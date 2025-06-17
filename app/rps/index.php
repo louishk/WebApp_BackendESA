@@ -149,6 +149,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 break;
 
+            case 'save_descriptor_limited':
+                // Limited save - only keywords, descriptions, deals, and insurance
+                if (empty($_POST['_id'])) {
+                    $message = 'Descriptor ID is required for limited save';
+                    $messageType = 'error';
+                    break;
+                }
+
+                try {
+                    // Get current descriptor data first
+                    $dataLoader = new DataLoader($api, $selectedLocation, $debug);
+                    $allData = $dataLoader->loadAllData();
+                    $existingDescriptor = null;
+
+                    foreach ($allData['descriptors'] as $desc) {
+                        if ($desc['_id'] === $_POST['_id']) {
+                            $existingDescriptor = $desc;
+                            break;
+                        }
+                    }
+
+                    if (!$existingDescriptor) {
+                        $message = 'Descriptor not found';
+                        $messageType = 'error';
+                        break;
+                    }
+
+                    // Start with existing descriptor data
+                    $descriptorData = $existingDescriptor;
+
+                    // Update only the allowed fields
+
+                    // 1. Keywords - update criteria.include.keywords
+                    $keywords = array_filter(array_map('trim', $_POST['keywords'] ?? []), function ($k) {
+                        return !empty($k);
+                    });
+                    $descriptorData['criteria']['include']['keywords'] = $keywords;
+
+                    // 2. Descriptions
+                    $descriptorData['description'] = trim($_POST['description'] ?? '');
+                    $descriptions = array_filter(array_map('trim', $_POST['descriptions'] ?? []), function ($d) {
+                        return !empty($d);
+                    });
+                    $descriptorData['descriptions'] = $descriptions;
+                    $descriptorData['specialText'] = trim($_POST['specialText'] ?? '');
+
+                    // 3. Deals
+                    $selectedDeals = $_POST['deals'] ?? [];
+                    $descriptorData['deals'] = array_values($selectedDeals); // Ensure indexed array
+
+                    // 4. Insurance
+                    $descriptorData['defaultInsuranceCoverage'] = trim($_POST['defaultInsuranceCoverage'] ?? '') ?: null;
+
+                    // Save the descriptor
+                    $result = $api->saveDescriptor($descriptorData, $selectedLocation);
+
+                    if ($result['status'] === 200) {
+                        $message = 'Descriptor updated successfully (keywords, descriptions, deals & insurance)';
+                        $messageType = 'success';
+
+                        // Clear the edit mode by redirecting
+                        header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?location=$selectedLocation");
+                        exit;
+                    } else {
+                        $errorMsg = 'Unknown error';
+                        if (isset($result['data']['error'])) {
+                            $errorMsg = $result['data']['error'];
+                        } elseif (isset($result['data']['message'])) {
+                            $errorMsg = $result['data']['message'];
+                        } elseif (!empty($result['raw'])) {
+                            $errorMsg = "HTTP {$result['status']}: " . substr($result['raw'], 0, 300);
+                        }
+                        $message = 'Save failed: ' . $errorMsg;
+                        $messageType = 'error';
+                    }
+
+                } catch (Exception $e) {
+                    $message = 'Error updating descriptor: ' . $e->getMessage();
+                    $messageType = 'error';
+                }
+                break;
+
             case 'delete_descriptor':
                 $descriptorData = json_decode($_POST['descriptor_data'], true);
                 $result = $api->deleteDescriptor($descriptorData, $selectedLocation);

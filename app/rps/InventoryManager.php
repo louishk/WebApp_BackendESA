@@ -1,7 +1,6 @@
 <?php
 /**
- * Enhanced Inventory Manager with EXACT keyword matching
- * Fixes the issue where partial matches were incorrectly included
+ * Enhanced Inventory Manager with Occupancy % and Keywords Info
  */
 class InventoryManager
 {
@@ -44,10 +43,6 @@ class InventoryManager
 
         $this->log("Built lookup with " . count($this->unitTypesLookup) . " unit types");
         $this->log("Built type name lookup with " . count($this->unitTypesByTypeName) . " unique type names");
-
-        if ($this->debug) {
-            $this->log("Sample type names: " . implode(', ', array_slice(array_keys($this->unitTypesByTypeName), 0, 5)));
-        }
     }
 
     public function calculateInventory($descriptor)
@@ -57,12 +52,19 @@ class InventoryManager
             'occupied' => 0,
             'reserved' => 0,
             'vacant' => 0,
-            'availability' => 0,
-            'matched_unit_types' => []
+            'availability' => 0,      // Keep for backward compatibility
+            'occupancy' => 0,         // NEW: Occupancy percentage
+            'matched_unit_types' => [],
+            'keywords' => [],         // NEW: Keywords used for matching
+            'matching_summary' => ''  // NEW: Summary for display
         ];
 
         $descriptorName = $descriptor['name'] ?? 'Unknown';
         $this->log("Calculating inventory for descriptor: {$descriptorName}");
+
+        // Extract and store keywords
+        $keywords = $this->extractKeywordsFromDescriptor($descriptor);
+        $inventory['keywords'] = $keywords;
 
         // Get matching unit types using EXACT keyword matching
         $matchingUnitTypes = $this->getExactMatchingUnitTypes($descriptor);
@@ -96,6 +98,7 @@ class InventoryManager
 
             $this->log("Added unit type {$typeName} (Floor: " . ($unitType['iFloor'] ?? 'N/A') . ") - " .
                 "Total: " . ($unitType['iTotalUnits'] ?? 0) . ", " .
+                "Occupied: " . ($unitType['iTotalOccupied'] ?? 0) . ", " .
                 "Vacant: " . ($unitType['iTotalVacant'] ?? 0));
         }
 
@@ -117,20 +120,55 @@ class InventoryManager
             ];
         }
 
-        $inventory['availability'] = $inventory['total'] > 0 ?
-            round(($inventory['vacant'] / $inventory['total']) * 100, 1) : 0;
+        // Calculate percentages
+        if ($inventory['total'] > 0) {
+            $inventory['availability'] = round(($inventory['vacant'] / $inventory['total']) * 100, 1);
+            $inventory['occupancy'] = round(($inventory['occupied'] / $inventory['total']) * 100, 1);
+        } else {
+            $inventory['availability'] = 0;
+            $inventory['occupancy'] = 0;
+        }
+
+        // Create matching summary for display
+        $inventory['matching_summary'] = $this->createMatchingSummary($keywords, $inventory['matched_unit_types']);
 
         $this->log("Final inventory for {$descriptorName}: " .
             "Total: {$inventory['total']}, " .
-            "Vacant: {$inventory['vacant']}, " .
-            "Availability: {$inventory['availability']}%");
+            "Occupied: {$inventory['occupied']} ({$inventory['occupancy']}%), " .
+            "Vacant: {$inventory['vacant']} ({$inventory['availability']}%)");
 
         return $inventory;
     }
 
     /**
+     * Create a summary of keywords and matching unit types for display
+     */
+    private function createMatchingSummary($keywords, $matchedUnitTypes)
+    {
+        if (empty($keywords) && empty($matchedUnitTypes)) {
+            return 'No keywords or matches';
+        }
+
+        $summary = '';
+
+        // Add keywords info
+        if (!empty($keywords)) {
+            $keywordCount = count($keywords);
+            $summary .= "{$keywordCount} keyword" . ($keywordCount !== 1 ? 's' : '');
+        }
+
+        // Add matching unit types info
+        if (!empty($matchedUnitTypes)) {
+            $matchCount = count($matchedUnitTypes);
+            if (!empty($summary)) $summary .= ', ';
+            $summary .= "{$matchCount} match" . ($matchCount !== 1 ? 'es' : '');
+        }
+
+        return $summary;
+    }
+
+    /**
      * Get unit types that EXACTLY match the descriptor keywords
-     * No partial matching - only exact sTypeName matches
      */
     private function getExactMatchingUnitTypes($descriptor)
     {
@@ -157,14 +195,6 @@ class InventoryManager
                 $this->log("EXACT match found for keyword: '{$keyword}' (" . count($this->unitTypesByTypeName[$keyword]) . " unit types)");
             } else {
                 $this->log("NO exact match found for keyword: '{$keyword}'");
-
-                // Debug: Show similar type names for troubleshooting
-                if ($this->debug) {
-                    $similarTypeNames = $this->findSimilarTypeNames($keyword);
-                    if (!empty($similarTypeNames)) {
-                        $this->log("Similar type names found: " . implode(', ', array_slice($similarTypeNames, 0, 3)));
-                    }
-                }
             }
         }
 
@@ -217,32 +247,6 @@ class InventoryManager
         return array_unique($cleanedKeywords);
     }
 
-    /**
-     * Find similar type names for debugging purposes
-     */
-    private function findSimilarTypeNames($keyword)
-    {
-        $similar = [];
-        $keywordLower = strtolower($keyword);
-
-        foreach (array_keys($this->unitTypesByTypeName) as $typeName) {
-            $typeNameLower = strtolower($typeName);
-
-            // Check if they share common parts
-            $keywordParts = preg_split('/[\/\-\s_]+/', $keywordLower);
-            $typeNameParts = preg_split('/[\/\-\s_]+/', $typeNameLower);
-
-            $commonParts = array_intersect($keywordParts, $typeNameParts);
-
-            // If they share 2 or more parts, consider it similar
-            if (count($commonParts) >= 2) {
-                $similar[] = $typeName;
-            }
-        }
-
-        return $similar;
-    }
-
     public function getUnitTypesLookup()
     {
         return $this->unitTypesLookup;
@@ -260,10 +264,13 @@ class InventoryManager
             'descriptors_with_inventory' => 0,
             'total_units' => 0,
             'total_vacant' => 0,
-            'average_availability' => 0
+            'total_occupied' => 0,
+            'average_availability' => 0,
+            'average_occupancy' => 0     // NEW: Average occupancy
         ];
 
         $availabilities = [];
+        $occupancies = [];
 
         foreach ($descriptors as $descriptor) {
             if (isset($descriptor['inventory'])) {
@@ -272,13 +279,19 @@ class InventoryManager
                     $stats['descriptors_with_inventory']++;
                     $stats['total_units'] += $inv['total'];
                     $stats['total_vacant'] += $inv['vacant'];
+                    $stats['total_occupied'] += $inv['occupied'];
                     $availabilities[] = $inv['availability'];
+                    $occupancies[] = $inv['occupancy'];
                 }
             }
         }
 
         if (!empty($availabilities)) {
             $stats['average_availability'] = round(array_sum($availabilities) / count($availabilities), 1);
+        }
+
+        if (!empty($occupancies)) {
+            $stats['average_occupancy'] = round(array_sum($occupancies) / count($occupancies), 1);
         }
 
         return $stats;
@@ -309,43 +322,15 @@ class InventoryManager
                     $this->log("    - " . ($match['sTypeName'] ?? 'N/A') .
                         " (Floor: " . ($match['iFloor'] ?? 'N/A') .
                         ", Units: " . ($match['iTotalUnits'] ?? 0) .
+                        ", Occupied: " . ($match['iTotalOccupied'] ?? 0) .
                         ", Vacant: " . ($match['iTotalVacant'] ?? 0) . ")");
                 }
             } else {
                 $this->log("  ❌ NO exact match found for: '{$keyword}'");
-
-                // Show what was available for debugging
-                $similar = $this->findSimilarTypeNames($keyword);
-                if (!empty($similar)) {
-                    $this->log("    Similar type names: " . implode(', ', array_slice($similar, 0, 3)));
-                }
             }
         }
 
         $this->log("=== END EXACT MATCH DEBUG ===");
-    }
-
-    /**
-     * Debug method to show all available type names
-     */
-    public function debugAvailableTypeNames($maxShow = 50)
-    {
-        if (!$this->debug) return;
-
-        $this->log("=== AVAILABLE TYPE NAMES DEBUG ===");
-        $typeNames = array_keys($this->unitTypesByTypeName);
-        $this->log("Total unique type names: " . count($typeNames));
-
-        foreach (array_slice($typeNames, 0, $maxShow) as $typeName) {
-            $count = count($this->unitTypesByTypeName[$typeName]);
-            $this->log("  - '{$typeName}' ({$count} variants)");
-        }
-
-        if (count($typeNames) > $maxShow) {
-            $this->log("  ... and " . (count($typeNames) - $maxShow) . " more");
-        }
-
-        $this->log("=== END AVAILABLE TYPE NAMES DEBUG ===");
     }
 }
 ?>

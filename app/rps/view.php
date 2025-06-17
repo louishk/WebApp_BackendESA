@@ -20,7 +20,7 @@
 </head>
 <body class="bg-gray-50 min-h-screen">
 
-<div class="max-w-7xl mx-auto p-6">
+<div class="max-w-full mx-auto p-6">
     <div class="bg-white rounded-lg shadow-lg">
 
         <!-- Header -->
@@ -29,9 +29,13 @@
         </div>
 
         <!-- Create/Edit Form -->
-        <?php if (isset($_GET['create']) || $editingDescriptor): ?>
+        <?php if (isset($_GET['create'])): ?>
             <div class="border-b border-gray-200 p-6 bg-gray-50">
                 <?php include 'includes/form.php'; ?>
+            </div>
+        <?php elseif ($editingDescriptor): ?>
+            <div class="border-b border-gray-200 p-6 bg-gray-50">
+                <?php include 'includes/simplified_form.php'; ?>
             </div>
         <?php endif; ?>
 

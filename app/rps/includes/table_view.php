@@ -1,5 +1,5 @@
 <?php
-// includes/table_view.php - Main table view for descriptors
+// includes/table_view.php - Main table view for descriptors with keywords column and occupancy %
 ?>
 
 <table class="w-full">
@@ -17,6 +17,7 @@
         </th>
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Name</th>
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Description</th>
+        <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Keywords & Matches</th>
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Quick Controls</th>
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Inventory</th>
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Deals & Insurance</th>
@@ -75,6 +76,77 @@
                             <?php if (count($descriptor['descriptions']) > 2): ?>
                                 <div>+ <?= count($descriptor['descriptions']) - 2 ?> more...</div>
                             <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </td>
+
+            <!-- NEW: Keywords & Matches Column -->
+            <td class="px-4 py-3">
+                <div class="text-xs max-w-64">
+                    <!-- Keywords -->
+                    <?php
+                    $keywords = $descriptor['inventory']['keywords'] ?? [];
+                    $matchedTypes = $descriptor['inventory']['matched_unit_types'] ?? [];
+                    ?>
+
+                    <?php if (!empty($keywords)): ?>
+                        <div class="mb-2">
+                            <div class="text-xs font-semibold text-blue-700 mb-1 flex items-center gap-1">
+                                <i class="fas fa-key"></i>
+                                Keywords (<?= count($keywords) ?>):
+                            </div>
+                            <?php foreach (array_slice($keywords, 0, 2) as $keyword): ?>
+                                <div class="bg-blue-50 border border-blue-200 rounded px-2 py-1 mb-1">
+                                    <code class="text-xs text-blue-800"><?= htmlspecialchars($keyword) ?></code>
+                                </div>
+                            <?php endforeach; ?>
+                            <?php if (count($keywords) > 2): ?>
+                                <div class="text-xs text-blue-600">+ <?= count($keywords) - 2 ?> more</div>
+                            <?php endif; ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="mb-2">
+                            <div class="text-xs font-semibold text-red-700 mb-1 flex items-center gap-1">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                No Keywords
+                            </div>
+                            <div class="bg-red-50 border border-red-200 rounded px-2 py-1 text-xs text-red-600">
+                                No matching criteria found
+                            </div>
+                        </div>
+                    <?php endif; ?>
+
+                    <!-- Matched Unit Types -->
+                    <?php if (!empty($matchedTypes)): ?>
+                        <div>
+                            <div class="text-xs font-semibold text-green-700 mb-1 flex items-center gap-1">
+                                <i class="fas fa-check-circle"></i>
+                                Matches (<?= count($matchedTypes) ?>):
+                            </div>
+                            <?php foreach (array_slice($matchedTypes, 0, 2) as $match): ?>
+                                <div class="bg-green-50 border border-green-200 rounded px-2 py-1 mb-1">
+                                    <div class="text-xs text-green-800 font-mono truncate">
+                                        <?= htmlspecialchars($match['type_name']) ?>
+                                    </div>
+                                    <div class="text-xs text-green-600">
+                                        <?= $match['total'] ?> units, <?= $match['vacant'] ?> vacant
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                            <?php if (count($matchedTypes) > 2): ?>
+                                <div class="text-xs text-green-600">+ <?= count($matchedTypes) - 2 ?> more</div>
+                            <?php endif; ?>
+                        </div>
+                    <?php elseif (!empty($keywords)): ?>
+                        <div>
+                            <div class="text-xs font-semibold text-orange-700 mb-1 flex items-center gap-1">
+                                <i class="fas fa-exclamation-circle"></i>
+                                No Matches
+                            </div>
+                            <div class="bg-orange-50 border border-orange-200 rounded px-2 py-1 text-xs text-orange-600">
+                                Keywords don't match any unit types
+                            </div>
                         </div>
                     <?php endif; ?>
                 </div>
@@ -140,13 +212,19 @@
                         <span class="font-medium"><?= $descriptor['inventory']['total'] ?></span>
                     </div>
 
-                    <!-- Availability Percentage -->
+                    <!-- NEW: Occupancy Percentage (instead of availability) -->
                     <div class="flex items-center justify-between">
-                        <span class="text-gray-600">Available:</span>
-                        <span class="font-medium <?= $descriptor['inventory']['availability'] > 50 ? 'text-green-600' :
-                            ($descriptor['inventory']['availability'] > 20 ? 'text-yellow-600' : 'text-red-600') ?>">
-                            <?= $descriptor['inventory']['availability'] ?>%
+                        <span class="text-gray-600">Occupancy:</span>
+                        <span class="font-medium <?= $descriptor['inventory']['occupancy'] > 80 ? 'text-red-600' :
+                            ($descriptor['inventory']['occupancy'] > 60 ? 'text-orange-600' : 'text-green-600') ?>">
+                            <?= $descriptor['inventory']['occupancy'] ?>%
                         </span>
+                    </div>
+
+                    <!-- Availability (smaller, secondary) -->
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-500 text-xs">Available:</span>
+                        <span class="text-xs text-gray-600"><?= $descriptor['inventory']['availability'] ?>%</span>
                     </div>
 
                     <!-- Visual Inventory Bar -->
@@ -160,15 +238,15 @@
                             <div class="flex h-full rounded overflow-hidden">
                                 <?php if ($occupiedPercent > 0): ?>
                                     <div class="inventory-segment bg-red-500" style="width: <?= $occupiedPercent ?>%"
-                                         title="Occupied: <?= $descriptor['inventory']['occupied'] ?>"></div>
+                                         title="Occupied: <?= $descriptor['inventory']['occupied'] ?> (<?= round($occupiedPercent, 1) ?>%)"></div>
                                 <?php endif; ?>
                                 <?php if ($reservedPercent > 0): ?>
                                     <div class="inventory-segment bg-yellow-500" style="width: <?= $reservedPercent ?>%"
-                                         title="Reserved: <?= $descriptor['inventory']['reserved'] ?>"></div>
+                                         title="Reserved: <?= $descriptor['inventory']['reserved'] ?> (<?= round($reservedPercent, 1) ?>%)"></div>
                                 <?php endif; ?>
                                 <?php if ($vacantPercent > 0): ?>
                                     <div class="inventory-segment bg-green-500" style="width: <?= $vacantPercent ?>%"
-                                         title="Vacant: <?= $descriptor['inventory']['vacant'] ?>"></div>
+                                         title="Vacant: <?= $descriptor['inventory']['vacant'] ?> (<?= round($vacantPercent, 1) ?>%)"></div>
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>
@@ -179,28 +257,19 @@
                         <div class="text-center">
                             <div class="w-2 h-2 bg-red-500 rounded-full mx-auto mb-1"></div>
                             <span><?= $descriptor['inventory']['occupied'] ?></span>
+                            <div class="text-xs text-gray-500">Occ</div>
                         </div>
                         <div class="text-center">
                             <div class="w-2 h-2 bg-yellow-500 rounded-full mx-auto mb-1"></div>
                             <span><?= $descriptor['inventory']['reserved'] ?></span>
+                            <div class="text-xs text-gray-500">Res</div>
                         </div>
                         <div class="text-center">
                             <div class="w-2 h-2 bg-green-500 rounded-full mx-auto mb-1"></div>
                             <span><?= $descriptor['inventory']['vacant'] ?></span>
+                            <div class="text-xs text-gray-500">Vac</div>
                         </div>
                     </div>
-
-                    <!-- Matched Unit Types (for debugging) -->
-                    <?php if ($debug && !empty($descriptor['inventory']['matched_unit_types'])): ?>
-                        <div class="mt-2 p-2 bg-gray-50 rounded border">
-                            <div class="text-xs font-medium text-gray-700 mb-1">Matched Unit Types:</div>
-                            <?php foreach ($descriptor['inventory']['matched_unit_types'] as $unitType): ?>
-                                <div class="text-xs text-gray-600">
-                                    <?= htmlspecialchars($unitType['name']) ?> (<?= $unitType['total'] ?> units)
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
                 </div>
             </td>
 
@@ -313,7 +382,7 @@
 
     <?php if (empty($data['descriptors'])): ?>
         <tr>
-            <td colspan="8" class="text-center py-12 text-gray-500">
+            <td colspan="9" class="text-center py-12 text-gray-500">
                 <div class="flex flex-col items-center">
                     <i class="fas fa-inbox text-4xl text-gray-300 mb-4"></i>
                     <p class="text-lg font-medium">No descriptors found</p>

@@ -31,6 +31,10 @@
             <a href="?create=1" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg inline-flex items-center">
                 <i class="fas fa-plus mr-2"></i>Create New
             </a>
+            <a href="debug_inventory.php?location=<?= $selectedLocation ?>" target="_blank"
+               class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg inline-flex items-center">
+                <i class="fas fa-bug mr-2"></i>Debug
+            </a>
             <form method="post" class="inline">
                 <input type="hidden" name="jwt_token" value="">
                 <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg">
@@ -114,9 +118,9 @@
             </div>
         </div>
 
-        <!-- Stats Dashboard -->
+        <!-- Enhanced Stats Dashboard with Occupancy -->
         <?php if (!empty($data['stats'])): ?>
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-lg">
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 p-4 bg-gray-50 rounded-lg">
                 <div class="text-center">
                     <div class="text-2xl font-bold text-blue-600"><?= $data['stats']['counts']['descriptors'] ?></div>
                     <div class="text-xs text-gray-600">Descriptors</div>
@@ -139,11 +143,42 @@
                         <div class="text-xs text-gray-600">Total Units</div>
                     </div>
                     <div class="text-center">
+                        <div class="text-2xl font-bold text-red-600"><?= $data['stats']['inventory']['average_occupancy'] ?? 0 ?>%</div>
+                        <div class="text-xs text-gray-600">Avg Occupancy</div>
+                    </div>
+                    <div class="text-center">
                         <div class="text-2xl font-bold text-green-600"><?= $data['stats']['inventory']['average_availability'] ?>%</div>
                         <div class="text-xs text-gray-600">Avg Available</div>
                     </div>
+                    <div class="text-center">
+                        <div class="text-2xl font-bold text-emerald-600"><?= $data['stats']['descriptors']['with_inventory'] ?></div>
+                        <div class="text-xs text-gray-600">With Inventory</div>
+                    </div>
                 <?php endif; ?>
             </div>
+
+            <!-- Occupancy Alert -->
+            <?php if (!empty($data['stats']['inventory']['average_occupancy']) && $data['stats']['inventory']['average_occupancy'] > 85): ?>
+                <div class="p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <div class="flex items-center gap-2 text-red-800">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <span class="font-medium">High Occupancy Alert</span>
+                    </div>
+                    <p class="text-sm text-red-700 mt-1">
+                        Average occupancy is <?= $data['stats']['inventory']['average_occupancy'] ?>%. Consider promoting alternative unit types or reviewing pricing.
+                    </p>
+                </div>
+            <?php elseif (!empty($data['stats']['inventory']['average_occupancy']) && $data['stats']['inventory']['average_occupancy'] < 50): ?>
+                <div class="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <div class="flex items-center gap-2 text-yellow-800">
+                        <i class="fas fa-info-circle"></i>
+                        <span class="font-medium">Low Occupancy Notice</span>
+                    </div>
+                    <p class="text-sm text-yellow-700 mt-1">
+                        Average occupancy is <?= $data['stats']['inventory']['average_occupancy'] ?>%. Consider promotional campaigns or reviewing unit availability.
+                    </p>
+                </div>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 <?php endif; ?>
@@ -191,7 +226,7 @@
                     <pre class="mt-1 p-2 bg-white rounded text-xs overflow-auto max-h-32"><?= htmlspecialchars(json_encode([
                             'name' => $data['descriptors'][0]['name'] ?? 'N/A',
                             'inventory' => $data['descriptors'][0]['inventory'] ?? [],
-                            'criteria' => $data['descriptors'][0]['criteria'] ?? []
+                            'keywords' => $data['descriptors'][0]['inventory']['keywords'] ?? []
                         ], JSON_PRETTY_PRINT)) ?></pre>
                 </div>
             <?php endif; ?>
