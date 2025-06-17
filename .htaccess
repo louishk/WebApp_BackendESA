@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────
+# Extend PHP session lifetime to 4 hours
+<IfModule mod_php7.c>
+    php_value session.gc_maxlifetime 14400
+    php_value session.cookie_lifetime 14400
+</IfModule>
+# ─────────────────────────────────────────────────────────────
+
+RewriteEngine On
+
+# Correct target — point at pages/chatwoot/testtable.php
+RewriteRule ^chatwoot/masswaba(?:\.php)?$ pages/chatwoot/masswaba.php [L,QSA]
+
+# 1) Serve existing files and directories directly
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# 2) Static assets
+RewriteRule \.(js|css|png|jpe?g|gif|ico|svg)$ - [L,NC]
+
+# 3) Redirect masswaba.js
+RewriteRule ^chatwoot/masswaba\.js$ /pages/chatwoot/masswaba.js [L,R=301]
+RewriteRule ^datalayer/datalayer\.js$ /pages/datalayer/datalayer.js [L,R=301]
+
+# 4) Exempt admin folder
+RewriteRule ^admin/ - [L]
+
+# 5) Exempt specific public scripts (Microsoft OAuth handlers)
+RewriteRule ^(login_microsoft|oauth_callback)\.php$ - [L]
+
+# 6) Catch-all slugs → index.php
+RewriteRule ^([a-z0-9\-/]+)/?$ index.php?page=$1 [L,QSA]
+
+
+
