@@ -2,7 +2,6 @@
 /**
  * Configuration Class for RapidStor Descriptor Manager
  */
-
 class Config
 {
     const API_BASE_URL = 'https://api.redboxstorage.hk';
@@ -57,4 +56,5 @@ class Config
         return array_key_exists($code, self::LOCATIONS);
     }
 }
+
 ?>

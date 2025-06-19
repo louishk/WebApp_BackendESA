@@ -1,15 +1,15 @@
 <?php
 /**
  * Enhanced RapidStor Descriptor Manager - Main Entry Point
- * Modular version with separated concerns
+ * FIXED VERSION - No duplicate cases
  */
 
 session_start();
 
 // Performance and timeout configurations for large operations
-ini_set('max_execution_time', 120);        // 2 minutes for complex operations
-ini_set('memory_limit', '256M');           // Increase memory limit
-ini_set('max_input_vars', 5000);          // Handle large form submissions
+ini_set('max_execution_time', 120);
+ini_set('memory_limit', '256M');
+ini_set('max_input_vars', 5000);
 
 // Disable output buffering for real-time feedback
 if (ob_get_level()) {
@@ -65,13 +65,46 @@ $api = new RapidStorAPI($jwtToken, $debug);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    // Handle AJAX requests
-    if (in_array($action, ['quick_toggle', 'reorder_descriptors', 'group_descriptors'])) {
-        $ajaxHandler = new AjaxHandler($api, $selectedLocation);
-        $response = $ajaxHandler->handleRequest($action, $_POST);
+    // List of all AJAX actions that should be handled by AjaxHandler
+    $ajaxActions = [
+        'quick_toggle',
+        'reorder_descriptors',
+        'group_descriptors',
+        'batch_update',
+        'batch_apply',
+        'auto_generate_upsells',
+        'smart_carousel_off',
+        'delete_descriptor',
+        'duplicate_descriptor',
+        'export_descriptors',
+        'get_descriptor'
+    ];
 
-        echo json_encode($response);
-        exit;
+    // Handle AJAX requests
+    if (in_array($action, $ajaxActions)) {
+        try {
+            error_log("Processing AJAX action: {$action}");
+
+            $ajaxHandler = new AjaxHandler($api, $selectedLocation, $debug);
+            $response = $ajaxHandler->handleRequest($action, $_POST);
+
+            error_log("AJAX response for {$action}: " . json_encode($response));
+
+            // Ensure we're sending JSON
+            header('Content-Type: application/json');
+            echo json_encode($response);
+            exit;
+        } catch (Exception $e) {
+            error_log("AJAX error for {$action}: " . $e->getMessage());
+
+            // Return error as JSON
+            header('Content-Type: application/json');
+            echo json_encode([
+                'success' => false,
+                'error' => $e->getMessage()
+            ]);
+            exit;
+        }
     }
 }
 
@@ -96,6 +129,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'save_descriptor':
+                error_log("► HIT save_descriptor");
+                error_log("POST KEYS: " . implode(', ', array_keys($_POST)));
+                error_log(" \$_POST DUMP: " . print_r($_POST, true));
+                $raw = file_get_contents('php://input');
+                if ($raw) {
+                    error_log("RAW INPUT: " . $raw);
+                }
                 $descriptorData = [
                     'name' => $_POST['name'],
                     'description' => $_POST['description'],
@@ -130,6 +170,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // New descriptor - add defaults
                     $descriptorData = array_merge(Config::DEFAULT_DESCRIPTOR, $descriptorData);
                 }
+                // 5. Upsells (upgradesTo)
+                $upsells = [];
+                if (isset($_POST['upsells']) && is_array($_POST['upsells'])) {
+                    foreach ($_POST['upsells'] as $u) {
+                        if (!empty($u['_id']) && !empty($u['upgradeReason'])) {
+                            $upsells[] = [
+                                '_id'               => trim($u['_id']),
+                                'upgradeIcon'       => 'fa-warehouse',
+                                'upgradeIconPrefix' => 'fa-light',
+                                'upgradeReason'     => trim($u['upgradeReason'])
+                            ];
+                        }
+                    }
+                }
+                $descriptorData['upgradesTo'] = $upsells;
 
                 $result = $api->saveDescriptor($descriptorData, $selectedLocation);
                 if ($result['status'] === 200) {
@@ -150,7 +205,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'save_descriptor_limited':
-                // Limited save - only keywords, descriptions, deals, and insurance
+                // Limited save – keywords, descriptions, deals, insurance, and upsells
                 if (empty($_POST['_id'])) {
                     $message = 'Descriptor ID is required for limited save';
                     $messageType = 'error';
@@ -158,100 +213,106 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 try {
-                    // Get current descriptor data first
+                    // Load existing descriptor
                     $dataLoader = new DataLoader($api, $selectedLocation, $debug);
                     $allData = $dataLoader->loadAllData();
                     $existingDescriptor = null;
-
                     foreach ($allData['descriptors'] as $desc) {
                         if ($desc['_id'] === $_POST['_id']) {
                             $existingDescriptor = $desc;
                             break;
                         }
                     }
-
                     if (!$existingDescriptor) {
                         $message = 'Descriptor not found';
                         $messageType = 'error';
                         break;
                     }
 
-                    // Start with existing descriptor data
+                    // Start with existing data
                     $descriptorData = $existingDescriptor;
 
-                    // Update only the allowed fields
-
-                    // 1. Keywords - update criteria.include.keywords
-                    $keywords = array_filter(array_map('trim', $_POST['keywords'] ?? []), function ($k) {
-                        return !empty($k);
+                    // 1) Keywords
+                    $keywords = array_filter(array_map('trim', $_POST['keywords'] ?? []), function($k) {
+                        return $k !== '';
                     });
-                    $descriptorData['criteria']['include']['keywords'] = $keywords;
+                    $descriptorData['criteria']['include']['keywords'] = array_values($keywords);
 
-                    // 2. Descriptions
+                    // 2) Descriptions
                     $descriptorData['description'] = trim($_POST['description'] ?? '');
-                    $descriptions = array_filter(array_map('trim', $_POST['descriptions'] ?? []), function ($d) {
-                        return !empty($d);
+                    $descs = array_filter(array_map('trim', $_POST['descriptions'] ?? []), function($d) {
+                        return $d !== '';
                     });
-                    $descriptorData['descriptions'] = $descriptions;
+                    $descriptorData['descriptions'] = array_values($descs);
                     $descriptorData['specialText'] = trim($_POST['specialText'] ?? '');
 
-                    // 3. Deals
+                    // 3) Deals
                     $selectedDeals = $_POST['deals'] ?? [];
-                    $descriptorData['deals'] = array_values($selectedDeals); // Ensure indexed array
+                    $descriptorData['deals'] = array_values($selectedDeals);
 
-                    // 4. Insurance
-                    $descriptorData['defaultInsuranceCoverage'] = trim($_POST['defaultInsuranceCoverage'] ?? '') ?: null;
+                    // 4) Insurance
+                    $insurance = trim($_POST['defaultInsuranceCoverage'] ?? '');
+                    $descriptorData['defaultInsuranceCoverage'] = $insurance !== '' ? $insurance : null;
 
-                    // Save the descriptor
+                    // 5) Upsells
+                    $upsells = [];
+                    if (!empty($_POST['upsells']) && is_array($_POST['upsells'])) {
+                        foreach ($_POST['upsells'] as $u) {
+                            if (!empty($u['_id']) && !empty($u['upgradeReason'])) {
+                                $upsells[] = [
+                                    '_id'               => trim($u['_id']),
+                                    'upgradeIcon'       => 'fa-warehouse',
+                                    'upgradeIconPrefix' => 'fa-light',
+                                    'upgradeReason'     => trim($u['upgradeReason']),
+                                ];
+                            }
+                        }
+                    }
+                    $descriptorData['upgradesTo'] = $upsells;
+
+                    // Persist
                     $result = $api->saveDescriptor($descriptorData, $selectedLocation);
-
                     if ($result['status'] === 200) {
-                        $message = 'Descriptor updated successfully (keywords, descriptions, deals & insurance)';
+                        // Build change summary
+                        $changes = [];
+                        if ($keywords !== ($existingDescriptor['criteria']['include']['keywords'] ?? [])) {
+                            $changes[] = 'keywords';
+                        }
+                        if ($descs !== ($existingDescriptor['descriptions'] ?? []) ||
+                            $descriptorData['description'] !== ($existingDescriptor['description'] ?? '') ||
+                            $descriptorData['specialText'] !== ($existingDescriptor['specialText'] ?? '')) {
+                            $changes[] = 'descriptions';
+                        }
+                        if ($selectedDeals !== ($existingDescriptor['deals'] ?? [])) {
+                            $changes[] = 'deals';
+                        }
+                        if ($descriptorData['defaultInsuranceCoverage'] !== ($existingDescriptor['defaultInsuranceCoverage'] ?? null)) {
+                            $changes[] = 'insurance';
+                        }
+                        if ($upsells !== ($existingDescriptor['upgradesTo'] ?? [])) {
+                            $changes[] = 'upsells';
+                        }
+
+                        if (count($changes) > 0) {
+                            $message = 'Descriptor updated successfully (' . implode(', ', $changes) . ')';
+                        } else {
+                            $message = 'No changes detected';
+                        }
                         $messageType = 'success';
 
-                        // Clear the edit mode by redirecting
-                        header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?location=$selectedLocation");
+                        // Redirect out of edit mode
+                        header("Location: " . strtok($_SERVER["REQUEST_URI"], '?') . "?location={$selectedLocation}");
                         exit;
                     } else {
-                        $errorMsg = 'Unknown error';
-                        if (isset($result['data']['error'])) {
-                            $errorMsg = $result['data']['error'];
-                        } elseif (isset($result['data']['message'])) {
-                            $errorMsg = $result['data']['message'];
-                        } elseif (!empty($result['raw'])) {
-                            $errorMsg = "HTTP {$result['status']}: " . substr($result['raw'], 0, 300);
-                        }
-                        $message = 'Save failed: ' . $errorMsg;
+                        // API error
+                        $err = $result['data']['error']
+                            ?? $result['data']['message']
+                            ?? (!empty($result['raw']) ? "HTTP {$result['status']}: " . substr($result['raw'],0,300) : 'Unknown error');
+                        $message = 'Save failed: ' . $err;
                         $messageType = 'error';
                     }
-
                 } catch (Exception $e) {
                     $message = 'Error updating descriptor: ' . $e->getMessage();
-                    $messageType = 'error';
-                }
-                break;
-
-            case 'delete_descriptor':
-                $descriptorData = json_decode($_POST['descriptor_data'], true);
-                $result = $api->deleteDescriptor($descriptorData, $selectedLocation);
-                if ($result['status'] === 200) {
-                    $message = 'Descriptor deleted successfully';
-                    $messageType = 'success';
-                } else {
-                    $message = 'Delete failed: ' . ($result['data']['error'] ?? 'Unknown error');
-                    $messageType = 'error';
-                }
-                break;
-
-            case 'batch_update':
-                $ajaxHandler = new AjaxHandler($api, $selectedLocation);
-                $response = $ajaxHandler->handleRequest('batch_update', $_POST);
-
-                if ($response['success']) {
-                    $message = $response['message'];
-                    $messageType = 'success';
-                } else {
-                    $message = 'Batch operation failed: ' . $response['error'];
                     $messageType = 'error';
                 }
                 break;
@@ -293,6 +354,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $messageType = 'error';
                 }
                 break;
+
+            // NOTE: All AJAX actions (delete_descriptor, duplicate_descriptor, etc.)
+            // are handled in the AJAX section above, not here
         }
     } catch (Exception $e) {
         $message = 'Error: ' . $e->getMessage();

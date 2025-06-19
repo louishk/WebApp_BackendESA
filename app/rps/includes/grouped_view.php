@@ -1,5 +1,5 @@
 <?php
-// includes/grouped_view.php - Grouped view for descriptors organized by size
+// includes/grouped_view.php - Updated grouped view with separate columns for Deals, Insurance, and Upsells
 ?>
 
 <div class="p-6 space-y-6">
@@ -111,7 +111,18 @@
                             <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Name</th>
                             <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Controls</th>
                             <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Inventory</th>
-                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Details</th>
+
+                            <!-- NEW: Separate columns for grouped view -->
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">
+                                <i class="fas fa-tags text-purple-600 mr-1"></i>Deals
+                            </th>
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">
+                                <i class="fas fa-shield-alt text-green-600 mr-1"></i>Insurance
+                            </th>
+                            <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">
+                                <i class="fas fa-arrow-up text-indigo-600 mr-1"></i>Upsells
+                            </th>
+
                             <th class="px-4 py-2 text-left text-sm font-medium text-gray-700">Actions</th>
                         </tr>
                         </thead>
@@ -151,7 +162,6 @@
 
                                 <td class="px-4 py-3">
                                     <div class="flex gap-2">
-                                        <!-- Quick toggle buttons for grouped view -->
                                         <button onclick="quickToggle('<?= htmlspecialchars($descriptor['_id']) ?>', 'enabled', <?= $descriptor['enabled'] ? 'false' : 'true' ?>)"
                                                 class="p-2 rounded-full transition-colors <?= $descriptor['enabled'] ? 'text-green-600 bg-green-50 hover:bg-green-100' : 'text-gray-400 bg-gray-50 hover:bg-gray-100' ?>"
                                                 title="<?= $descriptor['enabled'] ? 'Disable' : 'Enable' ?>">
@@ -179,10 +189,10 @@
                                             <span class="font-medium"><?= $descriptor['inventory']['total'] ?></span>
                                         </div>
                                         <div class="flex items-center justify-between mb-2">
-                                            <span class="text-gray-600 text-xs">Available:</span>
-                                            <span class="font-medium <?= $descriptor['inventory']['availability'] > 50 ? 'text-green-600' :
-                                                ($descriptor['inventory']['availability'] > 20 ? 'text-yellow-600' : 'text-red-600') ?>">
-                                            <?= $descriptor['inventory']['availability'] ?>%
+                                            <span class="text-gray-600 text-xs">Occupancy:</span>
+                                            <span class="font-medium <?= $descriptor['inventory']['occupancy'] > 80 ? 'text-red-600' :
+                                                ($descriptor['inventory']['occupancy'] > 60 ? 'text-orange-600' : 'text-green-600') ?>">
+                                            <?= $descriptor['inventory']['occupancy'] ?>%
                                         </span>
                                         </div>
 
@@ -210,42 +220,94 @@
                                     </div>
                                 </td>
 
+                                <!-- NEW: Deals Column for Grouped View -->
                                 <td class="px-4 py-3">
-                                    <div class="text-xs space-y-1">
-                                        <!-- Status badges -->
-                                        <div class="flex flex-wrap gap-1">
-                                            <?php if ($descriptor['enabled']): ?>
-                                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs">Enabled</span>
-                                            <?php endif; ?>
-                                            <?php if (!$descriptor['hidden']): ?>
-                                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">Visible</span>
-                                            <?php endif; ?>
-                                            <?php if ($descriptor['useForCarousel']): ?>
-                                                <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded-full text-xs">Carousel</span>
-                                            <?php endif; ?>
-                                        </div>
-
-                                        <!-- Deals count -->
-                                        <?php if (!empty($descriptor['deals'])): ?>
-                                            <div class="text-blue-600">
-                                                <i class="fas fa-tags mr-1"></i>
-                                                <?= count($descriptor['deals']) ?> deal<?= count($descriptor['deals']) !== 1 ? 's' : '' ?>
+                                    <div class="max-w-32">
+                                        <?php if (!empty($descriptor['deals']) && is_array($descriptor['deals'])): ?>
+                                            <div class="space-y-1">
+                                                <?php foreach (array_slice($descriptor['deals'], 0, 2) as $dealId): ?>
+                                                    <?php if (isset($data['lookups']['deals'][$dealId])): ?>
+                                                        <?php $deal = $data['lookups']['deals'][$dealId]; ?>
+                                                        <div class="bg-purple-50 border border-purple-200 rounded p-1">
+                                                            <div class="text-xs font-medium text-purple-800 truncate">
+                                                                <?= htmlspecialchars($deal['title']) ?>
+                                                            </div>
+                                                            <div class="text-xs <?= $deal['enable'] ? 'text-green-600' : 'text-gray-500' ?>">
+                                                                <?= $deal['enable'] ? '✓' : '○' ?>
+                                                            </div>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                <?php endforeach; ?>
+                                                <?php if (count($descriptor['deals']) > 2): ?>
+                                                    <div class="text-xs text-purple-600 text-center">
+                                                        +<?= count($descriptor['deals']) - 2 ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
+                                        <?php else: ?>
+                                            <div class="text-center py-2">
+                                                <i class="fas fa-tags text-gray-300"></i>
+                                                <div class="text-xs text-gray-400 mt-1">None</div>
                                             </div>
                                         <?php endif; ?>
+                                    </div>
+                                </td>
 
-                                        <!-- Insurance -->
+                                <!-- NEW: Insurance Column for Grouped View -->
+                                <td class="px-4 py-3">
+                                    <div class="max-w-32">
                                         <?php if (!empty($descriptor['defaultInsuranceCoverage'])): ?>
-                                            <div class="text-green-600">
-                                                <i class="fas fa-shield-alt mr-1"></i>
-                                                Insurance
+                                            <?php if (isset($data['lookups']['insurance'][$descriptor['defaultInsuranceCoverage']])): ?>
+                                                <?php $coverage = $data['lookups']['insurance'][$descriptor['defaultInsuranceCoverage']]; ?>
+                                                <div class="bg-green-50 border border-green-200 rounded p-1">
+                                                    <div class="text-xs font-medium text-green-800 truncate">
+                                                        <?= htmlspecialchars($coverage['sCoverageDesc']) ?>
+                                                    </div>
+                                                    <div class="text-xs text-green-600">
+                                                        $<?= number_format($coverage['dcCoverage']) ?>
+                                                    </div>
+                                                </div>
+                                            <?php else: ?>
+                                                <div class="bg-gray-50 border border-gray-200 rounded p-1">
+                                                    <div class="text-xs text-gray-600">Unknown</div>
+                                                </div>
+                                            <?php endif; ?>
+                                        <?php else: ?>
+                                            <div class="text-center py-2">
+                                                <i class="fas fa-shield-alt text-gray-300"></i>
+                                                <div class="text-xs text-gray-400 mt-1">None</div>
                                             </div>
                                         <?php endif; ?>
+                                    </div>
+                                </td>
 
-                                        <!-- Upgrades count -->
-                                        <?php if (!empty($descriptor['upgradesTo'])): ?>
-                                            <div class="text-orange-600">
-                                                <i class="fas fa-arrow-up mr-1"></i>
-                                                <?= count($descriptor['upgradesTo']) ?> upgrade<?= count($descriptor['upgradesTo']) !== 1 ? 's' : '' ?>
+                                <!-- NEW: Upsells Column for Grouped View -->
+                                <td class="px-4 py-3">
+                                    <div class="max-w-32">
+                                        <?php if (!empty($descriptor['upgradesTo']) && is_array($descriptor['upgradesTo'])): ?>
+                                            <div class="space-y-1">
+                                                <?php foreach (array_slice($descriptor['upgradesTo'], 0, 2) as $upgrade): ?>
+                                                    <div class="bg-indigo-50 border border-indigo-200 rounded p-1">
+                                                        <div class="flex items-center gap-1">
+                                                            <?php if (!empty($upgrade['upgradeIcon'])): ?>
+                                                                <i class="<?= htmlspecialchars($upgrade['upgradeIconPrefix'] ?? 'fas') ?> <?= htmlspecialchars($upgrade['upgradeIcon']) ?> text-indigo-600 text-xs"></i>
+                                                            <?php endif; ?>
+                                                            <span class="text-xs font-medium text-indigo-800 truncate">
+                                                                <?= htmlspecialchars(substr($upgrade['upgradeReason'] ?? 'Upgrade', 0, 12)) ?>
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                <?php endforeach; ?>
+                                                <?php if (count($descriptor['upgradesTo']) > 2): ?>
+                                                    <div class="text-xs text-indigo-600 text-center">
+                                                        +<?= count($descriptor['upgradesTo']) - 2 ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                            </div>
+                                        <?php else: ?>
+                                            <div class="text-center py-2">
+                                                <i class="fas fa-arrow-up text-gray-300"></i>
+                                                <div class="text-xs text-gray-400 mt-1">None</div>
                                             </div>
                                         <?php endif; ?>
                                     </div>
@@ -302,7 +364,7 @@
 </div>
 
 <script>
-    // Group-specific JavaScript functions
+    // Group-specific JavaScript functions (updated for new columns)
     function selectGroup(groupName) {
         const groupCheckboxes = document.querySelectorAll(`.group-item-${groupName.replace(/[^a-zA-Z0-9]/g, '')}`);
         const allSelected = Array.from(groupCheckboxes).every(cb => cb.checked);
@@ -340,7 +402,7 @@
         }
     }
 
-    // Group management functions
+    // Group management functions for deals, insurance, and upsells
     function bulkGroupAction(groupName, action) {
         const safeGroupName = groupName.replace(/[^a-zA-Z0-9]/g, '');
         const groupCheckboxes = document.querySelectorAll(`.group-item-${safeGroupName}`);
@@ -358,6 +420,37 @@
         RapidStorApp.selectedIds = originalSelection;
     }
 
+    function applyToGroup(groupName, type) {
+        const safeGroupName = groupName.replace(/[^a-zA-Z0-9]/g, '');
+        const groupCheckboxes = document.querySelectorAll(`.group-item-${safeGroupName}`);
+        const descriptorIds = Array.from(groupCheckboxes).map(cb => cb.value);
+
+        if (descriptorIds.length === 0) {
+            RapidStorApp.showToast('No descriptors in this group', 'warning');
+            return;
+        }
+
+        // Temporarily set selected IDs to group items
+        const originalSelection = new Set(RapidStorApp.selectedIds);
+        RapidStorApp.selectedIds.clear();
+        descriptorIds.forEach(id => RapidStorApp.selectedIds.add(id));
+
+        // Show the appropriate batch apply modal
+        if (type === 'deals') {
+            showBatchApplyModal('deals');
+        } else if (type === 'insurance') {
+            showBatchApplyModal('insurance');
+        }
+
+        // Restore original selection when modal is closed
+        const originalClose = closeBatchApplyModal;
+        closeBatchApplyModal = function() {
+            originalClose();
+            RapidStorApp.selectedIds = originalSelection;
+            updateSelection();
+        };
+    }
+
     // Enhanced group statistics
     function updateGroupStats(groupName) {
         const safeGroupName = groupName.replace(/[^a-zA-Z0-9]/g, '');
@@ -369,7 +462,10 @@
             visible: 0,
             carousel: 0,
             totalUnits: 0,
-            vacantUnits: 0
+            vacantUnits: 0,
+            withDeals: 0,
+            withInsurance: 0,
+            withUpsells: 0
         };
 
         groupRows.forEach(row => {
@@ -389,6 +485,22 @@
             const carouselButton = row.querySelector('[onclick*="useForCarousel"]');
             if (carouselButton && carouselButton.classList.contains('text-purple-600')) {
                 stats.carousel++;
+            }
+
+            // Count deals, insurance, and upsells
+            const dealsCell = row.querySelector('td:nth-child(5)');
+            if (dealsCell && !dealsCell.querySelector('.fa-tags.text-gray-300')) {
+                stats.withDeals++;
+            }
+
+            const insuranceCell = row.querySelector('td:nth-child(6)');
+            if (insuranceCell && !insuranceCell.querySelector('.fa-shield-alt.text-gray-300')) {
+                stats.withInsurance++;
+            }
+
+            const upsellsCell = row.querySelector('td:nth-child(7)');
+            if (upsellsCell && !upsellsCell.querySelector('.fa-arrow-up.text-gray-300')) {
+                stats.withUpsells++;
             }
         });
 

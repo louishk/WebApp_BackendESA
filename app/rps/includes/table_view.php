@@ -1,12 +1,12 @@
 <?php
-// includes/table_view.php - Main table view for descriptors with keywords column and occupancy %
+// includes/table_view.php - Main table view with separate Deals, Insurance, and Upsells columns
 ?>
 
 <table class="w-full">
     <thead class="bg-gray-50 border-b border-gray-200">
     <tr>
         <th class="px-4 py-3 text-left">
-            <input type="checkbox" id="selectAll" onchange="toggleSelectAll()"
+            <input type="checkbox" id="selectAll" data-action="toggleSelectAll"
                    class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500">
         </th>
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">
@@ -20,7 +20,27 @@
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Keywords & Matches</th>
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Quick Controls</th>
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Inventory</th>
-        <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Deals & Insurance</th>
+
+        <!-- NEW: Separate columns for Deals, Insurance, and Upsells -->
+        <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">
+            <div class="flex items-center gap-1">
+                <i class="fas fa-tags text-purple-600"></i>
+                Deals
+            </div>
+        </th>
+        <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">
+            <div class="flex items-center gap-1">
+                <i class="fas fa-shield-alt text-green-600"></i>
+                Insurance
+            </div>
+        </th>
+        <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">
+            <div class="flex items-center gap-1">
+                <i class="fas fa-arrow-up text-indigo-600"></i>
+                Upsells
+            </div>
+        </th>
+
         <th class="px-4 py-3 text-left text-sm font-medium text-gray-900">Actions</th>
     </tr>
     </thead>
@@ -30,7 +50,7 @@
             <td class="px-4 py-3">
                 <input type="checkbox" class="descriptor-checkbox w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
                        value="<?= htmlspecialchars($descriptor['_id']) ?>"
-                       onchange="updateSelection()">
+                       data-action="updateSelection">
             </td>
 
             <td class="px-4 py-3 text-sm text-gray-900">
@@ -81,10 +101,9 @@
                 </div>
             </td>
 
-            <!-- NEW: Keywords & Matches Column -->
+            <!-- Keywords & Matches Column -->
             <td class="px-4 py-3">
                 <div class="text-xs max-w-64">
-                    <!-- Keywords -->
                     <?php
                     $keywords = $descriptor['inventory']['keywords'] ?? [];
                     $matchedTypes = $descriptor['inventory']['matched_unit_types'] ?? [];
@@ -117,7 +136,6 @@
                         </div>
                     <?php endif; ?>
 
-                    <!-- Matched Unit Types -->
                     <?php if (!empty($matchedTypes)): ?>
                         <div>
                             <div class="text-xs font-semibold text-green-700 mb-1 flex items-center gap-1">
@@ -152,6 +170,7 @@
                 </div>
             </td>
 
+            <!-- Quick Controls Column -->
             <td class="px-4 py-3">
                 <div class="flex flex-col gap-2">
                     <!-- Enabled Toggle -->
@@ -204,15 +223,14 @@
                 </div>
             </td>
 
+            <!-- Inventory Column -->
             <td class="px-4 py-3">
                 <div class="text-xs space-y-2">
-                    <!-- Inventory Summary -->
                     <div class="flex items-center justify-between">
                         <span class="text-gray-600">Units:</span>
                         <span class="font-medium"><?= $descriptor['inventory']['total'] ?></span>
                     </div>
 
-                    <!-- NEW: Occupancy Percentage (instead of availability) -->
                     <div class="flex items-center justify-between">
                         <span class="text-gray-600">Occupancy:</span>
                         <span class="font-medium <?= $descriptor['inventory']['occupancy'] > 80 ? 'text-red-600' :
@@ -221,7 +239,6 @@
                         </span>
                     </div>
 
-                    <!-- Availability (smaller, secondary) -->
                     <div class="flex items-center justify-between">
                         <span class="text-gray-500 text-xs">Available:</span>
                         <span class="text-xs text-gray-600"><?= $descriptor['inventory']['availability'] ?>%</span>
@@ -273,89 +290,168 @@
                 </div>
             </td>
 
+            <!-- NEW: Deals Column -->
             <td class="px-4 py-3">
-                <div class="text-xs text-gray-600 max-w-40">
-                    <!-- Deals -->
+                <div class="max-w-48">
                     <?php if (!empty($descriptor['deals']) && is_array($descriptor['deals'])): ?>
-                        <div class="mb-2">
-                            <div class="text-xs font-semibold text-blue-700 mb-1 flex items-center gap-1">
-                                <i class="fas fa-tags"></i>
-                                Deals:
-                            </div>
-                            <?php foreach (array_slice($descriptor['deals'], 0, 1) as $dealId): ?>
+                        <div class="space-y-2">
+                            <?php foreach (array_slice($descriptor['deals'], 0, 3) as $dealId): ?>
                                 <?php if (isset($data['lookups']['deals'][$dealId])): ?>
                                     <?php $deal = $data['lookups']['deals'][$dealId]; ?>
-                                    <div class="bg-blue-50 border border-blue-200 rounded px-2 py-1 mb-1">
-                                        <div class="font-medium text-blue-800"><?= htmlspecialchars($deal['title']) ?></div>
-                                        <div class="text-xs <?= $deal['enable'] ? 'text-green-600' : 'text-gray-500' ?>">
-                                            <?= $deal['enable'] ? '✓ Active' : '○ Inactive' ?>
+                                    <div class="bg-purple-50 border border-purple-200 rounded-lg p-2">
+                                        <div class="text-xs font-medium text-purple-800 truncate">
+                                            <?= htmlspecialchars($deal['title']) ?>
+                                        </div>
+                                        <div class="flex items-center justify-between mt-1">
+                                            <span class="text-xs <?= $deal['enable'] ? 'text-green-600' : 'text-gray-500' ?>">
+                                                <?= $deal['enable'] ? '✓ Active' : '○ Inactive' ?>
+                                            </span>
+                                            <?php if (!empty($deal['discount'])): ?>
+                                                <span class="text-xs text-purple-600 font-medium">
+                                                    <?= htmlspecialchars($deal['discount']) ?>
+                                                </span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="bg-gray-50 border border-gray-200 rounded-lg p-2">
+                                        <div class="text-xs text-gray-500">
+                                            Unknown Deal
+                                        </div>
+                                        <div class="text-xs text-gray-400">
+                                            ID: <?= htmlspecialchars(substr($dealId, -6)) ?>
                                         </div>
                                     </div>
                                 <?php endif; ?>
                             <?php endforeach; ?>
-                            <?php if (count($descriptor['deals']) > 1): ?>
-                                <div class="text-xs text-blue-600">+ <?= count($descriptor['deals']) - 1 ?> more</div>
-                            <?php endif; ?>
-                        </div>
-                    <?php endif; ?>
 
-                    <!-- Insurance -->
-                    <?php if (!empty($descriptor['defaultInsuranceCoverage'])): ?>
-                        <div class="mb-1">
-                            <div class="text-xs font-semibold text-green-700 mb-1 flex items-center gap-1">
-                                <i class="fas fa-shield-alt"></i>
-                                Insurance:
-                            </div>
-                            <?php if (isset($data['lookups']['insurance'][$descriptor['defaultInsuranceCoverage']])): ?>
-                                <?php $coverage = $data['lookups']['insurance'][$descriptor['defaultInsuranceCoverage']]; ?>
-                                <div class="bg-green-50 border border-green-200 rounded px-2 py-1">
-                                    <div class="font-medium text-green-800 text-xs">
-                                        <?= htmlspecialchars($coverage['sCoverageDesc']) ?>
-                                    </div>
-                                    <div class="text-xs text-green-600">
-                                        $<?= number_format($coverage['dcCoverage']) ?>
-                                    </div>
-                                </div>
-                            <?php else: ?>
-                                <div class="text-xs text-gray-500">
-                                    ID: <?= htmlspecialchars(substr($descriptor['defaultInsuranceCoverage'], 0, 8)) ?>...
+                            <?php if (count($descriptor['deals']) > 3): ?>
+                                <div class="text-xs text-purple-600 text-center p-1">
+                                    + <?= count($descriptor['deals']) - 3 ?> more deals
                                 </div>
                             <?php endif; ?>
                         </div>
-                    <?php endif; ?>
-
-                    <!-- Upgrades -->
-                    <?php if (!empty($descriptor['upgradesTo']) && is_array($descriptor['upgradesTo'])): ?>
-                        <div class="mt-2">
-                            <div class="text-xs font-semibold text-orange-700 mb-1 flex items-center gap-1">
-                                <i class="fas fa-arrow-up"></i>
-                                Upgrades:
+                    <?php else: ?>
+                        <div class="text-center py-3">
+                            <div class="text-gray-400 mb-1">
+                                <i class="fas fa-tags text-lg"></i>
                             </div>
-                            <?php foreach (array_slice($descriptor['upgradesTo'], 0, 2) as $upgrade): ?>
-                                <div class="bg-orange-50 border border-orange-200 rounded px-2 py-1 mb-1">
-                                    <div class="flex items-center gap-1">
-                                        <?php if (!empty($upgrade['upgradeIcon'])): ?>
-                                            <i class="<?= htmlspecialchars($upgrade['upgradeIconPrefix'] ?? 'fas') ?> <?= htmlspecialchars($upgrade['upgradeIcon']) ?> text-orange-600"></i>
-                                        <?php endif; ?>
-                                        <span class="text-orange-800 font-medium text-xs">
-                                    <?= htmlspecialchars(substr($upgrade['upgradeReason'] ?? 'Upgrade', 0, 15)) ?>
-                                </span>
-                                    </div>
-                                    <?php if (isset($data['lookups']['unitTypes'][$upgrade['_id']])): ?>
-                                        <div class="text-xs text-orange-600">
-                                            <?= htmlspecialchars($data['lookups']['unitTypes'][$upgrade['_id']]['name'] ?? 'Unit') ?>
-                                        </div>
-                                    <?php endif; ?>
-                                </div>
-                            <?php endforeach; ?>
-                            <?php if (count($descriptor['upgradesTo']) > 2): ?>
-                                <div class="text-xs text-orange-600">+ <?= count($descriptor['upgradesTo']) - 2 ?> more</div>
-                            <?php endif; ?>
+                            <div class="text-xs text-gray-500">No deals</div>
+                            <button data-action="quickAddDeal" data-descriptor-id='<?= htmlspecialchars($descriptor['_id']) ?>')"
+                            class="text-xs text-purple-600 hover:text-purple-800 mt-1">
+                            + Add Deal
+                            </button>
                         </div>
                     <?php endif; ?>
                 </div>
             </td>
 
+            <!-- NEW: Insurance Column -->
+            <td class="px-4 py-3">
+                <div class="max-w-40">
+                    <?php if (!empty($descriptor['defaultInsuranceCoverage'])): ?>
+                        <?php if (isset($data['lookups']['insurance'][$descriptor['defaultInsuranceCoverage']])): ?>
+                            <?php $coverage = $data['lookups']['insurance'][$descriptor['defaultInsuranceCoverage']]; ?>
+                            <div class="bg-green-50 border border-green-200 rounded-lg p-2">
+                                <div class="text-xs font-medium text-green-800 truncate">
+                                    <?= htmlspecialchars($coverage['sCoverageDesc']) ?>
+                                </div>
+                                <div class="text-xs text-green-600 mt-1">
+                                    $<?= number_format($coverage['dcCoverage']) ?> coverage
+                                </div>
+                                <div class="text-xs text-gray-500 mt-1">
+                                    <?= !empty($coverage['monthlyRate']) ? '$' . number_format($coverage['monthlyRate'], 2) . '/month' : 'Rate varies' ?>
+                                </div>
+                            </div>
+                        <?php else: ?>
+                            <div class="bg-gray-50 border border-gray-200 rounded-lg p-2">
+                                <div class="text-xs text-gray-600">
+                                    Unknown Insurance
+                                </div>
+                                <div class="text-xs text-gray-400">
+                                    ID: <?= htmlspecialchars(substr($descriptor['defaultInsuranceCoverage'], -6)) ?>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <div class="text-center py-3">
+                            <div class="text-gray-400 mb-1">
+                                <i class="fas fa-shield-alt text-lg"></i>
+                            </div>
+                            <div class="text-xs text-gray-500">No insurance</div>
+                            <button data-action="quickAddInsurance" data-descriptor-id='<?= htmlspecialchars($descriptor['_id']) ?>')"
+                            class="text-xs text-green-600 hover:text-green-800 mt-1">
+                            + Add Insurance
+                            </button>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </td>
+
+            <!-- NEW: Upsells Column -->
+            <td class="px-4 py-3">
+                <div class="max-w-48">
+                    <?php if (!empty($descriptor['upgradesTo']) && is_array($descriptor['upgradesTo'])): ?>
+                        <div class="space-y-2">
+                            <?php foreach (array_slice($descriptor['upgradesTo'], 0, 3) as $upgrade): ?>
+                                <?php
+                                // Find the target descriptor
+                                $targetDescriptor = null;
+                                foreach ($data['descriptors'] as $desc) {
+                                    if ($desc['_id'] === $upgrade['_id']) {
+                                        $targetDescriptor = $desc;
+                                        break;
+                                    }
+                                }
+                                ?>
+                                <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-2">
+                                    <div class="flex items-start gap-1">
+                                        <?php if (!empty($upgrade['upgradeIcon'])): ?>
+                                            <i class="<?= htmlspecialchars($upgrade['upgradeIconPrefix'] ?? 'fas') ?> <?= htmlspecialchars($upgrade['upgradeIcon']) ?> text-indigo-600 text-xs mt-0.5"></i>
+                                        <?php endif; ?>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="text-xs font-medium text-indigo-800 truncate">
+                                                <?= htmlspecialchars($upgrade['upgradeReason'] ?? 'Upgrade Option') ?>
+                                            </div>
+                                            <?php if ($targetDescriptor): ?>
+                                                <div class="text-xs text-indigo-600 truncate mt-1">
+                                                    → <?= htmlspecialchars($targetDescriptor['name']) ?>
+                                                </div>
+                                                <div class="text-xs text-gray-500 mt-1">
+                                                    <?= $targetDescriptor['inventory']['availability'] ?>% available
+                                                </div>
+                                            <?php else: ?>
+                                                <div class="text-xs text-gray-500 mt-1">
+                                                    Target: <?= htmlspecialchars(substr($upgrade['_id'], -6)) ?>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+
+                            <?php if (count($descriptor['upgradesTo']) > 3): ?>
+                                <div class="text-xs text-indigo-600 text-center p-1">
+                                    + <?= count($descriptor['upgradesTo']) - 3 ?> more upsells
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="text-center py-3">
+                            <div class="text-gray-400 mb-1">
+                                <i class="fas fa-arrow-up text-lg"></i>
+                            </div>
+                            <div class="text-xs text-gray-500">No upsells</div>
+                            <button data-action="quickAddUpsell" data-descriptor-id='<?= htmlspecialchars($descriptor['_id']) ?>')"
+                            class="text-xs text-indigo-600 hover:text-indigo-800 mt-1">
+                            + Add Upsell
+                            </button>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </td>
+
+            <!-- Actions Column -->
             <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
                     <a href="?edit=<?= htmlspecialchars($descriptor['_id']) ?>"
@@ -364,13 +460,13 @@
                         <i class="fas fa-edit"></i>
                     </a>
 
-                    <button onclick="deleteDescriptor('<?= htmlspecialchars($descriptor['_id']) ?>', '<?= htmlspecialchars($descriptor['name']) ?>')"
+                    <button onclick="deleteDescriptor('<?= htmlspecialchars($descriptor['_id']) ?>', '<?= htmlspecialchars(addslashes($descriptor['name'])) ?>')"
                             class="text-red-600 hover:text-red-800 p-1 rounded hover:bg-red-50 transition-colors"
                             title="Delete descriptor">
                         <i class="fas fa-trash"></i>
                     </button>
 
-                    <button onclick="duplicateDescriptor('<?= htmlspecialchars($descriptor['_id']) ?>')"
+                    <button onclick="duplicateDescriptor('<?= htmlspecialchars($descriptor['_id']) ?>', '<?= htmlspecialchars(addslashes($descriptor['name'])) ?>')"
                             class="text-green-600 hover:text-green-800 p-1 rounded hover:bg-green-50 transition-colors"
                             title="Duplicate descriptor">
                         <i class="fas fa-copy"></i>
@@ -382,7 +478,7 @@
 
     <?php if (empty($data['descriptors'])): ?>
         <tr>
-            <td colspan="9" class="text-center py-12 text-gray-500">
+            <td colspan="11" class="text-center py-12 text-gray-500">
                 <div class="flex flex-col items-center">
                     <i class="fas fa-inbox text-4xl text-gray-300 mb-4"></i>
                     <p class="text-lg font-medium">No descriptors found</p>
@@ -402,3 +498,299 @@
     <?php endif; ?>
     </tbody>
 </table>
+
+<!-- Quick Add Modals and JavaScript -->
+<script>
+    // Quick add functions for deals, insurance, and upsells
+    function quickAddDeal(descriptorId) {
+        // Implementation for quick deal addition
+        const deals = Object.values(dealsLookup || {});
+        if (deals.length === 0) {
+            RapidStorApp.showToast('No deals available to add', 'warning');
+            return;
+        }
+
+        // Show a simple selection modal
+        const dealOptions = deals.map(deal =>
+            `<option value="${deal._id}">${deal.title} ${deal.enable ? '(Active)' : '(Inactive)'}</option>`
+        ).join('');
+
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 z-50 flex items-center justify-center';
+        modal.innerHTML = `
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold mb-4">Quick Add Deal</h3>
+            <select id="quickDealSelect" class="w-full border border-gray-300 rounded-md px-3 py-2 mb-4">
+                <option value="">Select a deal...</option>
+                ${dealOptions}
+            </select>
+            <div class="flex gap-3 justify-end">
+                <button onclick="this.closest('.fixed').remove()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-md">Cancel</button>
+                <button onclick="executeQuickAddDeal('${descriptorId}')" class="px-4 py-2 bg-purple-600 text-white rounded-md">Add Deal</button>
+            </div>
+        </div>
+    `;
+        document.body.appendChild(modal);
+    }
+
+    function executeQuickAddDeal(descriptorId) {
+        const select = document.getElementById('quickDealSelect');
+        const dealId = select.value;
+
+        if (!dealId) {
+            RapidStorApp.showToast('Please select a deal', 'warning');
+            return;
+        }
+
+        // Use batch apply with single descriptor
+        const formData = new FormData();
+        formData.append('action', 'batch_apply');
+        formData.append('descriptor_ids', JSON.stringify([descriptorId]));
+        formData.append('update_data', JSON.stringify({
+            field: 'deals',
+            value: [dealId],
+            mode: 'add'
+        }));
+
+        fetch(window.location.href, {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    RapidStorApp.showToast('Deal added successfully', 'success');
+                    document.querySelector('.fixed').remove();
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    RapidStorApp.showToast('Failed to add deal: ' + (data.error || 'Unknown error'), 'error');
+                }
+            })
+            .catch(error => {
+                RapidStorApp.showToast('Network error: ' + error.message, 'error');
+            });
+    }
+
+    function quickAddInsurance(descriptorId) {
+        const insuranceOptions = Object.values(insuranceLookup || {});
+        if (insuranceOptions.length === 0) {
+            RapidStorApp.showToast('No insurance options available', 'warning');
+            return;
+        }
+
+        const options = insuranceOptions.map(insurance =>
+            `<option value="${insurance._id}">${insurance.sCoverageDesc || 'Unknown Coverage'} - ${new Intl.NumberFormat().format(insurance.dcCoverage || 0)}</option>`
+        ).join('');
+
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 z-50 flex items-center justify-center';
+        modal.innerHTML = `
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 class="text-lg font-semibold mb-4">Quick Add Insurance</h3>
+            <select id="quickInsuranceSelect" class="w-full border border-gray-300 rounded-md px-3 py-2 mb-4">
+                <option value="">Select insurance coverage...</option>
+                ${options}
+            </select>
+            <div class="flex gap-3 justify-end">
+                <button onclick="this.closest('.fixed').remove()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-md">Cancel</button>
+                <button onclick="executeQuickAddInsurance('${descriptorId}')" class="px-4 py-2 bg-green-600 text-white rounded-md">Add Insurance</button>
+            </div>
+        </div>
+    `;
+        document.body.appendChild(modal);
+    }
+
+    function executeQuickAddInsurance(descriptorId) {
+        const select = document.getElementById('quickInsuranceSelect');
+        const insuranceId = select.value;
+
+        if (!insuranceId) {
+            RapidStorApp.showToast('Please select an insurance option', 'warning');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('action', 'batch_apply');
+        formData.append('descriptor_ids', JSON.stringify([descriptorId]));
+        formData.append('update_data', JSON.stringify({
+            field: 'defaultInsuranceCoverage',
+            value: insuranceId
+        }));
+
+        fetch(window.location.href, {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    RapidStorApp.showToast('Insurance added successfully', 'success');
+                    document.querySelector('.fixed').remove();
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    RapidStorApp.showToast('Failed to add insurance: ' + (data.error || 'Unknown error'), 'error');
+                }
+            })
+            .catch(error => {
+                RapidStorApp.showToast('Network error: ' + error.message, 'error');
+            });
+    }
+
+    function quickAddUpsell(descriptorId) {
+        // Find potential upsell targets (other descriptors with good availability)
+        const potentialTargets = descriptors.filter(desc =>
+            desc._id !== descriptorId &&
+            desc.inventory &&
+            desc.inventory.availability > 20
+        ).sort((a, b) => b.inventory.availability - a.inventory.availability);
+
+        if (potentialTargets.length === 0) {
+            RapidStorApp.showToast('No suitable upsell targets available (need >20% availability)', 'warning');
+            return;
+        }
+
+        const targetOptions = potentialTargets.slice(0, 10).map(desc =>
+            `<option value="${desc._id}">${desc.name} (${desc.inventory.availability}% available)</option>`
+        ).join('');
+
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 z-50 flex items-center justify-center';
+        modal.innerHTML = `
+        <div class="bg-white rounded-lg p-6 max-w-lg w-full mx-4">
+            <h3 class="text-lg font-semibold mb-4">Quick Add Upsell</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Target Descriptor</label>
+                    <select id="quickUpsellTarget" class="w-full border border-gray-300 rounded-md px-3 py-2">
+                        <option value="">Select upsell target...</option>
+                        ${targetOptions}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Upsell Reason</label>
+                    <input type="text" id="quickUpsellReason" placeholder="e.g., Larger Option +10sqft"
+                           class="w-full border border-gray-300 rounded-md px-3 py-2">
+                </div>
+            </div>
+            <div class="flex gap-3 justify-end mt-6">
+                <button onclick="this.closest('.fixed').remove()" class="px-4 py-2 text-gray-600 border border-gray-300 rounded-md">Cancel</button>
+                <button onclick="executeQuickAddUpsell('${descriptorId}')" class="px-4 py-2 bg-indigo-600 text-white rounded-md">Add Upsell</button>
+            </div>
+        </div>
+    `;
+        document.body.appendChild(modal);
+
+        // Auto-generate reason when target is selected
+        document.getElementById('quickUpsellTarget').addEventListener('change', function() {
+            if (this.value) {
+                const targetDesc = descriptors.find(d => d._id === this.value);
+                const currentDesc = descriptors.find(d => d._id === descriptorId);
+                if (targetDesc && currentDesc) {
+                    const reason = generateUpsellReason(currentDesc.name, targetDesc.name);
+                    document.getElementById('quickUpsellReason').value = reason;
+                }
+            }
+        });
+    }
+
+    function executeQuickAddUpsell(descriptorId) {
+        const targetSelect = document.getElementById('quickUpsellTarget');
+        const reasonInput = document.getElementById('quickUpsellReason');
+
+        const targetId = targetSelect.value;
+        const reason = reasonInput.value.trim();
+
+        if (!targetId) {
+            RapidStorApp.showToast('Please select an upsell target', 'warning');
+            return;
+        }
+
+        if (!reason) {
+            RapidStorApp.showToast('Please enter an upsell reason', 'warning');
+            return;
+        }
+
+        // First, get the current descriptor to add the upsell
+        fetch(window.location.href, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=get_descriptor&descriptor_id=${descriptorId}`
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const descriptor = data.data;
+                    const currentUpsells = descriptor.upgradesTo || [];
+
+                    // Add new upsell
+                    const newUpsell = {
+                        _id: targetId,
+                        upgradeReason: reason,
+                        upgradeIcon: 'fa-warehouse',
+                        upgradeIconPrefix: 'fa-light'
+                    };
+
+                    currentUpsells.push(newUpsell);
+                    descriptor.upgradesTo = currentUpsells;
+
+                    // Save the descriptor
+                    const formData = new FormData();
+                    formData.append('action', 'save_descriptor');
+                    Object.keys(descriptor).forEach(key => {
+                        if (typeof descriptor[key] === 'object') {
+                            formData.append(key, JSON.stringify(descriptor[key]));
+                        } else {
+                            formData.append(key, descriptor[key]);
+                        }
+                    });
+
+                    return fetch(window.location.href, {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    throw new Error('Failed to get descriptor: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    RapidStorApp.showToast('Upsell added successfully', 'success');
+                    document.querySelector('.fixed').remove();
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    RapidStorApp.showToast('Failed to add upsell: ' + (data.error || 'Unknown error'), 'error');
+                }
+            })
+            .catch(error => {
+                RapidStorApp.showToast('Error: ' + error.message, 'error');
+            });
+    }
+
+    function generateUpsellReason(fromName, toName) {
+        // Extract size patterns
+        const fromSize = fromName.match(/(\d+(?:-\d+)?)\s*sq\s*ft/i);
+        const toSize = toName.match(/(\d+(?:-\d+)?)\s*sq\s*ft/i);
+
+        if (fromSize && toSize) {
+            const fromNum = parseInt(fromSize[1].split('-').pop());
+            const toNum = parseInt(toSize[1].split('-').pop());
+            if (toNum > fromNum) {
+                return `Upgrade to ${toSize[1]}sqft (+${toNum - fromNum}sqft)`;
+            }
+            return `Upgrade to ${toSize[1]}sqft`;
+        }
+
+        // Check for premium upgrade
+        if (fromName.toLowerCase().includes('regular') && toName.toLowerCase().includes('premium')) {
+            return 'Premium upgrade';
+        }
+
+        // Check for climate control
+        if (!fromName.toLowerCase().includes('climate') && toName.toLowerCase().includes('climate')) {
+            return 'Climate controlled upgrade';
+        }
+
+        // Generic fallback
+        return `Upgrade to ${toName.split(' ').slice(0, 2).join(' ')}`;
+    }

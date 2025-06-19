@@ -109,6 +109,10 @@
                 <button onclick="enableDragDrop()" id="dragToggle" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm">
                     <i class="fas fa-arrows-alt mr-1"></i>Enable Drag & Drop
                 </button>
+                <button onclick="smartCarouselToggle()" class="bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded text-sm"
+                        title="Auto-manage carousel based on occupancy">
+                    <i class="fas fa-sync-alt mr-1"></i>Smart Carousel
+                </button>
                 <button onclick="bulkToggle('enabled', true)" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
                     <i class="fas fa-toggle-on mr-1"></i>Enable All
                 </button>
@@ -258,7 +262,90 @@
         </div>
     </div>
 <?php endif; ?>
+<script>// Add this function to your app.js or directly in the header
+    function smartCarouselToggle() {
+        if (!confirm('This will:\n• Turn OFF carousel for fully occupied units (100%)\n• Turn ON carousel for available units (<100%)\n\nContinue?')) {
+            return;
+        }
 
+        // Show loading state
+        const button = event.target.closest('button');
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Processing...';
+        button.disabled = true;
+
+        // Use the AJAX handler
+        const formData = new FormData();
+        formData.append('action', 'smart_carousel_off'); // Still uses same action name for compatibility
+
+        fetch(window.location.href, {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                button.innerHTML = originalHTML;
+                button.disabled = false;
+
+                if (data.success) {
+                    // Build detailed message
+                    let detailMessage = data.message;
+
+                    if (data.updated_details && data.updated_details.length > 0) {
+                        const turnedOff = data.updated_details.filter(d => d.action === 'turned_off');
+                        const turnedOn = data.updated_details.filter(d => d.action === 'turned_on');
+
+                        if (turnedOff.length > 0) {
+                            detailMessage += '\n\nTurned OFF for:';
+                            turnedOff.forEach(d => {
+                                detailMessage += `\n• ${d.name} (${d.occupancy}% occupied)`;
+                            });
+                        }
+
+                        if (turnedOn.length > 0) {
+                            detailMessage += '\n\nTurned ON for:';
+                            turnedOn.forEach(d => {
+                                detailMessage += `\n• ${d.name} (${d.occupancy}% occupied)`;
+                            });
+                        }
+                    }
+
+                    // Show success message
+                    RapidStorApp.showToast(data.message, 'success', 4000);
+
+                    // Update UI for specific descriptors
+                    if (data.updated_details && data.updated_details.length > 0) {
+                        data.updated_details.forEach(detail => {
+                            if (RapidStorApp.updateToggleUI) {
+                                RapidStorApp.updateToggleUI(
+                                    detail.id,
+                                    'useForCarousel',
+                                    detail.action === 'turned_on'
+                                );
+                            }
+                        });
+                    }
+
+                    // Show detailed changes in console
+                    console.log('Smart Carousel Updates:', data.updated_details);
+
+                    // Reload page after a delay to ensure everything is synced
+                    if (data.updated_count > 0) {
+                        setTimeout(() => {
+                            window.location.reload(true);
+                        }, 2000);
+                    }
+                } else {
+                    RapidStorApp.showToast(data.error || 'Failed to update carousel settings', 'error');
+                }
+            })
+            .catch(error => {
+                button.innerHTML = originalHTML;
+                button.disabled = false;
+                RapidStorApp.showToast('Error: ' + error.message, 'error');
+                console.error('Full error:', error);
+            });
+    }</script>
 <div class="mt-2">
     <a href="?debug=1<?= $selectedLocation ? "&location=$selectedLocation" : '' ?><?= $searchTerm ? "&search=" . urlencode($searchTerm) : '' ?><?= $viewMode !== 'table' ? "&view=$viewMode" : '' ?>"
        class="text-xs text-gray-500 hover:text-gray-700">Show Debug Info</a>

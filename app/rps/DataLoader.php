@@ -239,7 +239,7 @@ class DataLoader
 
         if ($this->debug && $successCount > 0) {
             // Log some successful examples
-            $successfulDescriptors = array_filter($descriptors, function($desc) {
+            $successfulDescriptors = array_filter($descriptors, function ($desc) {
                 return $desc['inventory']['total'] > 0;
             });
 
@@ -380,7 +380,7 @@ class DataLoader
 
         $this->log("Filtering descriptors with search term: {$searchTerm}");
 
-        $filtered = array_filter($descriptors, function($desc) use ($searchTerm) {
+        $filtered = array_filter($descriptors, function ($desc) use ($searchTerm) {
             $searchLower = strtolower($searchTerm);
             return strpos(strtolower($desc['name'] ?? ''), $searchLower) !== false ||
                 strpos(strtolower($desc['description'] ?? ''), $searchLower) !== false ||
@@ -395,7 +395,7 @@ class DataLoader
     {
         $this->log("Sorting descriptors by {$sortBy} ({$sortOrder})");
 
-        usort($descriptors, function($a, $b) use ($sortBy, $sortOrder) {
+        usort($descriptors, function ($a, $b) use ($sortBy, $sortOrder) {
             $valueA = $a[$sortBy] ?? '';
             $valueB = $b[$sortBy] ?? '';
 
@@ -423,8 +423,7 @@ class DataLoader
             // Try to extract size from name
             if (preg_match('/(\d+(?:\.\d+)?(?:-\d+(?:\.\d+)?)?)\s*(?:sq\s*ft|sqft|square\s*feet)/i', $descriptor['name'], $matches)) {
                 $sizeName = $matches[1] . ' sq ft';
-            }
-            // Try to extract dimensions like "8x10"
+            } // Try to extract dimensions like "8x10"
             elseif (preg_match('/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i', $descriptor['name'], $matches)) {
                 $sizeName = $matches[1] . 'x' . $matches[2];
             }
