@@ -1,14 +1,21 @@
 <?php
 /**
  * Enhanced RapidStor Descriptor Manager - Main Entry Point
- * FIXED VERSION - No duplicate cases
+ * Fixed version with proper include order
  */
 
 session_start();
 
-// Performance and timeout configurations for large operations
-ini_set('max_execution_time', 120);
-ini_set('memory_limit', '256M');
+// Include all required classes FIRST
+require_once 'config.php';
+require_once 'RapidStorAPI.php';
+require_once 'DataLoader.php';
+require_once 'AjaxHandler.php';
+require_once 'InventoryManager.php';
+
+// Performance and timeout configurations from environment (after config is loaded)
+ini_set('max_execution_time', Config::get('MAX_EXECUTION_TIME', 120));
+ini_set('memory_limit', Config::get('MEMORY_LIMIT', '256M'));
 ini_set('max_input_vars', 5000);
 
 // Disable output buffering for real-time feedback
@@ -16,33 +23,16 @@ if (ob_get_level()) {
     ob_end_clean();
 }
 
-// Set error handling for production vs development
-if (isset($_GET['debug']) || isset($_POST['debug'])) {
-    error_reporting(E_ALL);
-    ini_set('display_errors', 1);
-} else {
-    error_reporting(E_ERROR | E_WARNING);
-    ini_set('display_errors', 0);
-    ini_set('log_errors', 1);
-}
-
-// Include all required classes
-require_once 'config.php';
-require_once 'RapidStorAPI.php';
-require_once 'DataLoader.php';
-require_once 'AjaxHandler.php';
-require_once 'InventoryManager.php';
-
-// Initialize variables
-$jwtToken = $_SESSION['jwt_token'] ?? '';
+// Initialize variables with environment-aware defaults
+$jwtToken = $_SESSION['jwt_token'] ?? Config::getJwtToken() ?? '';
 $message = '';
 $messageType = '';
-$selectedLocation = $_GET['location'] ?? $_SESSION['location'] ?? 'L004';
+$selectedLocation = $_GET['location'] ?? $_SESSION['location'] ?? Config::getDefaultLocation();
 $searchTerm = $_GET['search'] ?? '';
 $sortBy = $_GET['sort'] ?? 'ordinalPosition';
 $sortOrder = $_GET['order'] ?? 'asc';
 $viewMode = $_GET['view'] ?? 'table';
-$debug = isset($_GET['debug']);
+$debug = isset($_GET['debug']) || Config::isDebugMode();
 
 // Handle JWT token input
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jwt_token'])) {
@@ -52,11 +42,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['jwt_token'])) {
 
 // Initialize API and validate location
 if (!Config::isValidLocation($selectedLocation)) {
-    $selectedLocation = 'L004';
+    $selectedLocation = Config::getDefaultLocation();
 }
 $_SESSION['location'] = $selectedLocation;
 
 $api = new RapidStorAPI($jwtToken, $debug);
+
+// Show environment status if debug mode
+if ($debug) {
+    $envStatus = [
+        'env_file_loaded' => Config::isEnvFileLoaded(),
+        'env_file_path' => Config::getEnvFilePath(),
+        'api_config' => $api->getConfig(),
+        'php_settings' => [
+            'memory_limit' => ini_get('memory_limit'),
+            'max_execution_time' => ini_get('max_execution_time'),
+            'error_reporting' => error_reporting(),
+            'display_errors' => ini_get('display_errors')
+        ]
+    ];
+
+    if (Config::isEnvFileLoaded()) {
+        $message = "✅ Environment loaded from: " . Config::getEnvFilePath();
+        $messageType = 'success';
+    } else {
+        $message = "⚠️ No .env file found. Using default configuration.";
+        $messageType = 'warning';
+    }
+}
 
 // ============================================================================
 // AJAX REQUEST HANDLING
@@ -128,14 +141,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 break;
 
+            case 'create_env_file':
+                $envPath = '.env';
+                if (Config::createSampleEnvFile($envPath)) {
+                    $message = "Sample .env file created at {$envPath}. Please edit it with your settings.";
+                    $messageType = 'success';
+                } else {
+                    $message = "Failed to create .env file. Check permissions.";
+                    $messageType = 'error';
+                }
+                break;
+
             case 'save_descriptor':
                 error_log("► HIT save_descriptor");
-                error_log("POST KEYS: " . implode(', ', array_keys($_POST)));
-                error_log(" \$_POST DUMP: " . print_r($_POST, true));
-                $raw = file_get_contents('php://input');
-                if ($raw) {
-                    error_log("RAW INPUT: " . $raw);
-                }
                 $descriptorData = [
                     'name' => $_POST['name'],
                     'description' => $_POST['description'],
@@ -170,16 +188,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // New descriptor - add defaults
                     $descriptorData = array_merge(Config::DEFAULT_DESCRIPTOR, $descriptorData);
                 }
-                // 5. Upsells (upgradesTo)
+
+                // Handle upsells
                 $upsells = [];
                 if (isset($_POST['upsells']) && is_array($_POST['upsells'])) {
                     foreach ($_POST['upsells'] as $u) {
                         if (!empty($u['_id']) && !empty($u['upgradeReason'])) {
                             $upsells[] = [
-                                '_id'               => trim($u['_id']),
-                                'upgradeIcon'       => 'fa-warehouse',
+                                '_id' => trim($u['_id']),
+                                'upgradeIcon' => 'fa-warehouse',
                                 'upgradeIconPrefix' => 'fa-light',
-                                'upgradeReason'     => trim($u['upgradeReason'])
+                                'upgradeReason' => trim($u['upgradeReason'])
                             ];
                         }
                     }
@@ -205,7 +224,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'save_descriptor_limited':
-                // Limited save – keywords, descriptions, deals, insurance, and upsells
+                // Limited save handling
                 if (empty($_POST['_id'])) {
                     $message = 'Descriptor ID is required for limited save';
                     $messageType = 'error';
@@ -213,7 +232,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 try {
-                    // Load existing descriptor
                     $dataLoader = new DataLoader($api, $selectedLocation, $debug);
                     $allData = $dataLoader->loadAllData();
                     $existingDescriptor = null;
@@ -232,13 +250,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Start with existing data
                     $descriptorData = $existingDescriptor;
 
-                    // 1) Keywords
+                    // Update fields...
                     $keywords = array_filter(array_map('trim', $_POST['keywords'] ?? []), function($k) {
                         return $k !== '';
                     });
                     $descriptorData['criteria']['include']['keywords'] = array_values($keywords);
 
-                    // 2) Descriptions
                     $descriptorData['description'] = trim($_POST['description'] ?? '');
                     $descs = array_filter(array_map('trim', $_POST['descriptions'] ?? []), function($d) {
                         return $d !== '';
@@ -246,24 +263,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $descriptorData['descriptions'] = array_values($descs);
                     $descriptorData['specialText'] = trim($_POST['specialText'] ?? '');
 
-                    // 3) Deals
                     $selectedDeals = $_POST['deals'] ?? [];
                     $descriptorData['deals'] = array_values($selectedDeals);
 
-                    // 4) Insurance
                     $insurance = trim($_POST['defaultInsuranceCoverage'] ?? '');
                     $descriptorData['defaultInsuranceCoverage'] = $insurance !== '' ? $insurance : null;
 
-                    // 5) Upsells
                     $upsells = [];
                     if (!empty($_POST['upsells']) && is_array($_POST['upsells'])) {
                         foreach ($_POST['upsells'] as $u) {
                             if (!empty($u['_id']) && !empty($u['upgradeReason'])) {
                                 $upsells[] = [
-                                    '_id'               => trim($u['_id']),
-                                    'upgradeIcon'       => 'fa-warehouse',
+                                    '_id' => trim($u['_id']),
+                                    'upgradeIcon' => 'fa-warehouse',
                                     'upgradeIconPrefix' => 'fa-light',
-                                    'upgradeReason'     => trim($u['upgradeReason']),
+                                    'upgradeReason' => trim($u['upgradeReason']),
                                 ];
                             }
                         }
@@ -355,8 +369,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 break;
 
-            // NOTE: All AJAX actions (delete_descriptor, duplicate_descriptor, etc.)
-            // are handled in the AJAX section above, not here
+            case 'reload_env':
+                // Force reload environment configuration
+                $oldToken = Config::getJwtToken();
+                $oldBaseUrl = Config::getApiBaseUrl();
+
+                // Clear the loaded flag to force re-read
+                try {
+                    $reflection = new ReflectionClass('Config');
+                    $loadedProperty = $reflection->getProperty('loaded');
+                    $loadedProperty->setAccessible(true);
+                    $loadedProperty->setValue(false);
+
+                    // Re-initialize API with new config
+                    $api = new RapidStorAPI($jwtToken, $debug);
+
+                    $message = "Environment configuration reloaded. ";
+                    if ($oldToken !== Config::getJwtToken()) {
+                        $message .= "JWT token updated. ";
+                    }
+                    if ($oldBaseUrl !== Config::getApiBaseUrl()) {
+                        $message .= "API URL updated. ";
+                    }
+                    $messageType = 'success';
+                } catch (Exception $e) {
+                    $message = "Failed to reload environment: " . $e->getMessage();
+                    $messageType = 'error';
+                }
+                break;
         }
     } catch (Exception $e) {
         $message = 'Error: ' . $e->getMessage();

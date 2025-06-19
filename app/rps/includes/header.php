@@ -1,9 +1,55 @@
 <?php
-// includes/header.php - Header section with authentication, controls, and navigation
+// includes/header.php - Enhanced header with .env support and environment status
 ?>
 
-<!-- JWT Token Input (show if not authenticated) -->
-<?php if (!$api->hasValidToken()): ?>
+<!-- Environment Status Alert (show if no .env file or missing JWT token) -->
+<?php if (!Config::isEnvFileLoaded() || !Config::getJwtToken()): ?>
+    <div class="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+        <div class="flex items-start gap-3">
+            <i class="fas fa-exclamation-triangle text-amber-600 mt-1"></i>
+            <div class="flex-1">
+                <h3 class="text-lg font-semibold text-amber-800 mb-2">Environment Configuration</h3>
+
+                <?php if (!Config::isEnvFileLoaded()): ?>
+                    <div class="mb-3">
+                        <p class="text-amber-700 mb-2">No .env file found. The application is using default configuration.</p>
+                        <form method="post" class="inline">
+                            <input type="hidden" name="action" value="create_env_file">
+                            <button type="submit" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-md text-sm">
+                                <i class="fas fa-file-plus mr-2"></i>Create .env File
+                            </button>
+                        </form>
+                        <span class="text-amber-600 text-sm ml-3">This will create a sample .env file that you can customize.</span>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (!Config::getJwtToken()): ?>
+                    <div class="mb-3">
+                        <p class="text-amber-700 mb-2">JWT token not configured. Please set it in your .env file or enter it below:</p>
+                        <form method="post" class="flex gap-2">
+                            <input type="text" name="jwt_token" placeholder="Enter your JWT token..."
+                                   value="<?= htmlspecialchars($jwtToken) ?>"
+                                   class="flex-1 border border-amber-300 rounded-md px-3 py-2 text-sm max-w-md">
+                            <button type="submit" class="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-md">
+                                <i class="fas fa-key mr-2"></i>Set Token
+                            </button>
+                        </form>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (Config::isEnvFileLoaded()): ?>
+                    <div class="text-sm text-amber-600">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        Environment loaded from: <code class="bg-amber-100 px-1 rounded"><?= htmlspecialchars(Config::getEnvFilePath()) ?></code>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
+
+<!-- JWT Token Input (show if not authenticated and no token in env) -->
+<?php if (!$api->hasValidToken() && !Config::getJwtToken()): ?>
     <div class="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
         <h3 class="text-lg font-semibold text-yellow-800 mb-2">Authentication Required</h3>
         <p class="text-yellow-700 mb-3">Please enter your JWT token to access the RapidStor API:</p>
@@ -19,7 +65,21 @@
 <?php endif; ?>
 
 <div class="flex justify-between items-center mb-4">
-    <h1 class="text-3xl font-bold text-gray-900">Enhanced RapidStor Manager</h1>
+    <h1 class="text-3xl font-bold text-gray-900 flex items-center gap-3">
+        Enhanced RapidStor Manager
+        <?php if (Config::isEnvFileLoaded()): ?>
+            <span class="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center gap-1">
+                <i class="fas fa-check-circle"></i>
+                ENV Loaded
+            </span>
+        <?php endif; ?>
+        <?php if (Config::isDebugMode()): ?>
+            <span class="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-full flex items-center gap-1">
+                <i class="fas fa-bug"></i>
+                Debug Mode
+            </span>
+        <?php endif; ?>
+    </h1>
     <div class="flex gap-2">
         <?php if ($api->hasValidToken()): ?>
             <form method="post" class="inline">
@@ -35,6 +95,41 @@
                class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg inline-flex items-center">
                 <i class="fas fa-bug mr-2"></i>Debug
             </a>
+
+            <!-- Environment Management Dropdown -->
+            <div class="relative group">
+                <button class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg inline-flex items-center">
+                    <i class="fas fa-cog mr-2"></i>Config
+                    <i class="fas fa-chevron-down ml-1 text-xs"></i>
+                </button>
+                <div class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10 hidden group-hover:block">
+                    <div class="py-1">
+                        <?php if (Config::isEnvFileLoaded()): ?>
+                            <form method="post" class="block">
+                                <input type="hidden" name="action" value="reload_env">
+                                <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <i class="fas fa-sync mr-2"></i>Reload Environment
+                                </button>
+                            </form>
+                        <?php endif; ?>
+
+                        <a href="?debug=1<?= $selectedLocation ? "&location=$selectedLocation" : '' ?>"
+                           class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                            <i class="fas fa-info-circle mr-2"></i>Environment Info
+                        </a>
+
+                        <?php if (!Config::isEnvFileLoaded()): ?>
+                            <form method="post" class="block">
+                                <input type="hidden" name="action" value="create_env_file">
+                                <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                    <i class="fas fa-file-plus mr-2"></i>Create .env File
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
             <form method="post" class="inline">
                 <input type="hidden" name="jwt_token" value="">
                 <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg">
@@ -195,20 +290,64 @@
     </div>
 <?php endif; ?>
 
-<!-- Debug Section -->
+<!-- Enhanced Debug Section with Environment Info -->
 <?php if ($debug): ?>
     <div class="mt-4 p-4 bg-gray-100 rounded-md">
-        <h4 class="font-semibold mb-2">Debug Information:</h4>
-        <div class="text-sm space-y-2">
-            <div><strong>API Base URL:</strong> <?= htmlspecialchars(Config::API_BASE_URL) ?></div>
-            <div><strong>JWT Token:</strong>
-                <?php if ($api->hasValidToken()): ?>
-                    <?= htmlspecialchars(substr($jwtToken, 0, 20)) ?>...
-                    <span class="text-green-600">(Valid)</span>
-                <?php else: ?>
-                    <span class="text-red-600">NOT PROVIDED</span>
-                <?php endif; ?>
+        <h4 class="font-semibold mb-2 flex items-center gap-2">
+            <i class="fas fa-info-circle text-blue-600"></i>
+            Debug Information
+        </h4>
+
+        <!-- Environment Status -->
+        <div class="mb-4 p-3 bg-white rounded border">
+            <h5 class="font-medium mb-2 text-gray-800">Environment Configuration</h5>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                    <strong>Environment File:</strong>
+                    <?php if (Config::isEnvFileLoaded()): ?>
+                        <span class="text-green-600">✅ Loaded</span>
+                        <div class="text-xs text-gray-500 mt-1">
+                            Path: <?= htmlspecialchars(Config::getEnvFilePath()) ?>
+                        </div>
+                    <?php else: ?>
+                        <span class="text-red-600">❌ Not found</span>
+                        <div class="text-xs text-gray-500 mt-1">Using default configuration</div>
+                    <?php endif; ?>
+                </div>
+
+                <div>
+                    <strong>API Configuration:</strong>
+                    <div class="text-xs space-y-1 mt-1">
+                        <div>Base URL: <?= htmlspecialchars(Config::getApiBaseUrl()) ?></div>
+                        <div>Timeout: <?= Config::getRequestTimeout() ?>s</div>
+                        <div>Debug Mode: <?= Config::isDebugMode() ? 'Yes' : 'No' ?></div>
+                    </div>
+                </div>
+
+                <div>
+                    <strong>JWT Token:</strong>
+                    <?php if ($api->hasValidToken()): ?>
+                        <span class="text-green-600">✅ Valid</span>
+                        <div class="text-xs text-gray-500 mt-1">
+                            Source: <?= Config::getJwtToken() ? 'Environment' : 'Session' ?>
+                        </div>
+                    <?php else: ?>
+                        <span class="text-red-600">❌ Missing/Invalid</span>
+                    <?php endif; ?>
+                </div>
+
+                <div>
+                    <strong>PHP Settings:</strong>
+                    <div class="text-xs space-y-1 mt-1">
+                        <div>Memory: <?= ini_get('memory_limit') ?></div>
+                        <div>Max Execution: <?= ini_get('max_execution_time') ?>s</div>
+                        <div>Error Display: <?= ini_get('display_errors') ? 'On' : 'Off' ?></div>
+                    </div>
+                </div>
             </div>
+        </div>
+
+        <div class="text-sm space-y-2">
             <div><strong>Selected Location:</strong> <?= htmlspecialchars($selectedLocation) ?></div>
             <div><strong>Descriptor Count:</strong> <?= count($data['descriptors']) ?></div>
             <div><strong>Unit Types Count:</strong> <?= count($data['unitTypes']) ?></div>
@@ -219,19 +358,9 @@
                 </div>
             <?php endif; ?>
 
-            <?php if (!empty($data['unitTypes'])): ?>
-                <div><strong>Sample Unit Type:</strong>
-                    <pre class="mt-1 p-2 bg-white rounded text-xs overflow-auto max-h-32"><?= htmlspecialchars(json_encode(array_slice($data['unitTypes'], 0, 1), JSON_PRETTY_PRINT)) ?></pre>
-                </div>
-            <?php endif; ?>
-
-            <?php if (!empty($data['descriptors'])): ?>
-                <div><strong>Sample Descriptor Inventory:</strong>
-                    <pre class="mt-1 p-2 bg-white rounded text-xs overflow-auto max-h-32"><?= htmlspecialchars(json_encode([
-                            'name' => $data['descriptors'][0]['name'] ?? 'N/A',
-                            'inventory' => $data['descriptors'][0]['inventory'] ?? [],
-                            'keywords' => $data['descriptors'][0]['inventory']['keywords'] ?? []
-                        ], JSON_PRETTY_PRINT)) ?></pre>
+            <?php if (Config::isEnvFileLoaded()): ?>
+                <div><strong>Environment Variables:</strong>
+                    <pre class="mt-1 p-2 bg-white rounded text-xs overflow-auto max-h-32"><?= htmlspecialchars(json_encode(Config::getAllEnvVars(), JSON_PRETTY_PRINT)) ?></pre>
                 </div>
             <?php endif; ?>
         </div>
@@ -262,7 +391,9 @@
         </div>
     </div>
 <?php endif; ?>
-<script>// Add this function to your app.js or directly in the header
+
+<script>
+    // Enhanced smart carousel toggle with environment awareness
     function smartCarouselToggle() {
         if (!confirm('This will:\n• Turn OFF carousel for fully occupied units (100%)\n• Turn ON carousel for available units (<100%)\n\nContinue?')) {
             return;
@@ -276,7 +407,7 @@
 
         // Use the AJAX handler
         const formData = new FormData();
-        formData.append('action', 'smart_carousel_off'); // Still uses same action name for compatibility
+        formData.append('action', 'smart_carousel_off');
 
         fetch(window.location.href, {
             method: 'POST',
@@ -311,13 +442,15 @@
                     }
 
                     // Show success message
-                    RapidStorApp.showToast(data.message, 'success', 4000);
+                    if (window.RapidStorApp && window.RapidStorApp.showToast) {
+                        window.RapidStorApp.showToast(data.message, 'success', 4000);
+                    }
 
                     // Update UI for specific descriptors
                     if (data.updated_details && data.updated_details.length > 0) {
                         data.updated_details.forEach(detail => {
-                            if (RapidStorApp.updateToggleUI) {
-                                RapidStorApp.updateToggleUI(
+                            if (window.RapidStorApp && window.RapidStorApp.updateToggleUI) {
+                                window.RapidStorApp.updateToggleUI(
                                     detail.id,
                                     'useForCarousel',
                                     detail.action === 'turned_on'
@@ -336,17 +469,64 @@
                         }, 2000);
                     }
                 } else {
-                    RapidStorApp.showToast(data.error || 'Failed to update carousel settings', 'error');
+                    if (window.RapidStorApp && window.RapidStorApp.showToast) {
+                        window.RapidStorApp.showToast(data.error || 'Failed to update carousel settings', 'error');
+                    }
                 }
             })
             .catch(error => {
                 button.innerHTML = originalHTML;
                 button.disabled = false;
-                RapidStorApp.showToast('Error: ' + error.message, 'error');
+                if (window.RapidStorApp && window.RapidStorApp.showToast) {
+                    window.RapidStorApp.showToast('Error: ' + error.message, 'error');
+                }
                 console.error('Full error:', error);
             });
-    }</script>
-<div class="mt-2">
-    <a href="?debug=1<?= $selectedLocation ? "&location=$selectedLocation" : '' ?><?= $searchTerm ? "&search=" . urlencode($searchTerm) : '' ?><?= $viewMode !== 'table' ? "&view=$viewMode" : '' ?>"
-       class="text-xs text-gray-500 hover:text-gray-700">Show Debug Info</a>
-</div>
+    }
+
+    // Enhanced bulk toggle functions
+    function bulkToggle(field, value) {
+        const action = field === 'enabled' ? (value ? 'enable' : 'disable') : (value ? 'show' : 'hide');
+
+        // Select all first
+        const checkboxes = document.querySelectorAll('.descriptor-checkbox');
+        checkboxes.forEach(checkbox => checkbox.checked = true);
+
+        if (window.RapidStorApp && window.RapidStorApp.updateSelection) {
+            window.RapidStorApp.updateSelection();
+        }
+
+        // Then perform batch action
+        setTimeout(() => {
+            if (window.RapidStorApp && window.RapidStorApp.batchAction) {
+                window.RapidStorApp.batchAction(action);
+            }
+        }, 100);
+    }
+
+    // Environment reload function
+    function reloadEnvironment() {
+        if (confirm('This will reload the environment configuration from the .env file. Continue?')) {
+            const form = document.createElement('form');
+            form.method = 'post';
+            form.style.display = 'none';
+
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'action';
+            input.value = 'reload_env';
+
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    }
+
+    // Show/hide debug info toggle
+    function toggleDebugInfo() {
+        const debugSection = document.querySelector('.bg-gray-100.rounded-md');
+        if (debugSection) {
+            debugSection.style.display = debugSection.style.display === 'none' ? 'block' : 'none';
+        }
+    }
+</script>
