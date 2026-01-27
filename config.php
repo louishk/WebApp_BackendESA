@@ -1,5 +1,9 @@
 <?php
 require_once __DIR__ . '/vendor/autoload.php';
+
+use Firebase\JWT\JWT;
+use Firebase\JWT\Key;
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -11,15 +15,16 @@ $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
 // ─────────────────────────────────────────────────────────────
-// Database Configuration
+// PostgreSQL Database Configuration (Backend)
 // ─────────────────────────────────────────────────────────────
 $dbHost     = $_ENV['DB_HOST']     ?? 'localhost';
-$dbUsername = $_ENV['DB_USERNAME'] ?? 'root';
+$dbPort     = $_ENV['DB_PORT']     ?? '5432';
+$dbUsername = $_ENV['DB_USERNAME'] ?? '';
 $dbPassword = $_ENV['DB_PASSWORD'] ?? '';
-$dbName     = $_ENV['DB_NAME']     ?? '';
-$dbNameBK   = $_ENV['DB_NAME_BK']     ?? '';
+$dbName     = $_ENV['DB_NAME']     ?? 'backend';
+$dbSslMode  = $_ENV['DB_SSLMODE']  ?? 'require';
 
-$dsn = "mysql:host={$dbHost};dbname={$dbName};charset=utf8mb4";
+$dsn = "pgsql:host={$dbHost};port={$dbPort};dbname={$dbName};sslmode={$dbSslMode}";
 
 try {
     $pdo = new PDO($dsn, $dbUsername, $dbPassword, [
@@ -32,26 +37,31 @@ try {
 }
 
 // ─────────────────────────────────────────────────────────────
-// WABA Configuration
+// PostgreSQL Data Layer Configuration (esa_pbi)
 // ─────────────────────────────────────────────────────────────
-$wabaIdListRaw   = $_ENV['WABA_ID_LIST'] ?? '';
-$wabaIds         = array_filter(array_map('trim', explode(',', $wabaIdListRaw)));
-$wabaAccessToken = $_ENV['WABA_ACCESS_TOKEN'] ?? '';
+$dataDbHost     = $_ENV['DATA_DB_HOST']     ?? $dbHost;
+$dataDbPort     = $_ENV['DATA_DB_PORT']     ?? '5432';
+$dataDbUsername = $_ENV['DATA_DB_USERNAME'] ?? $dbUsername;
+$dataDbPassword = $_ENV['DATA_DB_PASSWORD'] ?? $dbPassword;
+$dataDbName     = $_ENV['DATA_DB_NAME']     ?? 'esa_pbi';
+$dataDbSslMode  = $_ENV['DATA_DB_SSLMODE']  ?? 'require';
 
-// ─────────────────────────────────────────────────────────────
-// RBS API Configuration
-// ─────────────────────────────────────────────────────────────
-$rbsApiBaseUrl = rtrim($_ENV['RBS_API_BASE_URL'] ?? '', '/');
-$rbsApiBearer  = $_ENV['RBS_API_BEARER_TOKEN'] ?? '';
+/**
+ * Get Data Layer PDO connection (esa_pbi database)
+ */
+function getDataLayerPdo(): PDO {
+    global $dataDbHost, $dataDbPort, $dataDbUsername, $dataDbPassword, $dataDbName, $dataDbSslMode;
 
-define('RBS_API_BASE',   $rbsApiBaseUrl);
-define('RBS_API_BEARER', $rbsApiBearer);
-
-// ─────────────────────────────────────────────────────────────
-// FreshSales (FSS) API Configuration
-// ─────────────────────────────────────────────────────────────
-$fssApiKey = $_ENV['FSS_API_KEY'] ?? '';
-$fssApiBaseUrl = $_ENV['FSS_API_URL'] ?? 'https://api.redboxstorage.hk/fss';
+    static $dataPdo = null;
+    if ($dataPdo === null) {
+        $dsn = "pgsql:host={$dataDbHost};port={$dataDbPort};dbname={$dataDbName};sslmode={$dataDbSslMode}";
+        $dataPdo = new PDO($dsn, $dataDbUsername, $dataDbPassword, [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+    }
+    return $dataPdo;
+}
 
 // ─────────────────────────────────────────────────────────────
 // Microsoft OAuth Configuration
@@ -64,14 +74,73 @@ $azureConfig = [
 ];
 
 // ─────────────────────────────────────────────────────────────
+// JWT Configuration
+// ─────────────────────────────────────────────────────────────
+$jwtSecret = $_ENV['JWT_SECRET'] ?? '';
+$jwtExpiry = (int)($_ENV['JWT_EXPIRY'] ?? 3600);
+
+/**
+ * Generate a JWT token for scheduler access
+ */
+function generateSchedulerToken(array $user): string {
+    global $jwtSecret, $jwtExpiry;
+
+    $payload = [
+        'iss'   => 'webapp_backend',
+        'sub'   => $user['id'],
+        'email' => $user['email'] ?? '',
+        'role'  => $user['role'],
+        'iat'   => time(),
+        'exp'   => time() + $jwtExpiry
+    ];
+
+    return JWT::encode($payload, $jwtSecret, 'HS256');
+}
+
+/**
+ * Validate and decode a JWT token
+ */
+function validateSchedulerToken(string $token): ?array {
+    global $jwtSecret;
+
+    try {
+        $decoded = JWT::decode($token, new Key($jwtSecret, 'HS256'));
+        return (array)$decoded;
+    } catch (Exception $e) {
+        error_log("JWT validation error: " . $e->getMessage());
+        return null;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scheduler Configuration
+// ─────────────────────────────────────────────────────────────
+$schedulerApiUrl = $_ENV['SCHEDULER_API_URL'] ?? 'http://localhost:5000';
+
+// ─────────────────────────────────────────────────────────────
 // Role-Based Access Control (RBAC)
 // ─────────────────────────────────────────────────────────────
-function require_role($roles) {
+/**
+ * Require user to have one of the specified roles
+ * @param string|array $roles Single role or array of allowed roles
+ */
+function require_role($roles): void {
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
     }
-    if (!isset($_SESSION['user']) || !in_array($_SESSION['user']['role'], (array)$roles, true)) {
+
+    $allowedRoles = (array)$roles;
+
+    if (!isset($_SESSION['user']) || !in_array($_SESSION['user']['role'], $allowedRoles, true)) {
         header('HTTP/1.0 403 Forbidden');
         exit('Access denied');
     }
+}
+
+/**
+ * Check if current user has scheduler access (admin or scheduler_admin)
+ */
+function hasSchedulerAccess(): bool {
+    return isset($_SESSION['user']) &&
+           in_array($_SESSION['user']['role'], ['admin', 'scheduler_admin'], true);
 }

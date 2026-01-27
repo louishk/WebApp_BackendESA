@@ -1,36 +1,68 @@
 # ─────────────────────────────────────────────────────────────
+# WebApp Backend - Apache Configuration
+# ─────────────────────────────────────────────────────────────
+
 # Extend PHP session lifetime to 4 hours
 <IfModule mod_php7.c>
     php_value session.gc_maxlifetime 14400
     php_value session.cookie_lifetime 14400
 </IfModule>
-# ─────────────────────────────────────────────────────────────
+<IfModule mod_php.c>
+    php_value session.gc_maxlifetime 14400
+    php_value session.cookie_lifetime 14400
+</IfModule>
 
 RewriteEngine On
 
-# Correct target — point at pages/chatwoot/testtable.php
-RewriteRule ^chatwoot/masswaba(?:\.php)?$ pages/chatwoot/masswaba.php [L,QSA]
+# ─────────────────────────────────────────────────────────────
+# 1) Security - Block sensitive files
+# ─────────────────────────────────────────────────────────────
+<FilesMatch "^\.env$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
 
-# 1) Serve existing files and directories directly
+<FilesMatch "\.(sql|log|md)$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# Block access to sql directory
+RewriteRule ^sql/ - [F,L]
+
+# ─────────────────────────────────────────────────────────────
+# 2) Serve existing files and directories directly
+# ─────────────────────────────────────────────────────────────
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
 
-# 2) Static assets
-RewriteRule \.(js|css|png|jpe?g|gif|ico|svg)$ - [L,NC]
+# ─────────────────────────────────────────────────────────────
+# 3) Static assets - serve directly
+# ─────────────────────────────────────────────────────────────
+RewriteRule \.(js|css|png|jpe?g|gif|ico|svg|woff2?|ttf|eot)$ - [L,NC]
 
-# 3) Redirect masswaba.js
-RewriteRule ^chatwoot/masswaba\.js$ /pages/chatwoot/masswaba.js [L,R=301]
-RewriteRule ^datalayer/datalayer\.js$ /pages/datalayer/datalayer.js [L,R=301]
-
-# 4) Exempt admin folder
+# ─────────────────────────────────────────────────────────────
+# 4) Exempt specific directories from slug routing
+# ─────────────────────────────────────────────────────────────
+# Admin folder
 RewriteRule ^admin/ - [L]
 
-# 5) Exempt specific public scripts (Microsoft OAuth handlers)
-RewriteRule ^(login_microsoft|oauth_callback)\.php$ - [L]
+# App folder (scheduler, future apps)
+RewriteRule ^app/ - [L]
 
-# 6) Catch-all slugs → index.php
+# Pages folder (direct access)
+RewriteRule ^pages/ - [L]
+
+# Vendor folder
+RewriteRule ^vendor/ - [L]
+
+# ─────────────────────────────────────────────────────────────
+# 5) Exempt specific public scripts
+# ─────────────────────────────────────────────────────────────
+RewriteRule ^(login|login_microsoft|oauth_callback|logout|dashboard)\.php$ - [L]
+
+# ─────────────────────────────────────────────────────────────
+# 6) Catch-all slugs → index.php (for dynamic pages)
+# ─────────────────────────────────────────────────────────────
 RewriteRule ^([a-z0-9\-/]+)/?$ index.php?page=$1 [L,QSA]
-
-
-

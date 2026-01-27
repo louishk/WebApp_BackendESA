@@ -8,6 +8,8 @@ if (!isset($_SESSION['user'])) {
 }
 
 $user = $_SESSION['user'];
+$isAdmin = $user['role'] === 'admin';
+$hasSchedulerAccess = in_array($user['role'], ['admin', 'scheduler_admin']);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -20,10 +22,10 @@ $user = $_SESSION['user'];
 <body class="bg-light">
   <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
     <div class="container">
-      <a class="navbar-brand" href="dashboard.php">MyApp</a>
+      <a class="navbar-brand" href="dashboard.php">Backend Portal</a>
       <div class="collapse navbar-collapse">
         <ul class="navbar-nav ms-auto">
-          <?php if ($user['role'] === 'admin'): ?>
+          <?php if ($isAdmin || $hasSchedulerAccess): ?>
             <li class="nav-item">
               <a class="nav-link" href="admin/admin.php">Admin</a>
             </li>
@@ -40,11 +42,17 @@ $user = $_SESSION['user'];
     <h1>Welcome, <?= htmlspecialchars($user['username'], ENT_QUOTES) ?></h1>
     <p class="lead">This is your dashboard. Use the menu above to navigate.</p>
 
-    <?php if ($user['role'] === 'admin'): ?>
+    <?php if ($isAdmin): ?>
       <div class="mt-4">
+        <h5>Admin Tools</h5>
         <a href="admin/list_users.php" class="btn btn-outline-secondary me-2">Manage Users</a>
         <a href="admin/list_pages.php" class="btn btn-outline-secondary me-2">Manage Pages</a>
-        <a href="admin/manage_python.php" class="btn btn-outline-secondary">Manage Python Scripts</a>
+        <a href="/app/scheduler/" class="btn btn-outline-primary">Scheduler Dashboard</a>
+      </div>
+    <?php elseif ($user['role'] === 'scheduler_admin'): ?>
+      <div class="mt-4">
+        <h5>Scheduler Administration</h5>
+        <a href="/app/scheduler/" class="btn btn-outline-primary">Scheduler Dashboard</a>
       </div>
     <?php elseif ($user['role'] === 'editor'): ?>
       <div class="mt-4">
@@ -55,6 +63,15 @@ $user = $_SESSION['user'];
         You have viewer access. Use the menu to explore available pages.
       </div>
     <?php endif; ?>
+
+    <div class="mt-5">
+      <h5>Available Tools</h5>
+      <ul class="list-group">
+        <li class="list-group-item">
+          <a href="/pages/seo/richsnippet.php">SEO Rich Snippet Generator</a>
+        </li>
+      </ul>
+    </div>
 
   </div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>

@@ -13,7 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
     $confirm  = $_POST['confirm_password'] ?? '';
-    $role     = in_array($_POST['role'], ['admin', 'editor', 'viewer']) ? $_POST['role'] : 'viewer';
+    $role     = in_array($_POST['role'], ['admin', 'scheduler_admin', 'editor', 'viewer']) ? $_POST['role'] : 'viewer';
 
     if ($username === '') {
         $errors[] = "Username is required.";
@@ -39,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$errors) {
         $hash = password_hash($password, PASSWORD_DEFAULT);
         $pdo->prepare(
-            "INSERT INTO users (username, email, password, role, created_at) VALUES (?, ?, ?, ?, NOW())"
+            "INSERT INTO users (username, email, password, role, auth_provider, created_at) VALUES (?, ?, ?, ?, 'local', CURRENT_TIMESTAMP)"
         )->execute([$username, $email, $hash, $role]);
 
         header('Location: list_users.php');
@@ -83,8 +83,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="mb-3">
       <label class="form-label">Role</label>
       <select name="role" class="form-select" required>
-        <?php foreach (["admin", "editor", "viewer"] as $r): ?>
-          <option value="<?= $r ?>" <?= $role === $r ? 'selected' : '' ?>><?= ucfirst($r) ?></option>
+        <?php foreach (["admin", "scheduler_admin", "editor", "viewer"] as $r): ?>
+          <option value="<?= $r ?>" <?= $role === $r ? 'selected' : '' ?>><?= ucfirst(str_replace('_', ' ', $r)) ?></option>
         <?php endforeach; ?>
       </select>
     </div>

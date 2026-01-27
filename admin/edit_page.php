@@ -99,10 +99,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!is_dir($newDir)) mkdir($newDir, 0755, true);
             if (file_exists($oldFile)) {@rename($oldFile, $newFile);}
 
-            $sql = "UPDATE pages SET title=?, slug=?, content=?, is_secure=?, extension=?, edit_restricted=?, updated_at=NOW() WHERE id=?";
+            $sql = "UPDATE pages SET title=?, slug=?, content=?, is_secure=?, extension=?, edit_restricted=?, updated_at=CURRENT_TIMESTAMP WHERE id=?";
             $params = [$data['title'], $data['slug'], $data['content'], $data['is_secure'], $data['extension'], $data['edit_restricted'], $id];
         } else {
-            $sql = "INSERT INTO pages (title, slug, content, is_secure, extension, edit_restricted, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW())";
+            $sql = "INSERT INTO pages (title, slug, content, is_secure, extension, edit_restricted, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)";
             $params = [$data['title'], $data['slug'], $data['content'], $data['is_secure'], $data['extension'], $data['edit_restricted']];
         }
         $pdo->prepare($sql)->execute($params);

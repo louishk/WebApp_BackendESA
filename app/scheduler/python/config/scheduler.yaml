@@ -1,0 +1,51 @@
+# PBI Scheduler Configuration
+# Main scheduler settings including daemon, resources, and engine configuration
+
+scheduler:
+  # Daemon process settings
+  daemon:
+    pid_file: /var/run/pbi-scheduler.pid
+    log_file: /var/log/pbi-scheduler/scheduler.log
+    working_directory: ${SCHEDULER_WORKING_DIR}
+
+  # APScheduler engine settings
+  engine:
+    timezone: Asia/Singapore
+    job_defaults:
+      coalesce: true                    # Combine missed runs into one
+      max_instances: 1                  # Only one instance per job
+      misfire_grace_time: 3600          # Allow 1 hour late execution
+
+    # Job store (uses PostgreSQL from .env)
+    jobstore:
+      tablename: apscheduler_jobs
+
+    # Thread pool executor
+    executor:
+      max_workers: 5                    # Max concurrent pipeline executions
+
+  # Resource limits to prevent contention
+  resources:
+    db_pool:
+      max_connections: 10               # Of 15 total PostgreSQL connections
+      reserve_for_scheduler: 2          # Reserved for scheduler operations
+    soap_api:
+      max_concurrent: 5                 # Max concurrent SOAP API calls
+    http_api:
+      max_concurrent: 10                # Max concurrent HTTP API calls
+
+  # Health check settings
+  health:
+    heartbeat_interval_seconds: 30      # How often to update heartbeat
+    stale_lock_timeout_seconds: 600     # Consider lock stale after 10 min
+
+  # Graceful shutdown settings
+  shutdown:
+    timeout_seconds: 300                # Wait up to 5 min for running jobs
+    wait_for_jobs: true                 # Wait for jobs to complete before exit
+
+  # Web UI settings
+  web:
+    host: 0.0.0.0
+    port: 5000
+    debug: false

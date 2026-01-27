@@ -1,27 +1,10 @@
-
-        <?php
+<?php
 require_once dirname(__DIR__, 2) . '/config.php';
 
-// Database connection
+// Database connection - uses the global $pdo from config.php (PostgreSQL)
 function getDbConnection() {
-    global $dbHost, $dbUsername, $dbPassword, $dbNameBK;
-
-    try {
-        $pdo = new PDO(
-            "mysql:host={$dbHost};dbname={$dbNameBK};charset=utf8mb4",
-            $dbUsername,
-            $dbPassword,
-            [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-            ]
-        );
-        return $pdo;
-    } catch (PDOException $e) {
-        error_log("Database connection failed: " . $e->getMessage());
-        throw new Exception("Database connection failed");
-    }
+    global $pdo;
+    return $pdo;
 }
 
 // Handle AJAX requests
@@ -45,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $stmt = $pdo->prepare("
                     INSERT INTO schema_markups (name, schema_type, schema_data, form_data, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, NOW(), NOW())
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ");
                 $stmt->execute([$name, $schema_type, $schema_data, $form_data]);
 
@@ -93,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newName = $originalSchema['name'] . ' (Copy)';
                 $stmt = $pdo->prepare("
                     INSERT INTO schema_markups (name, schema_type, schema_data, form_data, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, NOW(), NOW())
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ");
                 $stmt->execute([$newName, $originalSchema['schema_type'], $originalSchema['schema_data'], $originalSchema['form_data']]);
 
@@ -160,7 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $stmt = $pdo->prepare("
                     UPDATE schema_markups
-                    SET name = ?, schema_type = ?, schema_data = ?, form_data = ?, updated_at = NOW()
+                    SET name = ?, schema_type = ?, schema_data = ?, form_data = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 ");
                 $stmt->execute([$name, $schema_type, $schema_data, $form_data, $id]);

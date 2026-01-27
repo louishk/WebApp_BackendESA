@@ -1,0 +1,166 @@
+pipelines:
+  siteinfo:
+    display_name: Site Information
+    description: Populate site dimension table with location metadata
+    module_path: datalayer.populate_siteinfo
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 4 * * 0
+    priority: 10
+    resource_group: soap_api
+    max_db_connections: 2
+    estimated_duration_seconds: 60
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 600
+    data_freshness:
+      table: ''
+      date_column: ''
+  unitsinfo:
+    display_name: Units Information
+    description: Fetch unit information (types, sizes, pricing) from SOAP API
+    module_path: datalayer.units_info_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 30 4 * * 0
+    priority: 9
+    depends_on:
+    - siteinfo
+    resource_group: soap_api
+    max_db_connections: 2
+    estimated_duration_seconds: 300
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 1200
+    data_freshness:
+      table: ''
+      date_column: ''
+  fxrate:
+    display_name: FX Rates
+    description: Fetch foreign exchange rates from Yahoo Finance
+    module_path: datalayer.fxrate_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 0 * * *
+    default_args:
+      mode: auto
+    priority: 3
+    resource_group: http_api
+    max_db_connections: 2
+    estimated_duration_seconds: 120
+    retry:
+      max_attempts: 5
+      delay_seconds: 60
+      backoff_multiplier: 2
+    timeout_seconds: 600
+    data_freshness:
+      table: fx_rates
+      date_column: rate_date
+  rentroll:
+    display_name: RentRoll
+    description: Fetch unit inventory and occupancy data
+    module_path: datalayer.rentroll_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 6 * * *
+    default_args:
+      mode: auto
+    priority: 1
+    depends_on:
+    - siteinfo
+    conflicts_with:
+    - discount
+    - mimo
+    resource_group: soap_api
+    max_db_connections: 3
+    estimated_duration_seconds: 900
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 3600
+    data_freshness:
+      table: rentroll
+      date_column: extract_date
+  discount:
+    display_name: Discounts
+    description: Fetch discount and concession data
+    module_path: datalayer.discount_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 30 6 * * *
+    default_args:
+      mode: auto
+    priority: 2
+    depends_on:
+    - siteinfo
+    conflicts_with:
+    - rentroll
+    - mimo
+    resource_group: soap_api
+    max_db_connections: 3
+    estimated_duration_seconds: 600
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+    timeout_seconds: 3600
+    data_freshness:
+      table: discount
+      date_column: extract_date
+  mimo:
+    display_name: Move-In/Move-Out
+    description: Fetch tenant move-in and move-out data
+    module_path: datalayer.moveinmoveout_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 */4 * * *
+    default_args:
+      mode: auto
+    priority: 2
+    depends_on:
+    - siteinfo
+    conflicts_with:
+    - rentroll
+    - discount
+    resource_group: soap_api
+    max_db_connections: 3
+    estimated_duration_seconds: 600
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+    timeout_seconds: 3600
+    data_freshness:
+      table: mimo
+      date_column: extract_date
+  sugarcrm:
+    display_name: SugarCRM
+    description: Fetch CRM data (Leads, Contacts, Accounts)
+    module_path: datalayer.sugarcrm_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 */3 * * *
+    default_args:
+      mode: auto
+    priority: 4
+    resource_group: http_api
+    max_db_connections: 3
+    estimated_duration_seconds: 1800
+    retry:
+      max_attempts: 5
+      delay_seconds: 600
+      backoff_multiplier: 2
+    timeout_seconds: 7200
+    data_freshness:
+      table: sugarcrm_leads
+      date_column: synced_at

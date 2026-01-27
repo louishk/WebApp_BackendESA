@@ -1,9 +1,4 @@
 <?php
-// Enable error reporting for debugging (disable in production)
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
 session_start();
 require 'config.php';
 
@@ -24,29 +19,35 @@ if (!$username || !$password) {
 }
 
 try {
-    // Fetch user record (note: users.password, not password_hash)
-    $stmt = $pdo->prepare("SELECT id, username, password, role FROM users WHERE username = ?");
-    $stmt->execute([$username]);
+    // Fetch user record - supports login by username or email
+    $stmt = $pdo->prepare("SELECT id, username, email, password, role FROM users WHERE username = ? OR email = ?");
+    $stmt->execute([$username, $username]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($user && password_verify($password, $user['password'])) {
         $_SESSION['user'] = [
             'id'       => $user['id'],
             'username' => $user['username'],
-            'role'     => $user['role']
+            'email'    => $user['email'],
+            'role'     => $user['role'],
+            'auth'     => 'local',
         ];
+
+        // Generate JWT token for scheduler access (admin/scheduler_admin only)
+        if (in_array($user['role'], ['admin', 'scheduler_admin'])) {
+            $_SESSION['scheduler_token'] = generateSchedulerToken($_SESSION['user']);
+        }
+
         header("Location: dashboard.php");
-        exit();
-    } else {
-        $error = "Invalid username or password.";
+        exit;
     }
+
     // Invalid credentials
     header('Location: index.php?error=invalid');
     exit;
+
 } catch (PDOException $e) {
-    // Log the error and show generic message
     error_log('Login error: ' . $e->getMessage());
-    http_response_code(500);
-    echo 'Server error. Please check the logs.';
+    header('Location: index.php?error=server');
     exit;
 }

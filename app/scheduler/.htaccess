@@ -1,0 +1,20 @@
+# Apache configuration for scheduler app
+# Prevents direct access to Python files and config
+
+# Deny access to Python files
+<FilesMatch "\.(py|pyc|yaml|yml|env)$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# Deny access to python directory
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^python/ - [F,L]
+</IfModule>
+
+# Allow PHP files
+<FilesMatch "\.php$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>

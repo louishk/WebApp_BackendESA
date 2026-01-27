@@ -28,7 +28,7 @@ $errors = [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email    = trim($_POST['email'] ?? '');
     $password = trim($_POST['password'] ?? '');
-    $role     = in_array($_POST['role'], ['admin', 'editor', 'viewer']) ? $_POST['role'] : 'viewer';
+    $role     = in_array($_POST['role'], ['admin', 'scheduler_admin', 'editor', 'viewer']) ? $_POST['role'] : 'viewer';
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = "A valid email is required.";
@@ -84,8 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="mb-3">
       <label class="form-label">Role</label>
       <select name="role" class="form-select" required>
-        <?php foreach (["admin", "editor", "viewer"] as $r): ?>
-          <option value="<?= $r ?>" <?= $user['role'] === $r ? 'selected' : '' ?>><?= ucfirst($r) ?></option>
+        <?php foreach (["admin", "scheduler_admin", "editor", "viewer"] as $r): ?>
+          <option value="<?= $r ?>" <?= $user['role'] === $r ? 'selected' : '' ?>><?= ucfirst(str_replace('_', ' ', $r)) ?></option>
         <?php endforeach; ?>
       </select>
     </div>

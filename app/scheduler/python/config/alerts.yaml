@@ -1,0 +1,74 @@
+# Alert Configuration
+# Configure notification channels for pipeline events
+
+alerts:
+  # Global default settings
+  defaults:
+    enabled: true
+    on_failure: true
+    on_success: false
+    on_retry: true
+    include_traceback: true
+    max_traceback_lines: 50
+
+  # Slack Webhook Configuration
+  slack:
+    enabled: true
+    webhook_url: ${SLACK_WEBHOOK_URL}   # Set in .env file
+    channel: "#data-pipeline-alerts"
+    username: "PBI Scheduler"
+
+    # Event triggers
+    on_failure: true
+    on_retry: true
+    on_success: false                   # Set to true for completion notifications
+
+    # Message templates (optional - uses defaults if not set)
+    templates:
+      failure: |
+        :x: *Pipeline Failed*
+        *Pipeline:* {pipeline_name}
+        *Execution ID:* {execution_id}
+        *Attempt:* {attempt}/{max_retries}
+        *Error:* ```{error_message}```
+        *Duration:* {duration}s
+        *Time:* {timestamp}
+
+      success: |
+        :white_check_mark: *Pipeline Completed*
+        *Pipeline:* {pipeline_name}
+        *Records:* {records_processed}
+        *Duration:* {duration}s
+
+      retry: |
+        :warning: *Pipeline Retrying*
+        *Pipeline:* {pipeline_name}
+        *Attempt:* {attempt}/{max_retries}
+        *Error:* {error_message}
+
+  # Email SMTP Configuration (optional)
+  email:
+    enabled: false
+    smtp_host: ${SMTP_HOST}
+    smtp_port: 587
+    smtp_user: ${SMTP_USER}
+    smtp_password: ${SMTP_PASSWORD}
+    from_address: scheduler@example.com
+    to_addresses:
+      - ops-team@example.com
+      - data-team@example.com
+
+    # Only email critical failures
+    min_severity: critical
+    pipeline_filter:
+      - rentroll
+      - managementsummary
+
+  # Webhook Configuration (for custom integrations)
+  webhook:
+    enabled: false
+    url: https://your-webhook-endpoint.com/alerts
+    method: POST
+    headers:
+      Authorization: "Bearer ${WEBHOOK_TOKEN}"
+      Content-Type: application/json
