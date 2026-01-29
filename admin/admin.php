@@ -1,7 +1,7 @@
 <?php
 session_start();
 require __DIR__ . '/../config.php';
-require_role(['admin', 'scheduler_admin']); // Admin and scheduler admin access
+require_role('admin'); // Admin-only access
 
 // Fetch some stats
 $userCount = (int)$pdo->query("SELECT COUNT(*) FROM users")->fetchColumn();
@@ -50,7 +50,16 @@ $pageCount = (int)$pdo->query("SELECT COUNT(*) FROM pages")->fetchColumn();
           <div class="card-body">
             <h2>📅</h2>
             <p>Scheduler</p>
-            <a href="/app/scheduler/" class="btn btn-outline-primary">Manage Scheduler</a>
+            <a href="../app/scheduler/" class="btn btn-outline-primary">Open Scheduler</a>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card text-center">
+          <div class="card-body">
+            <h2>⚙️</h2>
+            <p>Settings</p>
+            <a href="#" class="btn btn-outline-secondary disabled">TBD</a>
           </div>
         </div>
       </div>

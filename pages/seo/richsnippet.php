@@ -1,7 +1,7 @@
 <?php
 require_once dirname(__DIR__, 2) . '/config.php';
 
-// Database connection - uses the global $pdo from config.php (PostgreSQL)
+// Database connection - uses global $pdo from config.php (PostgreSQL)
 function getDbConnection() {
     global $pdo;
     return $pdo;

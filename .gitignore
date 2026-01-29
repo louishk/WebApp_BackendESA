@@ -1,18 +1,11 @@
-# Environment files (contain secrets)
+# Environment files
 .env
 .env.local
-.env.*.local
 
 # IDE
 .idea/
 .vscode/
 *.swp
-*.swo
-*~
-
-# OS files
-.DS_Store
-Thumbs.db
 
 # PHP
 /vendor/
@@ -20,42 +13,18 @@ composer.lock
 
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
+*.pyc
 venv/
-env/
-ENV/
 .venv/
-.eggs/
-*.egg-info/
-*.egg
-dist/
-build/
 
 # Logs
 *.log
 /logs/
 
-# Temp files
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
 *.tmp
-*.temp
 *.bak
-
-# Scheduler specific
-/app/scheduler/python/venv/
-/app/scheduler/python/__pycache__/
-/app/scheduler/python/*/__pycache__/
-/app/scheduler/python/*/*/__pycache__/
-
-# Don't ignore these example/template files
-!.env.example
-!.env.template
-
-# Test files (be explicit about test.php)
-test.php
-
-# SQL data dumps
-*.sql.gz
-*.dump

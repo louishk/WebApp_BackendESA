@@ -1,97 +1,105 @@
 <?php
 /**
  * Scheduler API Proxy
- * Forwards authenticated requests from PHP to Python scheduler API
+ * Forwards authenticated requests to Python scheduler API
+ * Handles both API requests and Server-Sent Events (SSE)
  */
+
 require_once __DIR__ . '/auth.php';
 
-// For session-based auth (from web UI)
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+// Require authentication
+requireSchedulerAuth();
 
-// Validate authentication (session or JWT)
-$user = null;
-if (isset($_SESSION['user']) && hasSchedulerAccess()) {
-    $user = $_SESSION['user'];
-    // Generate fresh token for the request
-    $jwtToken = $_SESSION['scheduler_token'] ?? generateSchedulerToken($user);
-} else {
-    // Try JWT-based auth
-    $user = validateApiAuth();
-    if ($user === null) {
-        http_response_code(401);
-        header('Content-Type: application/json');
-        echo json_encode(['error' => 'Unauthorized']);
-        exit;
-    }
-
-    if (!in_array($user['role'], ['admin', 'scheduler_admin'], true)) {
-        http_response_code(403);
-        header('Content-Type: application/json');
-        echo json_encode(['error' => 'Forbidden']);
-        exit;
-    }
-    $jwtToken = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    $jwtToken = preg_replace('/^Bearer\s+/i', '', $jwtToken);
-}
-
-// Get scheduler API URL and path
-$schedulerUrl = $_ENV['SCHEDULER_API_URL'] ?? 'http://localhost:5000';
+// Get path from query string
 $path = $_GET['path'] ?? '';
 $path = ltrim($path, '/');
 
 // Build target URL
-$targetUrl = rtrim($schedulerUrl, '/') . '/api/' . $path;
+$schedulerUrl = $GLOBALS['schedulerApiUrl'] ?? 'http://localhost:5000';
+$targetUrl = $schedulerUrl . '/api/' . $path;
+
+// Check if this is a streaming request (SSE)
+$isStreamRequest = strpos($path, '/stream') !== false;
+
+// Get request method
+$method = $_SERVER['REQUEST_METHOD'];
 
 // Get request body for POST/PUT/PATCH
-$requestBody = file_get_contents('php://input');
-
-// Initialize cURL
-$ch = curl_init($targetUrl);
-
-// Set cURL options
-$curlOptions = [
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_FOLLOWLOCATION => true,
-    CURLOPT_TIMEOUT => 30,
-    CURLOPT_HTTPHEADER => [
-        'Authorization: Bearer ' . $jwtToken,
-        'Content-Type: application/json',
-        'Accept: application/json',
-        'X-Forwarded-For: ' . ($_SERVER['REMOTE_ADDR'] ?? ''),
-        'X-Original-User: ' . ($user['email'] ?? $user['sub'] ?? 'unknown'),
-    ],
-];
-
-// Set method-specific options
-switch ($_SERVER['REQUEST_METHOD']) {
-    case 'POST':
-        $curlOptions[CURLOPT_POST] = true;
-        $curlOptions[CURLOPT_POSTFIELDS] = $requestBody;
-        break;
-    case 'PUT':
-        $curlOptions[CURLOPT_CUSTOMREQUEST] = 'PUT';
-        $curlOptions[CURLOPT_POSTFIELDS] = $requestBody;
-        break;
-    case 'PATCH':
-        $curlOptions[CURLOPT_CUSTOMREQUEST] = 'PATCH';
-        $curlOptions[CURLOPT_POSTFIELDS] = $requestBody;
-        break;
-    case 'DELETE':
-        $curlOptions[CURLOPT_CUSTOMREQUEST] = 'DELETE';
-        break;
-    case 'GET':
-    default:
-        // GET is default
-        break;
+$body = null;
+if (in_array($method, ['POST', 'PUT', 'PATCH'])) {
+    $body = file_get_contents('php://input');
 }
 
-curl_setopt_array($ch, $curlOptions);
+// Generate JWT token for backend-to-backend communication
+$jwtToken = generateSchedulerToken($_SESSION['user']);
+
+// Build headers
+$headers = [
+    'Authorization: Bearer ' . $jwtToken,
+    'X-Forwarded-For: ' . ($_SERVER['REMOTE_ADDR'] ?? ''),
+    'X-Forwarded-User: ' . ($_SESSION['user']['email'] ?? ''),
+    'Content-Type: application/json',
+];
+
+if ($isStreamRequest) {
+    // Handle Server-Sent Events streaming
+    header('Content-Type: text/event-stream');
+    header('Cache-Control: no-cache');
+    header('X-Accel-Buffering: no');
+
+    // Disable output buffering
+    if (function_exists('apache_setenv')) {
+        apache_setenv('no-gzip', '1');
+    }
+    ini_set('zlib.output_compression', 'Off');
+    while (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+
+    // Stream the response
+    $ch = curl_init($targetUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_WRITEFUNCTION => function($ch, $data) {
+            echo $data;
+            flush();
+            return strlen($data);
+        },
+        CURLOPT_TIMEOUT => 600, // 10 minute timeout for long-running jobs
+        CURLOPT_CONNECTTIMEOUT => 5,
+    ]);
+
+    curl_exec($ch);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($error) {
+        echo "data: [ERROR] Connection to scheduler failed: $error\n\n";
+        echo "event: done\ndata: error\n\n";
+    }
+
+    exit;
+}
+
+// Standard API request
+$ch = curl_init($targetUrl);
+
+curl_setopt_array($ch, [
+    CURLOPT_CUSTOMREQUEST => $method,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER => $headers,
+    CURLOPT_TIMEOUT => 30,
+    CURLOPT_CONNECTTIMEOUT => 5,
+]);
+
+if ($body !== null) {
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+}
 
 // Execute request
 $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 $error = curl_error($ch);
 curl_close($ch);
 
@@ -99,15 +107,17 @@ curl_close($ch);
 if ($error) {
     http_response_code(502);
     header('Content-Type: application/json');
-    echo json_encode([
-        'error' => 'Bad Gateway',
-        'message' => 'Failed to connect to scheduler API',
-        'details' => $error
-    ]);
+    echo json_encode(['error' => 'Scheduler API unavailable', 'details' => $error]);
     exit;
 }
 
 // Forward response
 http_response_code($httpCode);
-header('Content-Type: application/json');
+
+if ($contentType) {
+    header('Content-Type: ' . $contentType);
+} else {
+    header('Content-Type: application/json');
+}
+
 echo $response;

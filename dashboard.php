@@ -1,5 +1,4 @@
 <?php
-session_start();
 require 'config.php';
 
 if (!isset($_SESSION['user'])) {
@@ -8,24 +7,27 @@ if (!isset($_SESSION['user'])) {
 }
 
 $user = $_SESSION['user'];
-$isAdmin = $user['role'] === 'admin';
-$hasSchedulerAccess = in_array($user['role'], ['admin', 'scheduler_admin']);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>User Dashboard</title>
+  <title>Dashboard</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body class="bg-light">
   <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
     <div class="container">
-      <a class="navbar-brand" href="dashboard.php">Backend Portal</a>
+      <a class="navbar-brand" href="dashboard.php">ESA Backend</a>
       <div class="collapse navbar-collapse">
         <ul class="navbar-nav ms-auto">
-          <?php if ($isAdmin || $hasSchedulerAccess): ?>
+          <?php if (in_array($user['role'], ['admin', 'scheduler_admin'])): ?>
+            <li class="nav-item">
+              <a class="nav-link" href="/app/scheduler/">Scheduler</a>
+            </li>
+          <?php endif; ?>
+          <?php if ($user['role'] === 'admin'): ?>
             <li class="nav-item">
               <a class="nav-link" href="admin/admin.php">Admin</a>
             </li>
@@ -39,38 +41,54 @@ $hasSchedulerAccess = in_array($user['role'], ['admin', 'scheduler_admin']);
   </nav>
 
   <div class="container py-5">
-    <h1>Welcome, <?= htmlspecialchars($user['username'], ENT_QUOTES) ?></h1>
-    <p class="lead">This is your dashboard. Use the menu above to navigate.</p>
+    <h1>Welcome, <?= h($user['username'] ?? $user['email']) ?></h1>
+    <p class="lead">Role: <span class="badge bg-secondary"><?= h($user['role']) ?></span></p>
 
-    <?php if ($isAdmin): ?>
-      <div class="mt-4">
-        <h5>Admin Tools</h5>
-        <a href="admin/list_users.php" class="btn btn-outline-secondary me-2">Manage Users</a>
-        <a href="admin/list_pages.php" class="btn btn-outline-secondary me-2">Manage Pages</a>
-        <a href="/app/scheduler/" class="btn btn-outline-primary">Scheduler Dashboard</a>
-      </div>
-    <?php elseif ($user['role'] === 'scheduler_admin'): ?>
-      <div class="mt-4">
-        <h5>Scheduler Administration</h5>
-        <a href="/app/scheduler/" class="btn btn-outline-primary">Scheduler Dashboard</a>
-      </div>
-    <?php elseif ($user['role'] === 'editor'): ?>
-      <div class="mt-4">
-        <a href="admin/list_pages.php" class="btn btn-outline-secondary">Edit Website Pages</a>
-      </div>
-    <?php elseif ($user['role'] === 'viewer'): ?>
-      <div class="alert alert-info mt-4">
-        You have viewer access. Use the menu to explore available pages.
-      </div>
-    <?php endif; ?>
+    <div class="row mt-4">
+      <?php if (in_array($user['role'], ['admin', 'scheduler_admin'])): ?>
+        <div class="col-md-4 mb-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <h5 class="card-title">PBI Scheduler</h5>
+              <p class="card-text">Manage data pipelines and scheduled jobs.</p>
+              <a href="/app/scheduler/" class="btn btn-primary">Open Scheduler</a>
+            </div>
+          </div>
+        </div>
+      <?php endif; ?>
 
-    <div class="mt-5">
-      <h5>Available Tools</h5>
-      <ul class="list-group">
-        <li class="list-group-item">
-          <a href="/pages/seo/richsnippet.php">SEO Rich Snippet Generator</a>
-        </li>
-      </ul>
+      <?php if ($user['role'] === 'admin'): ?>
+        <div class="col-md-4 mb-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <h5 class="card-title">User Management</h5>
+              <p class="card-text">Manage users, roles, and permissions.</p>
+              <a href="admin/list_users.php" class="btn btn-outline-secondary">Manage Users</a>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4 mb-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <h5 class="card-title">Page Management</h5>
+              <p class="card-text">Manage website pages and content.</p>
+              <a href="admin/list_pages.php" class="btn btn-outline-secondary">Manage Pages</a>
+            </div>
+          </div>
+        </div>
+      <?php endif; ?>
+
+      <?php if (in_array($user['role'], ['admin', 'editor'])): ?>
+        <div class="col-md-4 mb-3">
+          <div class="card h-100">
+            <div class="card-body">
+              <h5 class="card-title">SEO Tools</h5>
+              <p class="card-text">Schema markup generator for SEO.</p>
+              <a href="pages/seo/richsnippet.php" class="btn btn-outline-secondary">Open SEO Tools</a>
+            </div>
+          </div>
+        </div>
+      <?php endif; ?>
     </div>
 
   </div>

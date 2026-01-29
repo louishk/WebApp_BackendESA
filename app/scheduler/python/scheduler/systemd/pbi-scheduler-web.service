@@ -1,0 +1,18 @@
+[Unit]
+Description=PBI Data Pipeline Scheduler - Web UI
+After=network.target
+
+[Service]
+Type=simple
+User=louis
+ExecStart=/home/louis/bin/pbi-scheduler-start.sh
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pbi-scheduler
+
+[Install]
+WantedBy=multi-user.target

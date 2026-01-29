@@ -4,7 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="5b9b9db2-6cfe-4f5a-9172-10f04fba31e9" name="Changes" comment="First Loading" />
+    <list default="true" id="5b9b9db2-6cfe-4f5a-9172-10f04fba31e9" name="Changes" comment="Working + Setting">
+      <change beforePath="$PROJECT_DIR$/PROGRESS.md" beforeDir="false" afterPath="$PROJECT_DIR$/PROGRESS.md" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -32,10 +34,14 @@
 }</component>
   <component name="GithubPullRequestsUISettings">{
   &quot;selectedUrlAndAccountId&quot;: {
-    &quot;url&quot;: &quot;https://github.com/louishk/WebApp.git&quot;,
-    &quot;accountId&quot;: &quot;24d844a7-f5fc-4c97-b943-f9ca42df7d12&quot;
+    &quot;url&quot;: &quot;https://github.com/louishk/WebApp_BackendESA.git&quot;,
+    &quot;accountId&quot;: &quot;c8af3eb4-eb65-4f74-a376-64795f8be419&quot;
   }
 }</component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
   <component name="PhpDebugGeneral" listening_started="true" />
   <component name="PhpWorkspaceProjectConfiguration" interpreter_name="PHP">
     <include_path>
@@ -73,25 +79,44 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "ASKED_MARK_IGNORED_FILES_AS_EXCLUDED": "true",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "PHP Built-in Web Server.PHP Local.executor": "Run",
     "PHP Built-in Web Server.PHP Web APP.executor": "Run",
     "PHP Built-in Web Server.Unnamed.executor": "Run",
     "PHP Script.index.php.executor": "Run",
     "PHP Script.test.php.executor": "Run",
+    "RunOnceActivity.MCP Project settings loaded": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
+    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
+    "ai.playground.ignore.import.keys.banner.in.settings": "true",
+    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
     "git-widget-placeholder": "master",
+    "ignore.virus.scanning.warn.message": "true",
     "junie.onboarding.icon.badge.shown": "true",
+    "last_opened_file_path": "C:/Users/VerLouisClaudePierre/PycharmProjects/WebApp_BackendESA",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
     "node.js.selected.package.tslint": "(autodetect)",
     "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "reference.webide.settings.project.settings.php",
+    "settings.editor.selected.configurable": "project.propVCSSupport.Mappings",
+    "to.speed.mode.migration.done": "true",
     "vue.rearranger.settings.migration": "true"
+  },
+  "keyToStringList": {
+    "DatabaseDriversLRU": [
+      "postgresql"
+    ]
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\VerLouisClaudePierre\PycharmProjects\WebApp_BackendESA" />
+    </key>
+  </component>
   <component name="RunDashboard">
     <option name="configurationTypes">
       <set>
@@ -99,7 +124,7 @@
       </set>
     </option>
   </component>
-  <component name="RunManager" selected="PHP Script.index.php">
+  <component name="RunManager">
     <configuration name="PHP Local Main" type="PhpBuiltInWebServerConfigurationType" factoryName="PHP Built-in Web Server" document_root="$PROJECT_DIR$" port="8000">
       <method v="2" />
     </configuration>
@@ -112,18 +137,12 @@
     <configuration name="test.php" type="PhpLocalRunConfigurationType" factoryName="PHP Console" temporary="true" path="$PROJECT_DIR$/test.php">
       <method v="2" />
     </configuration>
-    <recent_temporary>
-      <list>
-        <item itemvalue="PHP Script.index.php" />
-        <item itemvalue="PHP Script.test.php" />
-      </list>
-    </recent_temporary>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-b26f3e71634d-JavaScript-PS-251.26094.133" />
-        <option value="bundled-php-predefined-a98d8de5180a-c5828cf854d9-com.jetbrains.php.sharedIndexes-PS-251.26094.133" />
+        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.29346.142" />
+        <option value="bundled-python-sdk-f2b7a9f6281b-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.142" />
       </set>
     </attachedChunks>
   </component>
@@ -140,6 +159,9 @@
       <workItem from="1750134588219" duration="3174000" />
       <workItem from="1750137797251" duration="84000" />
       <workItem from="1750137902993" duration="4148000" />
+      <workItem from="1769502959102" duration="11423000" />
+      <workItem from="1769569067078" duration="17010000" />
+      <workItem from="1769679656754" duration="994000" />
     </task>
     <task id="LOCAL-00001" summary="First Loading">
       <option name="closed" value="true" />
@@ -149,7 +171,39 @@
       <option name="project" value="LOCAL" />
       <updated>1750135344211</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="First Loading">
+      <option name="closed" value="true" />
+      <created>1769569193576</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1769569193576</updated>
+    </task>
+    <task id="LOCAL-00003" summary="First Loading">
+      <option name="closed" value="true" />
+      <created>1769569220417</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1769569220417</updated>
+    </task>
+    <task id="LOCAL-00004" summary="First Loading">
+      <option name="closed" value="true" />
+      <created>1769569421217</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1769569421218</updated>
+    </task>
+    <task id="LOCAL-00005" summary="Working + Setting">
+      <option name="closed" value="true" />
+      <created>1769680518127</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1769680518128</updated>
+    </task>
+    <option name="localTasksCounter" value="6" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -168,7 +222,8 @@
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="First Loading" />
-    <option name="LAST_COMMIT_MESSAGE" value="First Loading" />
+    <MESSAGE value="Working + Setting" />
+    <option name="LAST_COMMIT_MESSAGE" value="Working + Setting" />
   </component>
   <component name="XSLT-Support.FileAssociations.UIState">
     <expand />

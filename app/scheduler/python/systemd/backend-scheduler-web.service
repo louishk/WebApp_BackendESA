@@ -1,0 +1,29 @@
+[Unit]
+Description=PBI Data Pipeline Scheduler - Web UI
+After=network.target postgresql.service backend-scheduler.service
+Wants=backend-scheduler.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/html/app/scheduler/python
+Environment="PATH=/var/www/html/app/scheduler/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/var/www/html/app/scheduler/python/.env
+ExecStart=/var/www/html/app/scheduler/python/venv/bin/python run_scheduler.py web --host 127.0.0.1 --port 5000
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=backend-scheduler-web
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/pbi-scheduler /var/www/html/app/scheduler/python
+
+[Install]
+WantedBy=multi-user.target

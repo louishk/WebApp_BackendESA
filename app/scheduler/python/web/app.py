@@ -80,6 +80,11 @@ def create_app(config=None, db_url=None):
         """Execution history page."""
         return render_template('history.html')
 
+    @app.route('/settings')
+    def settings_page():
+        """Settings and administration page."""
+        return render_template('settings.html')
+
     @app.route('/static/logo.jpeg')
     def serve_logo():
         """Serve the logo from media folder."""
@@ -366,8 +371,8 @@ def create_app(config=None, db_url=None):
 
     @app.route('/api/data-freshness')
     def api_data_freshness():
-        """Get latest data dates for all pipelines."""
-        from scheduler.config import SchedulerConfig
+        """Get latest data dates for all pipelines from PBI database."""
+        from scheduler.config import SchedulerConfig, get_pbi_engine
         from sqlalchemy import text
 
         if app.scheduler_config:
@@ -377,6 +382,12 @@ def create_app(config=None, db_url=None):
 
         freshness = {}
 
+        # Use PBI database engine for data tables (not scheduler database)
+        try:
+            pbi_engine = get_pbi_engine(config)
+        except Exception as e:
+            return jsonify({'error': f'Could not connect to PBI database: {str(e)[:100]}'})
+
         for name, pipeline in config.pipelines.items():
             table = pipeline.data_freshness.table
             column = pipeline.data_freshness.date_column
@@ -385,27 +396,23 @@ def create_app(config=None, db_url=None):
                 freshness[name] = {'latest_date': None, 'error': 'No table configured'}
                 continue
 
-            # Use a fresh session for each query to avoid transaction issues
-            session = get_session()
             try:
-                # Query max date from table
-                query = text(f'SELECT MAX("{column}") as max_date FROM "{table}"')
-                result = session.execute(query).fetchone()
+                # Query max date from PBI database table
+                with pbi_engine.connect() as conn:
+                    query = text(f'SELECT MAX("{column}") as max_date FROM "{table}"')
+                    result = conn.execute(query).fetchone()
 
-                if result and result[0]:
-                    max_date = result[0]
-                    # Format date/datetime
-                    if hasattr(max_date, 'isoformat'):
-                        freshness[name] = {'latest_date': max_date.isoformat()}
+                    if result and result[0]:
+                        max_date = result[0]
+                        # Format date/datetime
+                        if hasattr(max_date, 'isoformat'):
+                            freshness[name] = {'latest_date': max_date.isoformat()}
+                        else:
+                            freshness[name] = {'latest_date': str(max_date)}
                     else:
-                        freshness[name] = {'latest_date': str(max_date)}
-                else:
-                    freshness[name] = {'latest_date': None}
+                        freshness[name] = {'latest_date': None}
             except Exception as e:
-                session.rollback()
                 freshness[name] = {'latest_date': None, 'error': str(e)[:100]}
-            finally:
-                session.close()
 
         return jsonify(freshness)
 
@@ -831,6 +838,343 @@ def create_app(config=None, db_url=None):
                 'email_enabled': config.alerts.email.enabled,
             }
         })
+
+    # =========================================================================
+    # REST API - Service Management
+    # =========================================================================
+
+    @app.route('/api/services/status')
+    def api_services_status():
+        """Get status of scheduler services."""
+        import subprocess
+
+        services = {
+            'web_ui': 'backend-scheduler-web',
+            'scheduler': 'backend-scheduler'
+        }
+
+        result = {}
+        for key, service in services.items():
+            try:
+                output = subprocess.run(
+                    ['sudo', '/bin/systemctl', 'status', service],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                # Parse status
+                is_active = 'Active: active' in output.stdout
+                result[key] = {
+                    'service': service,
+                    'active': is_active,
+                    'status': 'running' if is_active else 'stopped',
+                }
+            except Exception as e:
+                result[key] = {
+                    'service': service,
+                    'active': False,
+                    'status': 'unknown',
+                    'error': str(e)
+                }
+
+        return jsonify(result)
+
+    @app.route('/api/services/<service>/restart', methods=['POST'])
+    @require_auth
+    def api_restart_service(service):
+        """Restart a scheduler service. Requires authentication."""
+        import subprocess
+
+        service_map = {
+            'web_ui': 'backend-scheduler-web',
+            'scheduler': 'backend-scheduler'
+        }
+
+        if service not in service_map:
+            return jsonify({'error': f'Unknown service: {service}'}), 400
+
+        service_name = service_map[service]
+
+        try:
+            result = subprocess.run(
+                ['sudo', '/bin/systemctl', 'restart', service_name],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode == 0:
+                return jsonify({
+                    'success': True,
+                    'service': service_name,
+                    'message': f'{service_name} restarted successfully'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'service': service_name,
+                    'error': result.stderr or 'Restart failed'
+                }), 500
+
+        except subprocess.TimeoutExpired:
+            return jsonify({
+                'success': False,
+                'error': 'Restart command timed out'
+            }), 500
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': str(e)
+            }), 500
+
+    # =========================================================================
+    # REST API - Pipeline Management
+    # =========================================================================
+
+    @app.route('/api/pipelines')
+    def api_list_pipelines():
+        """List all pipeline configurations."""
+        from scheduler.config import SchedulerConfig
+
+        config = SchedulerConfig.from_yaml()
+
+        pipelines = []
+        for name, p in config.pipelines.items():
+            pipelines.append({
+                'name': name,
+                'display_name': p.display_name,
+                'description': p.description,
+                'module_path': p.module_path,
+                'enabled': p.enabled,
+                'schedule': p.schedule_config,
+                'priority': p.priority,
+                'depends_on': p.depends_on,
+                'conflicts_with': p.conflicts_with,
+                'resource_group': p.resource_group,
+                'max_db_connections': p.max_db_connections,
+                'timeout_seconds': p.timeout_seconds,
+                'retry': {
+                    'max_attempts': p.retry.max_attempts,
+                    'delay_seconds': p.retry.delay_seconds,
+                    'backoff_multiplier': p.retry.backoff_multiplier,
+                },
+                'data_freshness': {
+                    'table': p.data_freshness.table,
+                    'date_column': p.data_freshness.date_column,
+                },
+                'default_args': p.default_args,
+            })
+
+        return jsonify({'pipelines': pipelines})
+
+    @app.route('/api/pipelines/<name>')
+    def api_get_pipeline(name):
+        """Get a specific pipeline configuration."""
+        from scheduler.config import SchedulerConfig
+
+        config = SchedulerConfig.from_yaml()
+
+        if name not in config.pipelines:
+            return jsonify({'error': 'Pipeline not found'}), 404
+
+        p = config.pipelines[name]
+        return jsonify({
+            'name': name,
+            'display_name': p.display_name,
+            'description': p.description,
+            'module_path': p.module_path,
+            'enabled': p.enabled,
+            'schedule': p.schedule_config,
+            'priority': p.priority,
+            'depends_on': p.depends_on,
+            'conflicts_with': p.conflicts_with,
+            'resource_group': p.resource_group,
+            'max_db_connections': p.max_db_connections,
+            'timeout_seconds': p.timeout_seconds,
+            'retry': {
+                'max_attempts': p.retry.max_attempts,
+                'delay_seconds': p.retry.delay_seconds,
+                'backoff_multiplier': p.retry.backoff_multiplier,
+            },
+            'data_freshness': {
+                'table': p.data_freshness.table,
+                'date_column': p.data_freshness.date_column,
+            },
+            'default_args': p.default_args,
+        })
+
+    @app.route('/api/pipelines', methods=['POST'])
+    @require_auth
+    def api_create_pipeline():
+        """Create a new pipeline. Requires authentication."""
+        from scheduler.config import SchedulerConfig
+        import yaml
+
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        name = data.get('name')
+        if not name:
+            return jsonify({'error': 'Pipeline name is required'}), 400
+
+        # Validate name format
+        if not name.replace('_', '').replace('-', '').isalnum():
+            return jsonify({'error': 'Pipeline name must be alphanumeric with underscores/hyphens'}), 400
+
+        config = SchedulerConfig.from_yaml()
+        if name in config.pipelines:
+            return jsonify({'error': f'Pipeline {name} already exists'}), 400
+
+        # Build pipeline config
+        pipeline_config = {
+            'display_name': data.get('display_name', name.replace('_', ' ').title()),
+            'description': data.get('description', ''),
+            'module_path': data.get('module_path', f'datalayer.{name}'),
+            'enabled': data.get('enabled', False),
+            'schedule': {
+                'type': 'cron',
+                'cron': data.get('cron', '0 6 * * *')
+            },
+            'priority': data.get('priority', 5),
+            'depends_on': data.get('depends_on', []),
+            'conflicts_with': data.get('conflicts_with', []),
+            'resource_group': data.get('resource_group', 'http_api'),
+            'max_db_connections': data.get('max_db_connections', 2),
+            'timeout_seconds': data.get('timeout_seconds', 3600),
+            'retry': {
+                'max_attempts': data.get('max_retries', 3),
+                'delay_seconds': data.get('retry_delay', 300),
+                'backoff_multiplier': data.get('backoff_multiplier', 2),
+            },
+            'data_freshness': {
+                'table': data.get('freshness_table', ''),
+                'date_column': data.get('freshness_column', ''),
+            },
+            'default_args': data.get('default_args', {'mode': 'auto'}),
+        }
+
+        # Load and update pipelines.yaml
+        config_path = Path(__file__).parent.parent / 'config' / 'pipelines.yaml'
+        with open(config_path) as f:
+            yaml_data = yaml.safe_load(f)
+
+        yaml_data['pipelines'][name] = pipeline_config
+
+        with open(config_path, 'w') as f:
+            yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+
+        return jsonify({
+            'success': True,
+            'message': f'Pipeline {name} created',
+            'pipeline': pipeline_config
+        })
+
+    @app.route('/api/pipelines/<name>', methods=['PUT'])
+    @require_auth
+    def api_update_pipeline(name):
+        """Update a pipeline configuration. Requires authentication."""
+        from scheduler.config import SchedulerConfig
+        import yaml
+
+        config = SchedulerConfig.from_yaml()
+        if name not in config.pipelines:
+            return jsonify({'error': 'Pipeline not found'}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        # Load current pipelines.yaml
+        config_path = Path(__file__).parent.parent / 'config' / 'pipelines.yaml'
+        with open(config_path) as f:
+            yaml_data = yaml.safe_load(f)
+
+        current = yaml_data['pipelines'][name]
+
+        # Update fields that were provided
+        if 'display_name' in data:
+            current['display_name'] = data['display_name']
+        if 'description' in data:
+            current['description'] = data['description']
+        if 'module_path' in data:
+            current['module_path'] = data['module_path']
+        if 'enabled' in data:
+            current['enabled'] = data['enabled']
+        if 'cron' in data:
+            current['schedule'] = {'type': 'cron', 'cron': data['cron']}
+        if 'priority' in data:
+            current['priority'] = data['priority']
+        if 'depends_on' in data:
+            current['depends_on'] = data['depends_on']
+        if 'conflicts_with' in data:
+            current['conflicts_with'] = data['conflicts_with']
+        if 'resource_group' in data:
+            current['resource_group'] = data['resource_group']
+        if 'max_db_connections' in data:
+            current['max_db_connections'] = data['max_db_connections']
+        if 'timeout_seconds' in data:
+            current['timeout_seconds'] = data['timeout_seconds']
+        if 'max_retries' in data:
+            current.setdefault('retry', {})['max_attempts'] = data['max_retries']
+        if 'freshness_table' in data:
+            current.setdefault('data_freshness', {})['table'] = data['freshness_table']
+        if 'freshness_column' in data:
+            current.setdefault('data_freshness', {})['date_column'] = data['freshness_column']
+
+        # Save updated config
+        with open(config_path, 'w') as f:
+            yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+
+        return jsonify({
+            'success': True,
+            'message': f'Pipeline {name} updated',
+        })
+
+    @app.route('/api/pipelines/<name>', methods=['DELETE'])
+    @require_auth
+    def api_delete_pipeline(name):
+        """Delete a pipeline. Requires authentication."""
+        from scheduler.config import SchedulerConfig
+        import yaml
+
+        config = SchedulerConfig.from_yaml()
+        if name not in config.pipelines:
+            return jsonify({'error': 'Pipeline not found'}), 404
+
+        # Load and update pipelines.yaml
+        config_path = Path(__file__).parent.parent / 'config' / 'pipelines.yaml'
+        with open(config_path) as f:
+            yaml_data = yaml.safe_load(f)
+
+        del yaml_data['pipelines'][name]
+
+        with open(config_path, 'w') as f:
+            yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+
+        return jsonify({
+            'success': True,
+            'message': f'Pipeline {name} deleted',
+        })
+
+    @app.route('/api/modules')
+    def api_list_modules():
+        """List available Python modules in datalayer."""
+        datalayer_path = Path(__file__).parent.parent / 'datalayer'
+        modules = []
+
+        if datalayer_path.exists():
+            for f in datalayer_path.glob('*.py'):
+                if f.name.startswith('_'):
+                    continue
+                module_name = f.stem
+                modules.append({
+                    'name': module_name,
+                    'path': f'datalayer.{module_name}',
+                    'file': str(f.name)
+                })
+
+        return jsonify({'modules': modules})
 
     return app
 

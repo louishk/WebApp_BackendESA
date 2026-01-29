@@ -244,13 +244,14 @@
 <body>
     <div class="navbar">
         <div class="brand">
-            <img src="/static/logo.jpeg" alt="Extra Space" class="logo">
+            <img src="static/logo.jpeg" alt="Extra Space" class="logo">
             <h1>Data <span>Pipeline</span> Scheduler</h1>
         </div>
         <nav>
-            <a href="/" class="{{ 'active' if request.path == '/' else '' }}">Dashboard</a>
-            <a href="/jobs" class="{{ 'active' if request.path == '/jobs' else '' }}">Jobs</a>
-            <a href="/history" class="{{ 'active' if request.path == '/history' else '' }}">History</a>
+            <a href="./" class="{{ 'active' if request.path == '/' or request.path.endswith('/scheduler/') else '' }}">Dashboard</a>
+            <a href="./jobs" class="{{ 'active' if '/jobs' in request.path else '' }}">Jobs</a>
+            <a href="./history" class="{{ 'active' if '/history' in request.path else '' }}">History</a>
+            <a href="./settings" class="{{ 'active' if '/settings' in request.path else '' }}">Settings</a>
         </nav>
     </div>
 

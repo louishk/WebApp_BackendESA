@@ -2,6 +2,11 @@
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/config.php';  // this file already calls session_start()
 
+// — Enable errors for debugging (remove in production) —
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 use TheNetworg\OAuth2\Client\Provider\Azure;
 
 // 1) Instantiate the provider
@@ -27,7 +32,7 @@ try {
         'code' => $_GET['code']
     ]);
 
-    // 4) Fetch the user's profile from Microsoft Graph
+    // 4) Fetch the user’s profile from Microsoft Graph
     $request  = $provider->getAuthenticatedRequest('GET', 'https://graph.microsoft.com/v1.0/me', $token);
     $response = $provider->getHttpClient()->send($request)->getBody()->getContents();
     $userInfo = json_decode($response, true);
@@ -41,7 +46,7 @@ try {
     }
 
     // 6) Look up or auto-create the user
-    $stmt = $pdo->prepare("SELECT id, username, email, role FROM users WHERE email = ?");
+    $stmt = $pdo->prepare("SELECT id, username, role FROM users WHERE email = ?");
     $stmt->execute([$email]);
     $dbUser = $stmt->fetch();
 
@@ -49,16 +54,12 @@ try {
         $userId   = $dbUser['id'];
         $username = $dbUser['username'];
         $role     = $dbUser['role'];
-
-        // Update auth_provider if needed
-        $updateStmt = $pdo->prepare("UPDATE users SET auth_provider = 'microsoft', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (auth_provider IS NULL OR auth_provider != 'microsoft')");
-        $updateStmt->execute([$userId]);
     } else {
         $username = explode('@', $email)[0];
         $password = password_hash('oauth-microsoft', PASSWORD_DEFAULT);
         $role     = 'viewer';
 
-        $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role, auth_provider, created_at, updated_at) VALUES (?, ?, ?, ?, 'microsoft', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+        $stmt = $pdo->prepare("INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)");
         $stmt->execute([$username, $email, $password, $role]);
         $userId = $pdo->lastInsertId();
     }
@@ -73,7 +74,7 @@ try {
         'auth'     => 'microsoft',
     ];
 
-    // 8) Generate JWT token for scheduler access (admin/scheduler_admin only)
+    // 8) Generate scheduler token for admin/scheduler_admin
     if (in_array($role, ['admin', 'scheduler_admin'])) {
         $_SESSION['scheduler_token'] = generateSchedulerToken($_SESSION['user']);
     }
@@ -83,6 +84,5 @@ try {
     exit;
 
 } catch (\Exception $e) {
-    error_log('OAuth error: ' . $e->getMessage());
     exit('OAuth error: ' . $e->getMessage());
 }

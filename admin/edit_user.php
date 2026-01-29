@@ -85,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       <label class="form-label">Role</label>
       <select name="role" class="form-select" required>
         <?php foreach (["admin", "scheduler_admin", "editor", "viewer"] as $r): ?>
-          <option value="<?= $r ?>" <?= $user['role'] === $r ? 'selected' : '' ?>><?= ucfirst(str_replace('_', ' ', $r)) ?></option>
+          <option value="<?= $r ?>" <?= $user['role'] === $r ? 'selected' : '' ?>><?= $r === 'scheduler_admin' ? 'Scheduler Admin' : ucfirst($r) ?></option>
         <?php endforeach; ?>
       </select>
     </div>

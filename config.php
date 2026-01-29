@@ -1,4 +1,9 @@
 <?php
+/**
+ * WebApp Backend Configuration
+ * PostgreSQL Database + JWT Authentication
+ */
+
 require_once __DIR__ . '/vendor/autoload.php';
 
 use Firebase\JWT\JWT;
@@ -15,53 +20,40 @@ $dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
 $dotenv->load();
 
 // ─────────────────────────────────────────────────────────────
-// PostgreSQL Database Configuration (Backend)
+// PostgreSQL Database Configuration
 // ─────────────────────────────────────────────────────────────
-$dbHost     = $_ENV['DB_HOST']     ?? 'localhost';
-$dbPort     = $_ENV['DB_PORT']     ?? '5432';
+$dbHost     = $_ENV['DB_HOST'] ?? 'localhost';
+$dbPort     = $_ENV['DB_PORT'] ?? '5432';
+$dbName     = $_ENV['DB_NAME'] ?? 'backend';
 $dbUsername = $_ENV['DB_USERNAME'] ?? '';
 $dbPassword = $_ENV['DB_PASSWORD'] ?? '';
-$dbName     = $_ENV['DB_NAME']     ?? 'backend';
-$dbSslMode  = $_ENV['DB_SSLMODE']  ?? 'require';
+$dbSslMode  = $_ENV['DB_SSLMODE'] ?? 'require';
 
+// PostgreSQL DSN with SSL for Azure
 $dsn = "pgsql:host={$dbHost};port={$dbPort};dbname={$dbName};sslmode={$dbSslMode}";
 
 try {
     $pdo = new PDO($dsn, $dbUsername, $dbPassword, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES   => false,
     ]);
 } catch (PDOException $e) {
-    error_log("PDO connection error: " . $e->getMessage());
-    die("Database connection failed.");
+    error_log("Database connection failed: " . $e->getMessage());
+    die("Database connection error.");
 }
 
 // ─────────────────────────────────────────────────────────────
-// PostgreSQL Data Layer Configuration (esa_pbi)
+// JWT Configuration
 // ─────────────────────────────────────────────────────────────
-$dataDbHost     = $_ENV['DATA_DB_HOST']     ?? $dbHost;
-$dataDbPort     = $_ENV['DATA_DB_PORT']     ?? '5432';
-$dataDbUsername = $_ENV['DATA_DB_USERNAME'] ?? $dbUsername;
-$dataDbPassword = $_ENV['DATA_DB_PASSWORD'] ?? $dbPassword;
-$dataDbName     = $_ENV['DATA_DB_NAME']     ?? 'esa_pbi';
-$dataDbSslMode  = $_ENV['DATA_DB_SSLMODE']  ?? 'require';
+$jwtSecret = $_ENV['JWT_SECRET'] ?? '';
+$jwtExpiry = (int)($_ENV['JWT_EXPIRY'] ?? 3600);
 
-/**
- * Get Data Layer PDO connection (esa_pbi database)
- */
-function getDataLayerPdo(): PDO {
-    global $dataDbHost, $dataDbPort, $dataDbUsername, $dataDbPassword, $dataDbName, $dataDbSslMode;
-
-    static $dataPdo = null;
-    if ($dataPdo === null) {
-        $dsn = "pgsql:host={$dataDbHost};port={$dataDbPort};dbname={$dataDbName};sslmode={$dataDbSslMode}";
-        $dataPdo = new PDO($dsn, $dataDbUsername, $dataDbPassword, [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ]);
-    }
-    return $dataPdo;
-}
+// ─────────────────────────────────────────────────────────────
+// Scheduler Configuration
+// ─────────────────────────────────────────────────────────────
+$schedulerApiUrl = $_ENV['SCHEDULER_API_URL'] ?? 'http://localhost:5000';
+$GLOBALS['schedulerApiUrl'] = $schedulerApiUrl;
 
 // ─────────────────────────────────────────────────────────────
 // Microsoft OAuth Configuration
@@ -74,13 +66,11 @@ $azureConfig = [
 ];
 
 // ─────────────────────────────────────────────────────────────
-// JWT Configuration
+// JWT Helper Functions
 // ─────────────────────────────────────────────────────────────
-$jwtSecret = $_ENV['JWT_SECRET'] ?? '';
-$jwtExpiry = (int)($_ENV['JWT_EXPIRY'] ?? 3600);
 
 /**
- * Generate a JWT token for scheduler access
+ * Generate a JWT token for scheduler API access
  */
 function generateSchedulerToken(array $user): string {
     global $jwtSecret, $jwtExpiry;
@@ -98,7 +88,7 @@ function generateSchedulerToken(array $user): string {
 }
 
 /**
- * Validate and decode a JWT token
+ * Validate a JWT token and return the payload
  */
 function validateSchedulerToken(string $token): ?array {
     global $jwtSecret;
@@ -107,40 +97,69 @@ function validateSchedulerToken(string $token): ?array {
         $decoded = JWT::decode($token, new Key($jwtSecret, 'HS256'));
         return (array)$decoded;
     } catch (Exception $e) {
-        error_log("JWT validation error: " . $e->getMessage());
+        error_log("JWT validation failed: " . $e->getMessage());
         return null;
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Scheduler Configuration
-// ─────────────────────────────────────────────────────────────
-$schedulerApiUrl = $_ENV['SCHEDULER_API_URL'] ?? 'http://localhost:5000';
+/**
+ * Get JWT token from Authorization header
+ */
+function getTokenFromHeader(): ?string {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? '';
+
+    if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
+        return $matches[1];
+    }
+
+    return null;
+}
 
 // ─────────────────────────────────────────────────────────────
 // Role-Based Access Control (RBAC)
 // ─────────────────────────────────────────────────────────────
+
 /**
  * Require user to have one of the specified roles
- * @param string|array $roles Single role or array of allowed roles
+ * Roles: admin, scheduler_admin, editor, viewer
  */
 function require_role($roles): void {
-    if (session_status() === PHP_SESSION_NONE) {
-        session_start();
-    }
-
     $allowedRoles = (array)$roles;
 
-    if (!isset($_SESSION['user']) || !in_array($_SESSION['user']['role'], $allowedRoles, true)) {
+    if (!isset($_SESSION['user'])) {
+        header('Location: /login.php');
+        exit();
+    }
+
+    if (!in_array($_SESSION['user']['role'], $allowedRoles, true)) {
         header('HTTP/1.0 403 Forbidden');
         exit('Access denied');
     }
 }
 
 /**
- * Check if current user has scheduler access (admin or scheduler_admin)
+ * Check if current user has a specific role
  */
-function hasSchedulerAccess(): bool {
-    return isset($_SESSION['user']) &&
-           in_array($_SESSION['user']['role'], ['admin', 'scheduler_admin'], true);
+function has_role($roles): bool {
+    $allowedRoles = (array)$roles;
+    return isset($_SESSION['user']) && in_array($_SESSION['user']['role'], $allowedRoles, true);
+}
+
+/**
+ * Check if user is logged in
+ */
+function is_logged_in(): bool {
+    return isset($_SESSION['user']) && !empty($_SESSION['user']['id']);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Utility Functions
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Sanitize output for HTML
+ */
+function h($str): string {
+    return htmlspecialchars($str ?? '', ENT_QUOTES, 'UTF-8');
 }
