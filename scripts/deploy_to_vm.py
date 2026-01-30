@@ -203,14 +203,26 @@ def run_rsync(credentials: dict, dry_run: bool = False, verbose: bool = True) ->
             return False
 
         # Step 2: Move from temp to /var/www/html using sudo (skip for dry run)
+        # IMPORTANT: Exclude .env, .vault, and venv from deletion to preserve VM-specific files
         if not dry_run:
             if verbose:
                 print("Moving files to /var/www/html with sudo...")
 
+            # Exclude patterns that should be preserved on the VM
+            vm_preserve = [
+                '.env',
+                '.vault',
+                'app/scheduler/python/.env',
+                'app/scheduler/python/venv',
+            ]
+            vm_excludes = ' '.join(f"--exclude='{e}'" for e in vm_preserve)
+
             move_cmd = (
-                f"sudo rsync -a --delete {temp_dir}/ /var/www/html/ && "
+                f"sudo rsync -a --delete {vm_excludes} {temp_dir}/ /var/www/html/ && "
                 f"sudo chown -R www-data:www-data /var/www/html && "
-                f"rm -rf {temp_dir}"
+                f"rm -rf {temp_dir} && "
+                # Remove any stray .vault in scheduler directory so it uses the main vault
+                f"sudo rm -rf /var/www/html/app/scheduler/python/.vault"
             )
             stdout, stderr, exit_code = run_ssh_command(
                 credentials, move_cmd, verbose=False
@@ -282,7 +294,7 @@ def check_status(verbose: bool = True):
     print("\nChecking scheduler status...")
     stdout, stderr, exit_code = run_ssh_command(
         credentials,
-        "sudo systemctl status pbi-scheduler --no-pager",
+        "sudo systemctl status backend-scheduler backend-scheduler-web --no-pager",
         verbose
     )
 
