@@ -214,7 +214,8 @@ def push_to_database(
     config: DataLayerConfig,
     year: int,
     month: int,
-    status: str
+    status: str,
+    chunk_size: int = 500
 ) -> None:
     """Push rentroll data to PostgreSQL database.
 
@@ -227,6 +228,7 @@ def push_to_database(
         year: Extract year
         month: Extract month
         status: "current" or "closed" - determines delete behavior
+        chunk_size: Batch size for SQL upsert operations
     """
     if not data:
         print("  ⚠ No data to push")
@@ -244,7 +246,6 @@ def push_to_database(
     tqdm.write("  ✓ Table 'rentroll' ready")
 
     session_manager = SessionManager(engine)
-    chunk_size = env_config('RENTROLL_SQL_CHUNK_SIZE', default=500, cast=int)
     num_chunks = (len(data) + chunk_size - 1) // chunk_size
 
     with session_manager.session_scope() as session:
@@ -310,6 +311,19 @@ Examples:
         help='End month in YYYY-MM format (required for manual mode)'
     )
 
+    # Pipeline-specific configuration (can be passed from scheduler default_args)
+    parser.add_argument(
+        '--location-codes',
+        type=str,
+        help='Comma-separated location codes (falls back to RENTROLL_LOCATION_CODES env var)'
+    )
+
+    parser.add_argument(
+        '--sql-chunk-size',
+        type=int,
+        help='Batch size for SQL upsert operations (falls back to RENTROLL_SQL_CHUNK_SIZE env var)'
+    )
+
     args = parser.parse_args()
 
     # Validate manual mode requires start and end
@@ -331,8 +345,14 @@ def main():
     if not config.soap:
         raise ValueError("SOAP configuration not found in .env")
 
-    # Load location codes from .env
-    location_codes = env_config('RENTROLL_LOCATION_CODES', cast=Csv())
+    # Load location codes - CLI arg takes precedence, fallback to env var
+    if args.location_codes:
+        location_codes = [code.strip() for code in args.location_codes.split(',')]
+    else:
+        location_codes = env_config('RENTROLL_LOCATION_CODES', cast=Csv())
+
+    # Load SQL chunk size - CLI arg takes precedence, fallback to env var
+    sql_chunk_size = args.sql_chunk_size or env_config('RENTROLL_SQL_CHUNK_SIZE', default=500, cast=int)
 
     # Determine date range based on mode
     if args.mode == 'manual':
@@ -391,7 +411,7 @@ def main():
 
         # Push to database
         if all_data:
-            push_to_database(all_data, config, year, month, status)
+            push_to_database(all_data, config, year, month, status, sql_chunk_size)
             total_records += len(all_data)
         else:
             print(f"  ⚠ No data found for {first_day.strftime('%b %Y')}")
