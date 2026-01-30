@@ -231,6 +231,36 @@
             font-size: 1.5rem;
         }
 
+        /* User Info */
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-left: 1rem;
+            padding-left: 1rem;
+            border-left: 1px solid rgba(255,255,255,0.2);
+        }
+        .user-info .user-name {
+            color: #fff;
+            font-weight: 500;
+        }
+        .user-info .user-role {
+            color: rgba(255,255,255,0.6);
+            font-size: 0.85rem;
+            margin-left: -0.5rem;
+        }
+        .user-info a {
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        .user-info a:hover {
+            background: var(--esa-navy-light);
+            color: #fff;
+        }
+
         /* Footer */
         .footer {
             text-align: center;
@@ -244,14 +274,16 @@
 <body>
     <div class="navbar">
         <div class="brand">
-            <img src="/static/logo.jpeg" alt="Extra Space" class="logo">
+            <img src="static/logo.jpeg" alt="Extra Space" class="logo">
             <h1>Data <span>Pipeline</span> Scheduler</h1>
         </div>
         <nav>
-            <a href="/" class="{{ 'active' if request.path == '/' else '' }}">Dashboard</a>
-            <a href="/jobs" class="{{ 'active' if request.path == '/jobs' else '' }}">Jobs</a>
-            <a href="/history" class="{{ 'active' if request.path == '/history' else '' }}">History</a>
+            <a href="./" class="{{ 'active' if request.path == '/' else '' }}">Dashboard</a>
+            <a href="./jobs" class="{{ 'active' if request.path == '/jobs' else '' }}">Jobs</a>
+            <a href="./history" class="{{ 'active' if request.path == '/history' else '' }}">History</a>
+            <a href="./settings" class="{{ 'active' if request.path == '/settings' else '' }}">Settings</a>
         </nav>
+        <div class="user-info" id="user-info"></div>
     </div>
 
     <div class="container">

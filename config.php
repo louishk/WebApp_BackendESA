@@ -29,7 +29,7 @@ $dbHost     = $_ENV['DB_HOST'] ?? 'localhost';
 $dbPort     = $_ENV['DB_PORT'] ?? '5432';
 $dbName     = $_ENV['DB_NAME'] ?? 'backend';
 $dbUsername = $_ENV['DB_USERNAME'] ?? '';
-$dbPassword = getSecret('DB_PASSWORD', $_ENV['DB_PASSWORD'] ?? '');
+$dbPassword = getSecret('DB_PASSWORD', $_ENV['DB_PASSWORD'] ?? '', __DIR__ . '/.vault');
 $dbSslMode  = $_ENV['DB_SSLMODE'] ?? 'require';
 
 // PostgreSQL DSN with SSL for Azure
@@ -49,7 +49,7 @@ try {
 // ─────────────────────────────────────────────────────────────
 // JWT Configuration (secret loaded from vault)
 // ─────────────────────────────────────────────────────────────
-$jwtSecret = getSecret('JWT_SECRET', $_ENV['JWT_SECRET'] ?? '');
+$jwtSecret = getSecret('JWT_SECRET', $_ENV['JWT_SECRET'] ?? '', __DIR__ . '/.vault');
 $jwtExpiry = (int)($_ENV['JWT_EXPIRY'] ?? 3600);
 
 // ─────────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ $GLOBALS['schedulerApiUrl'] = $schedulerApiUrl;
 // ─────────────────────────────────────────────────────────────
 $azureConfig = [
     'clientId'     => $_ENV['MS_OAUTH_CLIENT_ID']     ?? '',
-    'clientSecret' => getSecret('MS_OAUTH_CLIENT_SECRET', $_ENV['MS_OAUTH_CLIENT_SECRET'] ?? ''),
+    'clientSecret' => getSecret('MS_OAUTH_CLIENT_SECRET', $_ENV['MS_OAUTH_CLIENT_SECRET'] ?? '', __DIR__ . '/.vault'),
     'redirectUri'  => $_ENV['MS_OAUTH_REDIRECT_URI']  ?? '',
     'tenant'       => $_ENV['MS_OAUTH_TENANT']        ?? 'common',
 ];

@@ -26,16 +26,11 @@ def get_config():
 def get_db_url():
     """Get database URL from environment."""
     from decouple import config as env_config
-    try:
-        from common.secrets_vault import vault_config as secure_config
-    except ImportError:
-        secure_config = env_config
-
     host = env_config('POSTGRESQL_HOST')
     port = env_config('POSTGRESQL_PORT', default=5432)
     database = env_config('POSTGRESQL_DATABASE')
     username = env_config('POSTGRESQL_USERNAME')
-    password = secure_config('POSTGRESQL_PASSWORD')  # From vault
+    password = env_config('POSTGRESQL_PASSWORD')
     return f"postgresql://{username}:{password}@{host}:{port}/{database}"
 
 

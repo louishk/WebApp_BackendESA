@@ -73,6 +73,11 @@ def create_app(config=None, db_url=None):
         """Execution history page."""
         return render_template('history.html')
 
+    @app.route('/settings')
+    def settings_page():
+        """Settings and administration page."""
+        return render_template('settings.html')
+
     @app.route('/static/logo.jpeg')
     def serve_logo():
         """Serve the logo from media folder."""
@@ -829,23 +834,20 @@ def run_app(host='0.0.0.0', port=5000, debug=False, db_url=None):
     load_dotenv()
 
     from scheduler.config import SchedulerConfig
-    from decouple import config as env_config
-    try:
-        from common.secrets_vault import vault_config as secure_config
-    except ImportError:
-        secure_config = env_config
 
     config = SchedulerConfig.from_yaml()
 
     if not db_url:
-        # Use SCHEDULER_DB_* variables for the scheduler backend database
-        host_db = env_config('SCHEDULER_DB_HOST')
-        port_db = env_config('SCHEDULER_DB_PORT', default='5432')
-        database = env_config('SCHEDULER_DB_NAME')
-        username = env_config('SCHEDULER_DB_USER')
-        password = secure_config('SCHEDULER_DB_PASSWORD')  # From vault
-        ssl_mode = env_config('SCHEDULER_DB_SSL_MODE', default='require')
-        db_url = f"postgresql://{username}:{password}@{host_db}:{port_db}/{database}?sslmode={ssl_mode}"
+        import os
+        from common.secrets_vault import secure_config
+        # Support both SCHEDULER_DB_* and POSTGRESQL_* variable names
+        host_db = os.getenv('SCHEDULER_DB_HOST') or os.getenv('POSTGRESQL_HOST')
+        port_db = os.getenv('SCHEDULER_DB_PORT') or os.getenv('POSTGRESQL_PORT', '5432')
+        database = os.getenv('SCHEDULER_DB_NAME') or os.getenv('POSTGRESQL_DATABASE')
+        username = os.getenv('SCHEDULER_DB_USER') or os.getenv('POSTGRESQL_USERNAME')
+        password = secure_config('SCHEDULER_DB_PASSWORD') or os.getenv('POSTGRESQL_PASSWORD')
+        sslmode = os.getenv('SCHEDULER_DB_SSL_MODE', 'require')
+        db_url = f"postgresql://{username}:{password}@{host_db}:{port_db}/{database}?sslmode={sslmode}"
 
     app = create_app(config, db_url)
     app.run(host=host, port=port, debug=debug)

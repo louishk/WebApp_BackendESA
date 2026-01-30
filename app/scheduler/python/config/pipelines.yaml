@@ -51,10 +51,6 @@ pipelines:
       cron: 0 0 * * *
     default_args:
       mode: auto
-      target_currencies: "USD,HKD,KRW,JPY,AUD,NZD,TWD,THB,MYR,CNY"
-      historical_start: "2010-01-01"
-      sql_chunk_size: 1000
-      incremental_days: 7
     priority: 3
     resource_group: http_api
     max_db_connections: 2
@@ -77,8 +73,6 @@ pipelines:
       cron: 0 6 * * *
     default_args:
       mode: auto
-      location_codes: "L001,L002,L003,L004,L005,L006,L007,L008,L009,L010,L011,L013,L015,L017,L018,L019,L020,L021,L022,L023,L024,L025,L026,L028,L029,L030"
-      sql_chunk_size: 300
     priority: 1
     depends_on:
     - siteinfo
@@ -158,10 +152,6 @@ pipelines:
       cron: 0 */3 * * *
     default_args:
       mode: auto
-      modules: "Leads,Contacts,Accounts,Opportunities,Cases,Tasks,Meetings,Calls"
-      batch_size: 200
-      sql_chunk_size: 500
-      incremental_days: 7
     priority: 4
     resource_group: http_api
     max_db_connections: 3

@@ -10,12 +10,6 @@ Run from Scripts directory:
 from sqlalchemy import create_engine, text
 from decouple import config as env_config
 
-# Import vault-aware config for sensitive values
-try:
-    from common.secrets_vault import vault_config as secure_config
-except ImportError:
-    secure_config = env_config
-
 
 def get_postgres_url() -> str:
     """Build PostgreSQL connection URL."""
@@ -23,7 +17,7 @@ def get_postgres_url() -> str:
     port = env_config('POSTGRESQL_PORT', default='5432')
     database = env_config('POSTGRESQL_DATABASE')
     user = env_config('POSTGRESQL_USERNAME')
-    password = secure_config('POSTGRESQL_PASSWORD')  # From vault
+    password = env_config('POSTGRESQL_PASSWORD')
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 

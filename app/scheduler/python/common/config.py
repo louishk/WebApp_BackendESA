@@ -1,20 +1,12 @@
 """
 Configuration management for data pipeline module.
 Handles .env-based configuration for databases, Redis, and HTTP client.
-Sensitive values are loaded from encrypted vault with .env fallback.
 """
 
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Optional
 from decouple import config as env_config, Csv
-
-# Import vault-aware config for sensitive values
-try:
-    from common.secrets_vault import vault_config as secure_config
-except ImportError:
-    # Fallback if vault not available
-    secure_config = env_config
 
 
 class DatabaseType(Enum):
@@ -117,7 +109,7 @@ class DataLayerConfig:
                     port=env_config('AZURE_SQL_PORT', default=1433, cast=int),
                     database=env_config('AZURE_SQL_DATABASE'),
                     username=env_config('AZURE_SQL_USERNAME'),
-                    password=secure_config('AZURE_SQL_PASSWORD'),  # From vault
+                    password=env_config('AZURE_SQL_PASSWORD'),
                     driver=env_config('AZURE_SQL_DRIVER', default='ODBC Driver 17 for SQL Server'),
                     pool_size=env_config('DB_POOL_SIZE', default=5, cast=int),
                     max_overflow=env_config('DB_MAX_OVERFLOW', default=10, cast=int),
@@ -137,7 +129,7 @@ class DataLayerConfig:
                     port=env_config('MARIADB_PORT', default=3306, cast=int),
                     database=env_config('MARIADB_DATABASE'),
                     username=env_config('MARIADB_USERNAME'),
-                    password=secure_config('MARIADB_PASSWORD'),  # From vault
+                    password=env_config('MARIADB_PASSWORD'),
                     pool_size=env_config('DB_POOL_SIZE', default=5, cast=int),
                     max_overflow=env_config('DB_MAX_OVERFLOW', default=10, cast=int),
                     pool_timeout=env_config('DB_POOL_TIMEOUT', default=60, cast=int),
@@ -156,7 +148,7 @@ class DataLayerConfig:
                     port=env_config('POSTGRESQL_PORT', default=5432, cast=int),
                     database=env_config('POSTGRESQL_DATABASE'),
                     username=env_config('POSTGRESQL_USERNAME'),
-                    password=secure_config('POSTGRESQL_PASSWORD'),  # From vault
+                    password=env_config('POSTGRESQL_PASSWORD'),
                     pool_size=env_config('DB_POOL_SIZE', default=5, cast=int),
                     max_overflow=env_config('DB_MAX_OVERFLOW', default=10, cast=int),
                     pool_timeout=env_config('DB_POOL_TIMEOUT', default=60, cast=int),
@@ -174,8 +166,8 @@ class DataLayerConfig:
                     base_url=soap_url,
                     corp_code=env_config('SOAP_CORP_CODE'),
                     corp_user=env_config('SOAP_CORP_USER'),
-                    api_key=secure_config('SOAP_API_KEY'),  # From vault
-                    corp_password=secure_config('SOAP_CORP_PASSWORD'),  # From vault
+                    api_key=env_config('SOAP_API_KEY'),  # No ::: prefix in .env
+                    corp_password=env_config('SOAP_CORP_PASSWORD'),
                     timeout=env_config('SOAP_TIMEOUT', default=60, cast=int),
                     retries=env_config('SOAP_RETRIES', default=3, cast=int),
                 )

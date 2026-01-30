@@ -37,12 +37,6 @@ from tqdm import tqdm
 
 from decouple import config as env_config, Csv
 
-# Import vault-aware config for sensitive values
-try:
-    from common.secrets_vault import vault_config as secure_config
-except ImportError:
-    secure_config = env_config
-
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
@@ -125,7 +119,7 @@ def create_ssh_tunnel() -> int:
     ssh_host = strip_env_comment(env_config('VM_SSH_HOST'))
     ssh_port = int(strip_env_comment(env_config('VM_SSH_PORT', default='22')))
     ssh_username = strip_env_comment(env_config('VM_SSH_USERNAME'))
-    ssh_password = strip_env_comment(secure_config('VM_SSH_PASSWORD'))  # From vault
+    ssh_password = strip_env_comment(env_config('VM_SSH_PASSWORD'))
 
     vm_sql_port = int(env_config('VM_SQL_PORT', default='1433'))
     local_tunnel_port = int(env_config('VM_LOCAL_TUNNEL_PORT', default='9999'))

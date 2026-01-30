@@ -23,13 +23,6 @@ from decouple import config as env_config
 
 import requests
 
-# Import vault-aware config for sensitive values
-try:
-    from common.secrets_vault import vault_config as secure_config
-except ImportError:
-    # Fallback if vault not available
-    secure_config = env_config
-
 logger = logging.getLogger(__name__)
 
 
@@ -114,9 +107,9 @@ class SugarCRMClient:
         return cls(
             base_url=base_url,
             username=env_config('SUGARCRM_USERNAME'),
-            password=secure_config('SUGARCRM_PASSWORD'),  # From vault
+            password=env_config('SUGARCRM_PASSWORD'),
             client_id=env_config('SUGARCRM_CLIENT_ID', default='sugar'),
-            client_secret=secure_config('SUGARCRM_CLIENT_SECRET', default=''),  # From vault
+            client_secret=env_config('SUGARCRM_CLIENT_SECRET', default=''),
             platform=env_config('SUGARCRM_PLATFORM', default='mobile'),
             api_version=env_config('SUGARCRM_API_VERSION', default=cls.DEFAULT_API_VERSION),
             timeout=env_config('SUGARCRM_TIMEOUT', default=cls.DEFAULT_TIMEOUT, cast=int),

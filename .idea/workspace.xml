@@ -5,7 +5,53 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="5b9b9db2-6cfe-4f5a-9172-10f04fba31e9" name="Changes" comment="Working + Setting">
-      <change beforePath="$PROJECT_DIR$/PROGRESS.md" beforeDir="false" afterPath="$PROJECT_DIR$/PROGRESS.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/old sync app/data_control.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/old sync app/data_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/old sync app/main.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/old sync app/ssh_sql_connection.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/old sync app/sync_client.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/old sync app/sync_db_connection.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/old sync app/sync_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.env" beforeDir="false" afterPath="$PROJECT_DIR$/.env" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/.htaccess" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/.htaccess" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/api/auth.php" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/api/auth.php" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/api/proxy.php" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/api/proxy.php" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/index.php" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/index.php" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/.env.example" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/cli/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/cli/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/cache_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/cache_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/engine.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/http_client.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/http_client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/models.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/operations.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/operations.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/session.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/session.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/soap_client.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/soap_client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/soap_reports.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/soap_reports.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/sugarcrm_client.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/sugarcrm_client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/common/upsert_strategies.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/common/upsert_strategies.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/config/pipelines.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/config/pipelines.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/datalayer/fxrate_to_sql.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/fxrate_to_sql.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/datalayer/migrate_expand_varchar.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/migrate_expand_varchar.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/datalayer/rentroll_to_sql.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/rentroll_to_sql.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/datalayer/sugarcrm_to_sql.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/sugarcrm_to_sql.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/datalayer/tenant_ledger_charges_historical.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/tenant_ledger_charges_historical.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/datalayer/tenant_ledger_charges_unified.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/tenant_ledger_charges_unified.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/datalayer/units_info_to_sql.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/datalayer/units_info_to_sql.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/scheduler/cli/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/scheduler/cli/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/scheduler/web/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/scheduler/web/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/scheduler/web/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/scheduler/web/templates/base.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/scripts/migrate_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/scripts/migrate_data.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/web/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/web/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/scheduler/python/web/templates/base.html" beforeDir="false" afterPath="$PROJECT_DIR$/app/scheduler/python/web/templates/base.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config.php" beforeDir="false" afterPath="$PROJECT_DIR$/config.php" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/deploy_to_vm.py" beforeDir="false" afterPath="$PROJECT_DIR$/scripts/deploy_to_vm.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vendor/composer/autoload_classmap.php" beforeDir="false" afterPath="$PROJECT_DIR$/vendor/composer/autoload_classmap.php" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vendor/composer/autoload_static.php" beforeDir="false" afterPath="$PROJECT_DIR$/vendor/composer/autoload_static.php" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vendor/composer/installed.json" beforeDir="false" afterPath="$PROJECT_DIR$/vendor/composer/installed.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vendor/composer/installed.php" beforeDir="false" afterPath="$PROJECT_DIR$/vendor/composer/installed.php" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -20,6 +66,7 @@
     <option name="RECENT_TEMPLATES">
       <list>
         <option value="JavaScript File" />
+        <option value="Python Script" />
       </list>
     </option>
   </component>
@@ -73,45 +120,48 @@
   &quot;associatedIndex&quot;: 1
 }</component>
   <component name="ProjectId" id="2ycWxDTBfbLjpoa7cvuoK3DmxSv" />
+  <component name="ProjectLevelVcsManager">
+    <ConfirmationsSetting value="2" id="Add" />
+  </component>
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ASKED_MARK_IGNORED_FILES_AS_EXCLUDED": "true",
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "PHP Built-in Web Server.PHP Local.executor": "Run",
-    "PHP Built-in Web Server.PHP Web APP.executor": "Run",
-    "PHP Built-in Web Server.Unnamed.executor": "Run",
-    "PHP Script.index.php.executor": "Run",
-    "PHP Script.test.php.executor": "Run",
-    "RunOnceActivity.MCP Project settings loaded": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "ai.playground.ignore.import.keys.banner.in.settings": "true",
-    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
-    "git-widget-placeholder": "master",
-    "ignore.virus.scanning.warn.message": "true",
-    "junie.onboarding.icon.badge.shown": "true",
-    "last_opened_file_path": "C:/Users/VerLouisClaudePierre/PycharmProjects/WebApp_BackendESA",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "project.propVCSSupport.Mappings",
-    "to.speed.mode.migration.done": "true",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ASKED_MARK_IGNORED_FILES_AS_EXCLUDED&quot;: &quot;true&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;PHP Built-in Web Server.PHP Local.executor&quot;: &quot;Run&quot;,
+    &quot;PHP Built-in Web Server.PHP Web APP.executor&quot;: &quot;Run&quot;,
+    &quot;PHP Built-in Web Server.Unnamed.executor&quot;: &quot;Run&quot;,
+    &quot;PHP Script.index.php.executor&quot;: &quot;Run&quot;,
+    &quot;PHP Script.test.php.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
+    &quot;com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;junie.onboarding.icon.badge.shown&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/VerLouisClaudePierre/PycharmProjects/WebApp_BackendESA&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;project.propVCSSupport.Mappings&quot;,
+    &quot;to.speed.mode.migration.done&quot;: &quot;true&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   },
-  "keyToStringList": {
-    "DatabaseDriversLRU": [
-      "postgresql"
+  &quot;keyToStringList&quot;: {
+    &quot;DatabaseDriversLRU&quot;: [
+      &quot;postgresql&quot;
     ]
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="C:\Users\VerLouisClaudePierre\PycharmProjects\WebApp_BackendESA" />
@@ -161,7 +211,7 @@
       <workItem from="1750137902993" duration="4148000" />
       <workItem from="1769502959102" duration="11423000" />
       <workItem from="1769569067078" duration="17010000" />
-      <workItem from="1769679656754" duration="994000" />
+      <workItem from="1769679656754" duration="12528000" />
     </task>
     <task id="LOCAL-00001" summary="First Loading">
       <option name="closed" value="true" />

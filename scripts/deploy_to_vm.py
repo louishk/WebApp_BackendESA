@@ -218,11 +218,11 @@ def run_rsync(credentials: dict, dry_run: bool = False, verbose: bool = True) ->
             vm_excludes = ' '.join(f"--exclude='{e}'" for e in vm_preserve)
 
             move_cmd = (
-                f"sudo rsync -a --delete {vm_excludes} {temp_dir}/ /var/www/html/ && "
-                f"sudo chown -R www-data:www-data /var/www/html && "
+                f"sudo rsync -a --delete {vm_excludes} {temp_dir}/ /var/www/backend/ && "
+                f"sudo chown -R www-data:www-data /var/www/backend && "
                 f"rm -rf {temp_dir} && "
                 # Remove any stray .vault in scheduler directory so it uses the main vault
-                f"sudo rm -rf /var/www/html/app/scheduler/python/.vault"
+                f"sudo rm -rf /var/www/backend/app/scheduler/python/.vault"
             )
             stdout, stderr, exit_code = run_ssh_command(
                 credentials, move_cmd, verbose=False

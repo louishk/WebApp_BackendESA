@@ -860,25 +860,6 @@ Examples:
         help=f'SQL upsert chunk size (default: {DEFAULT_SQL_CHUNK_SIZE})'
     )
 
-    # Pipeline-specific configuration (can be passed from scheduler default_args)
-    parser.add_argument(
-        '--modules',
-        type=str,
-        help='Comma-separated module list (falls back to SUGARCRM_MODULES env var)'
-    )
-
-    parser.add_argument(
-        '--sql-chunk-size',
-        type=int,
-        help='Alias for --chunk-size for consistency with other pipelines'
-    )
-
-    parser.add_argument(
-        '--incremental-days',
-        type=int,
-        help='Days to look back for auto mode (falls back to SUGARCRM_INCREMENTAL_DAYS env var)'
-    )
-
     return parser.parse_args()
 
 
@@ -889,20 +870,15 @@ def main():
     # Load configuration
     config = DataLayerConfig.from_env()
 
-    # Load SugarCRM-specific config - CLI args take precedence, fallback to env vars
-    if args.modules:
-        modules = [m.strip() for m in args.modules.split(',')]
-    else:
-        modules = env_config(
-            'SUGARCRM_MODULES',
-            default=','.join(DEFAULT_MODULES),
-            cast=Csv()
-        )
-
+    # Load SugarCRM-specific config from .env
+    modules = env_config(
+        'SUGARCRM_MODULES',
+        default=','.join(DEFAULT_MODULES),
+        cast=Csv()
+    )
     batch_size = args.batch_size or env_config('SUGARCRM_BATCH_SIZE', default=DEFAULT_BATCH_SIZE, cast=int)
-    # Support both --chunk-size and --sql-chunk-size for consistency
-    sql_chunk_size = args.sql_chunk_size or args.chunk_size or env_config('SUGARCRM_SQL_CHUNK_SIZE', default=DEFAULT_SQL_CHUNK_SIZE, cast=int)
-    incremental_days = args.incremental_days or env_config('SUGARCRM_INCREMENTAL_DAYS', default=DEFAULT_INCREMENTAL_DAYS, cast=int)
+    sql_chunk_size = args.chunk_size or env_config('SUGARCRM_SQL_CHUNK_SIZE', default=DEFAULT_SQL_CHUNK_SIZE, cast=int)
+    incremental_days = env_config('SUGARCRM_INCREMENTAL_DAYS', default=DEFAULT_INCREMENTAL_DAYS, cast=int)
 
     # Parse since date
     since_date = None

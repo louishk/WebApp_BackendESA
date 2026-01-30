@@ -561,31 +561,6 @@ Examples:
         help='End date in YYYY-MM-DD format (optional for backfill mode)'
     )
 
-    # Pipeline-specific configuration (can be passed from scheduler default_args)
-    parser.add_argument(
-        '--target-currencies',
-        type=str,
-        help='Comma-separated target currency codes (falls back to FX_TARGET_CURRENCIES env var)'
-    )
-
-    parser.add_argument(
-        '--historical-start',
-        type=str,
-        help='Historical start date YYYY-MM-DD (falls back to FX_HISTORICAL_START env var)'
-    )
-
-    parser.add_argument(
-        '--sql-chunk-size',
-        type=int,
-        help='Batch size for SQL upsert operations (falls back to FX_SQL_CHUNK_SIZE env var)'
-    )
-
-    parser.add_argument(
-        '--incremental-days',
-        type=int,
-        help='Days to look back for auto mode (falls back to FX_INCREMENTAL_DAYS env var)'
-    )
-
     return parser.parse_args()
 
 
@@ -597,19 +572,15 @@ def main():
     # Load configuration
     config = DataLayerConfig.from_env()
 
-    # Load FX-specific config - CLI args take precedence, fallback to env vars
-    if args.target_currencies:
-        target_currencies = [c.strip() for c in args.target_currencies.split(',')]
-    else:
-        target_currencies = env_config(
-            'FX_TARGET_CURRENCIES',
-            default=','.join(DEFAULT_TARGET_CURRENCIES),
-            cast=Csv()
-        )
-
-    historical_start_str = args.historical_start or env_config('FX_HISTORICAL_START', default='2010-01-01')
-    chunk_size = args.sql_chunk_size or env_config('FX_SQL_CHUNK_SIZE', default=1000, cast=int)
-    incremental_days = args.incremental_days or env_config('FX_INCREMENTAL_DAYS', default=7, cast=int)
+    # Load FX-specific config from .env
+    target_currencies = env_config(
+        'FX_TARGET_CURRENCIES',
+        default=','.join(DEFAULT_TARGET_CURRENCIES),
+        cast=Csv()
+    )
+    historical_start_str = env_config('FX_HISTORICAL_START', default='2010-01-01')
+    chunk_size = env_config('FX_SQL_CHUNK_SIZE', default=1000, cast=int)
+    incremental_days = env_config('FX_INCREMENTAL_DAYS', default=7, cast=int)
 
     # Parse historical start date
     historical_start = datetime.strptime(historical_start_str, '%Y-%m-%d').date()
