@@ -28,3 +28,8 @@ Thumbs.db
 # Temp
 *.tmp
 *.bak
+/Temp/
+
+# Vault (keep metadata.json for reference)
+.vault/
+!.vault/metadata.json

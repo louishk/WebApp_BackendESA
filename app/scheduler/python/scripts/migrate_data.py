@@ -26,11 +26,17 @@ from decouple import config as env_config
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
+# Import vault-aware config for sensitive values
+try:
+    from common.secrets_vault import vault_config as secure_config
+except ImportError:
+    secure_config = env_config
+
 
 def get_source_engine():
     """Get engine for source database (esa_pbi)."""
     url = (
-        f"postgresql://{env_config('PBI_DB_USER')}:{env_config('PBI_DB_PASSWORD')}@"
+        f"postgresql://{env_config('PBI_DB_USER')}:{secure_config('PBI_DB_PASSWORD')}@"
         f"{env_config('PBI_DB_HOST')}:{env_config('PBI_DB_PORT', default=5432)}/{env_config('PBI_DB_NAME', default='esa_pbi')}"
         f"?sslmode={env_config('PBI_DB_SSL_MODE', default='require')}"
     )
@@ -40,7 +46,7 @@ def get_source_engine():
 def get_target_engine():
     """Get engine for target database (backend)."""
     url = (
-        f"postgresql://{env_config('SCHEDULER_DB_USER')}:{env_config('SCHEDULER_DB_PASSWORD')}@"
+        f"postgresql://{env_config('SCHEDULER_DB_USER')}:{secure_config('SCHEDULER_DB_PASSWORD')}@"
         f"{env_config('SCHEDULER_DB_HOST')}:{env_config('SCHEDULER_DB_PORT', default=5432)}/{env_config('SCHEDULER_DB_NAME', default='backend')}"
         f"?sslmode={env_config('SCHEDULER_DB_SSL_MODE', default='require')}"
     )

@@ -5,9 +5,11 @@
  */
 
 require_once __DIR__ . '/vendor/autoload.php';
+require_once __DIR__ . '/app/Vault/SecretsVault.php';
 
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
+use function App\Vault\getSecret;
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -21,12 +23,13 @@ $dotenv->load();
 
 // ─────────────────────────────────────────────────────────────
 // PostgreSQL Database Configuration
+// Sensitive values loaded from vault, fallback to .env
 // ─────────────────────────────────────────────────────────────
 $dbHost     = $_ENV['DB_HOST'] ?? 'localhost';
 $dbPort     = $_ENV['DB_PORT'] ?? '5432';
 $dbName     = $_ENV['DB_NAME'] ?? 'backend';
 $dbUsername = $_ENV['DB_USERNAME'] ?? '';
-$dbPassword = $_ENV['DB_PASSWORD'] ?? '';
+$dbPassword = getSecret('DB_PASSWORD', $_ENV['DB_PASSWORD'] ?? '');
 $dbSslMode  = $_ENV['DB_SSLMODE'] ?? 'require';
 
 // PostgreSQL DSN with SSL for Azure
@@ -44,9 +47,9 @@ try {
 }
 
 // ─────────────────────────────────────────────────────────────
-// JWT Configuration
+// JWT Configuration (secret loaded from vault)
 // ─────────────────────────────────────────────────────────────
-$jwtSecret = $_ENV['JWT_SECRET'] ?? '';
+$jwtSecret = getSecret('JWT_SECRET', $_ENV['JWT_SECRET'] ?? '');
 $jwtExpiry = (int)($_ENV['JWT_EXPIRY'] ?? 3600);
 
 // ─────────────────────────────────────────────────────────────
@@ -56,11 +59,11 @@ $schedulerApiUrl = $_ENV['SCHEDULER_API_URL'] ?? 'http://localhost:5000';
 $GLOBALS['schedulerApiUrl'] = $schedulerApiUrl;
 
 // ─────────────────────────────────────────────────────────────
-// Microsoft OAuth Configuration
+// Microsoft OAuth Configuration (secret loaded from vault)
 // ─────────────────────────────────────────────────────────────
 $azureConfig = [
     'clientId'     => $_ENV['MS_OAUTH_CLIENT_ID']     ?? '',
-    'clientSecret' => $_ENV['MS_OAUTH_CLIENT_SECRET'] ?? '',
+    'clientSecret' => getSecret('MS_OAUTH_CLIENT_SECRET', $_ENV['MS_OAUTH_CLIENT_SECRET'] ?? ''),
     'redirectUri'  => $_ENV['MS_OAUTH_REDIRECT_URI']  ?? '',
     'tenant'       => $_ENV['MS_OAUTH_TENANT']        ?? 'common',
 ];
