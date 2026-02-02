@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block title %}History - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Execution History</h2>
+
+    <div style="margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center;">
+        <select id="filter-pipeline" style="padding: 0.5rem; background: #fff; color: #333; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="">All Pipelines</option>
+        </select>
+        <select id="filter-status" style="padding: 0.5rem; background: #fff; color: #333; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="">All Statuses</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="running">Running</option>
+        </select>
+        <button class="btn btn-sm" onclick="loadHistory()">Filter</button>
+    </div>
+
+    <table id="history-table-main">
+        <thead>
+            <tr>
+                <th class="sortable" data-sort="pipeline_name">Pipeline <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="status">Status <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="started_at">Started <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="duration_seconds">Duration <span class="sort-icon"></span></th>
+                <th class="sortable" data-sort="records_processed">Records <span class="sort-icon"></span></th>
+                <th>Attempt</th>
+                <th class="sortable" data-sort="triggered_by">Triggered By <span class="sort-icon"></span></th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="history-table">
+            <tr><td colspan="8" style="text-align: center; color: #666;">Loading...</td></tr>
+        </tbody>
+    </table>
+
+    <div style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+        <div id="pagination-info" style="color: #666;">Showing 0 results</div>
+        <div>
+            <button class="btn btn-sm" id="prev-btn" onclick="loadHistory(currentOffset - 50)" disabled>Previous</button>
+            <button class="btn btn-sm" id="next-btn" onclick="loadHistory(currentOffset + 50)">Next</button>
+        </div>
+    </div>
+</div>
+
+<!-- Log Detail Modal -->
+<div id="logModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:800px;width:90%;">
+        <h3>Execution Details: <span id="logPipelineName"></span></h3>
+        <div style="margin-bottom:15px;">
+            <span id="logStatus" class="status"></span>
+            <span id="logTime" style="margin-left:15px;color:#666;"></span>
+        </div>
+        <div style="margin-bottom:10px;">
+            <strong>Parameters:</strong> <span id="logParams" style="color:#666;font-family:monospace;"></span>
+        </div>
+        <div id="logErrorSection" style="display:none;">
+            <strong style="color:#C41230;">Error:</strong>
+            <div id="logError" style="background:#1A2E5A;color:#fff;border-radius:4px;padding:10px;margin-top:5px;font-family:monospace;font-size:12px;white-space:pre-wrap;max-height:150px;overflow-y:auto;"></div>
+        </div>
+        <div id="logTracebackSection" style="display:none;margin-top:10px;">
+            <strong>Traceback:</strong>
+            <div id="logTraceback" style="background:#1A2E5A;color:#fff;border-radius:4px;padding:10px;margin-top:5px;font-family:monospace;font-size:11px;white-space:pre-wrap;max-height:250px;overflow-y:auto;"></div>
+        </div>
+        <div style="margin-top:15px;text-align:right;">
+            <button class="btn btn-secondary" onclick="closeLogModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(26, 46, 90, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: #fff;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.modal-content h3 {
+    color: #1A2E5A;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #C41230;
+}
+
+/* Sortable table headers */
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 20px;
+}
+th.sortable:hover {
+    background: rgba(196, 18, 48, 0.1);
+}
+th.sortable .sort-icon::after {
+    content: '⇅';
+    position: absolute;
+    right: 6px;
+    opacity: 0.3;
+    font-size: 12px;
+}
+th.sortable.asc .sort-icon::after {
+    content: '↑';
+    opacity: 1;
+    color: #C41230;
+}
+th.sortable.desc .sort-icon::after {
+    content: '↓';
+    opacity: 1;
+    color: #C41230;
+}
+</style>
+
+<div class="card">
+    <h2>Statistics (Last 7 Days)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Pipeline</th>
+                <th>Total</th>
+                <th>Success</th>
+                <th>Failed</th>
+                <th>Success Rate</th>
+                <th>Avg Duration</th>
+                <th>Avg Records</th>
+            </tr>
+        </thead>
+        <tbody id="stats-table">
+            <tr><td colspan="7" style="text-align: center; color: #666;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentOffset = 0;
+    let historyData = [];
+    let currentSort = { column: 'started_at', direction: 'desc' };
+    let totalResults = 0;
+
+    // Singapore timezone formatting
+    const SGT_OPTIONS = { timeZone: 'Asia/Singapore', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' };
+
+    function formatSGT(dateStr) {
+        if (!dateStr) return '-';
+        return new Date(dateStr).toLocaleString('en-SG', SGT_OPTIONS);
+    }
+
+    function formatDuration(seconds) {
+        if (seconds === null || seconds === undefined || seconds === '') return '-';
+        seconds = parseFloat(seconds);  // Ensure it's a number
+        if (isNaN(seconds)) return '-';
+        if (seconds < 60) return seconds.toFixed(1) + 's';
+        return Math.floor(seconds / 60) + 'm ' + Math.floor(seconds % 60) + 's';
+    }
+
+    // Sort history data
+    function sortHistory(column) {
+        if (currentSort.column === column) {
+            currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            currentSort.column = column;
+            currentSort.direction = column === 'started_at' ? 'desc' : 'asc';
+        }
+
+        document.querySelectorAll('#history-table-main th.sortable').forEach(th => {
+            th.classList.remove('asc', 'desc');
+            if (th.dataset.sort === column) {
+                th.classList.add(currentSort.direction);
+            }
+        });
+
+        historyData.sort((a, b) => {
+            let valA = a[column];
+            let valB = b[column];
+
+            // Handle nulls
+            if (valA == null) valA = column === 'started_at' ? '' : 0;
+            if (valB == null) valB = column === 'started_at' ? '' : 0;
+
+            // Handle strings
+            if (typeof valA === 'string') {
+                valA = valA.toLowerCase();
+                valB = (valB || '').toLowerCase();
+            }
+
+            if (valA < valB) return currentSort.direction === 'asc' ? -1 : 1;
+            if (valA > valB) return currentSort.direction === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        renderHistory();
+    }
+
+    function renderHistory() {
+        const tbody = document.getElementById('history-table');
+        if (!historyData || historyData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #666;">No executions found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = historyData.map(job => {
+            const statusClass = 'status-' + job.status;
+            const started = formatSGT(job.started_at);
+            const hasError = job.status === 'failed';
+            return `
+                <tr>
+                    <td>${job.pipeline_name}</td>
+                    <td><span class="status ${statusClass}">${job.status}</span></td>
+                    <td>${started}</td>
+                    <td>${formatDuration(job.duration_seconds)}</td>
+                    <td>${job.records_processed || '-'}</td>
+                    <td>${job.attempt_number}/${job.max_retries}</td>
+                    <td>${job.triggered_by}</td>
+                    <td><button class="btn btn-sm ${hasError ? '' : 'btn-secondary'}" onclick="viewLog(${job.id})">View</button></td>
+                </tr>
+            `;
+        }).join('');
+
+        document.getElementById('pagination-info').textContent =
+            'Showing ' + (currentOffset + 1) + '-' + (currentOffset + historyData.length) + ' of ' + totalResults;
+        document.getElementById('prev-btn').disabled = currentOffset === 0;
+        document.getElementById('next-btn').disabled = currentOffset + 50 >= totalResults;
+    }
+
+    // Add click handlers to sortable headers
+    document.querySelectorAll('#history-table-main th.sortable').forEach(th => {
+        th.addEventListener('click', () => sortHistory(th.dataset.sort));
+    });
+
+    function loadHistory(offset = 0) {
+        currentOffset = offset;
+        const pipeline = document.getElementById('filter-pipeline').value;
+        const status = document.getElementById('filter-status').value;
+
+        let url = '/api/history?limit=50&offset=' + offset;
+        if (pipeline) url += '&pipeline=' + pipeline;
+        if (status) url += '&status=' + status;
+
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                historyData = data.results || [];
+                totalResults = data.total || 0;
+
+                // Apply current sort and render
+                document.querySelectorAll('#history-table-main th.sortable').forEach(th => {
+                    th.classList.remove('asc', 'desc');
+                    if (th.dataset.sort === currentSort.column) {
+                        th.classList.add(currentSort.direction);
+                    }
+                });
+
+                sortHistory(currentSort.column);
+            })
+            .catch(err => {
+                document.getElementById('history-table').innerHTML =
+                    '<tr><td colspan="8" style="text-align: center; color: #C41230;">Error loading history</td></tr>';
+            });
+    }
+
+    function loadStats() {
+        fetch('/api/history/stats?period=7d')
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('stats-table');
+                if (!data.pipelines || data.pipelines.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No statistics available</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.pipelines.map(stat => {
+                    const rateColor = stat.success_rate >= 90 ? '#28a745' : (stat.success_rate >= 70 ? '#ffc107' : '#dc3545');
+                    return `
+                        <tr>
+                            <td>${stat.pipeline_name}</td>
+                            <td>${stat.total}</td>
+                            <td style="color: #28a745">${stat.success}</td>
+                            <td style="color: #dc3545">${stat.failed}</td>
+                            <td style="color: ${rateColor}">${stat.success_rate}%</td>
+                            <td>${formatDuration(stat.avg_duration)}</td>
+                            <td>${stat.avg_records || '-'}</td>
+                        </tr>
+                    `;
+                }).join('');
+            })
+            .catch(err => {
+                document.getElementById('stats-table').innerHTML =
+                    '<tr><td colspan="7" style="text-align: center; color: #f66;">Error loading stats</td></tr>';
+            });
+    }
+
+    function loadPipelineFilter() {
+        fetch('/api/jobs')
+            .then(r => r.json())
+            .then(data => {
+                const select = document.getElementById('filter-pipeline');
+                data.jobs.forEach(job => {
+                    const option = document.createElement('option');
+                    option.value = job.pipeline_name;
+                    option.textContent = job.display_name;
+                    select.appendChild(option);
+                });
+            });
+    }
+
+    function viewLog(historyId) {
+        fetch('/api/history/' + historyId)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('logPipelineName').textContent = data.pipeline_name;
+
+                // Status
+                const statusEl = document.getElementById('logStatus');
+                statusEl.textContent = data.status;
+                statusEl.className = 'status status-' + data.status;
+
+                // Time info
+                const started = formatSGT(data.started_at);
+                const duration = data.duration_seconds ? formatDuration(data.duration_seconds) : '-';
+                document.getElementById('logTime').textContent = `Started: ${started} (SGT) | Duration: ${duration}`;
+
+                // Parameters
+                document.getElementById('logParams').textContent = data.parameters ? JSON.stringify(data.parameters) : '-';
+
+                // Error section
+                const errorSection = document.getElementById('logErrorSection');
+                const tracebackSection = document.getElementById('logTracebackSection');
+
+                if (data.error_message) {
+                    document.getElementById('logError').textContent = data.error_message;
+                    errorSection.style.display = 'block';
+                } else {
+                    errorSection.style.display = 'none';
+                }
+
+                if (data.error_traceback) {
+                    document.getElementById('logTraceback').textContent = data.error_traceback;
+                    tracebackSection.style.display = 'block';
+                } else {
+                    tracebackSection.style.display = 'none';
+                }
+
+                document.getElementById('logModal').style.display = 'flex';
+            })
+            .catch(err => alert('Error loading details: ' + err));
+    }
+
+    function closeLogModal() {
+        document.getElementById('logModal').style.display = 'none';
+    }
+
+    // Close modal on background click
+    document.getElementById('logModal').addEventListener('click', function(e) {
+        if (e.target === this) closeLogModal();
+    });
+
+    loadPipelineFilter();
+    loadHistory();
+    loadStats();
+</script>
+{% endblock %}

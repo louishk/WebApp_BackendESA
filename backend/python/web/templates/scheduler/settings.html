@@ -1,0 +1,618 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Settings & Administration</h1>
+</div>
+
+<!-- Service Management -->
+<div class="card">
+    <h2>Service Management</h2>
+    <p style="color:#666;margin-bottom:1rem;">Manage the scheduler backend services</p>
+
+    <div class="services-grid">
+        <div class="service-card" id="service-web_ui">
+            <div class="service-header">
+                <span class="service-name">Web UI</span>
+                <span class="service-status" id="status-web_ui">checking...</span>
+            </div>
+            <div class="service-info">Flask Development Server</div>
+            <div class="service-details" id="details-web_ui"></div>
+        </div>
+
+        <div class="service-card" id="service-scheduler">
+            <div class="service-header">
+                <span class="service-name">Scheduler Daemon</span>
+                <span class="service-status" id="status-scheduler">checking...</span>
+            </div>
+            <div class="service-info">APScheduler Background Process</div>
+            <div class="service-details" id="details-scheduler"></div>
+            <div class="service-actions">
+                <button class="btn btn-sm btn-success" id="btn-start-scheduler" onclick="startScheduler()">Start</button>
+                <button class="btn btn-sm btn-danger" id="btn-stop-scheduler" onclick="stopScheduler()">Stop</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pipeline Management -->
+<div class="card">
+    <h2>Pipeline Management</h2>
+    <p style="color:#666;margin-bottom:1rem;">Add, edit, or remove data pipelines</p>
+
+    <button class="btn" onclick="openAddPipelineModal()" style="margin-bottom:1rem;">+ Add New Pipeline</button>
+
+    <table id="pipelines-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Module</th>
+                <th>Schedule</th>
+                <th>Resource</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="pipelines-body">
+            <tr><td colspan="6" style="text-align:center;color:#666;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Available Modules -->
+<div class="card">
+    <h2>Available Modules</h2>
+    <p style="color:#666;margin-bottom:1rem;">Python modules in the datalayer folder that can be used as pipelines</p>
+    <div id="modules-list" style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+        <span style="color:#666;">Loading...</span>
+    </div>
+</div>
+
+<!-- Add/Edit Pipeline Modal -->
+<div id="pipelineModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:600px;">
+        <h3 id="pipelineModalTitle">Add New Pipeline</h3>
+        <form id="pipelineForm">
+            <input type="hidden" id="pipelineEditMode" value="add">
+            <input type="hidden" id="pipelineOriginalName" value="">
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Pipeline Name (ID)*</label>
+                    <input type="text" id="pipelineName" pattern="[a-z0-9_-]+" required placeholder="e.g., my_pipeline">
+                    <small>Lowercase, underscores, hyphens only</small>
+                </div>
+                <div class="form-group">
+                    <label>Display Name*</label>
+                    <input type="text" id="pipelineDisplayName" required placeholder="e.g., My Pipeline">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Description</label>
+                <input type="text" id="pipelineDescription" placeholder="What does this pipeline do?">
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Module Path*</label>
+                    <input type="text" id="pipelineModule" required placeholder="datalayer.module_name">
+                    <small>Python module to execute</small>
+                </div>
+                <div class="form-group">
+                    <label>Cron Schedule*</label>
+                    <input type="text" id="pipelineCron" required placeholder="0 6 * * *">
+                    <small>minute hour day month weekday</small>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Priority (1-10)</label>
+                    <input type="number" id="pipelinePriority" min="1" max="10" value="5">
+                    <small>1 = highest priority</small>
+                </div>
+                <div class="form-group">
+                    <label>Resource Group</label>
+                    <select id="pipelineResource">
+                        <option value="http_api">HTTP API</option>
+                        <option value="soap_api">SOAP API</option>
+                        <option value="db_pool">Database</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Timeout (seconds)</label>
+                    <input type="number" id="pipelineTimeout" min="60" value="3600">
+                </div>
+                <div class="form-group">
+                    <label>Max DB Connections</label>
+                    <input type="number" id="pipelineDbConns" min="1" max="10" value="2">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Freshness Table</label>
+                    <input type="text" id="pipelineFreshnessTable" placeholder="table_name">
+                </div>
+                <div class="form-group">
+                    <label>Freshness Column</label>
+                    <input type="text" id="pipelineFreshnessColumn" placeholder="date_column">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="pipelineEnabled"> Enabled
+                </label>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn">Save Pipeline</button>
+                <button type="button" class="btn btn-secondary" onclick="closePipelineModal()">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Confirm Delete Modal -->
+<div id="deleteModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:400px;text-align:center;">
+        <h3 style="color:#C41230;">Delete Pipeline?</h3>
+        <p style="margin:1rem 0;">Are you sure you want to delete <strong id="deletePipelineName"></strong>?</p>
+        <p style="color:#666;font-size:0.9rem;">This action cannot be undone.</p>
+        <div class="form-actions" style="margin-top:1.5rem;">
+            <button class="btn" onclick="confirmDelete()" style="background:#C41230;">Delete</button>
+            <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.services-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+}
+.service-card {
+    background: var(--esa-navy);
+    padding: 1.5rem;
+    border-radius: 8px;
+    color: #fff;
+}
+.service-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+.service-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+.service-status {
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+.service-status.running {
+    background: #28A745;
+}
+.service-status.stopped {
+    background: #C41230;
+}
+.service-status.unknown {
+    background: #6C757D;
+}
+.service-info {
+    color: rgba(255,255,255,0.6);
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+    font-family: monospace;
+}
+.service-details {
+    color: rgba(255,255,255,0.5);
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+}
+.service-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+.btn-success {
+    background: #28A745;
+}
+.btn-success:hover {
+    background: #218838;
+}
+.btn-danger {
+    background: #C41230;
+}
+.btn-danger:hover {
+    background: #9E0E27;
+}
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+.form-group {
+    margin-bottom: 1rem;
+}
+.form-group label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-weight: 500;
+    color: #333;
+}
+.form-group input, .form-group select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.95rem;
+}
+.form-group small {
+    color: #888;
+    font-size: 0.8rem;
+}
+.form-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(26, 46, 90, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: #fff;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    max-height: 90vh;
+    overflow-y: auto;
+}
+.modal-content h3 {
+    color: var(--esa-navy);
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--esa-red);
+}
+.module-tag {
+    display: inline-block;
+    background: var(--esa-gray);
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    border: 1px solid var(--esa-gray-dark);
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let pipelinesData = [];
+let pendingDeletePipeline = null;
+
+// Load service status
+function loadServiceStatus() {
+    fetch('/api/services/status')
+        .then(r => r.json())
+        .then(data => {
+            for (const [key, info] of Object.entries(data)) {
+                const statusEl = document.getElementById('status-' + key);
+                const detailsEl = document.getElementById('details-' + key);
+
+                if (statusEl) {
+                    statusEl.textContent = info.status;
+                    statusEl.className = 'service-status ' + info.status;
+                }
+
+                if (detailsEl) {
+                    let details = [];
+                    if (info.pid) details.push('PID: ' + info.pid);
+                    if (info.host) details.push('Host: ' + info.host);
+                    if (info.last_heartbeat) {
+                        const hb = new Date(info.last_heartbeat);
+                        details.push('Heartbeat: ' + hb.toLocaleTimeString());
+                    }
+                    detailsEl.textContent = details.join(' | ');
+                }
+
+                // Update button states for scheduler
+                if (key === 'scheduler') {
+                    const startBtn = document.getElementById('btn-start-scheduler');
+                    const stopBtn = document.getElementById('btn-stop-scheduler');
+                    if (startBtn && stopBtn) {
+                        if (info.status === 'running') {
+                            startBtn.disabled = true;
+                            stopBtn.disabled = false;
+                        } else {
+                            startBtn.disabled = false;
+                            stopBtn.disabled = true;
+                        }
+                    }
+                }
+            }
+        })
+        .catch(err => {
+            console.error('Failed to load service status:', err);
+        });
+}
+
+// Start scheduler
+function startScheduler() {
+    const statusEl = document.getElementById('status-scheduler');
+    const startBtn = document.getElementById('btn-start-scheduler');
+
+    startBtn.disabled = true;
+    statusEl.textContent = 'starting...';
+    statusEl.className = 'service-status unknown';
+
+    fetch('/api/services/scheduler/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || 'Scheduler started');
+        } else {
+            alert('Failed to start: ' + (data.error || 'Unknown error'));
+        }
+        setTimeout(loadServiceStatus, 2000);
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        loadServiceStatus();
+    });
+}
+
+// Stop scheduler
+function stopScheduler() {
+    if (!confirm('Stop the scheduler daemon? Scheduled jobs will not run until restarted.')) {
+        return;
+    }
+
+    const statusEl = document.getElementById('status-scheduler');
+    const stopBtn = document.getElementById('btn-stop-scheduler');
+
+    stopBtn.disabled = true;
+    statusEl.textContent = 'stopping...';
+    statusEl.className = 'service-status unknown';
+
+    fetch('/api/services/scheduler/stop', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || 'Scheduler stopped');
+        } else {
+            alert('Failed to stop: ' + (data.error || 'Unknown error'));
+        }
+        setTimeout(loadServiceStatus, 2000);
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        loadServiceStatus();
+    });
+}
+
+// Load pipelines
+function loadPipelines() {
+    fetch('/api/pipelines')
+        .then(r => r.json())
+        .then(data => {
+            pipelinesData = data.pipelines || [];
+            renderPipelines();
+        })
+        .catch(err => {
+            document.getElementById('pipelines-body').innerHTML =
+                '<tr><td colspan="6" style="color:#C41230;">Error loading pipelines</td></tr>';
+        });
+}
+
+function renderPipelines() {
+    const tbody = document.getElementById('pipelines-body');
+
+    if (pipelinesData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#666;">No pipelines configured</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = pipelinesData.map(p => {
+        const status = p.enabled
+            ? '<span class="status status-completed">Enabled</span>'
+            : '<span class="status status-pending">Disabled</span>';
+        const cron = p.schedule?.cron || 'N/A';
+
+        return `
+            <tr>
+                <td><strong>${p.display_name}</strong><br><small style="color:#888">${p.name}</small></td>
+                <td><code style="font-size:0.85rem;">${p.module_path}</code></td>
+                <td><code>${cron}</code></td>
+                <td>${p.resource_group}</td>
+                <td>${status}</td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="editPipeline('${p.name}')">Edit</button>
+                    <button class="btn btn-sm" onclick="deletePipeline('${p.name}')" style="background:#C41230;">Delete</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Load available modules
+function loadModules() {
+    fetch('/api/modules')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('modules-list');
+            if (!data.modules || data.modules.length === 0) {
+                container.innerHTML = '<span style="color:#666;">No modules found</span>';
+                return;
+            }
+            container.innerHTML = data.modules.map(m =>
+                `<span class="module-tag" title="${m.file}">${m.path}</span>`
+            ).join('');
+        });
+}
+
+// Add pipeline modal
+function openAddPipelineModal() {
+    document.getElementById('pipelineModalTitle').textContent = 'Add New Pipeline';
+    document.getElementById('pipelineEditMode').value = 'add';
+    document.getElementById('pipelineOriginalName').value = '';
+    document.getElementById('pipelineName').disabled = false;
+
+    // Reset form
+    document.getElementById('pipelineForm').reset();
+    document.getElementById('pipelinePriority').value = 5;
+    document.getElementById('pipelineTimeout').value = 3600;
+    document.getElementById('pipelineDbConns').value = 2;
+
+    document.getElementById('pipelineModal').style.display = 'flex';
+}
+
+// Edit pipeline
+function editPipeline(name) {
+    const pipeline = pipelinesData.find(p => p.name === name);
+    if (!pipeline) return;
+
+    document.getElementById('pipelineModalTitle').textContent = 'Edit Pipeline: ' + name;
+    document.getElementById('pipelineEditMode').value = 'edit';
+    document.getElementById('pipelineOriginalName').value = name;
+    document.getElementById('pipelineName').value = name;
+    document.getElementById('pipelineName').disabled = true;
+    document.getElementById('pipelineDisplayName').value = pipeline.display_name || '';
+    document.getElementById('pipelineDescription').value = pipeline.description || '';
+    document.getElementById('pipelineModule').value = pipeline.module_path || '';
+    document.getElementById('pipelineCron').value = pipeline.schedule?.cron || '';
+    document.getElementById('pipelinePriority').value = pipeline.priority || 5;
+    document.getElementById('pipelineResource').value = pipeline.resource_group || 'http_api';
+    document.getElementById('pipelineTimeout').value = pipeline.timeout_seconds || 3600;
+    document.getElementById('pipelineDbConns').value = pipeline.max_db_connections || 2;
+    document.getElementById('pipelineFreshnessTable').value = pipeline.data_freshness?.table || '';
+    document.getElementById('pipelineFreshnessColumn').value = pipeline.data_freshness?.date_column || '';
+    document.getElementById('pipelineEnabled').checked = pipeline.enabled;
+
+    document.getElementById('pipelineModal').style.display = 'flex';
+}
+
+function closePipelineModal() {
+    document.getElementById('pipelineModal').style.display = 'none';
+}
+
+// Handle form submit
+document.getElementById('pipelineForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const mode = document.getElementById('pipelineEditMode').value;
+    const name = document.getElementById('pipelineName').value;
+
+    const data = {
+        name: name,
+        display_name: document.getElementById('pipelineDisplayName').value,
+        description: document.getElementById('pipelineDescription').value,
+        module_path: document.getElementById('pipelineModule').value,
+        cron: document.getElementById('pipelineCron').value,
+        priority: parseInt(document.getElementById('pipelinePriority').value),
+        resource_group: document.getElementById('pipelineResource').value,
+        timeout_seconds: parseInt(document.getElementById('pipelineTimeout').value),
+        max_db_connections: parseInt(document.getElementById('pipelineDbConns').value),
+        freshness_table: document.getElementById('pipelineFreshnessTable').value,
+        freshness_column: document.getElementById('pipelineFreshnessColumn').value,
+        enabled: document.getElementById('pipelineEnabled').checked,
+    };
+
+    const url = mode === 'add' ? '/api/pipelines' : '/api/pipelines/' + name;
+    const method = mode === 'add' ? 'POST' : 'PUT';
+
+    fetch(url, {
+        method: method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            closePipelineModal();
+            loadPipelines();
+            alert(result.message || 'Pipeline saved');
+        } else {
+            alert('Error: ' + (result.error || 'Failed to save pipeline'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+});
+
+// Delete pipeline
+function deletePipeline(name) {
+    pendingDeletePipeline = name;
+    document.getElementById('deletePipelineName').textContent = name;
+    document.getElementById('deleteModal').style.display = 'flex';
+}
+
+function closeDeleteModal() {
+    document.getElementById('deleteModal').style.display = 'none';
+    pendingDeletePipeline = null;
+}
+
+function confirmDelete() {
+    if (!pendingDeletePipeline) return;
+
+    fetch('/api/pipelines/' + pendingDeletePipeline, {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(result => {
+        closeDeleteModal();
+        if (result.success) {
+            loadPipelines();
+            alert(result.message || 'Pipeline deleted');
+        } else {
+            alert('Error: ' + (result.error || 'Failed to delete pipeline'));
+        }
+    })
+    .catch(err => {
+        closeDeleteModal();
+        alert('Error: ' + err);
+    });
+}
+
+// Close modals on background click
+document.getElementById('pipelineModal').addEventListener('click', function(e) {
+    if (e.target === this) closePipelineModal();
+});
+document.getElementById('deleteModal').addEventListener('click', function(e) {
+    if (e.target === this) closeDeleteModal();
+});
+
+// Initial load
+loadServiceStatus();
+loadPipelines();
+loadModules();
+
+// Refresh service status every 30 seconds
+setInterval(loadServiceStatus, 30000);
+</script>
+{% endblock %}

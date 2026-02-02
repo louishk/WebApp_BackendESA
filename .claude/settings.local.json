@@ -39,7 +39,17 @@
       "Bash(git fetch:*)",
       "Bash(pip install:*)",
       "Bash(git stash:*)",
-      "Bash(git cherry-pick:*)"
+      "Bash(git cherry-pick:*)",
+      "Bash(python3.12 -m web.app:*)",
+      "Bash(sudo ufw status:*)",
+      "Bash(python3.12:*)",
+      "Bash(export VAULT_MASTER_KEY=dLFKOEOeP9NweU5DQOKcGGRy6C5MpVYvDv6CEo0mpJc)",
+      "Bash(ls:*)",
+      "Bash(curl:*)",
+      "Bash(pkill:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(echo:*)"
     ]
   }
 }

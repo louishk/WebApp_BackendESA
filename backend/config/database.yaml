@@ -1,0 +1,36 @@
+# =============================================================================
+# ESA Backend - Database Configuration
+# =============================================================================
+# Non-sensitive settings only. Passwords are stored in the vault.
+
+# Backend database (users, pages, scheduler state)
+backend:
+  host: "esapbi.postgres.database.azure.com"
+  port: 5432
+  name: "backend"
+  username: "esa_pbi_admin"
+  password_vault: "DB_PASSWORD"  # Reference to vault secret
+  sslmode: "require"
+  pool:
+    size: 5
+    max_overflow: 10
+    timeout: 60
+    recycle: 1800
+
+# PBI database (Power BI data warehouse)
+pbi:
+  host: "esapbi.postgres.database.azure.com"
+  port: 5432
+  name: "esa_pbi"
+  username: "esa_pbi_admin"
+  password_vault: "PBI_DB_PASSWORD"  # Reference to vault secret
+  sslmode: "require"
+  pool:
+    size: 10
+    max_overflow: 5
+
+# Redis cache (optional)
+redis:
+  enabled: false
+  url: "redis://localhost:6379/0"
+  default_ttl: 3600

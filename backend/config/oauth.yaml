@@ -1,0 +1,16 @@
+# =============================================================================
+# ESA Backend - OAuth Configuration
+# =============================================================================
+# Non-sensitive settings only. Client secrets are stored in the vault.
+
+microsoft:
+  enabled: true
+  client_id: "a95a430f-94c8-4c9d-8522-f5e26cebe8ec"
+  client_secret_vault: "MS_OAUTH_CLIENT_SECRET"  # Reference to vault secret
+  tenant_id: "45d0dc96-5f92-4a48-93c1-edea9332dd55"
+  redirect_uri: "https://backend.extraspace.com.sg/oauth_callback"
+  scopes:
+    - "openid"
+    - "profile"
+    - "email"
+    - "User.Read"

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ name }} - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Edit Configuration: {{ name }}.yaml</h1>
+    <p><a href="{{ url_for('admin.list_configs') }}">&larr; Back to Config List</a></p>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="flash flash-{{ category }}" style="padding: 1rem; margin-bottom: 1rem; border-radius: 4px; background: {% if category == 'success' %}#d1fae5{% elif category == 'error' %}#fee2e2{% else %}#dbeafe{% endif %};">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+<div class="card">
+    <form method="POST">
+        <div style="margin-bottom: 1rem;">
+            <label style="display: block; font-weight: 600; margin-bottom: 0.5rem;">YAML Content</label>
+            <textarea name="content"
+                      style="width: 100%; height: 500px; font-family: monospace; font-size: 14px; padding: 1rem; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa;"
+                      spellcheck="false">{{ content }}</textarea>
+        </div>
+
+        <div style="display: flex; gap: 1rem;">
+            <button type="submit" class="btn">Save Configuration</button>
+            <a href="{{ url_for('admin.list_configs') }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <h2>YAML Tips</h2>
+    <ul style="color: #666; font-size: 0.9rem; line-height: 1.8;">
+        <li>Use <code>key_vault: SECRET_NAME</code> to reference secrets from the vault</li>
+        <li>Indentation must be consistent (2 spaces recommended)</li>
+        <li>Strings with special characters should be quoted</li>
+        <li>Lists use <code>-</code> prefix for each item</li>
+    </ul>
+</div>
+{% endblock %}

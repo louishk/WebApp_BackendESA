@@ -1,0 +1,39 @@
+# =============================================================================
+# ESA Backend - External APIs Configuration
+# =============================================================================
+# Non-sensitive settings only. API keys/passwords are stored in the vault.
+
+# SMD SOAP API
+soap:
+  base_url: "https://api.smdservers.net/CCWs_3.5/ReportingWs.asmx"
+  corp_code: "C234"
+  corp_user: "louis"
+  api_key_vault: "SOAP_API_KEY"  # Reference to vault secret
+  corp_password_vault: "SOAP_CORP_PASSWORD"  # Reference to vault secret
+  timeout: 60
+  retries: 3
+
+# SugarCRM REST API
+sugarcrm:
+  base_url: "https://extraspace.sugarondemand.com"
+  username: "louisver"
+  password_vault: "SUGARCRM_PASSWORD"  # Reference to vault secret
+  client_id: "sugar"
+  client_secret_vault: "SUGARCRM_CLIENT_SECRET"  # Reference to vault secret
+  platform: "mobile"
+  api_version: "v11"
+  timeout: 60
+
+# HTTP client settings
+http:
+  pool_connections: 10
+  pool_maxsize: 20
+  total_retries: 3
+  timeout: 30
+
+# Azure VM (for deployment)
+azure_vm:
+  host: "57.158.27.35"
+  port: 22
+  username: "esa_pbi_admin"
+  password_vault: "VM_SSH_PASSWORD"  # Reference to vault secret

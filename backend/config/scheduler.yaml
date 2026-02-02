@@ -1,0 +1,80 @@
+# =============================================================================
+# ESA Backend - Scheduler Configuration
+# =============================================================================
+# Non-sensitive settings only.
+
+scheduler:
+  enabled: true
+  timezone: "Asia/Singapore"
+  max_workers: 5
+  working_dir: "/var/www/backend/python"
+
+  # Resource limits
+  resources:
+    db_pool: 10
+    soap_api: 5
+    http_api: 10
+    scheduler_reserved: 2
+
+  # Default retry settings
+  retry:
+    max_attempts: 3
+    delay_seconds: 300
+    backoff_multiplier: 2.0
+    max_delay_seconds: 3600
+
+  # Batch processing
+  batch:
+    chunk_size: 500
+    compression_threshold: 1024
+
+# Pipeline-specific settings
+pipelines:
+  rentroll:
+    sql_chunk_size: 500
+    location_codes:
+      - "SG01"
+      - "SG02"
+      - "SG03"
+      - "SG04"
+      - "SG05"
+      - "SG06"
+      - "SG07"
+      - "SG08"
+      - "SG09"
+      - "SG10"
+      - "SG11"
+      - "SG12"
+      - "HK01"
+      - "HK02"
+      - "HK03"
+      - "MY01"
+      - "MY02"
+      - "KR01"
+      - "JP01"
+
+  discount:
+    sql_chunk_size: 500
+
+  mimo:
+    sql_chunk_size: 500
+
+# Alerts
+alerts:
+  slack:
+    enabled: false
+    webhook_url_vault: "SLACK_WEBHOOK_URL"  # Reference to vault secret
+    channel: "#data-pipeline-alerts"
+    notify_on:
+      - "failure"
+      - "recovery"
+
+  email:
+    enabled: false
+    smtp_host: "smtp.your-provider.com"
+    smtp_port: 587
+    smtp_user: "alerts@your-domain.com"
+    smtp_password_vault: "SMTP_PASSWORD"  # Reference to vault secret
+    from_address: "pbi-scheduler@your-domain.com"
+    to_addresses:
+      - "data-team@your-domain.com"

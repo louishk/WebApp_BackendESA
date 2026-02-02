@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+
+{% block title %}Scheduler - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Scheduler Status</h2>
+    <div class="stats-grid" id="status-grid">
+        <div class="stat-card">
+            <div class="value" id="scheduler-status">--</div>
+            <div class="label">Status</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="jobs-scheduled">--</div>
+            <div class="label">Jobs Scheduled</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="jobs-running">--</div>
+            <div class="label">Jobs Running</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="uptime">--</div>
+            <div class="label">Uptime</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Resource Usage</h2>
+    <div class="stats-grid" id="resources-grid">
+        <div class="stat-card">
+            <div class="value"><span id="db-pool-used">0</span>/<span id="db-pool-limit">10</span></div>
+            <div class="label">DB Connections</div>
+            <div class="resource-bar"><div class="fill" id="db-pool-bar" style="width: 0%"></div></div>
+        </div>
+        <div class="stat-card">
+            <div class="value"><span id="soap-api-used">0</span>/<span id="soap-api-limit">5</span></div>
+            <div class="label">SOAP API</div>
+            <div class="resource-bar"><div class="fill" id="soap-api-bar" style="width: 0%"></div></div>
+        </div>
+        <div class="stat-card">
+            <div class="value"><span id="http-api-used">0</span>/<span id="http-api-limit">10</span></div>
+            <div class="label">HTTP API</div>
+            <div class="resource-bar"><div class="fill" id="http-api-bar" style="width: 0%"></div></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Data Freshness</h2>
+    <div class="freshness-grid" id="freshness-grid">
+        <div style="text-align:center;color:#666;">Loading...</div>
+    </div>
+</div>
+
+<div class="execution-grid">
+    <div class="card">
+        <h2>Upcoming Executions</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Pipeline</th>
+                    <th>Schedule</th>
+                    <th>Next Run (SGT)</th>
+                    <th>Time Remaining</th>
+                </tr>
+            </thead>
+            <tbody id="upcoming-executions">
+                <tr><td colspan="4" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Recent Executions</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Pipeline</th>
+                    <th>Status</th>
+                    <th>Started (SGT)</th>
+                    <th>Duration</th>
+                    <th>Records</th>
+                </tr>
+            </thead>
+            <tbody id="recent-executions">
+                <tr><td colspan="5" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="refresh-notice">Auto-refresh every 10 seconds</div>
+
+<style>
+.execution-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+@media (max-width: 1200px) {
+    .execution-grid {
+        grid-template-columns: 1fr;
+    }
+}
+.freshness-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 15px;
+}
+.freshness-card {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+    border-left: 4px solid #28a745;
+}
+.freshness-card.stale { border-left-color: #ffc107; }
+.freshness-card.old { border-left-color: #dc3545; }
+.freshness-card .pipeline { font-weight: 600; color: #1A2E5A; margin-bottom: 8px; font-size: 14px; }
+.freshness-card .date { font-size: 16px; font-weight: 500; }
+.freshness-card .ago { font-size: 12px; color: #666; margin-top: 4px; }
+.countdown { font-family: monospace; font-weight: 600; }
+.countdown.soon { color: #C41230; }
+.countdown.near { color: #ffc107; }
+.countdown.far { color: #28a745; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Singapore timezone formatting
+    const SGT_OPTIONS = { timeZone: 'Asia/Singapore', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' };
+
+    function formatSGT(dateStr) {
+        if (!dateStr) return '-';
+        return new Date(dateStr).toLocaleString('en-SG', SGT_OPTIONS);
+    }
+
+    function formatDuration(seconds) {
+        if (seconds === null || seconds === undefined || seconds === '') return '-';
+        seconds = parseFloat(seconds);  // Ensure it's a number
+        if (isNaN(seconds)) return '-';
+        if (seconds < 60) return seconds.toFixed(1) + 's';
+        return Math.floor(seconds / 60) + 'm ' + Math.floor(seconds % 60) + 's';
+    }
+
+    function formatUptime(seconds) {
+        if (!seconds) return '--';
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        if (days > 0) return days + 'd ' + hours + 'h';
+        if (hours > 0) return hours + 'h ' + mins + 'm';
+        return mins + 'm';
+    }
+
+    function updateStatus() {
+        fetch('/api/status')
+            .then(r => r.json())
+            .then(data => {
+                // Display user-friendly status
+                let statusText = 'UNKNOWN';
+                let statusEl = document.getElementById('scheduler-status');
+
+                if (data.status === 'running') {
+                    statusText = 'RUNNING';
+                    statusEl.style.color = '#28A745';
+                } else if (data.status === 'web_ui_only') {
+                    statusText = 'WEB UI';
+                    statusEl.style.color = '#FFC107';
+                } else {
+                    statusText = data.status ? data.status.toUpperCase().replace('_', ' ') : 'UNKNOWN';
+                    statusEl.style.color = '#6C757D';
+                }
+                statusEl.textContent = statusText;
+
+                document.getElementById('uptime').textContent = formatUptime(data.uptime_seconds);
+
+                // Update running jobs count if available
+                if (data.running_jobs !== undefined) {
+                    document.getElementById('jobs-running').textContent = data.running_jobs;
+                }
+
+                if (data.resources) {
+                    // DB Pool
+                    const dbPool = data.resources.db_pool || {};
+                    document.getElementById('db-pool-used').textContent = dbPool.in_use || 0;
+                    document.getElementById('db-pool-limit').textContent = dbPool.limit || 10;
+                    document.getElementById('db-pool-bar').style.width = ((dbPool.in_use || 0) / (dbPool.limit || 10) * 100) + '%';
+
+                    // SOAP API
+                    const soapApi = data.resources.soap_api || {};
+                    document.getElementById('soap-api-used').textContent = soapApi.in_use || 0;
+                    document.getElementById('soap-api-limit').textContent = soapApi.limit || 5;
+                    document.getElementById('soap-api-bar').style.width = ((soapApi.in_use || 0) / (soapApi.limit || 5) * 100) + '%';
+
+                    // HTTP API
+                    const httpApi = data.resources.http_api || {};
+                    document.getElementById('http-api-used').textContent = httpApi.in_use || 0;
+                    document.getElementById('http-api-limit').textContent = httpApi.limit || 10;
+                    document.getElementById('http-api-bar').style.width = ((httpApi.in_use || 0) / (httpApi.limit || 10) * 100) + '%';
+                }
+            })
+            .catch(err => console.error('Status fetch error:', err));
+    }
+
+    function updateJobs() {
+        fetch('/api/jobs')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('jobs-scheduled').textContent = data.jobs ? data.jobs.length : 0;
+            })
+            .catch(err => console.error('Jobs fetch error:', err));
+    }
+
+    function updateHistory() {
+        fetch('/api/history?limit=10')
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('recent-executions');
+                if (!data.results || data.results.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">No recent executions</td></tr>';
+                    return;
+                }
+
+                let running = 0;
+                tbody.innerHTML = data.results.map(job => {
+                    if (job.status === 'running') running++;
+                    const statusClass = 'status-' + job.status;
+                    const started = formatSGT(job.started_at);
+                    return `
+                        <tr>
+                            <td>${job.pipeline_name}</td>
+                            <td><span class="status ${statusClass}">${job.status}</span></td>
+                            <td>${started}</td>
+                            <td>${formatDuration(job.duration_seconds)}</td>
+                            <td>${job.records_processed || '-'}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                document.getElementById('jobs-running').textContent = running;
+            })
+            .catch(err => console.error('History fetch error:', err));
+    }
+
+    function updateFreshness() {
+        Promise.all([
+            fetch('/api/jobs').then(r => r.json()),
+            fetch('/api/data-freshness').then(r => r.json())
+        ])
+        .then(([jobsData, freshnessData]) => {
+            const grid = document.getElementById('freshness-grid');
+            const jobs = jobsData.jobs || [];
+
+            if (jobs.length === 0) {
+                grid.innerHTML = '<div style="text-align:center;color:#666;">No pipelines configured</div>';
+                return;
+            }
+
+            grid.innerHTML = jobs.map(job => {
+                const freshness = freshnessData[job.pipeline_name];
+                const dateStr = freshness ? freshness.latest_date : null;
+
+                let dateDisplay = '-';
+                let agoDisplay = 'No data';
+                let cardClass = '';
+
+                if (dateStr) {
+                    const date = new Date(dateStr);
+                    // Use Singapore timezone for consistent display
+                    const nowSGT = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Singapore' }));
+                    const dateSGT = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Singapore' }));
+                    const diffDays = Math.floor((nowSGT - dateSGT) / (1000 * 60 * 60 * 24));
+
+                    dateDisplay = date.toLocaleDateString('en-SG', { timeZone: 'Asia/Singapore', day: '2-digit', month: 'short' });
+                    agoDisplay = diffDays === 0 ? 'Today' : diffDays === 1 ? '1 day ago' : diffDays + ' days ago';
+
+                    if (diffDays > 7) cardClass = 'stale';
+                    if (diffDays > 30) cardClass = 'old';
+                }
+
+                return `
+                    <div class="freshness-card ${cardClass}">
+                        <div class="pipeline">${job.display_name}</div>
+                        <div class="date">${dateDisplay}</div>
+                        <div class="ago">${agoDisplay}</div>
+                    </div>
+                `;
+            }).join('');
+        })
+        .catch(err => {
+            console.error('Freshness fetch error:', err);
+            document.getElementById('freshness-grid').innerHTML = '<div style="color:#dc3545;">Error loading data</div>';
+        });
+    }
+
+    // Store upcoming data for countdown updates
+    let upcomingData = [];
+
+    function formatCountdown(seconds) {
+        if (seconds <= 0) return '<span class="countdown soon">Now!</span>';
+
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+
+        let result = '';
+        if (days > 0) result += days + 'd ';
+        if (hours > 0 || days > 0) result += hours + 'h ';
+        if (mins > 0 || hours > 0 || days > 0) result += mins + 'm ';
+        result += secs + 's';
+
+        // Color based on time remaining
+        let colorClass = 'far';  // Green - more than 1 hour
+        if (seconds < 3600) colorClass = 'near';  // Yellow - less than 1 hour
+        if (seconds < 600) colorClass = 'soon';   // Red - less than 10 minutes
+
+        return `<span class="countdown ${colorClass}">${result}</span>`;
+    }
+
+    function formatNextRunTime(dateStr) {
+        if (!dateStr) return '-';
+        const date = new Date(dateStr);
+        return date.toLocaleString('en-SG', {
+            timeZone: 'Asia/Singapore',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    function updateUpcoming() {
+        fetch('/api/jobs/upcoming')
+            .then(r => r.json())
+            .then(data => {
+                upcomingData = data.upcoming || [];
+                renderUpcoming();
+            })
+            .catch(err => {
+                console.error('Upcoming fetch error:', err);
+                document.getElementById('upcoming-executions').innerHTML =
+                    '<tr><td colspan="4" style="text-align: center; color: #dc3545;">Error loading</td></tr>';
+            });
+    }
+
+    function renderUpcoming() {
+        const tbody = document.getElementById('upcoming-executions');
+
+        if (!upcomingData || upcomingData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666;">No upcoming executions</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = upcomingData.map(job => `
+            <tr>
+                <td><strong>${job.display_name}</strong></td>
+                <td>${job.schedule_human}</td>
+                <td>${formatNextRunTime(job.next_run)}</td>
+                <td data-seconds="${job.seconds_until}">${formatCountdown(job.seconds_until)}</td>
+            </tr>
+        `).join('');
+    }
+
+    // Update countdown timers every second
+    function updateCountdowns() {
+        const cells = document.querySelectorAll('#upcoming-executions td[data-seconds]');
+        cells.forEach(cell => {
+            let seconds = parseInt(cell.dataset.seconds);
+            if (seconds > 0) {
+                seconds--;
+                cell.dataset.seconds = seconds;
+                cell.innerHTML = formatCountdown(seconds);
+            }
+        });
+    }
+
+    // Initial load
+    updateStatus();
+    updateJobs();
+    updateHistory();
+    updateFreshness();
+    updateUpcoming();
+
+    // Refresh data periodically
+    setInterval(updateStatus, 10000);
+    setInterval(updateHistory, 10000);
+    setInterval(updateFreshness, 30000);
+    setInterval(updateUpcoming, 60000);  // Refresh upcoming every minute
+
+    // Update countdowns every second
+    setInterval(updateCountdowns, 1000);
+</script>
+{% endblock %}

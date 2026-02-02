@@ -1,0 +1,39 @@
+[Unit]
+Description=ESA Backend Flask Application
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/backend/python
+Environment="PATH=/var/www/backend/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=/var/www/backend/python/.env
+
+# Run with Gunicorn for production
+ExecStart=/var/www/backend/python/venv/bin/gunicorn \
+    --workers 4 \
+    --threads 2 \
+    --bind 127.0.0.1:5000 \
+    --access-logfile /var/log/esa-backend/access.log \
+    --error-logfile /var/log/esa-backend/error.log \
+    --capture-output \
+    --timeout 120 \
+    wsgi:app
+
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=esa-backend
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/esa-backend /var/www/backend/python
+
+[Install]
+WantedBy=multi-user.target

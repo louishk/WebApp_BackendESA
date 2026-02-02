@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Configuration - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Configuration Files</h1>
+    <p>Manage application configuration (YAML files)</p>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="flash flash-{{ category }}" style="padding: 1rem; margin-bottom: 1rem; border-radius: 4px; background: {% if category == 'success' %}#d1fae5{% elif category == 'error' %}#fee2e2{% else %}#dbeafe{% endif %};">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+<div class="card">
+    <h2>Config Files</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>File</th>
+                <th>Sections</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for config in configs %}
+            <tr>
+                <td><strong>{{ config.name }}</strong></td>
+                <td><code>{{ config.file }}</code></td>
+                <td>{{ config.section_count }}</td>
+                <td>
+                    <a href="{{ url_for('admin.edit_config', name=config.name) }}" class="btn btn-sm">Edit</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" style="text-align: center; color: #666;">No configuration files found</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card" style="margin-top: 1rem;">
+    <h2>Config Directory</h2>
+    <p style="color: #666; font-size: 0.9rem;">
+        Configuration files are stored in <code>backend/config/</code>
+    </p>
+    <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem;">
+        Secrets are referenced using <code>*_vault</code> keys and stored in the encrypted vault.
+    </p>
+</div>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit Page' if page else 'Create Page' }} - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ 'Edit Page: ' + page.title if page else 'Create New Page' }}</h1>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}" style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<div class="card">
+    <form method="POST">
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Title *</label>
+            <input type="text" name="title" required value="{{ page.title if page else '' }}"
+                   style="width: 100%; max-width: 400px; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
+        </div>
+
+        {% if not page %}
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Slug *</label>
+            <input type="text" name="slug" required pattern="[a-z0-9_-]+"
+                   style="width: 100%; max-width: 400px; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
+            <p style="color: #666; font-size: 0.85rem; margin-top: 0.5rem;">
+                URL-friendly identifier (lowercase letters, numbers, hyphens, underscores only)
+            </p>
+        </div>
+        {% endif %}
+
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Extension</label>
+            <select name="extension"
+                    style="width: 100%; max-width: 200px; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
+                {% for ext in extensions %}
+                <option value="{{ ext }}" {% if page and page.extension == ext %}selected{% endif %}>
+                    .{{ ext }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Content</label>
+            <textarea name="content" rows="20"
+                      style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem; font-family: monospace;">{{ page.content if page else '' }}</textarea>
+        </div>
+
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="is_secure" {% if page and page.is_secure %}checked{% endif %}>
+                <span><strong>Secure Page</strong> - Requires login to view</span>
+            </label>
+        </div>
+
+        {% if current_user.role == 'admin' %}
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" name="edit_restricted" {% if page and page.edit_restricted %}checked{% endif %}>
+                <span><strong>Edit Restricted</strong> - Only admins can edit this page</span>
+            </label>
+        </div>
+        {% endif %}
+
+        <div style="margin-top: 2rem;">
+            <button type="submit" class="btn">{{ 'Update Page' if page else 'Create Page' }}</button>
+            <a href="{{ url_for('admin.list_pages') }}" class="btn btn-secondary" style="margin-left: 0.5rem;">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,29 @@
+# =============================================================================
+# ESA Backend - Application Configuration
+# =============================================================================
+# Non-sensitive settings only. Secrets are stored in the vault.
+
+app:
+  name: "ESA Backend"
+  environment: "development"  # development, staging, production
+  debug: true
+  timezone: "Asia/Singapore"
+
+flask:
+  host: "0.0.0.0"
+  port: 5000
+  secret_key_vault: "FLASK_SECRET_KEY"  # Reference to vault secret
+
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "/var/log/esa-backend/app.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+session:
+  cookie_secure: false  # Set true in production (requires HTTPS)
+  cookie_httponly: true
+  cookie_samesite: "Lax"
+
+jwt:
+  expiry_seconds: 3600
+  secret_vault: "JWT_SECRET"  # Reference to vault secret
