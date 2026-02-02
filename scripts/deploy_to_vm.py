@@ -316,20 +316,12 @@ def step_check_env(credentials: dict, verbose: bool = True) -> bool:
         if [ -f "{VM_PYTHON_PATH}/.env" ]; then
             echo ".env exists"
 
-            # Check for required variables (without revealing values)
-            required_vars="SCHEDULER_DB_HOST SCHEDULER_DB_NAME SCHEDULER_DB_USER VAULT_MASTER_KEY"
-            missing=""
-
-            for var in $required_vars; do
-                if ! grep -q "^$var=" {VM_PYTHON_PATH}/.env; then
-                    missing="$missing $var"
-                fi
-            done
-
-            if [ -n "$missing" ]; then
-                echo "WARNING: Missing env vars:$missing"
+            # Check for required variable (only VAULT_MASTER_KEY needed - other config is in YAML)
+            if grep -q "^VAULT_MASTER_KEY=" {VM_PYTHON_PATH}/.env; then
+                echo "VAULT_MASTER_KEY: SET"
             else
-                echo "All required env vars present"
+                echo "ERROR: VAULT_MASTER_KEY not found in .env"
+                exit 1
             fi
         else
             echo "ERROR: .env file not found at {VM_PYTHON_PATH}/.env"
