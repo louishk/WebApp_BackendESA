@@ -72,6 +72,7 @@ def microsoft_login():
 
 
 @auth_bp.route('/oauth_callback')
+@auth_bp.route('/oauth_callback.php')  # Compatibility with Azure AD config
 def oauth_callback():
     """Handle Microsoft OAuth callback."""
     from web.auth.oauth import oauth
