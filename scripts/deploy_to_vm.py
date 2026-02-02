@@ -253,8 +253,27 @@ def deploy(restart_scheduler: bool = False, dry_run: bool = False, verbose: bool
     """
     credentials = get_ssh_credentials()
 
-    # Sync code via rsync
-    print("\n[1/2] Syncing code to VM...")
+    # Step 1: Stop running services before syncing
+    if not dry_run:
+        print("\n[1/3] Stopping services before deploy...")
+        stop_cmd = (
+            "sudo systemctl stop esa-backend 2>/dev/null || true; "
+            "sudo systemctl stop backend-scheduler 2>/dev/null || true; "
+            "sudo systemctl stop backend-scheduler-web 2>/dev/null || true; "
+            # Kill any stray Python processes running from /var/www/backend
+            "sudo pkill -f '/var/www/backend.*python' 2>/dev/null || true; "
+            "sudo pkill -f 'gunicorn.*wsgi' 2>/dev/null || true; "
+            "sleep 2; "
+            "echo 'Services stopped'"
+        )
+        stdout, stderr, exit_code = run_ssh_command(credentials, stop_cmd, verbose=verbose)
+        if verbose:
+            print("Services stopped.")
+    else:
+        print("\n[1/3] Would stop services (dry run)")
+
+    # Step 2: Sync code via rsync
+    print("\n[2/3] Syncing code to VM...")
     success = run_rsync(credentials, dry_run=dry_run, verbose=verbose)
 
     if not success:
@@ -267,34 +286,41 @@ def deploy(restart_scheduler: bool = False, dry_run: bool = False, verbose: bool
 
     print("Code sync successful!")
 
-    # Restart scheduler if requested
+    # Step 3: Restart services
     if restart_scheduler:
-        print("\n[2/2] Restarting scheduler...")
+        print("\n[3/3] Starting services...")
+        start_cmd = (
+            "sudo systemctl daemon-reload && "
+            "sudo systemctl start esa-backend && "
+            "sudo systemctl start backend-scheduler 2>/dev/null || true; "
+            "sleep 2 && sudo systemctl status esa-backend --no-pager"
+        )
         stdout, stderr, exit_code = run_ssh_command(
             credentials,
-            "sudo systemctl restart backend-scheduler && sudo systemctl restart backend-scheduler-web && "
-            "sleep 2 && sudo systemctl status backend-scheduler --no-pager",
+            start_cmd,
             verbose
         )
 
         if exit_code != 0:
-            print("WARNING: Scheduler restart may have issues")
+            print("WARNING: Service start may have issues")
         else:
-            print("Scheduler restarted successfully!")
+            print("Services started successfully!")
     else:
-        print("\n[2/2] Skipping scheduler restart (use --restart to restart)")
+        print("\n[3/3] Services stopped. Use --restart to start them after deploy")
 
     return True
 
 
 def check_status(verbose: bool = True):
-    """Check scheduler status on VM."""
+    """Check service status on VM."""
     credentials = get_ssh_credentials()
 
-    print("\nChecking scheduler status...")
+    print("\nChecking service status...")
     stdout, stderr, exit_code = run_ssh_command(
         credentials,
-        "sudo systemctl status backend-scheduler backend-scheduler-web --no-pager",
+        "sudo systemctl status esa-backend --no-pager; "
+        "echo '---'; "
+        "sudo systemctl status backend-scheduler --no-pager 2>/dev/null || echo 'backend-scheduler not running'",
         verbose
     )
 
