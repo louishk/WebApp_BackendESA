@@ -90,7 +90,7 @@
     </div>
 </div>
 
-<div class="refresh-notice">Auto-refresh every 10 seconds</div>
+<div class="refresh-notice">Auto-refresh every 45 seconds</div>
 
 <style>
 .execution-grid {
@@ -385,10 +385,10 @@
     updateFreshness();
     updateUpcoming();
 
-    // Refresh data periodically
-    setInterval(updateStatus, 10000);
-    setInterval(updateHistory, 10000);
-    setInterval(updateFreshness, 30000);
+    // Refresh data periodically (45 seconds)
+    setInterval(updateStatus, 45000);
+    setInterval(updateHistory, 45000);
+    setInterval(updateFreshness, 45000);
     setInterval(updateUpcoming, 60000);  // Refresh upcoming every minute
 
     // Update countdowns every second
