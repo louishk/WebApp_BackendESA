@@ -19,7 +19,6 @@ Example Usage:
 import logging
 from typing import Optional, Dict, Any, List, Generator, Tuple
 from datetime import datetime, timedelta
-from decouple import config as env_config
 
 import requests
 
@@ -86,33 +85,35 @@ class SugarCRMClient:
     @classmethod
     def from_env(cls) -> 'SugarCRMClient':
         """
-        Create client from environment variables.
+        Create client from unified config system (apis.yaml + vault).
 
-        Required env vars:
-        - SUGARCRM_BASE_URL or SUGARCRM_URL
-        - SUGARCRM_USERNAME
-        - SUGARCRM_PASSWORD
-
-        Optional env vars:
-        - SUGARCRM_CLIENT_ID (default: "sugar")
-        - SUGARCRM_CLIENT_SECRET (default: "")
-        - SUGARCRM_PLATFORM (default: "mobile")
-        - SUGARCRM_API_VERSION (default: "v11")
-        - SUGARCRM_TIMEOUT (default: 60)
+        Config loaded from apis.yaml:
+        - sugarcrm.base_url: SugarCRM instance URL
+        - sugarcrm.username: Username
+        - sugarcrm.password_vault: Vault key for password (auto-resolved)
+        - sugarcrm.client_id: OAuth client ID (default: "sugar")
+        - sugarcrm.client_secret_vault: Vault key for client secret (auto-resolved)
+        - sugarcrm.platform: Platform identifier (default: "mobile")
+        - sugarcrm.api_version: API version (default: "v11")
+        - sugarcrm.timeout: Request timeout (default: 60)
         """
-        base_url = env_config('SUGARCRM_BASE_URL', default=None)
-        if not base_url:
-            base_url = env_config('SUGARCRM_URL')
+        from common.config_loader import get_config
+
+        app_config = get_config()
+        sugar_cfg = app_config.apis.sugarcrm
+
+        if not sugar_cfg or not sugar_cfg.base_url:
+            raise ValueError("SugarCRM configuration not found. Check apis.yaml.")
 
         return cls(
-            base_url=base_url,
-            username=env_config('SUGARCRM_USERNAME'),
-            password=env_config('SUGARCRM_PASSWORD'),
-            client_id=env_config('SUGARCRM_CLIENT_ID', default='sugar'),
-            client_secret=env_config('SUGARCRM_CLIENT_SECRET', default=''),
-            platform=env_config('SUGARCRM_PLATFORM', default='mobile'),
-            api_version=env_config('SUGARCRM_API_VERSION', default=cls.DEFAULT_API_VERSION),
-            timeout=env_config('SUGARCRM_TIMEOUT', default=cls.DEFAULT_TIMEOUT, cast=int),
+            base_url=sugar_cfg.base_url,
+            username=sugar_cfg.username,
+            password=sugar_cfg.password_vault,  # Auto-resolved from vault
+            client_id=getattr(sugar_cfg, 'client_id', 'sugar'),
+            client_secret=sugar_cfg.client_secret_vault or '',  # Auto-resolved from vault
+            platform=getattr(sugar_cfg, 'platform', 'mobile'),
+            api_version=getattr(sugar_cfg, 'api_version', cls.DEFAULT_API_VERSION),
+            timeout=getattr(sugar_cfg, 'timeout', cls.DEFAULT_TIMEOUT),
         )
 
     # =========================================================================

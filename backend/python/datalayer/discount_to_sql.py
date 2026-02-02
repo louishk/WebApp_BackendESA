@@ -17,16 +17,14 @@ Usage:
     # Automatic mode - previous month + current month (for scheduler)
     python discount_to_sql.py --mode auto
 
-Configuration (in .env):
-    - SOAP_* : SOAP API connection settings
-    - DISCOUNT_LOCATION_CODES: Comma-separated location codes (or uses RENTROLL_LOCATION_CODES)
-    - DISCOUNT_SQL_CHUNK_SIZE: Batch size for upsert (default: 500)
+Configuration (in scheduler.yaml):
+    pipelines.discount.location_codes: List of location codes
+    pipelines.discount.sql_chunk_size: Batch size for upsert (default: 500)
 """
 
 import argparse
 from datetime import datetime, date
 from typing import List, Dict, Any
-from decouple import config as env_config, Csv
 from tqdm import tqdm
 
 from common import (
@@ -51,6 +49,7 @@ from common import (
     # Current month delete utility
     delete_current_month_records,
 )
+from common.config import get_pipeline_config
 
 
 # =============================================================================
@@ -183,7 +182,7 @@ def push_to_database(
     tqdm.write("  v Table 'discount' ready")
 
     session_manager = SessionManager(engine)
-    chunk_size = env_config('DISCOUNT_SQL_CHUNK_SIZE', default=500, cast=int)
+    chunk_size = get_pipeline_config('discount', 'sql_chunk_size', 500)
     num_chunks = (len(data) + chunk_size - 1) // chunk_size
 
     with session_manager.session_scope() as session:
@@ -268,14 +267,12 @@ def main():
     config = DataLayerConfig.from_env()
 
     if not config.soap:
-        raise ValueError("SOAP configuration not found in .env")
+        raise ValueError("SOAP configuration not found. Check apis.yaml and vault secrets.")
 
-    # Load location codes from .env (fallback to RENTROLL_LOCATION_CODES)
-    location_codes = env_config(
-        'DISCOUNT_LOCATION_CODES',
-        default=env_config('RENTROLL_LOCATION_CODES', default=''),
-        cast=Csv()
-    )
+    # Load location codes from unified config (uses shared location_codes)
+    location_codes = get_pipeline_config('discount', 'location_codes', [])
+    if not location_codes:
+        raise ValueError("DISCOUNT location_codes not configured in scheduler.yaml")
 
     # Determine date range based on mode
     if args.mode == 'manual':

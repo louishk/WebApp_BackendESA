@@ -70,10 +70,38 @@ pipelines:
   mimo:
     sql_chunk_size: 500
     location_codes: *location_codes
+    days_back: 60
+    days_forward: 365
 
   unitsinfo:
     sql_chunk_size: 500
     location_codes: *location_codes
+
+  fxrate:
+    sql_chunk_size: 1000
+    target_currencies:
+      - "USD"
+      - "HKD"
+      - "KRW"
+      - "JPY"
+      - "AUD"
+      - "NZD"
+      - "TWD"
+      - "THB"
+      - "MYR"
+      - "CNY"
+    historical_start: "2010-01-01"
+    incremental_days: 7
+
+  sugarcrm:
+    sql_chunk_size: 500
+    batch_size: 200
+    incremental_days: 7
+    modules:
+      - "Leads"
+      - "Contacts"
+      - "Accounts"
+      - "Opportunities"
 
 # Alerts
 alerts:

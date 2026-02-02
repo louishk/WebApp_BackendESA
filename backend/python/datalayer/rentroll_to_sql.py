@@ -17,10 +17,9 @@ Usage:
     # Automatic mode - previous month + current month (for scheduler)
     python rentroll_to_sql.py --mode auto
 
-Configuration (in .env):
-    - SOAP_* : SOAP API connection settings
-    - RENTROLL_LOCATION_CODES: Comma-separated location codes
-    - RENTROLL_SQL_CHUNK_SIZE: Batch size for upsert (default: 500)
+Configuration (in scheduler.yaml):
+    pipelines.rentroll.location_codes: List of location codes
+    pipelines.rentroll.sql_chunk_size: Batch size for upsert (default: 300)
 """
 
 import argparse

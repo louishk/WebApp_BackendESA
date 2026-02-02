@@ -18,18 +18,16 @@ Usage:
     # Automatic mode - delete D-60 and repush (for scheduler)
     python moveinmoveout_to_sql.py --mode auto
 
-Configuration (in .env):
-    - SOAP_* : SOAP API connection settings
-    - MOVEINMOVEOUT_LOCATION_CODES: Comma-separated location codes (or uses RENTROLL_LOCATION_CODES)
-    - MOVEINMOVEOUT_SQL_CHUNK_SIZE: Batch size for upsert (default: 500)
-    - MOVEINMOVEOUT_DAYS_BACK: Days to look back in auto mode (default: 60)
-    - MOVEINMOVEOUT_DAYS_FORWARD: Days to look forward in auto mode (default: 365)
+Configuration (in scheduler.yaml):
+    pipelines.mimo.location_codes: List of location codes
+    pipelines.mimo.sql_chunk_size: Batch size for upsert (default: 500)
+    pipelines.mimo.days_back: Days to look back in auto mode (default: 60)
+    pipelines.mimo.days_forward: Days to look forward in auto mode (default: 365)
 """
 
 import argparse
 from datetime import datetime, date
 from typing import List, Dict, Any
-from decouple import config as env_config, Csv
 from tqdm import tqdm
 
 from common import (
@@ -51,6 +49,7 @@ from common import (
     convert_to_datetime,
     deduplicate_records,
 )
+from common.config import get_pipeline_config
 
 
 # =============================================================================
@@ -230,7 +229,7 @@ def push_to_database(
     tqdm.write("  v Table 'mimo' ready")
 
     session_manager = SessionManager(engine)
-    chunk_size = env_config('MOVEINMOVEOUT_SQL_CHUNK_SIZE', default=500, cast=int)
+    chunk_size = get_pipeline_config('mimo', 'sql_chunk_size', 500)
     num_chunks = (len(data) + chunk_size - 1) // chunk_size
 
     with session_manager.session_scope() as session:
@@ -310,18 +309,16 @@ def main():
     config = DataLayerConfig.from_env()
 
     if not config.soap:
-        raise ValueError("SOAP configuration not found in .env")
+        raise ValueError("SOAP configuration not found. Check apis.yaml and vault secrets.")
 
-    # Load location codes from .env (fallback to RENTROLL_LOCATION_CODES)
-    location_codes = env_config(
-        'MOVEINMOVEOUT_LOCATION_CODES',
-        default=env_config('RENTROLL_LOCATION_CODES', default=''),
-        cast=Csv()
-    )
+    # Load location codes from unified config (uses shared location_codes)
+    location_codes = get_pipeline_config('mimo', 'location_codes', [])
+    if not location_codes:
+        raise ValueError("MIMO location_codes not configured in scheduler.yaml")
 
-    # Load auto mode settings
-    days_back = env_config('MOVEINMOVEOUT_DAYS_BACK', default=60, cast=int)
-    days_forward = env_config('MOVEINMOVEOUT_DAYS_FORWARD', default=365, cast=int)
+    # Load auto mode settings from unified config
+    days_back = get_pipeline_config('mimo', 'days_back', 60)
+    days_forward = get_pipeline_config('mimo', 'days_forward', 365)
 
     # Determine date range based on mode
     if args.mode == 'manual':

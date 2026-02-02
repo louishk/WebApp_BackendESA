@@ -27,13 +27,18 @@ Usage:
     # Limit records (for testing)
     python sugarcrm_to_sql.py --mode backfill --module Contacts --limit 100
 
-Configuration (in .env):
-    - POSTGRESQL_* : Database connection settings
-    - SUGARCRM_* : SugarCRM API credentials
-    - SUGARCRM_MODULES : Comma-separated module list (default: Leads,Contacts,Accounts)
-    - SUGARCRM_BATCH_SIZE : API batch size (default: 200)
-    - SUGARCRM_SQL_CHUNK_SIZE : SQL upsert chunk size (default: 500)
-    - SUGARCRM_INCREMENTAL_DAYS : Days to look back for auto mode (default: 7)
+Configuration (in scheduler.yaml):
+    pipelines.sugarcrm.modules: List of modules to sync
+    pipelines.sugarcrm.batch_size: API batch size (default: 200)
+    pipelines.sugarcrm.sql_chunk_size: SQL upsert chunk size (default: 500)
+    pipelines.sugarcrm.incremental_days: Days to look back for auto mode (default: 7)
+
+Configuration (in apis.yaml):
+    sugarcrm.base_url: SugarCRM instance URL
+    sugarcrm.username: Username
+    sugarcrm.password_vault: Vault key for password
+    sugarcrm.client_id: OAuth client ID
+    sugarcrm.client_secret_vault: Vault key for client secret
 """
 
 import argparse
@@ -42,7 +47,6 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Type, Generator
 
-from decouple import config as env_config, Csv
 from tqdm import tqdm
 from sqlalchemy import Column, String, Integer, DateTime, Date, Boolean, Numeric, Text
 from sqlalchemy.ext.declarative import declarative_base
@@ -62,6 +66,7 @@ from common import (
     convert_to_decimal,
     convert_to_datetime,
 )
+from common.config import get_pipeline_config
 from common.sugarcrm_client import SugarCRMClient
 
 # Setup logging
@@ -870,15 +875,11 @@ def main():
     # Load configuration
     config = DataLayerConfig.from_env()
 
-    # Load SugarCRM-specific config from .env
-    modules = env_config(
-        'SUGARCRM_MODULES',
-        default=','.join(DEFAULT_MODULES),
-        cast=Csv()
-    )
-    batch_size = args.batch_size or env_config('SUGARCRM_BATCH_SIZE', default=DEFAULT_BATCH_SIZE, cast=int)
-    sql_chunk_size = args.chunk_size or env_config('SUGARCRM_SQL_CHUNK_SIZE', default=DEFAULT_SQL_CHUNK_SIZE, cast=int)
-    incremental_days = env_config('SUGARCRM_INCREMENTAL_DAYS', default=DEFAULT_INCREMENTAL_DAYS, cast=int)
+    # Load SugarCRM-specific config from unified config
+    modules = get_pipeline_config('sugarcrm', 'modules', DEFAULT_MODULES)
+    batch_size = args.batch_size or get_pipeline_config('sugarcrm', 'batch_size', DEFAULT_BATCH_SIZE)
+    sql_chunk_size = args.chunk_size or get_pipeline_config('sugarcrm', 'sql_chunk_size', DEFAULT_SQL_CHUNK_SIZE)
+    incremental_days = get_pipeline_config('sugarcrm', 'incremental_days', DEFAULT_INCREMENTAL_DAYS)
 
     # Parse since date
     since_date = None

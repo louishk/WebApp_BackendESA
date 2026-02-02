@@ -14,15 +14,14 @@ Features:
 Usage:
     python units_info_to_sql.py
 
-Configuration (in .env):
-    - SOAP_* : SOAP API connection settings
-    - RENTROLL_LOCATION_CODES: Comma-separated location codes (reused for units)
+Configuration (in scheduler.yaml):
+    pipelines.unitsinfo.location_codes: List of location codes
+    pipelines.unitsinfo.sql_chunk_size: Batch size for upsert (default: 500)
 """
 
 import sys
 from pathlib import Path
 from typing import List, Dict, Any
-from decouple import config as env_config, Csv
 from tqdm import tqdm
 
 # Add parent directory to path
@@ -42,6 +41,7 @@ from common import (
     convert_to_datetime,
     deduplicate_records,
 )
+from common.config import get_pipeline_config
 
 
 # =============================================================================
@@ -256,10 +256,12 @@ def main():
     config = DataLayerConfig.from_env()
 
     if not config.soap:
-        raise ValueError("SOAP configuration not found in .env")
+        raise ValueError("SOAP configuration not found. Check apis.yaml and vault secrets.")
 
-    # Load location codes (reuse RENTROLL_LOCATION_CODES)
-    location_codes = env_config('RENTROLL_LOCATION_CODES', cast=Csv())
+    # Load location codes from unified config (uses shared location_codes)
+    location_codes = get_pipeline_config('unitsinfo', 'location_codes', [])
+    if not location_codes:
+        raise ValueError("UNITSINFO location_codes not configured in scheduler.yaml")
 
     # Initialize SOAP client for CallCenterWs (different from ReportingWs)
     soap_client = SOAPClient(

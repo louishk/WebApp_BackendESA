@@ -23,12 +23,11 @@ Usage:
     # Refresh monthly averages only
     python fxrate_to_sql.py --mode refresh-monthly
 
-Configuration (in .env):
-    - POSTGRESQL_* : Database connection settings
-    - FX_TARGET_CURRENCIES: Comma-separated currency codes (default: USD,HKD,KRW,JPY,AUD,NZD,TWD,THB,MYR,CNY)
-    - FX_HISTORICAL_START: Historical start date (default: 2010-01-01)
-    - FX_SQL_CHUNK_SIZE: Batch size for upsert (default: 1000)
-    - FX_INCREMENTAL_DAYS: Days to look back for auto mode (default: 7)
+Configuration (in scheduler.yaml):
+    pipelines.fxrate.target_currencies: List of currency codes
+    pipelines.fxrate.historical_start: Historical start date (default: 2010-01-01)
+    pipelines.fxrate.sql_chunk_size: Batch size for upsert (default: 1000)
+    pipelines.fxrate.incremental_days: Days to look back for auto mode (default: 7)
 """
 
 import argparse
@@ -37,7 +36,6 @@ from decimal import Decimal
 from typing import List, Dict, Any, Optional, Tuple
 from collections import defaultdict
 
-from decouple import config as env_config, Csv
 from tqdm import tqdm
 
 try:
@@ -55,6 +53,7 @@ from common import (
     FXRateMonthly,
     convert_to_decimal,
 )
+from common.config import get_pipeline_config
 
 
 # =============================================================================
@@ -572,15 +571,11 @@ def main():
     # Load configuration
     config = DataLayerConfig.from_env()
 
-    # Load FX-specific config from .env
-    target_currencies = env_config(
-        'FX_TARGET_CURRENCIES',
-        default=','.join(DEFAULT_TARGET_CURRENCIES),
-        cast=Csv()
-    )
-    historical_start_str = env_config('FX_HISTORICAL_START', default='2010-01-01')
-    chunk_size = env_config('FX_SQL_CHUNK_SIZE', default=1000, cast=int)
-    incremental_days = env_config('FX_INCREMENTAL_DAYS', default=7, cast=int)
+    # Load FX-specific config from unified config
+    target_currencies = get_pipeline_config('fxrate', 'target_currencies', DEFAULT_TARGET_CURRENCIES)
+    historical_start_str = get_pipeline_config('fxrate', 'historical_start', '2010-01-01')
+    chunk_size = get_pipeline_config('fxrate', 'sql_chunk_size', 1000)
+    incremental_days = get_pipeline_config('fxrate', 'incremental_days', 7)
 
     # Parse historical start date
     historical_start = datetime.strptime(historical_start_str, '%Y-%m-%d').date()

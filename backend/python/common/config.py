@@ -5,8 +5,37 @@ Uses unified config system (YAML + vault) for databases, Redis, and HTTP client.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 import os
+
+
+def get_pipeline_config(pipeline_name: str, key: str, default: Any = None) -> Any:
+    """
+    Get pipeline-specific config from scheduler.yaml.
+
+    Usage:
+        location_codes = get_pipeline_config('rentroll', 'location_codes', [])
+        chunk_size = get_pipeline_config('fxrate', 'sql_chunk_size', 1000)
+
+    Args:
+        pipeline_name: Name of the pipeline (rentroll, mimo, discount, fxrate, sugarcrm, etc.)
+        key: Configuration key to retrieve
+        default: Default value if not found
+
+    Returns:
+        Configuration value or default
+    """
+    try:
+        from common.config_loader import get_config
+        config = get_config()
+        pipelines = getattr(config.scheduler, 'pipelines', None)
+        if pipelines:
+            pipeline = getattr(pipelines, pipeline_name, None)
+            if pipeline:
+                return getattr(pipeline, key, default)
+    except Exception:
+        pass
+    return default
 
 
 class DatabaseType(Enum):
