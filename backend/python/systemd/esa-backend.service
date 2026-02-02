@@ -6,12 +6,12 @@ After=network.target postgresql.service
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/var/www/backend/python
-Environment="PATH=/var/www/backend/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=/var/www/backend/python/.env
+WorkingDirectory=/var/www/backend/backend/python
+Environment="PATH=/var/www/backend/backend/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=-/var/www/backend/backend/python/.env
 
 # Run with Gunicorn for production
-ExecStart=/var/www/backend/python/venv/bin/gunicorn \
+ExecStart=/var/www/backend/backend/python/venv/bin/gunicorn \
     --workers 4 \
     --threads 2 \
     --bind 127.0.0.1:5000 \
@@ -33,7 +33,7 @@ SyslogIdentifier=esa-backend
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/esa-backend /var/www/backend/python
+ReadWritePaths=/var/log/esa-backend /var/www/backend/backend/python
 
 [Install]
 WantedBy=multi-user.target

@@ -51,10 +51,12 @@ from dotenv import load_dotenv
 load_dotenv(project_root / '.env')
 
 # VM paths
+# Note: Repo cloned to /var/www/backend, Python code is in backend/python subdirectory
 VM_BACKEND_PATH = "/var/www/backend"
 VM_PYTHON_PATH = f"{VM_BACKEND_PATH}/backend/python"
 VM_VENV_PATH = f"{VM_PYTHON_PATH}/venv"
 VM_VAULT_PATH = f"{VM_PYTHON_PATH}/.vault"
+VM_ENV_PATH = f"{VM_PYTHON_PATH}/.env"
 
 # Rsync exclude patterns (files that should NOT be synced)
 RSYNC_EXCLUDES = [
