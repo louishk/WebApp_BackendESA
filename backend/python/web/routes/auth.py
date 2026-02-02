@@ -2,7 +2,6 @@
 Authentication routes - login, logout, OAuth callbacks.
 """
 
-import os
 import bcrypt
 from flask import Blueprint, render_template, redirect, url_for, request, flash, session, current_app
 from flask_login import login_user, logout_user, login_required, current_user
@@ -57,8 +56,18 @@ def login():
 def microsoft_login():
     """Initiate Microsoft OAuth login."""
     from web.auth.oauth import oauth
+    from common.config_loader import get_config
 
-    redirect_uri = os.getenv('MS_OAUTH_REDIRECT_URI') or url_for('auth.oauth_callback', _external=True)
+    config = get_config()
+    ms_config = config.oauth.microsoft if config.oauth else None
+
+    # Use config redirect_uri, or generate from current request
+    if ms_config and ms_config.redirect_uri:
+        redirect_uri = ms_config.redirect_uri
+    else:
+        redirect_uri = url_for('auth.oauth_callback', _external=True)
+
+    current_app.logger.info(f"OAuth redirect URI: {redirect_uri}")
     return oauth.microsoft.authorize_redirect(redirect_uri)
 
 
