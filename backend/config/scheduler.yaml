@@ -29,35 +29,51 @@ scheduler:
     compression_threshold: 1024
 
 # Pipeline-specific settings
+# Location codes used by: rentroll, discount, mimo, unitsinfo
+location_codes: &location_codes
+  - "L001"
+  - "L002"
+  - "L003"
+  - "L004"
+  - "L005"
+  - "L006"
+  - "L007"
+  - "L008"
+  - "L009"
+  - "L010"
+  - "L011"
+  - "L013"
+  - "L015"
+  - "L017"
+  - "L018"
+  - "L019"
+  - "L020"
+  - "L021"
+  - "L022"
+  - "L023"
+  - "L024"
+  - "L025"
+  - "L026"
+  - "L028"
+  - "L029"
+  - "L030"
+
 pipelines:
   rentroll:
-    sql_chunk_size: 500
-    location_codes:
-      - "SG01"
-      - "SG02"
-      - "SG03"
-      - "SG04"
-      - "SG05"
-      - "SG06"
-      - "SG07"
-      - "SG08"
-      - "SG09"
-      - "SG10"
-      - "SG11"
-      - "SG12"
-      - "HK01"
-      - "HK02"
-      - "HK03"
-      - "MY01"
-      - "MY02"
-      - "KR01"
-      - "JP01"
+    sql_chunk_size: 300
+    location_codes: *location_codes
 
   discount:
     sql_chunk_size: 500
+    location_codes: *location_codes
 
   mimo:
     sql_chunk_size: 500
+    location_codes: *location_codes
+
+  unitsinfo:
+    sql_chunk_size: 500
+    location_codes: *location_codes
 
 # Alerts
 alerts:
