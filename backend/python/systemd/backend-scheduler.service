@@ -1,33 +1,33 @@
 [Unit]
-Description=PBI Data Pipeline Scheduler - Daemon
-After=network.target postgresql.service
+Description=ESA Backend - Scheduler Daemon
+After=network.target postgresql.service esa-backend.service
 Wants=postgresql.service
 
 [Service]
 Type=simple
 User=www-data
 Group=www-data
-WorkingDirectory=/var/www/html/app/scheduler/python
-Environment="PATH=/var/www/html/app/scheduler/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=/var/www/html/app/scheduler/python/.env
-ExecStart=/var/www/html/app/scheduler/python/venv/bin/python run_scheduler.py daemon start --foreground
+WorkingDirectory=/var/www/backend/backend/python
+Environment="PATH=/var/www/backend/backend/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=-/var/www/backend/backend/python/.env
+ExecStart=/var/www/backend/backend/python/venv/bin/python run_scheduler.py daemon start --foreground
 ExecReload=/bin/kill -HUP $MAINPID
-ExecStop=/var/www/html/app/scheduler/python/venv/bin/python run_scheduler.py daemon stop
+ExecStop=/var/www/backend/backend/python/venv/bin/python run_scheduler.py daemon stop
 
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=backend-scheduler
+SyslogIdentifier=esa-scheduler
 
-# Graceful shutdown timeout (match scheduler.yaml shutdown.timeout_seconds)
+# Graceful shutdown timeout
 TimeoutStopSec=300
 
 # Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/log/pbi-scheduler /var/www/html/app/scheduler/python /var/run
+ReadWritePaths=/var/log/esa-backend /var/www/backend/backend/python /var/run
 
 [Install]
 WantedBy=multi-user.target

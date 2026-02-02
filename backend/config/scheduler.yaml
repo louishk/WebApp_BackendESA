@@ -7,7 +7,7 @@ scheduler:
   enabled: true
   timezone: "Asia/Singapore"
   max_workers: 5
-  working_dir: "/var/www/backend/python"
+  working_dir: "/var/www/backend/backend/python"
 
   # Resource limits
   resources:

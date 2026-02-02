@@ -49,7 +49,10 @@
       "Bash(pkill:*)",
       "Bash(find:*)",
       "Bash(grep:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(PYTHONPATH=\"$PWD:$PWD/backend/python\" python3:*)",
+      "Bash(sudo apt-get install:*)"
     ]
   }
 }
