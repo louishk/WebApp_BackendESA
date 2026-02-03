@@ -8,7 +8,7 @@ import threading
 import signal
 import socket
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Callable, List
 from uuid import uuid4
 
@@ -341,7 +341,7 @@ class SchedulerEngine:
             pipeline_name=pipeline_name,
             execution_id=execution_id,
             priority=pipeline.priority,
-            scheduled_at=datetime.now(),
+            scheduled_at=datetime.now(timezone.utc),
             config=pipeline,
             status=JobStatus.PENDING
         )
@@ -445,7 +445,7 @@ class SchedulerEngine:
             pipeline_name=pipeline_name,
             execution_id=execution_id,
             priority=pipeline.priority,
-            scheduled_at=datetime.now(),
+            scheduled_at=datetime.now(timezone.utc),
             config=modified_pipeline,
             status=JobStatus.QUEUED
         )
@@ -502,7 +502,7 @@ class SchedulerEngine:
                 status='running',
                 priority=job_context.priority,
                 scheduled_at=job_context.scheduled_at,
-                started_at=datetime.now(),
+                started_at=datetime.now(timezone.utc),
                 mode=job_context.config.default_args.get('mode', 'auto'),
                 parameters=job_context.config.default_args,
                 attempt_number=job_context.attempt_number,
@@ -527,7 +527,7 @@ class SchedulerEngine:
 
             if record:
                 record.status = 'completed' if result.success else 'failed'
-                record.completed_at = datetime.now()
+                record.completed_at = datetime.now(timezone.utc)
                 record.duration_seconds = result.duration_seconds
                 record.records_processed = result.records_processed
                 if result.error_message:
@@ -547,7 +547,7 @@ class SchedulerEngine:
 
             if record:
                 record.status = 'failed'
-                record.completed_at = datetime.now()
+                record.completed_at = datetime.now(timezone.utc)
                 record.error_message = error
                 session.commit()
         finally:

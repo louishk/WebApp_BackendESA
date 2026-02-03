@@ -16,13 +16,19 @@ from web.auth.jwt_auth import require_auth
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
-# Singapore timezone for all timestamps
+# Timezones
 SGT = pytz.timezone('Asia/Singapore')
+UTC = pytz.UTC
 
 
 def now_sgt():
-    """Get current time in Singapore timezone."""
+    """Get current time in Singapore timezone (for display)."""
     return datetime.now(SGT)
+
+
+def now_utc():
+    """Get current time in UTC (for database storage)."""
+    return datetime.now(UTC)
 
 
 def get_session():
@@ -369,8 +375,8 @@ def api_run_job_async(pipeline):
             execution_id=execution_id,
             status='running',
             priority=p.priority,
-            scheduled_at=now_sgt(),
-            started_at=now_sgt(),
+            scheduled_at=now_utc(),
+            started_at=now_utc(),
             mode=mode,
             parameters=final_args,
             triggered_by='web'
@@ -403,7 +409,7 @@ def api_run_job_async(pipeline):
                 error_message=f"Resource acquisition timeout: {e}"
             )
 
-        job_history.completed_at = now_sgt()
+        job_history.completed_at = now_utc()
         job_history.duration_seconds = result.duration_seconds
         job_history.records_processed = result.records_processed
         job_history.status = 'completed' if result.success else 'failed'
@@ -672,7 +678,7 @@ def api_cleanup_stale():
         for job in stale:
             job.status = 'failed'
             job.error_message = 'Interrupted - server restarted'
-            job.completed_at = now_sgt()
+            job.completed_at = now_utc()
             fixed.append({
                 'pipeline_name': job.pipeline_name,
                 'execution_id': str(job.execution_id),
