@@ -31,6 +31,62 @@ def now_utc():
     return datetime.now(UTC)
 
 
+# =============================================================================
+# Simple Response Cache
+# =============================================================================
+_cache = {}
+_cache_lock = threading.Lock()
+
+
+def cached(ttl_seconds=30):
+    """
+    Simple cache decorator for API responses.
+
+    Args:
+        ttl_seconds: Cache time-to-live in seconds (default 30s)
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            # Create cache key from function name and request path/args
+            cache_key = f"{func.__name__}:{request.path}:{request.query_string.decode()}"
+
+            with _cache_lock:
+                if cache_key in _cache:
+                    cached_time, cached_response = _cache[cache_key]
+                    if (datetime.now() - cached_time).total_seconds() < ttl_seconds:
+                        return cached_response
+
+            # Call function and cache result
+            response = func(*args, **kwargs)
+
+            with _cache_lock:
+                _cache[cache_key] = (datetime.now(), response)
+
+                # Clean old entries (keep cache size manageable)
+                if len(_cache) > 100:
+                    now = datetime.now()
+                    expired = [k for k, (t, _) in _cache.items()
+                              if (now - t).total_seconds() > 300]
+                    for k in expired:
+                        del _cache[k]
+
+            return response
+        wrapper.__name__ = func.__name__
+        return wrapper
+    return decorator
+
+
+def clear_cache(pattern=None):
+    """Clear cache entries, optionally matching a pattern."""
+    with _cache_lock:
+        if pattern:
+            keys_to_delete = [k for k in _cache if pattern in k]
+            for k in keys_to_delete:
+                del _cache[k]
+        else:
+            _cache.clear()
+
+
 def get_session():
     """Get database session from app context."""
     return current_app.get_db_session()
@@ -102,6 +158,7 @@ def health():
 # =============================================================================
 
 @api_bp.route('/jobs')
+@cached(ttl_seconds=30)
 def api_list_jobs():
     """List all scheduled jobs."""
     from scheduler.config import SchedulerConfig
@@ -253,6 +310,7 @@ def api_schedule_presets():
 
 
 @api_bp.route('/jobs/upcoming')
+@cached(ttl_seconds=15)
 def api_upcoming_jobs():
     """Get upcoming scheduled executions."""
     from scheduler.config import SchedulerConfig
@@ -295,6 +353,7 @@ def api_upcoming_jobs():
 
 
 @api_bp.route('/data-freshness')
+@cached(ttl_seconds=60)
 def api_data_freshness():
     """Get latest data dates for all pipelines."""
     from scheduler.config import SchedulerConfig, get_pbi_engine
@@ -307,29 +366,40 @@ def api_data_freshness():
     except Exception as e:
         return jsonify({'error': f'Could not connect to PBI database: {str(e)[:100]}'})
 
+    # Build queries for all pipelines
+    queries_to_run = []
     for name, pipeline in config.pipelines.items():
         table = pipeline.data_freshness.table
         column = pipeline.data_freshness.date_column
 
         if not table:
             freshness[name] = {'latest_date': None, 'error': 'No table configured'}
-            continue
+        else:
+            queries_to_run.append((name, table, column))
 
+    # Execute all queries in a single connection
+    if queries_to_run:
         try:
             with pbi_engine.connect() as conn:
-                query = text(f'SELECT MAX("{column}") as max_date FROM "{table}"')
-                result = conn.execute(query).fetchone()
+                for name, table, column in queries_to_run:
+                    try:
+                        query = text(f'SELECT MAX("{column}") as max_date FROM "{table}"')
+                        result = conn.execute(query).fetchone()
 
-                if result and result[0]:
-                    max_date = result[0]
-                    if hasattr(max_date, 'isoformat'):
-                        freshness[name] = {'latest_date': max_date.isoformat()}
-                    else:
-                        freshness[name] = {'latest_date': str(max_date)}
-                else:
-                    freshness[name] = {'latest_date': None}
+                        if result and result[0]:
+                            max_date = result[0]
+                            if hasattr(max_date, 'isoformat'):
+                                freshness[name] = {'latest_date': max_date.isoformat()}
+                            else:
+                                freshness[name] = {'latest_date': str(max_date)}
+                        else:
+                            freshness[name] = {'latest_date': None}
+                    except Exception as e:
+                        freshness[name] = {'latest_date': None, 'error': str(e)[:100]}
         except Exception as e:
-            freshness[name] = {'latest_date': None, 'error': str(e)[:100]}
+            # Connection failed - mark all as error
+            for name, _, _ in queries_to_run:
+                freshness[name] = {'latest_date': None, 'error': str(e)[:100]}
 
     return jsonify(freshness)
 
@@ -418,6 +488,10 @@ def api_run_job_async(pipeline):
             job_history.error_traceback = result.stderr[:5000] if result.stderr else None
         session.commit()
         session.close()
+
+        # Clear cache so dashboard shows fresh data
+        clear_cache('data-freshness')
+        clear_cache('history')
 
     thread = threading.Thread(target=run_pipeline, daemon=True)
     thread.start()
@@ -590,6 +664,7 @@ def api_get_execution(execution_id):
 
 
 @api_bp.route('/history/stats')
+@cached(ttl_seconds=30)
 def api_history_stats():
     """Get execution statistics."""
     from scheduler.models import JobHistory
