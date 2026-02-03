@@ -43,8 +43,13 @@ def login():
 
             valid = False
             if user and user.password:
-                # Check password with bcrypt
-                # Convert PHP bcrypt $2y$ to Python bcrypt $2b$ for compatibility
+                # TECHNICAL DEBT: PHP bcrypt migration
+                # Legacy passwords were hashed with PHP's password_hash() which uses
+                # the $2y$ prefix. Python's bcrypt uses $2b$. Both are functionally
+                # identical (same algorithm, same security). We convert the prefix at
+                # runtime for compatibility. No security impact.
+                # TODO: Rehash to $2b$ on successful login to eliminate this conversion
+                #       once done, remove the prefix swap below.
                 stored_hash = user.password
                 if stored_hash.startswith('$2y$'):
                     stored_hash = '$2b$' + stored_hash[4:]
@@ -54,6 +59,11 @@ def login():
                 bcrypt.checkpw(password.encode('utf-8'), _DUMMY_BCRYPT_HASH)
 
             if valid:
+                # Opportunistic rehash: migrate legacy $2y$ hashes to $2b$ on login
+                if user.password.startswith('$2y$'):
+                    user.password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                    db_session.commit()
+
                 login_user(user)
                 reset_login_attempts(username)
                 audit_log(AuditEvent.LOGIN_SUCCESS, f"Local login for user '{username}'", user=username)

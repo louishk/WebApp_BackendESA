@@ -16,60 +16,26 @@ def get_session():
     return current_app.get_db_session()
 
 
-def admin_required(f):
-    """Decorator to require user management permission."""
+def _permission_required(check_fn, deny_message):
+    """Factory for permission-checking decorators. Redirects with flash on denial."""
     from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return redirect(url_for('auth.login'))
-        if not current_user.can_manage_users():
-            flash('Admin access required.', 'error')
-            return redirect(url_for('main.dashboard'))
-        return f(*args, **kwargs)
-    return decorated
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            if not current_user.is_authenticated:
+                return redirect(url_for('auth.login'))
+            if not check_fn(current_user):
+                flash(deny_message, 'error')
+                return redirect(url_for('main.dashboard'))
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
 
 
-def roles_required(f):
-    """Decorator to require role management permission."""
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return redirect(url_for('auth.login'))
-        if not current_user.can_manage_roles():
-            flash('Role management access required.', 'error')
-            return redirect(url_for('main.dashboard'))
-        return f(*args, **kwargs)
-    return decorated
-
-
-def editor_required(f):
-    """Decorator to require page management permission."""
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return redirect(url_for('auth.login'))
-        if not current_user.can_manage_pages():
-            flash('Editor access required.', 'error')
-            return redirect(url_for('main.dashboard'))
-        return f(*args, **kwargs)
-    return decorated
-
-
-def config_required(f):
-    """Decorator to require config management permission."""
-    from functools import wraps
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not current_user.is_authenticated:
-            return redirect(url_for('auth.login'))
-        if not current_user.can_manage_configs():
-            flash('Config management access required.', 'error')
-            return redirect(url_for('main.dashboard'))
-        return f(*args, **kwargs)
-    return decorated
+admin_required = _permission_required(lambda u: u.can_manage_users(), 'Admin access required.')
+roles_required = _permission_required(lambda u: u.can_manage_roles(), 'Role management access required.')
+editor_required = _permission_required(lambda u: u.can_manage_pages(), 'Editor access required.')
+config_required = _permission_required(lambda u: u.can_manage_configs(), 'Config management access required.')
 
 
 # =============================================================================
