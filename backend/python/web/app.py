@@ -131,7 +131,7 @@ def create_app(config=None, db_url=None):
 
         # Security headers for all responses
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['X-Frame-Options'] = 'ALLOW-FROM https://app.powerbi.com'
         response.headers['X-XSS-Protection'] = '1; mode=block'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
@@ -146,7 +146,7 @@ def create_app(config=None, db_url=None):
             "img-src 'self' data:",
             "font-src 'self'",
             "connect-src 'self'",
-            "frame-ancestors 'self'",
+            "frame-ancestors 'self' https://app.powerbi.com",
             "form-action 'self'",
             "base-uri 'self'"
         ]
