@@ -46,19 +46,18 @@
 
         <div style="margin-bottom: 1.25rem;">
             <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Role *</label>
-            <select name="role" required
+            <select name="role_id" required
                     style="width: 100%; max-width: 400px; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
+                <option value="">-- Select a role --</option>
                 {% for role in roles %}
-                <option value="{{ role }}" {% if user and user.role == role %}selected{% endif %}>
-                    {{ role|title }}
+                <option value="{{ role.id }}" {% if user and user.role_id == role.id %}selected{% endif %}>
+                    {{ role.name }} - {{ role.description or 'No description' }}
                 </option>
                 {% endfor %}
             </select>
             <p style="color: #666; font-size: 0.85rem; margin-top: 0.5rem;">
-                <strong>admin</strong>: Full access<br>
-                <strong>scheduler_admin</strong>: Scheduler access<br>
-                <strong>editor</strong>: Page editing<br>
-                <strong>viewer</strong>: Read-only
+                Role determines what permissions the user has in the system.
+                <a href="{{ url_for('admin.list_roles') }}" style="color: var(--esa-red);">Manage roles</a>
             </p>
         </div>
 
@@ -68,4 +67,70 @@
         </div>
     </form>
 </div>
+
+{% if user and user.role %}
+<div class="card" style="margin-top: 1.5rem;">
+    <h2>Current Role Permissions</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Permission</th>
+                <th>Granted</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Scheduler Access</td>
+                <td>
+                    {% if user.role.can_access_scheduler %}
+                        <span class="status status-completed">Yes</span>
+                    {% else %}
+                        <span class="status status-pending">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>User Management</td>
+                <td>
+                    {% if user.role.can_manage_users %}
+                        <span class="status status-completed">Yes</span>
+                    {% else %}
+                        <span class="status status-pending">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>Page Management</td>
+                <td>
+                    {% if user.role.can_manage_pages %}
+                        <span class="status status-completed">Yes</span>
+                    {% else %}
+                        <span class="status status-pending">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>Role Management</td>
+                <td>
+                    {% if user.role.can_manage_roles %}
+                        <span class="status status-completed">Yes</span>
+                    {% else %}
+                        <span class="status status-pending">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>Config Management</td>
+                <td>
+                    {% if user.role.can_manage_configs %}
+                        <span class="status status-completed">Yes</span>
+                    {% else %}
+                        <span class="status status-pending">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
 {% endblock %}

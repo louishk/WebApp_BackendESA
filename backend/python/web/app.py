@@ -75,9 +75,15 @@ def create_app(config=None, db_url=None):
     @login_manager.user_loader
     def load_user(user_id):
         from web.models.user import User
+        from sqlalchemy.orm import joinedload
         session = get_db_session()
         try:
-            return session.query(User).get(int(user_id))
+            # Eagerly load the role relationship to avoid DetachedInstanceError
+            user = session.query(User).options(joinedload(User.role)).get(int(user_id))
+            if user:
+                # Expunge from session so it can be used after session closes
+                session.expunge(user)
+            return user
         finally:
             session.close()
 

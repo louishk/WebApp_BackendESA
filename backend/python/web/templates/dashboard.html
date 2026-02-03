@@ -5,10 +5,20 @@
 {% block content %}
 <div class="page-header">
     <h1>Welcome, {{ current_user.username }}!</h1>
-    <p class="role-badge">Role: <span class="badge badge-{{ current_user.role }}">{{ current_user.role }}</span></p>
+    <p class="role-badge">Role: <span class="badge badge-{{ current_user.role.name }}">{{ current_user.role.name }}</span></p>
 </div>
 
 <div class="features-grid">
+    <a href="{{ url_for('main.pages_list') }}" class="feature-card">
+        <div class="feature-icon">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
+                <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+            </svg>
+        </div>
+        <h3>Pages</h3>
+        <p>View available pages and reports</p>
+    </a>
+
     {% if current_user.can_access_scheduler() %}
     <a href="{{ url_for('scheduler.dashboard') }}" class="feature-card">
         <div class="feature-icon">
@@ -45,6 +55,7 @@
     </a>
     {% endif %}
 
+    {% if current_user.can_manage_configs() %}
     <a href="{{ url_for('api.api_status') }}" class="feature-card" target="_blank">
         <div class="feature-icon">
             <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
@@ -64,8 +75,9 @@
         <h3>Health Check</h3>
         <p>View system health and status information</p>
     </a>
+    {% endif %}
 
-    {% if current_user.can_manage_users() %}
+    {% if current_user.can_manage_configs() %}
     <a href="{{ url_for('admin.list_configs') }}" class="feature-card">
         <div class="feature-icon">
             <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">

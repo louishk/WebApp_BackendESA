@@ -1,5 +1,5 @@
 """
-Admin routes - user and page management.
+Admin routes - user, role, and page management.
 """
 
 import bcrypt
@@ -15,31 +15,210 @@ def get_session():
 
 
 def admin_required(f):
-    """Decorator to require admin role."""
+    """Decorator to require user management permission."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated:
             return redirect(url_for('auth.login'))
-        if current_user.role != 'admin':
+        if not current_user.can_manage_users():
             flash('Admin access required.', 'error')
             return redirect(url_for('main.dashboard'))
         return f(*args, **kwargs)
     return decorated
 
 
-def editor_required(f):
-    """Decorator to require admin or editor role."""
+def roles_required(f):
+    """Decorator to require role management permission."""
     from functools import wraps
     @wraps(f)
     def decorated(*args, **kwargs):
         if not current_user.is_authenticated:
             return redirect(url_for('auth.login'))
-        if current_user.role not in ['admin', 'editor']:
+        if not current_user.can_manage_roles():
+            flash('Role management access required.', 'error')
+            return redirect(url_for('main.dashboard'))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def editor_required(f):
+    """Decorator to require page management permission."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for('auth.login'))
+        if not current_user.can_manage_pages():
             flash('Editor access required.', 'error')
             return redirect(url_for('main.dashboard'))
         return f(*args, **kwargs)
     return decorated
+
+
+def config_required(f):
+    """Decorator to require config management permission."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for('auth.login'))
+        if not current_user.can_manage_configs():
+            flash('Config management access required.', 'error')
+            return redirect(url_for('main.dashboard'))
+        return f(*args, **kwargs)
+    return decorated
+
+
+# =============================================================================
+# Role Management
+# =============================================================================
+
+@admin_bp.route('/roles')
+@login_required
+@roles_required
+def list_roles():
+    """List all roles."""
+    from web.models.role import Role
+    from web.models.user import User
+
+    db_session = get_session()
+    try:
+        roles = db_session.query(Role).order_by(Role.name).all()
+        # Get user count for each role
+        role_user_counts = {}
+        for role in roles:
+            count = db_session.query(User).filter_by(role_id=role.id).count()
+            role_user_counts[role.id] = count
+        return render_template('admin/roles/list.html', roles=roles, role_user_counts=role_user_counts)
+    finally:
+        db_session.close()
+
+
+@admin_bp.route('/roles/create', methods=['GET', 'POST'])
+@login_required
+@roles_required
+def create_role():
+    """Create a new role."""
+    from web.models.role import Role
+
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip().lower()
+        description = request.form.get('description', '').strip()
+
+        if not name:
+            flash('Role name is required.', 'error')
+            return render_template('admin/roles/edit.html', role=None)
+
+        # Validate name format (alphanumeric and underscores only)
+        if not name.replace('_', '').isalnum():
+            flash('Role name can only contain letters, numbers, and underscores.', 'error')
+            return render_template('admin/roles/edit.html', role=None)
+
+        db_session = get_session()
+        try:
+            # Check for duplicate name
+            if db_session.query(Role).filter_by(name=name).first():
+                flash('Role name already exists.', 'error')
+                return render_template('admin/roles/edit.html', role=None)
+
+            role = Role(
+                name=name,
+                description=description,
+                can_access_scheduler=request.form.get('can_access_scheduler') == 'on',
+                can_manage_users=request.form.get('can_manage_users') == 'on',
+                can_manage_pages=request.form.get('can_manage_pages') == 'on',
+                can_manage_roles=request.form.get('can_manage_roles') == 'on',
+                can_manage_configs=request.form.get('can_manage_configs') == 'on',
+                is_system=False
+            )
+            db_session.add(role)
+            db_session.commit()
+
+            flash(f'Role "{name}" created successfully.', 'success')
+            return redirect(url_for('admin.list_roles'))
+        except Exception as e:
+            db_session.rollback()
+            current_app.logger.error(f"Error creating role: {e}")
+            flash('An error occurred.', 'error')
+        finally:
+            db_session.close()
+
+    return render_template('admin/roles/edit.html', role=None)
+
+
+@admin_bp.route('/roles/<int:role_id>/edit', methods=['GET', 'POST'])
+@login_required
+@roles_required
+def edit_role(role_id):
+    """Edit an existing role."""
+    from web.models.role import Role
+
+    db_session = get_session()
+    try:
+        role = db_session.query(Role).get(role_id)
+        if not role:
+            flash('Role not found.', 'error')
+            return redirect(url_for('admin.list_roles'))
+
+        if request.method == 'POST':
+            role.description = request.form.get('description', '').strip()
+            role.can_access_scheduler = request.form.get('can_access_scheduler') == 'on'
+            role.can_manage_users = request.form.get('can_manage_users') == 'on'
+            role.can_manage_pages = request.form.get('can_manage_pages') == 'on'
+            role.can_manage_roles = request.form.get('can_manage_roles') == 'on'
+            role.can_manage_configs = request.form.get('can_manage_configs') == 'on'
+
+            db_session.commit()
+            flash('Role updated successfully.', 'success')
+            return redirect(url_for('admin.list_roles'))
+
+        return render_template('admin/roles/edit.html', role=role)
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"Error editing role: {e}")
+        flash('An error occurred.', 'error')
+        return redirect(url_for('admin.list_roles'))
+    finally:
+        db_session.close()
+
+
+@admin_bp.route('/roles/<int:role_id>/delete', methods=['POST'])
+@login_required
+@roles_required
+def delete_role(role_id):
+    """Delete a role."""
+    from web.models.role import Role
+    from web.models.user import User
+
+    db_session = get_session()
+    try:
+        role = db_session.query(Role).get(role_id)
+        if not role:
+            flash('Role not found.', 'error')
+            return redirect(url_for('admin.list_roles'))
+
+        if role.is_system:
+            flash('Cannot delete system roles.', 'error')
+            return redirect(url_for('admin.list_roles'))
+
+        # Check if any users have this role
+        user_count = db_session.query(User).filter_by(role_id=role_id).count()
+        if user_count > 0:
+            flash(f'Cannot delete role. {user_count} user(s) are assigned to this role.', 'error')
+            return redirect(url_for('admin.list_roles'))
+
+        db_session.delete(role)
+        db_session.commit()
+        flash(f'Role "{role.name}" deleted.', 'success')
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"Error deleting role: {e}")
+        flash('An error occurred.', 'error')
+    finally:
+        db_session.close()
+
+    return redirect(url_for('admin.list_roles'))
 
 
 # =============================================================================
@@ -67,27 +246,36 @@ def list_users():
 def create_user():
     """Create a new user."""
     from web.models.user import User
+    from web.models.role import Role
 
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        email = request.form.get('email', '').strip() or None
-        password = request.form.get('password', '')
-        role = request.form.get('role', 'viewer')
+    db_session = get_session()
+    try:
+        roles = db_session.query(Role).order_by(Role.name).all()
 
-        if not username:
-            flash('Username is required.', 'error')
-            return render_template('admin/users/edit.html', user=None, roles=User.ROLES)
+        if request.method == 'POST':
+            username = request.form.get('username', '').strip()
+            email = request.form.get('email', '').strip() or None
+            password = request.form.get('password', '')
+            role_id = request.form.get('role_id', type=int)
 
-        if role not in User.ROLES:
-            flash('Invalid role.', 'error')
-            return render_template('admin/users/edit.html', user=None, roles=User.ROLES)
+            if not username:
+                flash('Username is required.', 'error')
+                return render_template('admin/users/edit.html', user=None, roles=roles)
 
-        db_session = get_session()
-        try:
+            if not role_id:
+                flash('Role is required.', 'error')
+                return render_template('admin/users/edit.html', user=None, roles=roles)
+
+            # Verify role exists
+            role = db_session.query(Role).get(role_id)
+            if not role:
+                flash('Invalid role.', 'error')
+                return render_template('admin/users/edit.html', user=None, roles=roles)
+
             # Check for duplicate username
             if db_session.query(User).filter_by(username=username).first():
                 flash('Username already exists.', 'error')
-                return render_template('admin/users/edit.html', user=None, roles=User.ROLES)
+                return render_template('admin/users/edit.html', user=None, roles=roles)
 
             # Hash password if provided
             hashed_password = None
@@ -98,7 +286,7 @@ def create_user():
                 username=username,
                 email=email,
                 password=hashed_password,
-                role=role,
+                role_id=role_id,
                 auth_provider='local'
             )
             db_session.add(user)
@@ -106,15 +294,15 @@ def create_user():
 
             flash(f'User "{username}" created successfully.', 'success')
             return redirect(url_for('admin.list_users'))
-        except Exception as e:
-            db_session.rollback()
-            current_app.logger.error(f"Error creating user: {e}")
-            flash('An error occurred.', 'error')
-        finally:
-            db_session.close()
 
-    from web.models.user import User
-    return render_template('admin/users/edit.html', user=None, roles=User.ROLES)
+        return render_template('admin/users/edit.html', user=None, roles=roles)
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"Error creating user: {e}")
+        flash('An error occurred.', 'error')
+        return redirect(url_for('admin.list_users'))
+    finally:
+        db_session.close()
 
 
 @admin_bp.route('/users/<int:user_id>/edit', methods=['GET', 'POST'])
@@ -123,6 +311,7 @@ def create_user():
 def edit_user(user_id):
     """Edit an existing user."""
     from web.models.user import User
+    from web.models.role import Role
 
     db_session = get_session()
     try:
@@ -131,15 +320,23 @@ def edit_user(user_id):
             flash('User not found.', 'error')
             return redirect(url_for('admin.list_users'))
 
+        roles = db_session.query(Role).order_by(Role.name).all()
+
         if request.method == 'POST':
             user.email = request.form.get('email', '').strip() or None
-            role = request.form.get('role', user.role)
+            role_id = request.form.get('role_id', type=int)
 
-            if role not in User.ROLES:
+            if not role_id:
+                flash('Role is required.', 'error')
+                return render_template('admin/users/edit.html', user=user, roles=roles)
+
+            # Verify role exists
+            role = db_session.query(Role).get(role_id)
+            if not role:
                 flash('Invalid role.', 'error')
-                return render_template('admin/users/edit.html', user=user, roles=User.ROLES)
+                return render_template('admin/users/edit.html', user=user, roles=roles)
 
-            user.role = role
+            user.role_id = role_id
 
             # Update password if provided
             new_password = request.form.get('password', '')
@@ -150,7 +347,7 @@ def edit_user(user_id):
             flash('User updated successfully.', 'success')
             return redirect(url_for('admin.list_users'))
 
-        return render_template('admin/users/edit.html', user=user, roles=User.ROLES)
+        return render_template('admin/users/edit.html', user=user, roles=roles)
     except Exception as e:
         db_session.rollback()
         current_app.logger.error(f"Error editing user: {e}")
@@ -191,7 +388,32 @@ def delete_user(user_id):
 
 
 # =============================================================================
-# Page Management (Admin and Editor)
+# User Search API (for Select2 in page access control)
+# =============================================================================
+
+@admin_bp.route('/api/users/search')
+@login_required
+def search_users():
+    """Search users for Select2 dropdown."""
+    from web.models.user import User
+
+    q = request.args.get('q', '').strip()
+
+    db_session = get_session()
+    try:
+        query = db_session.query(User)
+        if q:
+            query = query.filter(User.username.ilike(f'%{q}%'))
+        users = query.order_by(User.username).limit(20).all()
+        return jsonify({
+            'results': [{'id': u.id, 'text': u.username} for u in users]
+        })
+    finally:
+        db_session.close()
+
+
+# =============================================================================
+# Page Management (Editor permission)
 # =============================================================================
 
 @admin_bp.route('/pages')
@@ -215,52 +437,64 @@ def list_pages():
 def create_page():
     """Create a new page."""
     from web.models.page import Page
+    from web.models.role import Role
+    from web.models.user import User
 
-    if request.method == 'POST':
-        title = request.form.get('title', '').strip()
-        slug = request.form.get('slug', '').strip()
-        content = request.form.get('content', '')
-        extension = request.form.get('extension', 'html')
-        is_secure = request.form.get('is_secure') == 'on'
-        edit_restricted = request.form.get('edit_restricted') == 'on'
+    db_session = get_session()
+    try:
+        roles = db_session.query(Role).order_by(Role.name).all()
 
-        if not title or not slug:
-            flash('Title and slug are required.', 'error')
-            return render_template('admin/pages/edit.html', page=None, extensions=Page.ALLOWED_EXTENSIONS)
+        if request.method == 'POST':
+            title = request.form.get('title', '').strip()
+            slug = request.form.get('slug', '').strip()
+            content = request.form.get('content', '')
+            extension = request.form.get('extension', 'html')
+            is_public = request.form.get('is_public') == 'on'
 
-        if extension not in Page.ALLOWED_EXTENSIONS:
-            flash('Invalid extension.', 'error')
-            return render_template('admin/pages/edit.html', page=None, extensions=Page.ALLOWED_EXTENSIONS)
+            # Access control lists
+            view_roles = ','.join(request.form.getlist('view_roles'))
+            view_users = ','.join(request.form.getlist('view_users'))
+            edit_roles = ','.join(request.form.getlist('edit_roles'))
+            edit_users = ','.join(request.form.getlist('edit_users'))
 
-        db_session = get_session()
-        try:
+            if not title or not slug:
+                flash('Title and slug are required.', 'error')
+                return render_template('admin/pages/edit.html', page=None, extensions=Page.ALLOWED_EXTENSIONS, roles=roles)
+
+            if extension not in Page.ALLOWED_EXTENSIONS:
+                flash('Invalid extension.', 'error')
+                return render_template('admin/pages/edit.html', page=None, extensions=Page.ALLOWED_EXTENSIONS, roles=roles)
+
             # Check for duplicate slug
             if db_session.query(Page).filter_by(slug=slug).first():
                 flash('Slug already exists.', 'error')
-                return render_template('admin/pages/edit.html', page=None, extensions=Page.ALLOWED_EXTENSIONS)
+                return render_template('admin/pages/edit.html', page=None, extensions=Page.ALLOWED_EXTENSIONS, roles=roles)
 
             page = Page(
                 title=title,
                 slug=slug,
                 content=content,
                 extension=extension,
-                is_secure=is_secure,
-                edit_restricted=edit_restricted
+                is_public=is_public,
+                view_roles=view_roles,
+                view_users=view_users,
+                edit_roles=edit_roles,
+                edit_users=edit_users
             )
             db_session.add(page)
             db_session.commit()
 
             flash(f'Page "{title}" created successfully.', 'success')
             return redirect(url_for('admin.list_pages'))
-        except Exception as e:
-            db_session.rollback()
-            current_app.logger.error(f"Error creating page: {e}")
-            flash('An error occurred.', 'error')
-        finally:
-            db_session.close()
 
-    from web.models.page import Page
-    return render_template('admin/pages/edit.html', page=None, extensions=Page.ALLOWED_EXTENSIONS)
+        return render_template('admin/pages/edit.html', page=None, extensions=Page.ALLOWED_EXTENSIONS, roles=roles)
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"Error creating page: {e}")
+        flash('An error occurred.', 'error')
+        return redirect(url_for('admin.list_pages'))
+    finally:
+        db_session.close()
 
 
 @admin_bp.route('/pages/<int:page_id>/edit', methods=['GET', 'POST'])
@@ -269,6 +503,8 @@ def create_page():
 def edit_page(page_id):
     """Edit an existing page."""
     from web.models.page import Page
+    from web.models.role import Role
+    from web.models.user import User
 
     db_session = get_session()
     try:
@@ -277,20 +513,30 @@ def edit_page(page_id):
             flash('Page not found.', 'error')
             return redirect(url_for('admin.list_pages'))
 
-        # Check edit restrictions
-        if page.edit_restricted and current_user.role != 'admin':
-            flash('This page can only be edited by admins.', 'error')
+        # Check edit permissions
+        if not page.can_edit(current_user):
+            flash('You do not have permission to edit this page.', 'error')
             return redirect(url_for('admin.list_pages'))
+
+        roles = db_session.query(Role).order_by(Role.name).all()
+
+        # Get selected users for display
+        view_user_ids = page.get_view_users_list()
+        edit_user_ids = page.get_edit_users_list()
+        view_users = db_session.query(User).filter(User.id.in_(view_user_ids)).all() if view_user_ids else []
+        edit_users = db_session.query(User).filter(User.id.in_(edit_user_ids)).all() if edit_user_ids else []
 
         if request.method == 'POST':
             page.title = request.form.get('title', '').strip()
             page.content = request.form.get('content', '')
             extension = request.form.get('extension', page.extension)
-            page.is_secure = request.form.get('is_secure') == 'on'
+            page.is_public = request.form.get('is_public') == 'on'
 
-            # Only admin can change edit_restricted
-            if current_user.role == 'admin':
-                page.edit_restricted = request.form.get('edit_restricted') == 'on'
+            # Access control lists
+            page.view_roles = ','.join(request.form.getlist('view_roles'))
+            page.view_users = ','.join(request.form.getlist('view_users'))
+            page.edit_roles = ','.join(request.form.getlist('edit_roles'))
+            page.edit_users = ','.join(request.form.getlist('edit_users'))
 
             if extension in Page.ALLOWED_EXTENSIONS:
                 page.extension = extension
@@ -299,7 +545,12 @@ def edit_page(page_id):
             flash('Page updated successfully.', 'success')
             return redirect(url_for('admin.list_pages'))
 
-        return render_template('admin/pages/edit.html', page=page, extensions=Page.ALLOWED_EXTENSIONS)
+        return render_template('admin/pages/edit.html',
+                             page=page,
+                             extensions=Page.ALLOWED_EXTENSIONS,
+                             roles=roles,
+                             view_users=view_users,
+                             edit_users=edit_users)
     except Exception as e:
         db_session.rollback()
         current_app.logger.error(f"Error editing page: {e}")
@@ -336,12 +587,12 @@ def delete_page(page_id):
 
 
 # =============================================================================
-# Configuration Management (Admin only)
+# Configuration Management (Config permission required)
 # =============================================================================
 
 @admin_bp.route('/config')
 @login_required
-@admin_required
+@config_required
 def list_configs():
     """List all configuration files."""
     from common.config_loader import get_config
@@ -364,7 +615,7 @@ def list_configs():
 
 @admin_bp.route('/config/<name>', methods=['GET', 'POST'])
 @login_required
-@admin_required
+@config_required
 def edit_config(name):
     """Edit a configuration file."""
     import yaml
@@ -395,12 +646,12 @@ def edit_config(name):
 
 
 # =============================================================================
-# Secrets Management (Admin only)
+# Secrets Management (Config permission required)
 # =============================================================================
 
 @admin_bp.route('/secrets')
 @login_required
-@admin_required
+@config_required
 def list_secrets():
     """List all secrets in vault (keys only, not values)."""
     from common.config_loader import get_config
@@ -417,7 +668,7 @@ def list_secrets():
 
 @admin_bp.route('/secrets/add', methods=['GET', 'POST'])
 @login_required
-@admin_required
+@config_required
 def add_secret():
     """Add a new secret to vault."""
     from common.config_loader import get_config
@@ -447,7 +698,7 @@ def add_secret():
 
 @admin_bp.route('/secrets/<key>/edit', methods=['GET', 'POST'])
 @login_required
-@admin_required
+@config_required
 def edit_secret(key):
     """Edit an existing secret."""
     from common.config_loader import get_config
@@ -476,7 +727,7 @@ def edit_secret(key):
 
 @admin_bp.route('/secrets/<key>/delete', methods=['POST'])
 @login_required
-@admin_required
+@config_required
 def delete_secret(key):
     """Delete a secret from vault."""
     from common.config_loader import get_config

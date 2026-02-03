@@ -2,10 +2,10 @@
 
 from datetime import datetime
 from flask_login import UserMixin
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
 
-Base = declarative_base()
+from web.models.base import Base
 
 
 class User(Base, UserMixin):
@@ -20,31 +20,39 @@ class User(Base, UserMixin):
     username = Column(String(255), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=True)
     password = Column(String(255), nullable=True)  # NULL for OAuth-only users
-    role = Column(String(20), nullable=False, default='viewer')
+    role_id = Column(Integer, ForeignKey('roles.id'), nullable=False)
     auth_provider = Column(String(20), default='local')  # 'local' or 'microsoft'
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Valid roles
-    ROLES = ['admin', 'scheduler_admin', 'editor', 'viewer']
-
-    def has_role(self, roles):
-        """Check if user has one of the specified roles."""
-        if isinstance(roles, str):
-            roles = [roles]
-        return self.role in roles
+    # Relationship to Role
+    role = relationship('Role', backref='users')
 
     def can_access_scheduler(self):
         """Check if user can access scheduler functionality."""
-        return self.role in ['admin', 'scheduler_admin']
+        return self.role.can_access_scheduler if self.role else False
 
     def can_manage_users(self):
-        """Check if user can manage other users (admin only)."""
-        return self.role == 'admin'
+        """Check if user can manage other users."""
+        return self.role.can_manage_users if self.role else False
 
     def can_manage_pages(self):
-        """Check if user can manage pages (admin and editor)."""
-        return self.role in ['admin', 'editor']
+        """Check if user can manage pages."""
+        return self.role.can_manage_pages if self.role else False
+
+    def can_manage_roles(self):
+        """Check if user can manage roles."""
+        return self.role.can_manage_roles if self.role else False
+
+    def can_manage_configs(self):
+        """Check if user can manage configurations."""
+        return self.role.can_manage_configs if self.role else False
+
+    def has_role(self, role_names):
+        """Check if user has one of the specified role names."""
+        if isinstance(role_names, str):
+            role_names = [role_names]
+        return self.role.name in role_names if self.role else False
 
     def to_dict(self):
         """Convert user to dictionary (excluding password)."""
@@ -52,11 +60,13 @@ class User(Base, UserMixin):
             'id': self.id,
             'username': self.username,
             'email': self.email,
-            'role': self.role,
+            'role_id': self.role_id,
+            'role_name': self.role.name if self.role else None,
             'auth_provider': self.auth_provider,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
     def __repr__(self):
-        return f"<User {self.username} ({self.role})>"
+        role_name = self.role.name if self.role else 'no-role'
+        return f"<User {self.username} ({role_name})>"

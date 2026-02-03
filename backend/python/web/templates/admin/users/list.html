@@ -43,12 +43,16 @@
                 <td><strong>{{ user.username }}</strong></td>
                 <td>{{ user.email or '-' }}</td>
                 <td>
-                    <span class="status
-                        {% if user.role == 'admin' %}status-failed{% endif %}
-                        {% if user.role == 'scheduler_admin' %}status-running{% endif %}
-                        {% if user.role == 'editor' %}status-completed{% endif %}
-                        {% if user.role == 'viewer' %}status-pending{% endif %}
-                    ">{{ user.role }}</span>
+                    {% if user.role %}
+                        <span class="status
+                            {% if user.role.name == 'admin' %}status-failed{% endif %}
+                            {% if user.role.name == 'scheduler_admin' %}status-running{% endif %}
+                            {% if user.role.name == 'editor' %}status-completed{% endif %}
+                            {% if user.role.name == 'viewer' %}status-pending{% endif %}
+                        ">{{ user.role.name }}</span>
+                    {% else %}
+                        <span style="color: #888;">None</span>
+                    {% endif %}
                 </td>
                 <td>{{ user.auth_provider }}</td>
                 <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>

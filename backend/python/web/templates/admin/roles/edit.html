@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit Role' if role else 'Create Role' }} - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ 'Edit Role: ' + role.name if role else 'Create New Role' }}</h1>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}" style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<div class="card">
+    <form method="POST">
+        {% if not role %}
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Role Name *</label>
+            <input type="text" name="name" required pattern="[a-z0-9_]+"
+                   style="width: 100%; max-width: 400px; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
+            <p style="color: #666; font-size: 0.85rem; margin-top: 0.5rem;">
+                Lowercase letters, numbers, and underscores only
+            </p>
+        </div>
+        {% endif %}
+
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Description</label>
+            <input type="text" name="description" value="{{ role.description if role else '' }}"
+                   style="width: 100%; max-width: 600px; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+            <label style="display: block; margin-bottom: 0.75rem; font-weight: 500;">Permissions</label>
+            <div style="display: grid; gap: 0.75rem; max-width: 600px;">
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_access_scheduler" {% if role and role.can_access_scheduler %}checked{% endif %}>
+                    <div>
+                        <strong>Scheduler Access</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Access scheduler dashboard, jobs, and history</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_manage_users" {% if role and role.can_manage_users %}checked{% endif %}>
+                    <div>
+                        <strong>User Management</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Create, edit, and delete users</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_manage_pages" {% if role and role.can_manage_pages %}checked{% endif %}>
+                    <div>
+                        <strong>Page Management</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Create, edit, and manage dynamic pages</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_manage_roles" {% if role and role.can_manage_roles %}checked{% endif %}>
+                    <div>
+                        <strong>Role Management</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Create, edit, and manage roles</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_manage_configs" {% if role and role.can_manage_configs %}checked{% endif %}>
+                    <div>
+                        <strong>Config Management</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Edit configuration files and manage secrets</p>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        {% if role and role.is_system %}
+        <div style="margin-bottom: 1.5rem; padding: 0.75rem 1rem; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px;">
+            <strong>System Role</strong> - This is a built-in role and cannot be deleted.
+        </div>
+        {% endif %}
+
+        <div style="margin-top: 2rem;">
+            <button type="submit" class="btn">{{ 'Update Role' if role else 'Create Role' }}</button>
+            <a href="{{ url_for('admin.list_roles') }}" class="btn btn-secondary" style="margin-left: 0.5rem;">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

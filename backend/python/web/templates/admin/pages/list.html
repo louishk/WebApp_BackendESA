@@ -31,8 +31,7 @@
                 <th>Title</th>
                 <th>Slug</th>
                 <th>Extension</th>
-                <th>Secure</th>
-                <th>Restricted</th>
+                <th>Access</th>
                 <th>Updated</th>
                 <th>Actions</th>
             </tr>
@@ -45,26 +44,21 @@
                 <td><code>{{ page.slug }}</code></td>
                 <td>{{ page.extension }}</td>
                 <td>
-                    {% if page.is_secure %}
-                        <span class="status status-running">Yes</span>
+                    {% if page.is_public %}
+                        <span class="status status-completed">Public</span>
+                    {% elif page.view_roles or page.view_users %}
+                        <span class="status status-running">Restricted</span>
                     {% else %}
-                        <span class="status status-pending">No</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if page.edit_restricted %}
-                        <span class="status status-failed">Admin Only</span>
-                    {% else %}
-                        <span class="status status-pending">No</span>
+                        <span class="status status-pending">Login</span>
                     {% endif %}
                 </td>
                 <td>{{ page.updated_at.strftime('%Y-%m-%d %H:%M') if page.updated_at else '-' }}</td>
                 <td>
                     <a href="/{{ page.slug }}.{{ page.extension }}" target="_blank" class="btn btn-sm" style="background: #6366f1;">Preview</a>
-                    {% if not page.edit_restricted or current_user.role == 'admin' %}
+                    {% if page.can_edit(current_user) %}
                     <a href="{{ url_for('admin.edit_page', page_id=page.id) }}" class="btn btn-sm btn-secondary">Edit</a>
                     {% endif %}
-                    {% if current_user.role == 'admin' %}
+                    {% if current_user.can_manage_users() %}
                     <form action="{{ url_for('admin.delete_page', page_id=page.id) }}" method="POST" style="display: inline;"
                           onsubmit="return confirm('Are you sure you want to delete this page?');">
                         <button type="submit" class="btn btn-sm" style="background: #dc2626;">Delete</button>

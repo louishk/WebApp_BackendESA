@@ -281,18 +281,15 @@
         <nav>
             {% if current_user and current_user.is_authenticated %}
                 <a href="{{ url_for('main.dashboard') }}" class="{{ 'active' if request.endpoint == 'main.dashboard' else '' }}">Home</a>
+                <a href="{{ url_for('main.pages_list') }}" class="{{ 'active' if request.endpoint == 'main.pages_list' or request.endpoint == 'main.serve_page' or (request.endpoint and 'admin' in request.endpoint and 'page' in request.endpoint) else '' }}">Pages</a>
                 {% if current_user.can_access_scheduler() %}
                     <a href="{{ url_for('scheduler.dashboard') }}" class="{{ 'active' if request.endpoint and 'scheduler' in request.endpoint else '' }}">Scheduler</a>
                 {% endif %}
-                {% if current_user.can_manage_users() %}
-                    <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and 'user' in request.endpoint else '' }}">Users</a>
+                {% if current_user.can_manage_users() or current_user.can_manage_roles() %}
+                    <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint) else '' }}">User Management</a>
                 {% endif %}
-                {% if current_user.can_manage_pages() %}
-                    <a href="{{ url_for('admin.list_pages') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and 'page' in request.endpoint else '' }}">Pages</a>
-                {% endif %}
-                {% if current_user.can_manage_users() %}
-                    <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and 'config' in request.endpoint else '' }}">Config</a>
-                    <a href="{{ url_for('admin.list_secrets') }}" class="{{ 'active' if request.endpoint and 'secret' in request.endpoint else '' }}">Secrets</a>
+                {% if current_user.can_manage_configs() %}
+                    <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint) else '' }}">Settings</a>
                 {% endif %}
                 <a href="{{ url_for('auth.logout') }}" style="margin-left: 1rem;">Logout ({{ current_user.username }})</a>
             {% else %}
@@ -307,6 +304,33 @@
         <a href="{{ url_for('scheduler.jobs_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.jobs_page' else '' }}">Jobs</a>
         <a href="{{ url_for('scheduler.history_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.history_page' else '' }}">History</a>
         <a href="{{ url_for('scheduler.settings_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.settings_page' else '' }}">Settings</a>
+    </div>
+    {% endif %}
+
+    {% if request.endpoint and (request.endpoint == 'main.pages_list' or request.endpoint == 'main.serve_page' or (request.endpoint and 'admin' in request.endpoint and 'page' in request.endpoint)) %}
+    <div class="sub-navbar">
+        <a href="{{ url_for('main.pages_list') }}" class="{{ 'active' if request.endpoint == 'main.pages_list' or request.endpoint == 'main.serve_page' else '' }}">Available Pages</a>
+        {% if current_user.can_manage_pages() %}
+        <a href="{{ url_for('admin.list_pages') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and 'page' in request.endpoint else '' }}">Manage Pages</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint) %}
+    <div class="sub-navbar">
+        {% if current_user.can_manage_users() %}
+        <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if 'user' in request.endpoint else '' }}">Users</a>
+        {% endif %}
+        {% if current_user.can_manage_roles() %}
+        <a href="{{ url_for('admin.list_roles') }}" class="{{ 'active' if 'role' in request.endpoint else '' }}">Roles</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint) %}
+    <div class="sub-navbar">
+        <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if 'config' in request.endpoint else '' }}">Config</a>
+        <a href="{{ url_for('admin.list_secrets') }}" class="{{ 'active' if 'secret' in request.endpoint else '' }}">Secrets</a>
     </div>
     {% endif %}
 

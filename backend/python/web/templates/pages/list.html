@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Pages - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Available Pages</h1>
+</div>
+
+{% if pages %}
+<div class="card">
+    <h2>Pages You Can Access ({{ pages|length }})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for page in pages %}
+            <tr>
+                <td><strong>{{ page.title }}</strong></td>
+                <td><code>.{{ page.extension }}</code></td>
+                <td>
+                    <a href="/{{ page.slug }}.{{ page.extension }}" class="btn btn-sm" target="_blank">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="card">
+    <p style="color: #666;">No pages available for your access level.</p>
+</div>
+{% endif %}
+{% endblock %}

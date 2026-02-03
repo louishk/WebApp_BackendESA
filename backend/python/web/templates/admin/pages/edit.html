@@ -3,6 +3,58 @@
 {% block title %}{{ 'Edit Page' if page else 'Create Page' }} - ESA Backend{% endblock %}
 
 {% block content %}
+<style>
+    .access-section {
+        background: #f9fafb;
+        padding: 1.25rem;
+        border-radius: 8px;
+        margin-bottom: 1.25rem;
+        border: 1px solid #e5e7eb;
+    }
+    .access-section h4 {
+        margin: 0 0 0.75rem 0;
+        color: var(--esa-navy);
+    }
+    .access-section .help-text {
+        color: #666;
+        font-size: 0.85rem;
+        margin-bottom: 0.75rem;
+    }
+    .checkbox-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+    .checkbox-group label {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.4rem 0.75rem;
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+    .checkbox-group label:hover {
+        border-color: var(--esa-red);
+    }
+    .checkbox-group input:checked + span {
+        font-weight: 500;
+        color: var(--esa-red);
+    }
+    .select2-container {
+        width: 100% !important;
+        max-width: 500px;
+    }
+    .select2-container--default .select2-selection--multiple {
+        border: 2px solid #e5e7eb;
+        border-radius: 6px;
+        min-height: 42px;
+    }
+</style>
+
 <div class="page-header">
     <h1>{{ 'Edit Page: ' + page.title if page else 'Create New Page' }}</h1>
 </div>
@@ -57,21 +109,65 @@
                       style="width: 100%; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem; font-family: monospace;">{{ page.content if page else '' }}</textarea>
         </div>
 
+        <!-- Access Control Section -->
+        <h3 style="margin-top: 2rem; margin-bottom: 1rem; color: var(--esa-navy);">Access Control</h3>
+
         <div style="margin-bottom: 1.25rem;">
             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                <input type="checkbox" name="is_secure" {% if page and page.is_secure %}checked{% endif %}>
-                <span><strong>Secure Page</strong> - Requires login to view</span>
+                <input type="checkbox" name="is_public" {% if page and page.is_public %}checked{% endif %}>
+                <span><strong>Public Page</strong> - Anyone can view without login</span>
             </label>
         </div>
 
-        {% if current_user.role == 'admin' %}
-        <div style="margin-bottom: 1.25rem;">
-            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                <input type="checkbox" name="edit_restricted" {% if page and page.edit_restricted %}checked{% endif %}>
-                <span><strong>Edit Restricted</strong> - Only admins can edit this page</span>
-            </label>
+        <div class="access-section">
+            <h4>View Access</h4>
+            <p class="help-text">Leave empty = any logged-in user can view</p>
+
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.9rem;">Roles that can view:</label>
+            <div class="checkbox-group">
+                {% for role in roles %}
+                <label>
+                    <input type="checkbox" name="view_roles" value="{{ role.id }}"
+                        {% if page and role.id|string in page.get_view_roles_list() %}checked{% endif %}>
+                    <span>{{ role.name }}</span>
+                </label>
+                {% endfor %}
+            </div>
+
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.9rem;">Specific users that can view:</label>
+            <select name="view_users" id="view_users" multiple class="user-select">
+                {% if view_users %}
+                    {% for user in view_users %}
+                    <option value="{{ user.id }}" selected>{{ user.username }}</option>
+                    {% endfor %}
+                {% endif %}
+            </select>
         </div>
-        {% endif %}
+
+        <div class="access-section">
+            <h4>Edit Access</h4>
+            <p class="help-text">Leave empty = any user with page management permission can edit</p>
+
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.9rem;">Roles that can edit:</label>
+            <div class="checkbox-group">
+                {% for role in roles %}
+                <label>
+                    <input type="checkbox" name="edit_roles" value="{{ role.id }}"
+                        {% if page and role.id|string in page.get_edit_roles_list() %}checked{% endif %}>
+                    <span>{{ role.name }}</span>
+                </label>
+                {% endfor %}
+            </div>
+
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.9rem;">Specific users that can edit:</label>
+            <select name="edit_users" id="edit_users" multiple class="user-select">
+                {% if edit_users %}
+                    {% for user in edit_users %}
+                    <option value="{{ user.id }}" selected>{{ user.username }}</option>
+                    {% endfor %}
+                {% endif %}
+            </select>
+        </div>
 
         <div style="margin-top: 2rem;">
             <button type="submit" class="btn">{{ 'Update Page' if page else 'Create Page' }}</button>
@@ -79,4 +175,31 @@
         </div>
     </form>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script>
+$(document).ready(function() {
+    $('.user-select').select2({
+        placeholder: 'Search and select users...',
+        allowClear: true,
+        ajax: {
+            url: '{{ url_for("admin.search_users") }}',
+            dataType: 'json',
+            delay: 250,
+            data: function(params) {
+                return { q: params.term };
+            },
+            processResults: function(data) {
+                return data;
+            },
+            cache: true
+        },
+        minimumInputLength: 0
+    });
+});
+</script>
 {% endblock %}
