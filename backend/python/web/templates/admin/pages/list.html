@@ -60,6 +60,7 @@
                 </td>
                 <td>{{ page.updated_at.strftime('%Y-%m-%d %H:%M') if page.updated_at else '-' }}</td>
                 <td>
+                    <a href="/{{ page.slug }}.{{ page.extension }}" target="_blank" class="btn btn-sm" style="background: #6366f1;">Preview</a>
                     {% if not page.edit_restricted or current_user.role == 'admin' %}
                     <a href="{{ url_for('admin.edit_page', page_id=page.id) }}" class="btn btn-sm btn-secondary">Edit</a>
                     {% endif %}
