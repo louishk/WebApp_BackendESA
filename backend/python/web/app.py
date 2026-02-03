@@ -142,11 +142,12 @@ def create_app(config=None, db_url=None):
         # Consider moving to external CSS files for stricter CSP
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' https://cdn.jsdelivr.net",  # For select2
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",  # unsafe-inline needed for template scripts
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",  # For select2 and inline styles
             "img-src 'self' data:",
             "font-src 'self'",
             "connect-src 'self'",
+            "frame-src 'self' https://app.powerbi.com",  # Allow embedding Power BI iframes
             "frame-ancestors 'self' https://app.powerbi.com",
             "form-action 'self'",
             "base-uri 'self'"
