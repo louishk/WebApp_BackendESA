@@ -131,7 +131,8 @@ def create_app(config=None, db_url=None):
 
         # Security headers for all responses
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['X-Frame-Options'] = 'ALLOW-FROM https://app.powerbi.com'
+        # X-Frame-Options removed; CSP frame-ancestors handles this
+        # and supports multiple origins (X-Frame-Options ALLOW-FROM is deprecated)
         response.headers['X-XSS-Protection'] = '1; mode=block'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
