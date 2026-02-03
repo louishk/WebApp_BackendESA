@@ -10,13 +10,22 @@ from flask import request, jsonify, g
 
 
 def _get_jwt_secret():
-    """Get JWT secret from unified config system."""
+    """Get JWT secret from unified config system. Raises ValueError if not configured."""
     try:
         from common.config_loader import get_config
         config = get_config()
-        return config.get_secret('JWT_SECRET') or ''
+        secret = config.get_secret('JWT_SECRET')
+        if secret:
+            return secret
     except Exception:
-        return os.environ.get('JWT_SECRET', '')
+        pass
+    # Fallback to environment variable
+    secret = os.environ.get('JWT_SECRET')
+    if secret:
+        return secret
+    raise ValueError(
+        'JWT_SECRET is not configured. Set it in vault or JWT_SECRET environment variable.'
+    )
 
 
 def _get_jwt_algorithm():

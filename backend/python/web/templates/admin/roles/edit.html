@@ -22,6 +22,7 @@
 
 <div class="card">
     <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% if not role %}
         <div style="margin-bottom: 1.25rem;">
             <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Role Name *</label>

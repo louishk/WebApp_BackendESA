@@ -9,10 +9,13 @@ from pathlib import Path
 from uuid import uuid4, UUID
 import threading
 
+import re
+
 from flask import Blueprint, jsonify, request, current_app
 from sqlalchemy import desc, func, case, text
 
 from web.auth.jwt_auth import require_auth
+from web.utils.rate_limit import rate_limit_api
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -352,6 +355,27 @@ def api_upcoming_jobs():
     return jsonify({'upcoming': upcoming})
 
 
+def _is_valid_sql_identifier(name):
+    """Validate that a string is a safe SQL identifier (table/column name)."""
+    import re
+    if not name or not isinstance(name, str):
+        return False
+    # Allow alphanumeric, underscores, and dots (for schema.table)
+    # Must start with letter or underscore
+    return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$', name))
+
+
+def _validate_module_path(module_path):
+    """Validate module_path is a safe Python module reference within datalayer."""
+    if not module_path or not isinstance(module_path, str):
+        return False, 'module_path is required'
+    if not module_path.startswith('datalayer.'):
+        return False, 'module_path must start with "datalayer."'
+    if not re.match(r'^datalayer(\.[a-zA-Z_][a-zA-Z0-9_]*)+$', module_path):
+        return False, 'module_path contains invalid characters'
+    return True, 'valid'
+
+
 @api_bp.route('/data-freshness')
 @cached(ttl_seconds=60)
 def api_data_freshness():
@@ -374,6 +398,8 @@ def api_data_freshness():
 
         if not table:
             freshness[name] = {'latest_date': None, 'error': 'No table configured'}
+        elif not _is_valid_sql_identifier(table) or not _is_valid_sql_identifier(column):
+            freshness[name] = {'latest_date': None, 'error': 'Invalid table or column name'}
         else:
             queries_to_run.append((name, table, column))
 
@@ -406,6 +432,7 @@ def api_data_freshness():
 
 @api_bp.route('/jobs/<pipeline>/run-async', methods=['POST'])
 @require_auth
+@rate_limit_api(max_requests=10, window_seconds=60)
 def api_run_job_async(pipeline):
     """Trigger job execution asynchronously."""
     from scheduler.config import SchedulerConfig
@@ -561,6 +588,7 @@ def api_stream_execution(execution_id):
 
 @api_bp.route('/jobs/<pipeline>/run', methods=['POST'])
 @require_auth
+@rate_limit_api(max_requests=10, window_seconds=60)
 def api_run_job(pipeline):
     """Trigger job execution (synchronous)."""
     from scheduler.config import SchedulerConfig
@@ -643,6 +671,7 @@ def api_list_history():
 
 
 @api_bp.route('/history/<execution_id>')
+@require_auth
 def api_get_execution(execution_id):
     """Get execution details by execution ID."""
     from scheduler.models import JobHistory
@@ -884,6 +913,7 @@ def api_services_status():
 
 @api_bp.route('/services/scheduler/start', methods=['POST'])
 @require_auth
+@rate_limit_api(max_requests=5, window_seconds=60)
 def api_start_scheduler():
     """Start the scheduler daemon as a background process."""
     import subprocess
@@ -932,14 +962,16 @@ def api_start_scheduler():
         })
 
     except Exception as e:
+        current_app.logger.error(f"Failed to start scheduler: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': 'Failed to start scheduler service'
         }), 500
 
 
 @api_bp.route('/services/scheduler/stop', methods=['POST'])
 @require_auth
+@rate_limit_api(max_requests=5, window_seconds=60)
 def api_stop_scheduler():
     """Stop the scheduler daemon."""
     import os
@@ -982,9 +1014,10 @@ def api_stop_scheduler():
             })
 
         except PermissionError:
+            current_app.logger.error(f"Permission denied to stop scheduler process {pid}")
             return jsonify({
                 'success': False,
-                'error': f'Permission denied to stop process {pid}'
+                'error': 'Permission denied to stop scheduler'
             }), 403
 
     finally:
@@ -1095,6 +1128,7 @@ def api_get_pipeline(name):
 
 @api_bp.route('/pipelines', methods=['POST'])
 @require_auth
+@rate_limit_api(max_requests=20, window_seconds=60)
 def api_create_pipeline():
     """Create a new pipeline."""
     from scheduler.config import SchedulerConfig
@@ -1115,10 +1149,15 @@ def api_create_pipeline():
     if name in config.pipelines:
         return jsonify({'error': f'Pipeline {name} already exists'}), 400
 
+    module_path = data.get('module_path', f'datalayer.{name}')
+    is_valid, msg = _validate_module_path(module_path)
+    if not is_valid:
+        return jsonify({'error': msg}), 400
+
     pipeline_config = {
         'display_name': data.get('display_name', name.replace('_', ' ').title()),
         'description': data.get('description', ''),
-        'module_path': data.get('module_path', f'datalayer.{name}'),
+        'module_path': module_path,
         'enabled': data.get('enabled', False),
         'schedule': {
             'type': 'cron',
@@ -1160,6 +1199,7 @@ def api_create_pipeline():
 
 @api_bp.route('/pipelines/<name>', methods=['PUT'])
 @require_auth
+@rate_limit_api(max_requests=20, window_seconds=60)
 def api_update_pipeline(name):
     """Update a pipeline configuration."""
     from scheduler.config import SchedulerConfig
@@ -1184,6 +1224,9 @@ def api_update_pipeline(name):
     if 'description' in data:
         current['description'] = data['description']
     if 'module_path' in data:
+        is_valid, msg = _validate_module_path(data['module_path'])
+        if not is_valid:
+            return jsonify({'error': msg}), 400
         current['module_path'] = data['module_path']
     if 'enabled' in data:
         current['enabled'] = data['enabled']
@@ -1219,6 +1262,7 @@ def api_update_pipeline(name):
 
 @api_bp.route('/pipelines/<name>', methods=['DELETE'])
 @require_auth
+@rate_limit_api(max_requests=10, window_seconds=60)
 def api_delete_pipeline(name):
     """Delete a pipeline."""
     from scheduler.config import SchedulerConfig

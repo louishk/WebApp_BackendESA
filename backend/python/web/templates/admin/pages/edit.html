@@ -74,6 +74,7 @@
 
 <div class="card">
     <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div style="margin-bottom: 1.25rem;">
             <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Title *</label>
             <input type="text" name="title" required value="{{ page.title if page else '' }}"

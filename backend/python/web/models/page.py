@@ -31,7 +31,7 @@ class Page(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Allowed file extensions
-    ALLOWED_EXTENSIONS = ['php', 'html', 'js', 'css', 'txt']
+    ALLOWED_EXTENSIONS = ['html', 'js', 'css', 'txt']
 
     def _parse_id_list(self, value):
         """Parse comma-separated ID string into list of strings."""
@@ -95,9 +95,12 @@ class Page(Base):
         """
         if not user or not user.is_authenticated:
             return False
-        # No restrictions means any authenticated user can edit
-        if not self.edit_roles and not self.edit_users:
+        # Users with page management permission can always edit
+        if hasattr(user, 'can_manage_pages') and user.can_manage_pages():
             return True
+        # No restrictions set: require page management permission (secure default)
+        if not self.edit_roles and not self.edit_users:
+            return False
         # Check role-based access
         role_ids = self.get_edit_roles_list()
         if role_ids and str(user.role_id) in role_ids:

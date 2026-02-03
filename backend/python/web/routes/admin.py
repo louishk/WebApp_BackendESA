@@ -5,6 +5,8 @@ Admin routes - user, role, and page management.
 import bcrypt
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, current_app
 from flask_login import login_required, current_user
+from web.utils.audit import audit_log, AuditEvent
+from web.utils.validators import validate_password
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -135,6 +137,7 @@ def create_role():
             db_session.add(role)
             db_session.commit()
 
+            audit_log(AuditEvent.ROLE_CREATED, f"Created role '{name}' with permissions: {role.get_permissions_list()}")
             flash(f'Role "{name}" created successfully.', 'success')
             return redirect(url_for('admin.list_roles'))
         except Exception as e:
@@ -170,6 +173,7 @@ def edit_role(role_id):
             role.can_manage_configs = request.form.get('can_manage_configs') == 'on'
 
             db_session.commit()
+            audit_log(AuditEvent.ROLE_UPDATED, f"Updated role '{role.name}' (id={role_id}), permissions: {role.get_permissions_list()}")
             flash('Role updated successfully.', 'success')
             return redirect(url_for('admin.list_roles'))
 
@@ -208,9 +212,11 @@ def delete_role(role_id):
             flash(f'Cannot delete role. {user_count} user(s) are assigned to this role.', 'error')
             return redirect(url_for('admin.list_roles'))
 
+        role_name = role.name
         db_session.delete(role)
         db_session.commit()
-        flash(f'Role "{role.name}" deleted.', 'success')
+        audit_log(AuditEvent.ROLE_DELETED, f"Deleted role '{role_name}' (id={role_id})")
+        flash(f'Role "{role_name}" deleted.', 'success')
     except Exception as e:
         db_session.rollback()
         current_app.logger.error(f"Error deleting role: {e}")
@@ -277,9 +283,13 @@ def create_user():
                 flash('Username already exists.', 'error')
                 return render_template('admin/users/edit.html', user=None, roles=roles)
 
-            # Hash password if provided
+            # Validate and hash password
             hashed_password = None
             if password:
+                is_valid, message = validate_password(password)
+                if not is_valid:
+                    flash(message, 'error')
+                    return render_template('admin/users/edit.html', user=None, roles=roles)
                 hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
             user = User(
@@ -292,6 +302,7 @@ def create_user():
             db_session.add(user)
             db_session.commit()
 
+            audit_log(AuditEvent.USER_CREATED, f"Created user '{username}' with role_id={role_id}")
             flash(f'User "{username}" created successfully.', 'success')
             return redirect(url_for('admin.list_users'))
 
@@ -325,6 +336,7 @@ def edit_user(user_id):
         if request.method == 'POST':
             user.email = request.form.get('email', '').strip() or None
             role_id = request.form.get('role_id', type=int)
+            old_role_id = user.role_id
 
             if not role_id:
                 flash('Role is required.', 'error')
@@ -340,10 +352,26 @@ def edit_user(user_id):
 
             # Update password if provided
             new_password = request.form.get('password', '')
+            password_changed = False
             if new_password:
+                is_valid, message = validate_password(new_password)
+                if not is_valid:
+                    flash(message, 'error')
+                    return render_template('admin/users/edit.html', user=user, roles=roles)
                 user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                password_changed = True
 
             db_session.commit()
+
+            # Audit logging
+            changes = []
+            if old_role_id != role_id:
+                audit_log(AuditEvent.USER_ROLE_CHANGED, f"User '{user.username}' role changed from {old_role_id} to {role_id}")
+                changes.append(f"role: {old_role_id}->{role_id}")
+            if password_changed:
+                changes.append("password changed")
+            audit_log(AuditEvent.USER_UPDATED, f"Updated user '{user.username}' (id={user_id}): {', '.join(changes) if changes else 'email updated'}")
+
             flash('User updated successfully.', 'success')
             return redirect(url_for('admin.list_users'))
 
@@ -372,9 +400,11 @@ def delete_user(user_id):
     try:
         user = db_session.query(User).get(user_id)
         if user:
+            username = user.username
             db_session.delete(user)
             db_session.commit()
-            flash(f'User "{user.username}" deleted.', 'success')
+            audit_log(AuditEvent.USER_DELETED, f"Deleted user '{username}' (id={user_id})")
+            flash(f'User "{username}" deleted.', 'success')
         else:
             flash('User not found.', 'error')
     except Exception as e:
@@ -397,13 +427,15 @@ def search_users():
     """Search users for Select2 dropdown."""
     from web.models.user import User
 
-    q = request.args.get('q', '').strip()
+    q = request.args.get('q', '').strip()[:50]
 
     db_session = get_session()
     try:
         query = db_session.query(User)
         if q:
-            query = query.filter(User.username.ilike(f'%{q}%'))
+            # Escape SQL LIKE wildcard characters in user input
+            safe_q = q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            query = query.filter(User.username.ilike(f'%{safe_q}%', escape='\\'))
         users = query.order_by(User.username).limit(20).all()
         return jsonify({
             'results': [{'id': u.id, 'text': u.username} for u in users]
@@ -484,6 +516,7 @@ def create_page():
             db_session.add(page)
             db_session.commit()
 
+            audit_log(AuditEvent.PAGE_CREATED, f"Created page '{title}' ({slug}.{extension}), public={is_public}")
             flash(f'Page "{title}" created successfully.', 'success')
             return redirect(url_for('admin.list_pages'))
 
@@ -542,6 +575,7 @@ def edit_page(page_id):
                 page.extension = extension
 
             db_session.commit()
+            audit_log(AuditEvent.PAGE_UPDATED, f"Updated page '{page.title}' ({page.slug}.{page.extension})")
             flash('Page updated successfully.', 'success')
             return redirect(url_for('admin.list_pages'))
 
@@ -571,9 +605,12 @@ def delete_page(page_id):
     try:
         page = db_session.query(Page).get(page_id)
         if page:
+            page_title = page.title
+            page_slug = page.slug
             db_session.delete(page)
             db_session.commit()
-            flash(f'Page "{page.title}" deleted.', 'success')
+            audit_log(AuditEvent.PAGE_DELETED, f"Deleted page '{page_title}' ({page_slug})")
+            flash(f'Page "{page_title}" deleted.', 'success')
         else:
             flash('Page not found.', 'error')
     except Exception as e:

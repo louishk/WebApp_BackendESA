@@ -10,6 +10,7 @@ from datetime import datetime
 from flask import Flask, g, request, jsonify
 from flask_cors import CORS
 from flask_login import LoginManager
+from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -36,6 +37,16 @@ def create_app(config=None, db_url=None):
     # Load Flask configuration from unified config
     flask_config = get_flask_config()
     app.config.update(flask_config)
+
+    # Ensure secure session cookie defaults
+    # HTTPONLY should always be True to prevent XSS access to session
+    app.config.setdefault('SESSION_COOKIE_HTTPONLY', True)
+    # SAMESITE should be at least 'Lax' to prevent CSRF
+    if app.config.get('SESSION_COOKIE_SAMESITE') not in ('Lax', 'Strict'):
+        app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    # SECURE should be True in production (when not debug)
+    if not app.config.get('DEBUG', False):
+        app.config['SESSION_COOKIE_SECURE'] = True
 
     # Store scheduler config
     app.scheduler_config = config
@@ -72,6 +83,13 @@ def create_app(config=None, db_url=None):
     login_manager.login_message = 'Please log in to access this page.'
     login_manager.login_message_category = 'warning'
 
+    # Initialize CSRF protection
+    csrf = CSRFProtect()
+    csrf.init_app(app)
+
+    # Store csrf on app for blueprint exemptions
+    app.csrf = csrf
+
     @login_manager.user_loader
     def load_user(user_id):
         from web.models.user import User
@@ -98,13 +116,46 @@ def create_app(config=None, db_url=None):
     # Track web UI start time
     app.web_started_at = datetime.now()
 
-    # Prevent caching of API responses
+    # Initialize audit logging
+    from web.utils.audit import setup_audit_logging
+    setup_audit_logging(app)
+
+    # Add security headers and prevent caching of API responses
     @app.after_request
-    def add_no_cache_headers(response):
+    def add_security_headers(response):
+        # Cache control for API endpoints
         if '/api/' in request.path:
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
             response.headers['Pragma'] = 'no-cache'
             response.headers['Expires'] = '0'
+
+        # Security headers for all responses
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+
+        # Content Security Policy
+        # Note: 'unsafe-inline' needed for inline styles in templates
+        # Consider moving to external CSS files for stricter CSP
+        csp_directives = [
+            "default-src 'self'",
+            "script-src 'self' https://cdn.jsdelivr.net",  # For select2
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",  # For select2 and inline styles
+            "img-src 'self' data:",
+            "font-src 'self'",
+            "connect-src 'self'",
+            "frame-ancestors 'self'",
+            "form-action 'self'",
+            "base-uri 'self'"
+        ]
+        response.headers['Content-Security-Policy'] = '; '.join(csp_directives)
+
+        # HSTS - only enable in production with HTTPS
+        # Uncomment when deployed with HTTPS:
+        # response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+
         return response
 
     # Make current_user available in templates
@@ -125,6 +176,9 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(admin_bp)
     app.register_blueprint(scheduler_bp)
     app.register_blueprint(api_bp)
+
+    # Exempt API routes from CSRF (they use JWT authentication)
+    csrf.exempt(api_bp)
 
     # Backward compatibility: also mount health check at root
     @app.route('/health')

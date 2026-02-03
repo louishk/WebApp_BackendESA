@@ -50,7 +50,8 @@ def healthcheck():
         session.close()
         db_status = 'connected'
     except Exception as e:
-        db_status = f'error: {str(e)[:50]}'
+        current_app.logger.error(f"Database health check failed: {e}")
+        db_status = 'error'
 
     # Check scheduler API
     scheduler_status = 'unknown'
