@@ -123,18 +123,18 @@ def require_auth(f):
 
         # First, check for session-based authentication (web UI)
         if current_user and current_user.is_authenticated:
-            # Check role for session user
-            user_role = getattr(current_user, 'role', '')
-            if user_role not in SCHEDULER_ROLES:
+            # Check scheduler access via RBAC permission
+            if not current_user.can_access_scheduler():
+                role_name = current_user.role.name if current_user.role else 'none'
                 return jsonify({
                     'error': 'Forbidden',
-                    'message': f'Role "{user_role}" does not have scheduler access'
+                    'message': f'Role "{role_name}" does not have scheduler access'
                 }), 403
 
             # Store user info in Flask's g object
             g.current_user = {
                 'sub': current_user.username,
-                'role': current_user.role,
+                'role': current_user.role.name if current_user.role else 'unknown',
                 'user_id': current_user.id,
             }
             return f(*args, **kwargs)
