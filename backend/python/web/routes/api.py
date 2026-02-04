@@ -3,6 +3,7 @@ REST API routes for scheduler.
 Refactored from app.py to use blueprint pattern.
 """
 
+import os
 from datetime import datetime, timedelta
 import pytz
 from pathlib import Path
@@ -35,43 +36,58 @@ def now_utc():
 
 
 # =============================================================================
-# Simple Response Cache
+# Shared File-Based Response Cache (works across gunicorn workers)
 # =============================================================================
-_cache = {}
+import json
+import hashlib
+import tempfile
+
+_CACHE_DIR = os.path.join(tempfile.gettempdir(), 'esa-api-cache')
+os.makedirs(_CACHE_DIR, exist_ok=True)
 _cache_lock = threading.Lock()
+
+
+def _cache_path(key):
+    """Get file path for a cache key."""
+    safe_key = hashlib.md5(key.encode()).hexdigest()
+    return os.path.join(_CACHE_DIR, f'{safe_key}.json')
 
 
 def cached(ttl_seconds=30):
     """
-    Simple cache decorator for API responses.
+    File-based cache decorator for API responses.
+    Shared across all gunicorn workers via filesystem.
 
     Args:
         ttl_seconds: Cache time-to-live in seconds (default 30s)
     """
     def decorator(func):
         def wrapper(*args, **kwargs):
-            # Create cache key from function name and request path/args
             cache_key = f"{func.__name__}:{request.path}:{request.query_string.decode()}"
+            path = _cache_path(cache_key)
 
-            with _cache_lock:
-                if cache_key in _cache:
-                    cached_time, cached_response = _cache[cache_key]
-                    if (datetime.now() - cached_time).total_seconds() < ttl_seconds:
-                        return cached_response
+            # Check file cache
+            try:
+                if os.path.exists(path):
+                    mtime = os.path.getmtime(path)
+                    if (datetime.now().timestamp() - mtime) < ttl_seconds:
+                        with open(path, 'r') as f:
+                            data = json.load(f)
+                        return jsonify(data)
+            except (OSError, json.JSONDecodeError):
+                pass
 
             # Call function and cache result
             response = func(*args, **kwargs)
 
-            with _cache_lock:
-                _cache[cache_key] = (datetime.now(), response)
-
-                # Clean old entries (keep cache size manageable)
-                if len(_cache) > 100:
-                    now = datetime.now()
-                    expired = [k for k, (t, _) in _cache.items()
-                              if (now - t).total_seconds() > 300]
-                    for k in expired:
-                        del _cache[k]
+            # Write to file cache
+            try:
+                response_data = response.get_json()
+                if response_data is not None:
+                    with open(path, 'w') as f:
+                        json.dump(response_data, f)
+            except (OSError, TypeError):
+                pass
 
             return response
         wrapper.__name__ = func.__name__
@@ -80,14 +96,13 @@ def cached(ttl_seconds=30):
 
 
 def clear_cache(pattern=None):
-    """Clear cache entries, optionally matching a pattern."""
-    with _cache_lock:
-        if pattern:
-            keys_to_delete = [k for k in _cache if pattern in k]
-            for k in keys_to_delete:
-                del _cache[k]
-        else:
-            _cache.clear()
+    """Clear cache entries."""
+    try:
+        for f in os.listdir(_CACHE_DIR):
+            if f.endswith('.json'):
+                os.remove(os.path.join(_CACHE_DIR, f))
+    except OSError:
+        pass
 
 
 def get_session():
@@ -100,6 +115,7 @@ def get_session():
 # =============================================================================
 
 @api_bp.route('/status')
+@cached(ttl_seconds=10)
 def api_status():
     """Get scheduler status."""
     from scheduler import __version__
@@ -632,6 +648,7 @@ def api_run_job(pipeline):
 # =============================================================================
 
 @api_bp.route('/history')
+@cached(ttl_seconds=15)
 def api_list_history():
     """List execution history with pagination."""
     from scheduler.models import JobHistory
