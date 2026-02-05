@@ -33,7 +33,9 @@ def _get_jwt_algorithm():
     try:
         from common.config_loader import get_config
         config = get_config()
-        return config.app.jwt.algorithm if config.app.jwt else 'HS256'
+        if config.app.jwt and config.app.jwt.algorithm:
+            return config.app.jwt.algorithm
+        return 'HS256'
     except Exception:
         return 'HS256'
 

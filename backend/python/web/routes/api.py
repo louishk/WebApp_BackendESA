@@ -110,6 +110,24 @@ def get_session():
     return current_app.get_db_session()
 
 
+# PBI database session factory (for RentRoll, SiteInfo, etc.)
+_pbi_engine = None
+_pbi_session_factory = None
+
+
+def get_pbi_session():
+    """Get PBI database session for RentRoll/SiteInfo queries."""
+    global _pbi_engine, _pbi_session_factory
+    if _pbi_engine is None:
+        from common.config_loader import get_database_url
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        pbi_url = get_database_url('pbi')
+        _pbi_engine = create_engine(pbi_url)
+        _pbi_session_factory = sessionmaker(bind=_pbi_engine)
+    return _pbi_session_factory()
+
+
 # =============================================================================
 # Status & Health
 # =============================================================================
@@ -1339,7 +1357,7 @@ def api_get_billing_day_status(site_id):
     """
     from common.models import RentRoll, SiteInfo
 
-    session = get_session()
+    session = get_pbi_session()
     try:
         # Get site info
         site = session.query(SiteInfo).filter_by(SiteID=site_id).first()
@@ -1473,7 +1491,7 @@ def api_update_billing_day():
 
     # Validate ledger belongs to an active tenant
     from common.models import RentRoll, SiteInfo
-    session = get_session()
+    session = get_pbi_session()
     try:
         # Get site by code
         site = session.query(SiteInfo).filter_by(SiteCode=site_code).first()
