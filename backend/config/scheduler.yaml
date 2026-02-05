@@ -57,6 +57,7 @@ location_codes: &location_codes
   - "L028"
   - "L029"
   - "L030"
+  - "LSETUP"
 
 pipelines:
   rentroll:
@@ -74,6 +75,10 @@ pipelines:
     days_forward: 365
 
   unitsinfo:
+    sql_chunk_size: 500
+    location_codes: *location_codes
+
+  cc_discount_plans:
     sql_chunk_size: 500
     location_codes: *location_codes
 

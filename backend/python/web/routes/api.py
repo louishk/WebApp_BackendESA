@@ -1322,3 +1322,252 @@ def api_list_modules():
             })
 
     return jsonify({'modules': modules})
+
+
+# =============================================================================
+# Billing Day Management
+# =============================================================================
+
+@api_bp.route('/billing-day/<int:site_id>')
+@require_auth
+@cached(ttl_seconds=300)
+def api_get_billing_day_status(site_id):
+    """
+    Get billing day status for all rented units at a site.
+    Highlights tenants NOT on 1st of month billing.
+    Only includes active tenants (rented, valid ledger, paid within last year).
+    """
+    from common.models import RentRoll, SiteInfo
+
+    session = get_session()
+    try:
+        # Get site info
+        site = session.query(SiteInfo).filter_by(SiteID=site_id).first()
+        if not site:
+            return jsonify({'error': 'Site not found'}), 404
+
+        # Get latest extract_date for this site
+        latest_date = session.query(func.max(RentRoll.extract_date)).filter(
+            RentRoll.SiteID == site_id
+        ).scalar()
+
+        if not latest_date:
+            return jsonify({
+                'site_id': site_id,
+                'site_code': site.SiteCode,
+                'site_name': site.Name,
+                'extract_date': None,
+                'total_tenants': 0,
+                'on_first': 0,
+                'not_on_first': 0,
+                'ledgers': []
+            })
+
+        # Calculate cutoff date (1 year ago) to filter out inactive tenants
+        one_year_ago = datetime.now() - timedelta(days=365)
+
+        # Query active tenants only:
+        # - Unit is rented
+        # - Has valid ledger and tenant IDs
+        # - PaidThru within last year (excludes moved-out/inactive tenants)
+        rentroll_data = session.query(RentRoll).filter(
+            RentRoll.extract_date == latest_date,
+            RentRoll.SiteID == site_id,
+            RentRoll.bRented == True,
+            RentRoll.LedgerID.isnot(None),
+            RentRoll.TenantID.isnot(None),
+            RentRoll.dPaidThru >= one_year_ago
+        ).order_by(
+            RentRoll.iAnnivDays,
+            RentRoll.sUnit
+        ).all()
+
+        # Build response
+        ledgers = []
+        on_first = 0
+        not_on_first = 0
+
+        for rr in rentroll_data:
+            billing_day = rr.iAnnivDays
+            needs_conversion = billing_day != 1 if billing_day is not None else False
+
+            if billing_day == 1:
+                on_first += 1
+            else:
+                not_on_first += 1
+
+            ledgers.append({
+                'LedgerID': rr.LedgerID,
+                'TenantID': rr.TenantID,
+                'UnitID': rr.UnitID,
+                'UnitName': rr.sUnit,
+                'TenantName': rr.sTenant,
+                'Company': rr.sCompany,
+                'Rent': float(rr.dcRent) if rr.dcRent else None,
+                'BillingDay': billing_day,
+                'PaidThruDate': rr.dPaidThru.isoformat() if rr.dPaidThru else None,
+                'NeedsConversion': needs_conversion
+            })
+
+        return jsonify({
+            'site_id': site_id,
+            'site_code': site.SiteCode,
+            'site_name': site.Name,
+            'extract_date': latest_date.isoformat() if latest_date else None,
+            'total_tenants': len(ledgers),
+            'on_first': on_first,
+            'not_on_first': not_on_first,
+            'ledgers': ledgers
+        })
+
+    finally:
+        session.close()
+
+
+@api_bp.route('/billing-day/update', methods=['POST'])
+@require_auth
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_update_billing_day():
+    """
+    Update billing day for a ledger via SOAP API.
+    Supports preview (commit: false) and commit (commit: true) modes.
+    """
+    from common.config import DataLayerConfig
+    from common.soap_client import SOAPClient, SOAPFaultError
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    # Validate required fields
+    site_code = data.get('site_code')
+    ledger_id = data.get('ledger_id')
+    billing_day = data.get('billing_day')
+    commit = data.get('commit', False)
+
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+    if ledger_id is None:
+        return jsonify({'error': 'ledger_id is required'}), 400
+    if billing_day is None:
+        return jsonify({'error': 'billing_day is required'}), 400
+
+    # Validate types
+    try:
+        ledger_id = int(ledger_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'ledger_id must be an integer'}), 400
+
+    try:
+        billing_day = int(billing_day)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'billing_day must be an integer'}), 400
+
+    # Validate billing_day range
+    if billing_day < 1 or billing_day > 31:
+        return jsonify({'error': 'billing_day must be between 1 and 31'}), 400
+
+    # Validate commit is boolean
+    if not isinstance(commit, bool):
+        return jsonify({'error': 'commit must be a boolean'}), 400
+
+    # Validate ledger belongs to an active tenant
+    from common.models import RentRoll, SiteInfo
+    session = get_session()
+    try:
+        # Get site by code
+        site = session.query(SiteInfo).filter_by(SiteCode=site_code).first()
+        if not site:
+            return jsonify({'error': f'Site not found: {site_code}'}), 404
+
+        # Get latest extract_date for this site
+        latest_date = session.query(func.max(RentRoll.extract_date)).filter(
+            RentRoll.SiteID == site.SiteID
+        ).scalar()
+
+        if latest_date:
+            one_year_ago = datetime.now() - timedelta(days=365)
+
+            # Check if ledger exists and is active
+            ledger_record = session.query(RentRoll).filter(
+                RentRoll.extract_date == latest_date,
+                RentRoll.SiteID == site.SiteID,
+                RentRoll.LedgerID == ledger_id
+            ).first()
+
+            if not ledger_record:
+                return jsonify({'error': f'Ledger {ledger_id} not found at site {site_code}'}), 404
+
+            if not ledger_record.bRented:
+                return jsonify({'error': f'Ledger {ledger_id} is not currently rented'}), 400
+
+            if ledger_record.dPaidThru and ledger_record.dPaidThru < one_year_ago:
+                return jsonify({
+                    'error': f'Ledger {ledger_id} appears inactive (PaidThru: {ledger_record.dPaidThru.date()})',
+                    'hint': 'Cannot update billing day for moved-out or inactive tenants'
+                }), 400
+    finally:
+        session.close()
+
+    # Get SOAP config
+    config = DataLayerConfig.from_env()
+    if not config.soap:
+        current_app.logger.error("SOAP configuration not available")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    # Build CallCenterWs URL from base_url
+    cc_url = config.soap.base_url.replace('ReportingWs.asmx', 'CallCenterWs.asmx')
+
+    # Initialize SOAP client
+    soap_client = SOAPClient(
+        base_url=cc_url,
+        corp_code=config.soap.corp_code,
+        corp_user=config.soap.corp_user,
+        api_key=config.soap.api_key,
+        corp_password=config.soap.corp_password,
+        timeout=config.soap.timeout,
+        retries=config.soap.retries
+    )
+
+    try:
+        # Call LedgerBillingDayUpdate SOAP API
+        results = soap_client.call(
+            operation="LedgerBillingDayUpdate",
+            parameters={
+                "sLocationCode": site_code,
+                "iLedgerID": ledger_id,
+                "iBillingDay": billing_day,
+                "bUpdateFlag": str(commit).lower(),
+            },
+            soap_action="http://tempuri.org/CallCenterWs/CallCenterWs/LedgerBillingDayUpdate",
+            namespace="http://tempuri.org/CallCenterWs/CallCenterWs",
+            result_tag="Table",
+        )
+
+        return jsonify({
+            'success': True,
+            'mode': 'commit' if commit else 'preview',
+            'site_code': site_code,
+            'ledger_id': ledger_id,
+            'billing_day': billing_day,
+            'charges': results
+        })
+
+    except SOAPFaultError as e:
+        current_app.logger.error(f"SOAP fault during billing day update: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'SOAP API error',
+            'details': str(e)
+        }), 502
+
+    except Exception as e:
+        current_app.logger.error(f"Unexpected error during billing day update: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Unexpected error',
+            'details': str(e)
+        }), 500
+
+    finally:
+        soap_client.close()
