@@ -311,6 +311,14 @@ class SugarCRMClient:
                 return None, str(e)
         return self._request('POST', endpoint, data=data)
 
+    def put(self, endpoint: str, data: Optional[Dict] = None) -> Tuple[Optional[Any], Optional[str]]:
+        """Make a PUT request."""
+        return self._request('PUT', endpoint, data=data)
+
+    def delete(self, endpoint: str) -> Tuple[Optional[Any], Optional[str]]:
+        """Make a DELETE request."""
+        return self._request('DELETE', endpoint)
+
     # =========================================================================
     # Module Data Operations
     # =========================================================================
@@ -445,6 +453,207 @@ class SugarCRMClient:
             offset = next_offset
 
         logger.info(f"Finished fetching {module}: {total_fetched} records total")
+
+    # =========================================================================
+    # Record CRUD Operations
+    # =========================================================================
+
+    def get_record(
+        self,
+        module: str,
+        record_id: str,
+        fields: Optional[List[str]] = None
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        """
+        Get a single record by ID.
+
+        Args:
+            module: Module name (e.g., 'Leads')
+            record_id: SugarCRM record UUID
+            fields: List of fields to return (None = all fields)
+
+        Returns:
+            Tuple of (record_dict, error_message)
+        """
+        endpoint = f"{module}/{record_id}"
+        params = {}
+        if fields:
+            params['fields'] = ','.join(fields)
+        return self.get(endpoint, params=params if params else None)
+
+    def create_record(
+        self,
+        module: str,
+        fields: Dict[str, Any]
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        """
+        Create a new record in a SugarCRM module.
+
+        Custom fields (ending in '_c') are included as regular fields.
+
+        Args:
+            module: Module name (e.g., 'Leads')
+            fields: Dict of field_name -> value (including custom fields like 'my_field_c')
+
+        Returns:
+            Tuple of (created_record, error_message)
+            created_record contains the full record with its new 'id'
+
+        Example:
+            record, error = client.create_record('Leads', {
+                'first_name': 'John',
+                'last_name': 'Doe',
+                'email': [{'email_address': 'john@example.com', 'primary_address': True}],
+                'phone_mobile': '555-0100',
+                'status': 'New',
+                'lead_source': 'Web Site',
+                'custom_score_c': '85',
+            })
+        """
+        return self.post(module, data=fields)
+
+    def update_record(
+        self,
+        module: str,
+        record_id: str,
+        fields: Dict[str, Any]
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        """
+        Update an existing record in a SugarCRM module.
+
+        Only the fields provided will be updated; other fields remain unchanged.
+        Custom fields (ending in '_c') are included as regular fields.
+
+        Args:
+            module: Module name (e.g., 'Leads')
+            record_id: SugarCRM record UUID to update
+            fields: Dict of field_name -> value to update
+
+        Returns:
+            Tuple of (updated_record, error_message)
+
+        Example:
+            record, error = client.update_record('Leads', 'abc-123-uuid', {
+                'status': 'Converted',
+                'custom_score_c': '95',
+            })
+        """
+        endpoint = f"{module}/{record_id}"
+        return self.put(endpoint, data=fields)
+
+    def upsert_record(
+        self,
+        module: str,
+        fields: Dict[str, Any],
+        lookup_field: str = 'id',
+        lookup_value: Optional[str] = None
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        """
+        Create or update a record. If a record matching the lookup is found, update it;
+        otherwise create a new one.
+
+        Args:
+            module: Module name (e.g., 'Leads')
+            fields: Dict of field_name -> value
+            lookup_field: Field to match on for finding existing records (default: 'id')
+            lookup_value: Value to look up. If None and lookup_field is 'id',
+                          uses fields.get('id'). For other fields, must be provided.
+
+        Returns:
+            Tuple of (record, error_message)
+            The record dict includes '_action': 'created' or '_action': 'updated'
+        """
+        # Determine lookup value
+        if lookup_value is None:
+            if lookup_field == 'id':
+                lookup_value = fields.get('id')
+            else:
+                lookup_value = fields.get(lookup_field)
+
+        # Try to find existing record
+        if lookup_value:
+            if lookup_field == 'id':
+                existing, error = self.get_record(module, lookup_value)
+                if existing and not error:
+                    # Record exists - update it
+                    update_fields = {k: v for k, v in fields.items() if k != 'id'}
+                    result, error = self.update_record(module, lookup_value, update_fields)
+                    if result:
+                        result['_action'] = 'updated'
+                    return result, error
+            else:
+                # Search by custom field
+                filter_expr = [{lookup_field: {'$equals': lookup_value}}]
+                search_result, error = self.filter_records(
+                    module=module,
+                    filter_expr=filter_expr,
+                    max_num=1
+                )
+                if search_result and search_result.get('records'):
+                    existing_id = search_result['records'][0]['id']
+                    update_fields = {k: v for k, v in fields.items() if k != 'id'}
+                    result, error = self.update_record(module, existing_id, update_fields)
+                    if result:
+                        result['_action'] = 'updated'
+                    return result, error
+
+        # No existing record found - create new
+        create_fields = {k: v for k, v in fields.items() if k != 'id'}
+        result, error = self.create_record(module, create_fields)
+        if result:
+            result['_action'] = 'created'
+        return result, error
+
+    def delete_record(
+        self,
+        module: str,
+        record_id: str
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        """
+        Delete a record from a SugarCRM module.
+
+        Args:
+            module: Module name (e.g., 'Leads')
+            record_id: SugarCRM record UUID to delete
+
+        Returns:
+            Tuple of (response, error_message)
+        """
+        endpoint = f"{module}/{record_id}"
+        return self.delete(endpoint)
+
+    def find_leads_by_email(
+        self,
+        email: str,
+        fields: Optional[List[str]] = None
+    ) -> Tuple[Optional[List[Dict]], Optional[str]]:
+        """
+        Find leads by email address.
+
+        Useful for deduplication before creating new leads.
+
+        Args:
+            email: Email address to search for
+            fields: Fields to return (None = all)
+
+        Returns:
+            Tuple of (list_of_matching_records, error_message)
+        """
+        filter_expr = [{
+            '$or': [
+                {'email': {'$equals': email}},
+                {'webtolead_email1': {'$equals': email}},
+            ]
+        }]
+        result, error = self.filter_records(
+            module='Leads',
+            filter_expr=filter_expr,
+            fields=fields,
+            max_num=10
+        )
+        if error:
+            return None, error
+        return result.get('records', []), None
 
     # =========================================================================
     # Metadata Operations
