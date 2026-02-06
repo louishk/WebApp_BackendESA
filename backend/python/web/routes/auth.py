@@ -135,6 +135,15 @@ def oauth_callback():
         flash('Could not retrieve email from Microsoft account.', 'error')
         return redirect(url_for('auth.login'))
 
+    # Restrict OAuth to allowed email domains
+    ALLOWED_DOMAINS = {'extraspaceasia.com'}
+    email_domain = email.rsplit('@', 1)[-1].lower()
+    if email_domain not in ALLOWED_DOMAINS:
+        current_app.logger.warning(f"OAuth login rejected for unauthorized domain: {email}")
+        audit_log(AuditEvent.LOGIN_FAILED, f"OAuth rejected: unauthorized domain '{email_domain}' for {email}", user=email, level='WARNING')
+        flash('Access is restricted to authorized organization accounts.', 'error')
+        return redirect(url_for('auth.login'))
+
     db_session = get_session()
     try:
         # Find or create user
