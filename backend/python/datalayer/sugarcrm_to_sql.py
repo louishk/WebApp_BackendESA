@@ -48,7 +48,7 @@ from decimal import Decimal
 from typing import List, Dict, Any, Optional, Type, Generator
 
 from tqdm import tqdm
-from sqlalchemy import Column, String, Integer, DateTime, Date, Boolean, Numeric, Text
+from sqlalchemy import Column, String, Integer, DateTime, Date, Boolean, Numeric, Text, inspect as sa_inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 
 # Import common utilities
@@ -516,6 +516,50 @@ def transform_record(
 # Database Operations
 # =============================================================================
 
+def sync_table_schema(engine, model_class: Type) -> List[str]:
+    """
+    Compare the dynamic model columns to the live database table and
+    ALTER TABLE ADD COLUMN for any that are missing.
+
+    Safe for production — only adds columns, never drops or modifies.
+
+    Args:
+        engine: SQLAlchemy engine
+        model_class: Dynamic model class built from current SugarCRM metadata
+
+    Returns:
+        List of column names that were added
+    """
+    table_name = model_class.__tablename__
+    inspector = sa_inspect(engine)
+
+    if not inspector.has_table(table_name):
+        return []  # Table doesn't exist yet; create_all will handle it
+
+    existing_columns = {col['name'] for col in inspector.get_columns(table_name)}
+    model_columns = {col.name: col for col in model_class.__table__.columns}
+
+    missing = [
+        (name, col) for name, col in model_columns.items()
+        if name not in existing_columns
+    ]
+
+    if not missing:
+        return []
+
+    added = []
+    with engine.begin() as conn:
+        for col_name, col in missing:
+            # Map SQLAlchemy type to a safe SQL type string
+            col_type = col.type.compile(dialect=engine.dialect)
+            stmt = f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type} NULL'
+            logger.info(f"Adding missing column: {table_name}.{col_name} ({col_type})")
+            conn.execute(text(stmt))
+            added.append(col_name)
+
+    return added
+
+
 def push_records_to_database(
     records: List[Dict[str, Any]],
     model_class: Type,
@@ -543,9 +587,13 @@ def push_records_to_database(
 
     engine = create_engine_from_config(db_config)
 
-    # Create table if not exists
+    # Create table if not exists, then add any missing columns
     DynamicBase.metadata.create_all(engine, tables=[model_class.__table__])
-    tqdm.write(f"  Table '{model_class.__tablename__}' ready")
+    added_cols = sync_table_schema(engine, model_class)
+    if added_cols:
+        tqdm.write(f"  Table '{model_class.__tablename__}': added {len(added_cols)} new column(s): {', '.join(added_cols)}")
+    else:
+        tqdm.write(f"  Table '{model_class.__tablename__}' ready")
 
     session_manager = SessionManager(engine)
     num_chunks = (len(records) + chunk_size - 1) // chunk_size
