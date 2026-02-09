@@ -45,6 +45,7 @@
     </a>
     {% endif %}
 
+    {% if current_user.can_manage_configs() %}
     <a href="{{ url_for('api.api_status') }}" class="feature-card" target="_blank">
         <div class="feature-icon">
             <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
@@ -64,6 +65,7 @@
         <h3>Health Check</h3>
         <p>View system health and status information</p>
     </a>
+    {% endif %}
 
     {% if current_user.can_manage_users() %}
     <a href="{{ url_for('admin.list_configs') }}" class="feature-card">
