@@ -52,7 +52,7 @@ from .models import Base, BaseModel, TimestampMixin, SoftDeleteMixin
 from .models import RentRoll, SiteInfo, LOSRange, PriceRange, UnitsInfo  # Data models
 from .models import Discount, MoveInsAndMoveOuts  # Discount and Move-in/out models
 from .models import FXRate, FXRateMonthly  # FX rate models
-from .models import Tenant, Ledger, Charge  # CallCenterWs models
+from .models import Tenant, Ledger, Charge, CCDiscount  # CallCenterWs models
 # Management Summary models
 from .models import (
     MSDeposits, MSReceipts, MSConcessions, MSDiscounts, MSLiabilities,
@@ -141,6 +141,7 @@ __all__ = [
     'Tenant',
     'Ledger',
     'Charge',
+    'CCDiscount',
     # Management Summary models
     'MSDeposits',
     'MSReceipts',

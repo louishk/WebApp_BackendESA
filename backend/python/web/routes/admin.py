@@ -261,7 +261,16 @@ def list_users():
         order_fn = desc if sort_dir == 'desc' else asc
         query = query.order_by(order_fn(col))
 
-        users = query.all()
+        # Pagination
+        PER_PAGE = 15
+        page = request.args.get('page', 1, type=int)
+        if page < 1:
+            page = 1
+        total = query.count()
+        total_pages = max(1, (total + PER_PAGE - 1) // PER_PAGE)
+        if page > total_pages:
+            page = total_pages
+        users = query.offset((page - 1) * PER_PAGE).limit(PER_PAGE).all()
 
         # Get distinct departments and offices for filter dropdowns
         all_users = db_session.query(User).all()
@@ -270,6 +279,10 @@ def list_users():
 
         return render_template('admin/users/list.html',
                                users=users,
+                               total=total,
+                               page=page,
+                               total_pages=total_pages,
+                               per_page=PER_PAGE,
                                departments=departments,
                                offices=offices,
                                search=search,
@@ -279,6 +292,105 @@ def list_users():
                                sort_dir=sort_dir)
     finally:
         db_session.close()
+
+
+@admin_bp.route('/users/sync-o365', methods=['POST'])
+@login_required
+@admin_required
+def sync_o365_profiles():
+    """Backfill O365 profile fields for all Microsoft users via Graph API."""
+    import requests as http_requests
+    from web.models.user import User
+    from common.config_loader import get_config
+
+    config = get_config()
+    ms = config.oauth.microsoft
+
+    if not ms or not ms.enabled:
+        flash('Microsoft OAuth is not configured.', 'error')
+        return redirect(url_for('admin.list_users'))
+
+    # Get app-only token via client credentials flow
+    token_url = f"https://login.microsoftonline.com/{ms.tenant_id}/oauth2/v2.0/token"
+    try:
+        token_resp = http_requests.post(token_url, data={
+            'grant_type': 'client_credentials',
+            'client_id': ms.client_id,
+            'client_secret': ms.client_secret_vault,
+            'scope': 'https://graph.microsoft.com/.default',
+        }, timeout=10)
+        token_resp.raise_for_status()
+        token = token_resp.json()['access_token']
+    except Exception as e:
+        current_app.logger.error(f"O365 sync: token error: {e}")
+        flash('Failed to get Graph API token. Check OAuth config.', 'error')
+        return redirect(url_for('admin.list_users'))
+
+    # Fetch all users from Graph
+    headers = {'Authorization': f'Bearer {token}'}
+    graph_users = []
+    url = 'https://graph.microsoft.com/v1.0/users'
+    params = {'$select': 'mail,userPrincipalName,department,jobTitle,officeLocation,employeeId', '$top': '999'}
+    try:
+        while url:
+            resp = http_requests.get(url, headers=headers, params=params, timeout=15)
+            if resp.status_code == 403:
+                flash('Graph API permission denied. Ask your Azure AD admin to grant User.Read.All application permission.', 'error')
+                return redirect(url_for('admin.list_users'))
+            resp.raise_for_status()
+            data = resp.json()
+            graph_users.extend(data.get('value', []))
+            url = data.get('@odata.nextLink')
+            params = None
+    except Exception as e:
+        current_app.logger.error(f"O365 sync: Graph API error: {e}")
+        flash(f'Graph API error: {e}', 'error')
+        return redirect(url_for('admin.list_users'))
+
+    # Build lookup by email
+    graph_lookup = {}
+    for gu in graph_users:
+        email = (gu.get('mail') or gu.get('userPrincipalName') or '').lower()
+        if email:
+            graph_lookup[email] = gu
+
+    # Update DB
+    db_session = get_session()
+    try:
+        ms_users = db_session.query(User).filter_by(auth_provider='microsoft').all()
+        updated = 0
+        not_found = 0
+
+        for user in ms_users:
+            gu = graph_lookup.get((user.email or '').lower())
+            if not gu:
+                not_found += 1
+                continue
+
+            dept = gu.get('department') or None
+            title = gu.get('jobTitle') or None
+            office = gu.get('officeLocation') or None
+            emp_id = gu.get('employeeId') or None
+
+            if (user.department != dept or user.job_title != title
+                    or user.office_location != office or user.employee_id != emp_id):
+                user.department = dept
+                user.job_title = title
+                user.office_location = office
+                user.employee_id = emp_id
+                updated += 1
+
+        db_session.commit()
+        audit_log(AuditEvent.USER_UPDATED, f"O365 profile sync: {updated} updated, {not_found} not found in Graph, {len(ms_users)} total")
+        flash(f'O365 sync complete: {updated} users updated, {len(ms_users) - updated - not_found} unchanged, {not_found} not found in Azure AD.', 'success')
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"O365 sync DB error: {e}")
+        flash(f'Database error during sync: {e}', 'error')
+    finally:
+        db_session.close()
+
+    return redirect(url_for('admin.list_users'))
 
 
 @admin_bp.route('/users/create', methods=['GET', 'POST'])

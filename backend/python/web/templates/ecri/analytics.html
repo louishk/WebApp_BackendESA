@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+
+{% block title %}ECRI Analytics - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>ECRI Batch Analytics</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Outcome tracking, control group comparison, and revenue impact</p>
+</div>
+
+<!-- Batch Info -->
+<div class="card">
+    <h2>Batch Details</h2>
+    <div id="batch-info" style="color: #666;">Loading...</div>
+</div>
+
+<!-- Revenue Impact -->
+<div class="card">
+    <h2>Revenue Impact</h2>
+    <div class="stats-grid" id="revenue-stats"></div>
+</div>
+
+<!-- Control Group Comparison -->
+<div id="groups-section" style="display: none;">
+    <div class="card">
+        <h2>Control Group Comparison</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Group</th>
+                    <th>Increase %</th>
+                    <th>Ledgers</th>
+                    <th>Stayed</th>
+                    <th>Moved Out</th>
+                    <th>Pending</th>
+                    <th>Churn Rate</th>
+                    <th>Monthly Gain</th>
+                    <th>Monthly Loss</th>
+                    <th>Net Impact</th>
+                </tr>
+            </thead>
+            <tbody id="groups-tbody"></tbody>
+        </table>
+    </div>
+
+    <!-- Visual Comparison -->
+    <div class="card">
+        <h2>Churn Rate by Group</h2>
+        <div id="churn-chart" style="display: flex; gap: 2rem; align-items: end; min-height: 200px; padding: 1rem 0;"></div>
+    </div>
+</div>
+
+<!-- Outcome Details -->
+<div class="card">
+    <h2>Individual Outcomes</h2>
+    <div style="margin-bottom: 0.75rem;">
+        <select id="outcome-filter" class="form-select" style="max-width: 200px;" onchange="filterOutcomes()">
+            <option value="all">All</option>
+            <option value="stayed">Stayed</option>
+            <option value="moved_out">Moved Out</option>
+            <option value="scheduled_out">Scheduled Out</option>
+            <option value="pending">Pending</option>
+        </select>
+    </div>
+    <div style="max-height: 400px; overflow-y: auto;">
+        <table>
+            <thead style="position: sticky; top: 0; background: var(--esa-gray); z-index: 10;">
+                <tr>
+                    <th>Site</th>
+                    <th>Ledger</th>
+                    <th>Tenant</th>
+                    <th>Group</th>
+                    <th>Old Rent</th>
+                    <th>New Rent</th>
+                    <th>Increase</th>
+                    <th>Outcome</th>
+                    <th>Days After Notice</th>
+                </tr>
+            </thead>
+            <tbody id="outcomes-tbody">
+                <tr><td colspan="9" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div style="margin-top: 1rem;">
+    <a href="{{ url_for('ecri.dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+
+<style>
+.form-select {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    border: 1px solid var(--esa-gray-dark);
+    border-radius: 4px;
+    background: #fff;
+}
+.bar-container {
+    display: flex; flex-direction: column; align-items: center; gap: 0.5rem;
+}
+.bar {
+    width: 80px; background: var(--esa-navy); border-radius: 4px 4px 0 0;
+    display: flex; align-items: end; justify-content: center;
+    color: #fff; font-weight: bold; padding-bottom: 0.5rem; min-height: 20px;
+}
+.bar-label { font-size: 0.85rem; color: #666; }
+.outcome-stayed { color: #28A745; font-weight: 600; }
+.outcome-moved_out { color: #C41230; font-weight: 600; }
+.outcome-scheduled_out { color: #FFC107; font-weight: 600; }
+.outcome-pending { color: #6C757D; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    clearTimeout(window.autoRefreshTimeout);
+
+    const BATCH_ID = '{{ batch_id }}';
+    let allLedgerData = [];
+    let outcomeMap = {};
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        return { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() };
+    }
+
+    function formatCurrency(val) {
+        if (val === null || val === undefined) return '-';
+        return '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    }
+
+    function formatDate(iso) {
+        if (!iso) return '-';
+        return new Date(iso).toLocaleDateString('en-SG', {day: '2-digit', month: 'short', year: 'numeric'});
+    }
+
+    async function loadAnalytics() {
+        try {
+            // Load batch details and outcomes in parallel
+            const [batchRes, outcomesRes] = await Promise.all([
+                fetch(`/ecri/api/batch/${BATCH_ID}`, {headers: apiHeaders()}),
+                fetch(`/ecri/api/batch/${BATCH_ID}/outcomes`, {headers: apiHeaders()})
+            ]);
+
+            const batch = await batchRes.json();
+            const outcomes = await outcomesRes.json();
+
+            if (batch.error) {
+                document.getElementById('batch-info').innerHTML = `<p style="color: #C41230;">${batch.error}</p>`;
+                return;
+            }
+
+            allLedgerData = batch.ledgers || [];
+
+            // Build outcome map
+            (outcomes.outcomes || []).forEach(o => {
+                outcomeMap[`${o.site_id}_${o.ledger_id}`] = o;
+            });
+
+            // Batch info
+            document.getElementById('batch-info').innerHTML = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; max-width: 600px;">
+                    <div><strong>Name:</strong> ${batch.name || '-'}</div>
+                    <div><strong>Status:</strong> <span class="status status-completed">${batch.status}</span></div>
+                    <div><strong>Executed:</strong> ${formatDate(batch.executed_at)}</div>
+                    <div><strong>Attribution Window:</strong> ${batch.attribution_window_days} days</div>
+                    <div><strong>Total Ledgers:</strong> ${batch.total_ledgers}</div>
+                    <div><strong>Control Groups:</strong> ${batch.control_group_enabled ? 'Yes' : 'No'}</div>
+                </div>
+            `;
+
+            // Revenue impact
+            const groups = outcomes.groups || [];
+            let totalGain = 0, totalLoss = 0, totalNet = 0;
+            let totalStayed = 0, totalChurned = 0, totalPending = 0;
+
+            groups.forEach(g => {
+                totalGain += g.monthly_gain_stayed;
+                totalLoss += g.monthly_loss_churn;
+                totalNet += g.net_monthly_impact;
+                totalStayed += g.stayed;
+                totalChurned += g.moved_out;
+                totalPending += g.pending;
+            });
+
+            document.getElementById('revenue-stats').innerHTML = `
+                <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(totalGain)}</div><div class="label">Monthly Gain (Stayed)</div></div>
+                <div class="stat-card" style="background: #C41230;"><div class="value">${formatCurrency(totalLoss)}</div><div class="label">Monthly Loss (Churn)</div></div>
+                <div class="stat-card"><div class="value">${formatCurrency(totalNet)}</div><div class="label">Net Monthly</div></div>
+                <div class="stat-card"><div class="value">${formatCurrency(totalNet * 12)}</div><div class="label">Net Annual</div></div>
+                <div class="stat-card"><div class="value">${totalStayed}</div><div class="label">Stayed</div></div>
+                <div class="stat-card" style="background: #C41230;"><div class="value">${totalChurned}</div><div class="label">Churned</div></div>
+                <div class="stat-card"><div class="value">${totalPending}</div><div class="label">Pending</div></div>
+            `;
+
+            // Control group comparison
+            if (groups.length > 1) {
+                document.getElementById('groups-section').style.display = 'block';
+
+                document.getElementById('groups-tbody').innerHTML = groups.map(g => `
+                    <tr>
+                        <td>Group ${g.group}</td>
+                        <td>${g.increase_pct}%</td>
+                        <td>${g.count}</td>
+                        <td>${g.stayed}</td>
+                        <td>${g.moved_out}</td>
+                        <td>${g.pending}</td>
+                        <td>${g.churn_rate !== null ? g.churn_rate + '%' : '-'}</td>
+                        <td>${formatCurrency(g.monthly_gain_stayed)}</td>
+                        <td>${formatCurrency(g.monthly_loss_churn)}</td>
+                        <td>${formatCurrency(g.net_monthly_impact)}</td>
+                    </tr>
+                `).join('');
+
+                // Simple bar chart
+                const maxChurn = Math.max(...groups.map(g => g.churn_rate || 0), 1);
+                document.getElementById('churn-chart').innerHTML = groups.map(g => {
+                    const height = Math.max((g.churn_rate || 0) / maxChurn * 150, 20);
+                    const color = g.increase_pct === 0 ? '#6C757D' : (g.churn_rate > 10 ? '#C41230' : 'var(--esa-navy)');
+                    return `<div class="bar-container">
+                        <div class="bar" style="height: ${height}px; background: ${color};">${g.churn_rate !== null ? g.churn_rate + '%' : '-'}</div>
+                        <div class="bar-label">Group ${g.group}<br>${g.increase_pct}% increase</div>
+                    </div>`;
+                }).join('');
+            }
+
+            // Render outcome details
+            renderOutcomes();
+
+        } catch (e) {
+            console.error('Failed to load analytics:', e);
+            document.getElementById('batch-info').innerHTML = `<p style="color: #C41230;">Failed to load analytics: ${e.message}</p>`;
+        }
+    }
+
+    function renderOutcomes() {
+        const filter = document.getElementById('outcome-filter').value;
+        const tbody = document.getElementById('outcomes-tbody');
+
+        const filtered = allLedgerData.filter(l => {
+            const key = `${l.site_id}_${l.ledger_id}`;
+            const outcome = outcomeMap[key];
+            if (filter === 'all') return true;
+            if (filter === 'pending') return !outcome;
+            return outcome && outcome.outcome_type === filter;
+        });
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #666;">No matching outcomes.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = filtered.map(l => {
+            const key = `${l.site_id}_${l.ledger_id}`;
+            const outcome = outcomeMap[key];
+            const outcomeType = outcome ? outcome.outcome_type : 'pending';
+            const outcomeClass = `outcome-${outcomeType}`;
+
+            return `<tr>
+                <td>${l.site_id}</td>
+                <td>${l.ledger_id}</td>
+                <td>${l.tenant_name || '-'}</td>
+                <td>${l.control_group}</td>
+                <td>${formatCurrency(l.old_rent)}</td>
+                <td>${formatCurrency(l.new_rent)}</td>
+                <td>${l.increase_pct}%</td>
+                <td><span class="${outcomeClass}">${outcomeType.replace('_', ' ')}</span></td>
+                <td>${outcome ? (outcome.days_after_notice || '-') : '-'}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    function filterOutcomes() {
+        renderOutcomes();
+    }
+
+    loadAnalytics();
+</script>
+{% endblock %}

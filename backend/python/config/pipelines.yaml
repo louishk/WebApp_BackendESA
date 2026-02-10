@@ -142,6 +142,28 @@ pipelines:
     data_freshness:
       table: mimo
       date_column: extract_date
+  cc_discount_plans:
+    display_name: CC Discount Plans
+    description: Fetch discount/concession plan data from DiscountPlansRetrieve SOAP API
+    module_path: datalayer.cc_discount_plans_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 5 * * 0
+    priority: 8
+    depends_on:
+    - siteinfo
+    resource_group: soap_api
+    max_db_connections: 2
+    estimated_duration_seconds: 300
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 1200
+    data_freshness:
+      table: ''
+      date_column: ''
   sugarcrm:
     display_name: SugarCRM
     description: Fetch CRM data (Leads, Contacts, Accounts)
@@ -164,3 +186,23 @@ pipelines:
     data_freshness:
       table: sugarcrm_leads
       date_column: synced_at
+  ecri_outcome_tracking:
+    display_name: ECRI Outcome Tracking
+    description: Track churn/stay outcomes for executed ECRI batches within attribution window
+    module_path: datalayer.ecri_outcome_tracking
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 8 * * 1
+    priority: 7
+    resource_group: http_api
+    max_db_connections: 2
+    estimated_duration_seconds: 300
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 1200
+    data_freshness:
+      table: ecri_outcomes
+      date_column: created_at

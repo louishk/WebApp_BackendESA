@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+
+{% block title %}Create ECRI Batch - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Create ECRI Batch</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Configure rate increase parameters for selected tenants</p>
+</div>
+
+<!-- No Selection Warning -->
+<div id="no-selection" class="card" style="display: none; background: #fef3c7; border-color: #fcd34d;">
+    <p style="margin: 0; color: #92400e;">
+        <strong>No tenants selected.</strong> Please go to
+        <a href="{{ url_for('ecri.eligibility') }}">Eligibility Review</a>
+        and select eligible tenants first.
+    </p>
+</div>
+
+<!-- Batch Configuration -->
+<div id="config-section" style="display: none;">
+    <div class="card">
+        <h2>Batch Configuration</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; max-width: 800px;">
+            <div class="form-group">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Batch Name</label>
+                <input type="text" id="batch-name" class="form-select" placeholder="e.g. Feb 2026 ECRI - SG Sites">
+            </div>
+            <div class="form-group">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Target Increase %</label>
+                <input type="number" id="target-pct" value="8" min="0" max="50" step="0.5" class="form-select">
+            </div>
+            <div class="form-group">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Notice Period (days)</label>
+                <input type="number" id="notice-days" value="14" min="7" max="90" class="form-select">
+            </div>
+            <div class="form-group">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Attribution Window (days)</label>
+                <input type="number" id="attribution-days" value="90" min="30" max="365" class="form-select">
+            </div>
+        </div>
+    </div>
+
+    <!-- Control Group Settings -->
+    <div class="card">
+        <h2>Control Groups</h2>
+        <div style="margin-bottom: 1rem;">
+            <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
+                <input type="checkbox" id="control-enabled" onchange="toggleControlGroups()">
+                <div>
+                    <strong>Enable A/B Testing</strong>
+                    <p style="color: #666; font-size: 0.85rem; margin: 0;">Split tenants into groups with different increase percentages</p>
+                </div>
+            </label>
+        </div>
+
+        <div id="control-config" style="display: none; padding: 1rem; background: #f9fafb; border-radius: 6px;">
+            <div id="group-inputs" style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                <div class="form-group">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Group 1 (Control)</label>
+                    <input type="number" class="group-pct form-select" value="0" min="0" max="50" step="0.5" style="max-width: 100px;">
+                </div>
+                <div class="form-group">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Group 2</label>
+                    <input type="number" class="group-pct form-select" value="8" min="0" max="50" step="0.5" style="max-width: 100px;">
+                </div>
+                <div class="form-group">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Group 3</label>
+                    <input type="number" class="group-pct form-select" value="12" min="0" max="50" step="0.5" style="max-width: 100px;">
+                </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="addGroup()">Add Group</button>
+        </div>
+    </div>
+
+    <!-- Preview -->
+    <div class="card">
+        <h2>Batch Preview</h2>
+        <div class="stats-grid" id="preview-stats">
+            <div class="stat-card">
+                <div class="value" id="preview-count">0</div>
+                <div class="label">Total Tenants</div>
+            </div>
+            <div class="stat-card" style="background: #28A745;">
+                <div class="value" id="preview-monthly">$0</div>
+                <div class="label">Est. Monthly Gain</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="preview-annual">$0</div>
+                <div class="label">Est. Annual Gain</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="preview-avg-pct">0%</div>
+                <div class="label">Avg Increase</div>
+            </div>
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Notes (optional)</label>
+            <textarea id="batch-notes" rows="3" class="form-select" style="max-width: 600px;" placeholder="Any notes about this batch..."></textarea>
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+            <button type="button" class="btn" onclick="createBatch()">Create Batch (Draft)</button>
+            <a href="{{ url_for('ecri.eligibility') }}" class="btn btn-secondary" style="margin-left: 0.5rem;">Back to Eligibility</a>
+        </div>
+    </div>
+</div>
+
+<style>
+.form-group { margin-bottom: 1rem; }
+.form-select {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border: 1px solid var(--esa-gray-dark);
+    border-radius: 4px;
+    background: #fff;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    clearTimeout(window.autoRefreshTimeout);
+
+    let selectedTenants = [];
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        return { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() };
+    }
+
+    // Load selected tenants from sessionStorage
+    function init() {
+        const stored = sessionStorage.getItem('ecri_selected_tenants');
+        if (!stored) {
+            document.getElementById('no-selection').style.display = 'block';
+            return;
+        }
+
+        selectedTenants = JSON.parse(stored);
+        if (selectedTenants.length === 0) {
+            document.getElementById('no-selection').style.display = 'block';
+            return;
+        }
+
+        // Load filter params
+        const params = JSON.parse(sessionStorage.getItem('ecri_filter_params') || '{}');
+        if (params.discount_reference_pct) {
+            // Already captured in eligibility data
+        }
+
+        document.getElementById('config-section').style.display = 'block';
+        updatePreview();
+
+        // Update preview when target changes
+        document.getElementById('target-pct').addEventListener('input', updatePreview);
+    }
+
+    function toggleControlGroups() {
+        const enabled = document.getElementById('control-enabled').checked;
+        document.getElementById('control-config').style.display = enabled ? 'block' : 'none';
+        updatePreview();
+    }
+
+    function addGroup() {
+        const container = document.getElementById('group-inputs');
+        const count = container.querySelectorAll('.form-group').length + 1;
+        const div = document.createElement('div');
+        div.className = 'form-group';
+        div.innerHTML = `
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Group ${count}</label>
+            <input type="number" class="group-pct form-select" value="10" min="0" max="50" step="0.5" style="max-width: 100px;">
+        `;
+        container.appendChild(div);
+    }
+
+    function updatePreview() {
+        const controlEnabled = document.getElementById('control-enabled').checked;
+        const targetPct = parseFloat(document.getElementById('target-pct').value) || 0;
+
+        let totalMonthly = 0;
+        let totalPct = 0;
+        const count = selectedTenants.length;
+
+        if (controlEnabled) {
+            const groupPcts = Array.from(document.querySelectorAll('.group-pct')).map(i => parseFloat(i.value) || 0);
+            const numGroups = groupPcts.length;
+            selectedTenants.forEach((t, i) => {
+                const pct = groupPcts[i % numGroups];
+                totalMonthly += (t.current_rent || 0) * pct / 100;
+                totalPct += pct;
+            });
+        } else {
+            selectedTenants.forEach(t => {
+                totalMonthly += (t.current_rent || 0) * targetPct / 100;
+                totalPct += targetPct;
+            });
+        }
+
+        document.getElementById('preview-count').textContent = count;
+        document.getElementById('preview-monthly').textContent = '$' + Math.round(totalMonthly).toLocaleString();
+        document.getElementById('preview-annual').textContent = '$' + Math.round(totalMonthly * 12).toLocaleString();
+        document.getElementById('preview-avg-pct').textContent = count > 0 ? (totalPct / count).toFixed(1) + '%' : '0%';
+    }
+
+    async function createBatch() {
+        const controlEnabled = document.getElementById('control-enabled').checked;
+        const targetPct = parseFloat(document.getElementById('target-pct').value) || 0;
+        const noticeDays = parseInt(document.getElementById('notice-days').value) || 14;
+        const attributionDays = parseInt(document.getElementById('attribution-days').value) || 90;
+        const batchName = document.getElementById('batch-name').value.trim();
+        const notes = document.getElementById('batch-notes').value.trim();
+
+        const siteIds = [...new Set(selectedTenants.map(t => t.site_id))];
+
+        let groupConfig = null;
+        if (controlEnabled) {
+            const groupPcts = Array.from(document.querySelectorAll('.group-pct')).map(i => parseFloat(i.value) || 0);
+            groupConfig = { percentages: groupPcts };
+        }
+
+        const payload = {
+            name: batchName || `ECRI Batch ${new Date().toISOString().split('T')[0]}`,
+            site_ids: siteIds,
+            target_increase_pct: targetPct,
+            control_group_enabled: controlEnabled,
+            group_config: groupConfig,
+            ledgers: selectedTenants,
+            notice_period_days: noticeDays,
+            attribution_window_days: attributionDays,
+            notes: notes,
+        };
+
+        try {
+            const res = await fetch('/ecri/api/batch', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                // Clear sessionStorage
+                sessionStorage.removeItem('ecri_selected_tenants');
+                sessionStorage.removeItem('ecri_filter_params');
+                // Redirect to review page
+                window.location.href = `/ecri/batch/${data.batch_id}/review`;
+            } else {
+                alert('Error creating batch: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            alert('Failed to create batch: ' + e.message);
+        }
+    }
+
+    init();
+</script>
+{% endblock %}

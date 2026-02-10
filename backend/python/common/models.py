@@ -5,7 +5,8 @@ Provides type-safe database operations replacing raw SQL queries.
 
 from datetime import datetime, date
 from typing import Dict, Any
-from sqlalchemy import Column, String, Integer, BigInteger, DateTime, Date, Boolean, Numeric, Text, ForeignKey, Index
+from sqlalchemy import Column, String, Integer, BigInteger, DateTime, Date, Boolean, Numeric, Text, ForeignKey, Index, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 
@@ -1123,7 +1124,7 @@ class Tenant(Base, BaseModel, TimestampMixin):
 
     Composite unique key: SiteID + TenantID
     """
-    __tablename__ = 'tenants'
+    __tablename__ = 'cc_tenants'
 
     # =========================================================================
     # Primary Keys
@@ -1346,7 +1347,7 @@ class Ledger(Base, BaseModel, TimestampMixin):
 
     Composite unique key: SiteID + LedgerID
     """
-    __tablename__ = 'ledgers'
+    __tablename__ = 'cc_ledgers'
 
     # =========================================================================
     # Primary Keys
@@ -1715,7 +1716,7 @@ class Charge(Base, BaseModel, TimestampMixin):
     Composite unique key: SiteID + ChargeID + dcPmtAmt
     (Same ChargeID can appear multiple times for partial payments)
     """
-    __tablename__ = 'charges'
+    __tablename__ = 'cc_charges'
 
     # =========================================================================
     # Primary Keys
@@ -1797,6 +1798,143 @@ class Charge(Base, BaseModel, TimestampMixin):
         Index('idx_charge_category', 'sChgCategory'),
         Index('idx_charge_date', 'dChgStrt'),
         Index('idx_charge_created', 'dCreated'),
+    )
+
+
+class CCDiscount(Base, BaseModel, TimestampMixin):
+    """
+    Discount/Concession plan data from DiscountPlansRetrieve endpoint.
+
+    Data Source: CallCenterWs DiscountPlansRetrieve SOAP endpoint
+    Contains concession plan definitions with joined ChargeDesc fields.
+
+    Composite unique key: SiteID + ConcessionID
+    """
+    __tablename__ = 'cc_discount'
+
+    # =========================================================================
+    # Primary Key
+    # =========================================================================
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="Auto-increment primary key")
+
+    # =========================================================================
+    # Core Identifiers
+    # =========================================================================
+    ConcessionID = Column(Integer, nullable=False, index=True, comment="Concession plan ID")
+    SiteID = Column(Integer, nullable=False, index=True, comment="Site/Location ID")
+    iConcessionGlobalNum = Column(Integer, comment="Global concession number")
+    QTTouchDiscPlanID = Column(String(50), comment="QT Touch discount plan ID")
+    PlanName_TermID = Column(String(50), comment="Plan name term ID")
+    OldPK = Column(String(50), comment="Legacy primary key")
+
+    # =========================================================================
+    # Plan Info
+    # =========================================================================
+    sDefPlanName = Column(String(255), comment="Default plan name")
+    sPlanName = Column(String(255), comment="Plan name")
+    sDescription = Column(Text, comment="Plan description")
+    sComment = Column(Text, comment="Plan comment")
+    sCouponCode = Column(String(100), comment="Coupon code")
+
+    # =========================================================================
+    # Plan Dates
+    # =========================================================================
+    dPlanStrt = Column(DateTime, comment="Plan start date")
+    dPlanEnd = Column(DateTime, comment="Plan end date")
+    dCreated = Column(DateTime, comment="Record created date")
+    dUpdated = Column(DateTime, comment="Record updated date")
+    dArchived = Column(DateTime, comment="Record archived date")
+    dDisabled = Column(DateTime, comment="Record disabled date")
+    dDeleted = Column(DateTime, comment="Record deleted date")
+
+    # =========================================================================
+    # Plan Configuration
+    # =========================================================================
+    iShowOn = Column(Integer, comment="Show-on flag")
+    bNeverExpires = Column(Boolean, comment="Never expires flag")
+    iExpirMonths = Column(Integer, comment="Expiration months")
+    bPrepay = Column(Boolean, comment="Prepay flag")
+    bOnPmt = Column(Boolean, comment="On payment flag")
+    bManualCredit = Column(Boolean, comment="Manual credit flag")
+    iPrePaidMonths = Column(Integer, comment="Prepaid months")
+    iInMonth = Column(Integer, comment="In-month value")
+    bPermanent = Column(Boolean, comment="Permanent flag")
+
+    # =========================================================================
+    # Discount Amounts
+    # =========================================================================
+    iAmtType = Column(Integer, comment="Amount type")
+    dcChgAmt = Column(Numeric(14, 4), comment="Charge amount")
+    dcFixedDiscount = Column(Numeric(14, 4), comment="Fixed discount amount")
+    dcPCDiscount = Column(Numeric(14, 4), comment="Percentage discount")
+    bRound = Column(Boolean, comment="Round flag")
+    dcRoundTo = Column(Numeric(14, 4), comment="Round-to amount")
+    dcMaxAmountOff = Column(Numeric(14, 4), comment="Maximum amount off")
+
+    # =========================================================================
+    # Charge Reference
+    # =========================================================================
+    ChargeDescID = Column(Integer, comment="Charge description ID")
+    iQty = Column(Integer, comment="Quantity")
+    iOfferItemAction = Column(Integer, comment="Offer item action")
+
+    # =========================================================================
+    # Corporate / Occupancy Rules
+    # =========================================================================
+    bForCorp = Column(Boolean, comment="For corporate flag")
+    dcMaxOccPct = Column(Numeric(14, 4), comment="Max occupancy percentage")
+    bForAllUnits = Column(Boolean, comment="For all units flag")
+    iExcludeIfLessThanUnitsTotal = Column(Integer, comment="Exclude if less than units total")
+    dcMaxOccPctExcludeIfMoreThanUnitsTotal = Column(Numeric(14, 4), comment="Max occ pct exclude if more than units total")
+    iExcludeIfMoreThanUnitsTotal = Column(Integer, comment="Exclude if more than units total")
+    iAvailableAt = Column(Integer, comment="Available-at flag")
+    bEligibleToRemoveIfPastDue = Column(Boolean, comment="Eligible to remove if past due")
+    iRestrictionFlags = Column(Integer, comment="Restriction flags bitmask")
+    iOccupancyPctUnitCountMethod = Column(Integer, comment="Occupancy pct unit count method")
+
+    # =========================================================================
+    # ChargeDesc Joined Fields (suffix "1" from API join)
+    # =========================================================================
+    ChargeDescID1 = Column(Integer, comment="Joined ChargeDesc ID")
+    SiteID1 = Column(Integer, comment="Joined ChargeDesc SiteID")
+    ChartOfAcctID = Column(Integer, comment="Chart of account ID")
+    ChgDesc_TermID = Column(Integer, comment="Charge description term ID")
+    sDefChgDesc = Column(String(255), comment="Default charge description")
+    sChgDesc = Column(String(255), comment="Charge description")
+    sVendor = Column(String(255), comment="Vendor name")
+    sVendorPhone = Column(String(50), comment="Vendor phone")
+    sReorderPartNum = Column(String(100), comment="Reorder part number")
+    sChgCategory = Column(String(100), comment="Charge category")
+    bApplyAtMoveIn = Column(Boolean, comment="Apply at move-in flag")
+    bProrateAtMoveIn = Column(Boolean, comment="Prorate at move-in flag")
+    bPermanent1 = Column(Boolean, comment="ChargeDesc permanent flag")
+    dcPrice = Column(Numeric(14, 4), comment="Price")
+    dcTax1Rate = Column(Numeric(14, 6), comment="Tax 1 rate")
+    dcTax2Rate = Column(Numeric(14, 6), comment="Tax 2 rate")
+    dcCost = Column(Numeric(14, 4), comment="Cost")
+    dcInStock = Column(Numeric(14, 4), comment="In stock quantity")
+    dcOrderPt = Column(Numeric(14, 4), comment="Order point")
+    dChgStrt = Column(DateTime, comment="Charge start date")
+    dChgDisabled = Column(DateTime, comment="Charge disabled date")
+    bUseMileageRate = Column(Boolean, comment="Use mileage rate flag")
+    dcMileageRate = Column(Numeric(14, 4), comment="Mileage rate")
+    iIncludedMiles = Column(Integer, comment="Included miles")
+    dDisabled1 = Column(DateTime, comment="ChargeDesc disabled date")
+    dDeleted1 = Column(DateTime, comment="ChargeDesc deleted date")
+    dUpdated1 = Column(DateTime, comment="ChargeDesc updated date")
+    OldPK1 = Column(Integer, comment="ChargeDesc legacy PK")
+    sCorpCategory = Column(String(255), comment="Corporate category")
+    sBarCode = Column(String(100), comment="Barcode")
+    iPriceType = Column(Integer, comment="Price type")
+    dcPCRate = Column(Numeric(14, 4), comment="PC rate")
+    dcMinPriceIfPC = Column(Numeric(14, 4), comment="Min price if PC")
+    bRound1 = Column(Boolean, comment="ChargeDesc round flag")
+    dcRoundTo1 = Column(Numeric(14, 4), comment="ChargeDesc round-to amount")
+
+    __table_args__ = (
+        Index('idx_cc_discount_site_concession', 'SiteID', 'ConcessionID', unique=True),
+        Index('idx_cc_discount_site', 'SiteID'),
+        Index('idx_cc_discount_plan_name', 'sPlanName'),
     )
 
 
@@ -2515,4 +2653,195 @@ class MSInsuranceStats(Base, BaseModel, TimestampMixin):
         Index('idx_ms_insurance_stats_composite', 'extract_date', 'SiteID'),
         Index('idx_ms_insurance_stats_extract_date', 'extract_date'),
     )
+
+
+# ============================================================================
+# ECRI (Existing Customer Rate Increase) Models
+# ============================================================================
+
+
+class ECRIBatch(Base, BaseModel):
+    """
+    ECRI batch metadata — groups ledgers for a single rate increase run.
+
+    Data Source: Created by ECRI app when user configures a new batch.
+    """
+    __tablename__ = 'ecri_batches'
+
+    batch_id = Column(UUID(as_uuid=True), primary_key=True, comment="Batch UUID")
+    name = Column(String(255), nullable=True, comment="Batch name/label")
+    site_ids = Column(ARRAY(Integer), nullable=False, comment="Sites included in batch")
+    target_increase_pct = Column(Numeric(5, 2), nullable=True, comment="Target increase percentage")
+    control_group_enabled = Column(Boolean, nullable=False, default=False, comment="A/B testing mode")
+    group_config = Column(JSONB, nullable=True, comment="Control group percentages config")
+    total_ledgers = Column(Integer, nullable=False, default=0, comment="Count of ledgers in batch")
+    status = Column(String(20), nullable=False, default='draft', comment="draft/review/executed/cancelled")
+    created_by = Column(String(255), nullable=True, comment="Username who created batch")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, comment="Batch creation time")
+    executed_at = Column(DateTime, nullable=True, comment="When pushed to SiteLink")
+    cancelled_at = Column(DateTime, nullable=True, comment="When cancelled")
+
+    # Configuration snapshot
+    min_tenure_months = Column(Integer, nullable=False, default=12)
+    notice_period_days = Column(Integer, nullable=False, default=14)
+    discount_reference_pct = Column(Numeric(5, 2), nullable=False, default=40.00)
+    attribution_window_days = Column(Integer, nullable=False, default=90)
+    notes = Column(Text, nullable=True)
+
+    # Relationships
+    ledgers = relationship('ECRIBatchLedger', backref='batch', lazy='dynamic',
+                           cascade='all, delete-orphan')
+    outcomes = relationship('ECRIOutcome', backref='batch', lazy='dynamic',
+                            cascade='all, delete-orphan')
+
+    __table_args__ = (
+        Index('idx_ecri_batches_status', 'status'),
+        Index('idx_ecri_batches_created', 'created_at'),
+    )
+
+    def to_dict(self):
+        return {
+            'batch_id': str(self.batch_id),
+            'name': self.name,
+            'site_ids': self.site_ids,
+            'target_increase_pct': float(self.target_increase_pct) if self.target_increase_pct else None,
+            'control_group_enabled': self.control_group_enabled,
+            'group_config': self.group_config,
+            'total_ledgers': self.total_ledgers,
+            'status': self.status,
+            'created_by': self.created_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'executed_at': self.executed_at.isoformat() if self.executed_at else None,
+            'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
+            'min_tenure_months': self.min_tenure_months,
+            'notice_period_days': self.notice_period_days,
+            'discount_reference_pct': float(self.discount_reference_pct) if self.discount_reference_pct else None,
+            'attribution_window_days': self.attribution_window_days,
+            'notes': self.notes,
+        }
+
+
+class ECRIBatchLedger(Base, BaseModel):
+    """
+    Per-ledger detail within an ECRI batch.
+
+    Tracks old/new rent, control group assignment, benchmarks, and API status.
+    """
+    __tablename__ = 'ecri_batch_ledgers'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('ecri_batches.batch_id', ondelete='CASCADE'), nullable=False)
+    site_id = Column(Integer, nullable=False)
+    ledger_id = Column(Integer, nullable=False)
+    tenant_id = Column(Integer, nullable=False)
+    unit_id = Column(Integer, nullable=True)
+    unit_name = Column(String(100), nullable=True)
+    tenant_name = Column(String(255), nullable=True)
+
+    # Control group
+    control_group = Column(Integer, nullable=False, default=0)
+
+    # Rent details
+    old_rent = Column(Numeric(14, 4), nullable=False)
+    new_rent = Column(Numeric(14, 4), nullable=False)
+    increase_pct = Column(Numeric(5, 2), nullable=False)
+    increase_amt = Column(Numeric(14, 4), nullable=False)
+
+    # Dates
+    notice_date = Column(Date, nullable=True)
+    effective_date = Column(Date, nullable=True)
+
+    # Benchmarking
+    in_place_median_site = Column(Numeric(14, 4), nullable=True)
+    in_place_median_country = Column(Numeric(14, 4), nullable=True)
+    market_rate = Column(Numeric(14, 4), nullable=True)
+    std_rate = Column(Numeric(14, 4), nullable=True)
+    variance_vs_site = Column(Numeric(5, 2), nullable=True)
+    variance_vs_market = Column(Numeric(5, 2), nullable=True)
+
+    # Tenure info
+    moved_in_date = Column(Date, nullable=True)
+    last_increase_date = Column(Date, nullable=True)
+    tenure_months = Column(Integer, nullable=True)
+
+    # API execution
+    api_status = Column(String(20), nullable=False, default='pending', comment="pending/success/failed/skipped")
+    api_response = Column(JSONB, nullable=True)
+    api_executed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index('idx_ecri_bl_batch', 'batch_id'),
+        Index('idx_ecri_bl_site_ledger', 'site_id', 'ledger_id'),
+        Index('idx_ecri_bl_api_status', 'api_status'),
+        Index('idx_ecri_bl_control_group', 'batch_id', 'control_group'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'batch_id': str(self.batch_id),
+            'site_id': self.site_id,
+            'ledger_id': self.ledger_id,
+            'tenant_id': self.tenant_id,
+            'unit_id': self.unit_id,
+            'unit_name': self.unit_name,
+            'tenant_name': self.tenant_name,
+            'control_group': self.control_group,
+            'old_rent': float(self.old_rent) if self.old_rent else None,
+            'new_rent': float(self.new_rent) if self.new_rent else None,
+            'increase_pct': float(self.increase_pct) if self.increase_pct else None,
+            'increase_amt': float(self.increase_amt) if self.increase_amt else None,
+            'notice_date': self.notice_date.isoformat() if self.notice_date else None,
+            'effective_date': self.effective_date.isoformat() if self.effective_date else None,
+            'in_place_median_site': float(self.in_place_median_site) if self.in_place_median_site else None,
+            'in_place_median_country': float(self.in_place_median_country) if self.in_place_median_country else None,
+            'market_rate': float(self.market_rate) if self.market_rate else None,
+            'std_rate': float(self.std_rate) if self.std_rate else None,
+            'variance_vs_site': float(self.variance_vs_site) if self.variance_vs_site else None,
+            'variance_vs_market': float(self.variance_vs_market) if self.variance_vs_market else None,
+            'moved_in_date': self.moved_in_date.isoformat() if self.moved_in_date else None,
+            'last_increase_date': self.last_increase_date.isoformat() if self.last_increase_date else None,
+            'tenure_months': self.tenure_months,
+            'api_status': self.api_status,
+            'api_response': self.api_response,
+            'api_executed_at': self.api_executed_at.isoformat() if self.api_executed_at else None,
+        }
+
+
+class ECRIOutcome(Base, BaseModel):
+    """
+    Churn/stay tracking post-ECRI.
+
+    Populated by scheduled outcome tracking job within the attribution window.
+    """
+    __tablename__ = 'ecri_outcomes'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    batch_id = Column(UUID(as_uuid=True), ForeignKey('ecri_batches.batch_id', ondelete='CASCADE'), nullable=False)
+    site_id = Column(Integer, nullable=False)
+    ledger_id = Column(Integer, nullable=False)
+    outcome_date = Column(Date, nullable=False)
+    outcome_type = Column(String(20), nullable=False, comment="stayed/moved_out/scheduled_out")
+    days_after_notice = Column(Integer, nullable=True)
+    months_at_new_rent = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_ecri_outcomes_batch', 'batch_id'),
+        Index('idx_ecri_outcomes_ledger', 'site_id', 'ledger_id'),
+        Index('idx_ecri_outcomes_type', 'outcome_type'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'batch_id': str(self.batch_id),
+            'site_id': self.site_id,
+            'ledger_id': self.ledger_id,
+            'outcome_date': self.outcome_date.isoformat() if self.outcome_date else None,
+            'outcome_type': self.outcome_type,
+            'days_after_notice': self.days_after_notice,
+            'months_at_new_rent': self.months_at_new_rent,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
 

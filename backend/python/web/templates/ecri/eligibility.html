@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+
+{% block title %}ECRI Eligibility - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>ECRI Eligibility Review</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Identify tenants eligible for rate increases</p>
+</div>
+
+<!-- Filters -->
+<div class="card">
+    <h2>Filters</h2>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+        <div class="form-group" style="flex: 1; min-width: 250px;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Sites</label>
+            <select id="site-select" class="form-select" multiple style="height: auto; min-height: 42px;">
+            </select>
+            <p style="color: #666; font-size: 0.8rem; margin-top: 0.25rem;">Hold Ctrl/Cmd to select multiple</p>
+        </div>
+        <div class="form-group">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Min Tenure (months)</label>
+            <input type="number" id="min-tenure" value="12" min="1" max="60" class="form-select" style="max-width: 120px;">
+        </div>
+        <div class="form-group">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Sched Out Exclusion (days)</label>
+            <input type="number" id="sched-out-days" value="30" min="0" max="180" class="form-select" style="max-width: 120px;">
+        </div>
+        <div class="form-group">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Discount Ref %</label>
+            <input type="number" id="discount-ref" value="40" min="0" max="100" class="form-select" style="max-width: 120px;">
+        </div>
+        <div class="form-group">
+            <button type="button" class="btn" onclick="runEligibility()">Run Eligibility Check</button>
+        </div>
+    </div>
+</div>
+
+<!-- Exclusion Summary -->
+<div id="exclusion-section" style="display: none;">
+    <div class="card">
+        <h2>Exclusion Breakdown</h2>
+        <div class="stats-grid" id="exclusion-grid"></div>
+    </div>
+</div>
+
+<!-- Eligible Tenants Table -->
+<div id="results-section" style="display: none;">
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h2 style="margin-bottom: 0; border-bottom: none; padding-bottom: 0;">Eligible Tenants (<span id="eligible-count">0</span>)</h2>
+            {% if current_user.can_manage_ecri() %}
+            <button type="button" class="btn" id="create-batch-btn" onclick="goToCreateBatch()" disabled>Create Batch from Selection</button>
+            {% endif %}
+        </div>
+
+        <div style="margin-bottom: 0.75rem;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllEligible()">Select All</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="selectNoneEligible()">Select None</button>
+            <span style="margin-left: 1rem; color: #666;" id="selected-info">0 selected</span>
+        </div>
+
+        <div style="max-height: 600px; overflow-y: auto;">
+            <table>
+                <thead style="position: sticky; top: 0; background: var(--esa-gray); z-index: 10;">
+                    <tr>
+                        <th style="width: 40px;"><input type="checkbox" id="select-all-cb" onchange="toggleAllEligible(this)"></th>
+                        <th>Site</th>
+                        <th>Unit</th>
+                        <th>Tenant</th>
+                        <th>Current Rent</th>
+                        <th>Tenure (mo)</th>
+                        <th>Site Median</th>
+                        <th>Var vs Site</th>
+                        <th>Market Rate</th>
+                        <th>Var vs Market</th>
+                    </tr>
+                </thead>
+                <tbody id="eligible-tbody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+.form-group { margin-bottom: 1rem; }
+.form-select {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border: 1px solid var(--esa-gray-dark);
+    border-radius: 4px;
+    background: #fff;
+}
+.form-select:focus { outline: none; border-color: var(--esa-navy); }
+.variance-negative { color: #C41230; font-weight: 600; }
+.variance-positive { color: #28A745; font-weight: 600; }
+.tenant-row { cursor: pointer; }
+.tenant-row:hover { background: rgba(196, 18, 48, 0.1); }
+.tenant-row.selected { background: rgba(196, 18, 48, 0.15); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    clearTimeout(window.autoRefreshTimeout);
+
+    let eligibleData = [];
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        return { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() };
+    }
+
+    function formatCurrency(val) {
+        if (val === null || val === undefined) return '-';
+        return '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    function varianceHtml(val) {
+        if (val === null || val === undefined) return '-';
+        const cls = val < 0 ? 'variance-negative' : 'variance-positive';
+        return `<span class="${cls}">${val > 0 ? '+' : ''}${val}%</span>`;
+    }
+
+    // Load sites
+    async function loadSites() {
+        try {
+            const res = await fetch('/api/sites', {headers: apiHeaders()});
+            const data = await res.json();
+            const select = document.getElementById('site-select');
+            data.sites.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.site_id;
+                opt.textContent = `${s.site_code} - ${s.name}`;
+                select.appendChild(opt);
+            });
+        } catch (e) {
+            console.error('Failed to load sites:', e);
+        }
+    }
+
+    // Run eligibility
+    async function runEligibility() {
+        const select = document.getElementById('site-select');
+        const selectedSites = Array.from(select.selectedOptions).map(o => o.value);
+
+        if (selectedSites.length === 0) {
+            alert('Please select at least one site.');
+            return;
+        }
+
+        const params = new URLSearchParams({
+            site_ids: selectedSites.join(','),
+            min_tenure_months: document.getElementById('min-tenure').value,
+            sched_out_exclusion_days: document.getElementById('sched-out-days').value,
+            discount_reference_pct: document.getElementById('discount-ref').value,
+        });
+
+        try {
+            const res = await fetch(`/ecri/api/eligible-tenants?${params}`, {headers: apiHeaders()});
+            const data = await res.json();
+
+            if (data.error) {
+                alert('Error: ' + data.error);
+                return;
+            }
+
+            eligibleData = data.eligible;
+            renderExclusionSummary(data.exclusion_summary);
+            renderEligibleTable(data.eligible);
+        } catch (e) {
+            alert('Failed to run eligibility check: ' + e.message);
+        }
+    }
+
+    function renderExclusionSummary(summary) {
+        const grid = document.getElementById('exclusion-grid');
+        grid.innerHTML = `
+            <div class="stat-card"><div class="value">${summary.total_ledgers}</div><div class="label">Total Ledgers</div></div>
+            <div class="stat-card" style="background: #6C757D;"><div class="value">${summary.excluded_inactive}</div><div class="label">Inactive/Moved Out</div></div>
+            <div class="stat-card" style="background: #6C757D;"><div class="value">${summary.excluded_sched_out}</div><div class="label">Scheduled Out</div></div>
+            <div class="stat-card" style="background: #6C757D;"><div class="value">${summary.excluded_pending_increase}</div><div class="label">Pending Increase</div></div>
+            <div class="stat-card" style="background: #6C757D;"><div class="value">${summary.excluded_recent_increase}</div><div class="label">Recent Increase</div></div>
+            <div class="stat-card" style="background: #6C757D;"><div class="value">${summary.excluded_rev_mgmt}</div><div class="label">Rev Mgmt Excluded</div></div>
+            <div class="stat-card" style="background: #28A745;"><div class="value">${summary.eligible}</div><div class="label">Eligible</div></div>
+        `;
+        document.getElementById('exclusion-section').style.display = 'block';
+    }
+
+    function renderEligibleTable(tenants) {
+        const tbody = document.getElementById('eligible-tbody');
+        document.getElementById('eligible-count').textContent = tenants.length;
+
+        if (tenants.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #666;">No eligible tenants found for selected criteria.</td></tr>';
+            document.getElementById('results-section').style.display = 'block';
+            return;
+        }
+
+        tbody.innerHTML = tenants.map((t, i) => `
+            <tr class="tenant-row" data-index="${i}" onclick="toggleEligibleRow(this)">
+                <td><input type="checkbox" class="eligible-cb" onclick="event.stopPropagation(); updateSelectedCount();"></td>
+                <td>${t.site_id}</td>
+                <td>${t.unit_name || '-'}</td>
+                <td>${t.tenant_name || '-'}</td>
+                <td>${formatCurrency(t.current_rent)}</td>
+                <td>${t.tenure_months !== null ? t.tenure_months : '-'}</td>
+                <td>${formatCurrency(t.in_place_median_site)}</td>
+                <td>${varianceHtml(t.variance_vs_site)}</td>
+                <td>${formatCurrency(t.market_rate)}</td>
+                <td>${varianceHtml(t.variance_vs_market)}</td>
+            </tr>
+        `).join('');
+
+        document.getElementById('results-section').style.display = 'block';
+    }
+
+    function toggleEligibleRow(row) {
+        const cb = row.querySelector('.eligible-cb');
+        cb.checked = !cb.checked;
+        row.classList.toggle('selected', cb.checked);
+        updateSelectedCount();
+    }
+
+    function toggleAllEligible(master) {
+        document.querySelectorAll('.eligible-cb').forEach(cb => {
+            cb.checked = master.checked;
+            cb.closest('tr').classList.toggle('selected', cb.checked);
+        });
+        updateSelectedCount();
+    }
+
+    function selectAllEligible() {
+        document.getElementById('select-all-cb').checked = true;
+        toggleAllEligible(document.getElementById('select-all-cb'));
+    }
+
+    function selectNoneEligible() {
+        document.getElementById('select-all-cb').checked = false;
+        toggleAllEligible(document.getElementById('select-all-cb'));
+    }
+
+    function updateSelectedCount() {
+        const count = document.querySelectorAll('.eligible-cb:checked').length;
+        document.getElementById('selected-info').textContent = count + ' selected';
+        const btn = document.getElementById('create-batch-btn');
+        if (btn) btn.disabled = count === 0;
+    }
+
+    function goToCreateBatch() {
+        const checked = document.querySelectorAll('.eligible-cb:checked');
+        if (checked.length === 0) {
+            alert('Please select at least one tenant.');
+            return;
+        }
+
+        // Store selected eligible data in sessionStorage
+        const selected = Array.from(checked).map(cb => {
+            const idx = parseInt(cb.closest('tr').dataset.index);
+            return eligibleData[idx];
+        });
+        sessionStorage.setItem('ecri_selected_tenants', JSON.stringify(selected));
+        sessionStorage.setItem('ecri_filter_params', JSON.stringify({
+            min_tenure_months: document.getElementById('min-tenure').value,
+            sched_out_exclusion_days: document.getElementById('sched-out-days').value,
+            discount_reference_pct: document.getElementById('discount-ref').value,
+        }));
+        window.location.href = '/ecri/batch/create';
+    }
+
+    // Initialize
+    loadSites();
+</script>
+{% endblock %}

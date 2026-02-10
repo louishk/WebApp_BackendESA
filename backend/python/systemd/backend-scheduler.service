@@ -14,7 +14,7 @@ ExecStart=/var/www/backend/backend/python/venv/bin/python run_scheduler.py daemo
 ExecReload=/bin/kill -HUP $MAINPID
 ExecStop=/var/www/backend/backend/python/venv/bin/python run_scheduler.py daemon stop
 
-Restart=on-failure
+Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal

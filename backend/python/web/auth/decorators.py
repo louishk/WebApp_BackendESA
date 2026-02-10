@@ -93,6 +93,11 @@ def scheduler_access_required(f):
     return require_permission('can_access_scheduler')(f)
 
 
+def billing_tools_access_required(f):
+    """Decorator to require billing tools access permission."""
+    return require_permission('can_access_billing_tools')(f)
+
+
 def editor_required(f):
     """Decorator to require page management permission."""
     return require_permission('can_manage_pages')(f)
@@ -106,3 +111,13 @@ def roles_required(f):
 def config_required(f):
     """Decorator to require config management permission."""
     return require_permission('can_manage_configs')(f)
+
+
+def ecri_access_required(f):
+    """Decorator to require ECRI view access permission."""
+    return require_permission('can_access_ecri')(f)
+
+
+def ecri_manage_required(f):
+    """Decorator to require ECRI management permission."""
+    return require_permission('can_manage_ecri')(f)

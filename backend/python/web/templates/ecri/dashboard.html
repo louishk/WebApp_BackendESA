@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}ECRI Dashboard - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>ECRI Dashboard</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Existing Customer Rate Increase Management</p>
+</div>
+
+<!-- Data Freshness -->
+<div class="card">
+    <h2>Data Freshness</h2>
+    <div id="freshness-container">
+        <p style="color: #666;">Loading data freshness...</p>
+    </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="card">
+    <h2>Performance Summary</h2>
+    <div class="stats-grid" id="kpi-container">
+        <div class="stat-card">
+            <div class="value" id="kpi-batches">-</div>
+            <div class="label">Executed Batches</div>
+        </div>
+        <div class="stat-card" style="background: #28A745;">
+            <div class="value" id="kpi-gain">-</div>
+            <div class="label">Monthly Gain</div>
+        </div>
+        <div class="stat-card" style="background: #C41230;">
+            <div class="value" id="kpi-loss">-</div>
+            <div class="label">Monthly Loss (Churn)</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="kpi-net">-</div>
+            <div class="label">Net Monthly Impact</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="kpi-churn">-</div>
+            <div class="label">Churn Rate</div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Batches -->
+<div class="card">
+    <h2>Recent Batches</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Batch Name</th>
+                <th>Status</th>
+                <th>Ledgers</th>
+                <th>Target %</th>
+                <th>Created</th>
+                <th>Executed</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="batches-tbody">
+            <tr><td colspan="7" style="text-align: center; color: #666;">Loading batches...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    clearTimeout(window.autoRefreshTimeout);
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        return {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCSRFToken()
+        };
+    }
+
+    function formatCurrency(val) {
+        if (val === null || val === undefined) return '-';
+        return '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+    }
+
+    function formatDate(iso) {
+        if (!iso) return '-';
+        return new Date(iso).toLocaleDateString('en-SG', {day: '2-digit', month: 'short', year: 'numeric'});
+    }
+
+    // Load data freshness
+    async function loadFreshness() {
+        try {
+            const res = await fetch('/ecri/api/data-freshness', {headers: apiHeaders()});
+            const data = await res.json();
+            const container = document.getElementById('freshness-container');
+
+            let html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">';
+            for (const [table, info] of Object.entries(data.freshness)) {
+                const staleClass = info.stale ? 'style="background: #FFC107; color: #000;"' : 'style="background: #28A745; color: #fff;"';
+                html += `<div class="stat-card" ${staleClass}>
+                    <div class="value" style="font-size: 1rem;">${info.latest_date || 'No data'}</div>
+                    <div class="label">${table}</div>
+                </div>`;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        } catch (e) {
+            document.getElementById('freshness-container').innerHTML = '<p style="color: #C41230;">Failed to load freshness data</p>';
+        }
+    }
+
+    // Load KPIs
+    async function loadKPIs() {
+        try {
+            const res = await fetch('/ecri/api/analytics/summary', {headers: apiHeaders()});
+            const data = await res.json();
+
+            document.getElementById('kpi-batches').textContent = data.total_batches;
+            document.getElementById('kpi-gain').textContent = formatCurrency(data.total_monthly_gain);
+            document.getElementById('kpi-loss').textContent = formatCurrency(data.total_monthly_loss);
+            document.getElementById('kpi-net').textContent = formatCurrency(data.net_monthly_impact);
+            document.getElementById('kpi-churn').textContent = data.overall_churn_rate !== null ? data.overall_churn_rate + '%' : '-';
+        } catch (e) {
+            console.error('Failed to load KPIs:', e);
+        }
+    }
+
+    // Load batches
+    async function loadBatches() {
+        try {
+            const res = await fetch('/ecri/api/batches', {headers: apiHeaders()});
+            const data = await res.json();
+            const tbody = document.getElementById('batches-tbody');
+
+            if (!data.batches || data.batches.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No batches yet. Create your first batch from the Eligibility tab.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.batches.map(b => {
+                const statusClass = {
+                    'draft': 'status-pending',
+                    'review': 'status-running',
+                    'executed': 'status-completed',
+                    'cancelled': 'status-failed'
+                }[b.status] || '';
+
+                let actions = '';
+                if (b.status === 'draft' || b.status === 'review') {
+                    actions = `<a href="/ecri/batch/${b.batch_id}/review" class="btn btn-sm">Review</a>`;
+                } else if (b.status === 'executed') {
+                    actions = `<a href="/ecri/batch/${b.batch_id}/analytics" class="btn btn-sm btn-secondary">Analytics</a>`;
+                }
+
+                return `<tr>
+                    <td>${b.name || '-'}</td>
+                    <td><span class="status ${statusClass}">${b.status}</span></td>
+                    <td>${b.total_ledgers}</td>
+                    <td>${b.target_increase_pct ? b.target_increase_pct + '%' : (b.control_group_enabled ? 'Control Groups' : '-')}</td>
+                    <td>${formatDate(b.created_at)}</td>
+                    <td>${formatDate(b.executed_at)}</td>
+                    <td>${actions}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            document.getElementById('batches-tbody').innerHTML = '<tr><td colspan="7" style="text-align: center; color: #C41230;">Failed to load batches</td></tr>';
+        }
+    }
+
+    // Initialize
+    loadFreshness();
+    loadKPIs();
+    loadBatches();
+</script>
+{% endblock %}

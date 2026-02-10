@@ -1589,3 +1589,31 @@ def api_update_billing_day():
 
     finally:
         soap_client.close()
+
+
+# =============================================================================
+# Sites List
+# =============================================================================
+
+@api_bp.route('/sites')
+@require_auth
+@cached(ttl_seconds=300)
+def api_list_sites():
+    """List all sites for dropdown selection."""
+    from common.models import SiteInfo
+
+    session = get_pbi_session()
+    try:
+        sites = session.query(SiteInfo).order_by(SiteInfo.Name).all()
+        return jsonify({
+            'sites': [
+                {
+                    'site_id': s.SiteID,
+                    'site_code': s.SiteCode,
+                    'name': s.Name
+                }
+                for s in sites
+            ]
+        })
+    finally:
+        session.close()

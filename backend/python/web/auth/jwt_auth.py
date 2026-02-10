@@ -52,8 +52,8 @@ def _ensure_jwt_config():
         JWT_SECRET = _get_jwt_secret()
         JWT_ALGORITHM = _get_jwt_algorithm()
 
-# Allowed roles for scheduler access
-SCHEDULER_ROLES = ['admin', 'scheduler_admin']
+# Allowed roles for API access (scheduler and tools)
+API_ACCESS_ROLES = ['admin', 'scheduler_admin']
 
 
 class AuthError(Exception):
@@ -125,12 +125,15 @@ def require_auth(f):
 
         # First, check for session-based authentication (web UI)
         if current_user and current_user.is_authenticated:
-            # Check scheduler access via RBAC permission
-            if not current_user.can_access_scheduler():
+            # Check API access via RBAC permission (scheduler OR billing tools)
+            has_scheduler = current_user.can_access_scheduler()
+            has_billing_tools = current_user.can_access_billing_tools() if hasattr(current_user, 'can_access_billing_tools') else False
+
+            if not has_scheduler and not has_billing_tools:
                 role_name = current_user.role.name if current_user.role else 'none'
                 return jsonify({
                     'error': 'Forbidden',
-                    'message': f'Role "{role_name}" does not have scheduler access'
+                    'message': f'Role "{role_name}" does not have API access'
                 }), 403
 
             # Store user info in Flask's g object
@@ -155,10 +158,10 @@ def require_auth(f):
 
             # Check role
             user_role = payload.get('role', '')
-            if user_role not in SCHEDULER_ROLES:
+            if user_role not in API_ACCESS_ROLES:
                 return jsonify({
                     'error': 'Forbidden',
-                    'message': f'Role "{user_role}" does not have scheduler access'
+                    'message': f'Role "{user_role}" does not have API access'
                 }), 403
 
             # Store user info in Flask's g object

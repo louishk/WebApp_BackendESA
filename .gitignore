@@ -19,7 +19,14 @@ venv/
 
 # Logs
 *.log
-/logs/
+logs/
+
+# Runtime / cache
+esa-api-cache/
+media/
+
+# AI tool artifacts
+.ai/
 
 # OS
 .DS_Store

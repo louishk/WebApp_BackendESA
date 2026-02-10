@@ -172,12 +172,16 @@ def create_app(config=None, db_url=None):
     from web.routes.admin import admin_bp
     from web.routes.scheduler import scheduler_bp
     from web.routes.api import api_bp
+    from web.routes.tools import tools_bp
+    from web.routes.ecri import ecri_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(scheduler_bp)
     app.register_blueprint(api_bp)
+    app.register_blueprint(tools_bp)
+    app.register_blueprint(ecri_bp)
 
     # Exempt API routes from CSRF (they use JWT authentication)
     csrf.exempt(api_bp)

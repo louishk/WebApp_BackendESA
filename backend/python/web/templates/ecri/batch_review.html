@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}ECRI Batch Review - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Batch Review</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Review and approve before pushing to SiteLink</p>
+</div>
+
+<!-- Batch Summary -->
+<div class="card">
+    <h2>Batch Summary</h2>
+    <div id="batch-info" style="color: #666;">Loading batch details...</div>
+</div>
+
+<!-- Impact Preview -->
+<div class="card">
+    <h2>Impact Preview</h2>
+    <div class="stats-grid" id="impact-stats"></div>
+</div>
+
+<!-- Control Group Breakdown (if applicable) -->
+<div id="groups-section" class="card" style="display: none;">
+    <h2>Control Group Breakdown</h2>
+    <table id="groups-table">
+        <thead>
+            <tr>
+                <th>Group</th>
+                <th>Increase %</th>
+                <th>Ledgers</th>
+                <th>Total Monthly Increase</th>
+            </tr>
+        </thead>
+        <tbody id="groups-tbody"></tbody>
+    </table>
+</div>
+
+<!-- Ledger Details -->
+<div class="card">
+    <h2>Ledger Details</h2>
+    <div style="max-height: 500px; overflow-y: auto;">
+        <table>
+            <thead style="position: sticky; top: 0; background: var(--esa-gray); z-index: 10;">
+                <tr>
+                    <th>Site</th>
+                    <th>Unit</th>
+                    <th>Tenant</th>
+                    <th>Group</th>
+                    <th>Old Rent</th>
+                    <th>New Rent</th>
+                    <th>Increase</th>
+                    <th>Effective Date</th>
+                    <th>API Status</th>
+                </tr>
+            </thead>
+            <tbody id="ledgers-tbody">
+                <tr><td colspan="9" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Actions -->
+<div class="card" id="actions-section" style="display: none;">
+    <div style="display: flex; gap: 1rem; align-items: center;">
+        <button type="button" class="btn" id="execute-btn" onclick="confirmExecute()">Execute - Push to SiteLink</button>
+        <button type="button" class="btn btn-secondary" id="cancel-btn" onclick="confirmCancel()">Cancel Batch</button>
+        <a href="{{ url_for('ecri.dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+    </div>
+    <p style="color: #666; font-size: 0.85rem; margin-top: 0.75rem;">
+        Executing will push rent increases to SiteLink. This action cannot be undone from this app.
+    </p>
+</div>
+
+<!-- Executed Status -->
+<div class="card" id="executed-section" style="display: none; background: #d1fae5; border-color: #a7f3d0;">
+    <p style="margin: 0; color: #065f46;">
+        <strong>Batch Executed.</strong> Rate increases have been pushed to SiteLink.
+        <a href="" id="analytics-link">View Analytics</a>
+    </p>
+</div>
+
+<!-- Progress Modal -->
+<div id="progress-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>Executing ECRI Batch</h3>
+        <div class="progress-info">
+            <p id="progress-status" style="color: #666;">Pushing rate increases to SiteLink...</p>
+            <div class="progress-bar" style="height: 20px; background: var(--esa-gray-dark); border-radius: 10px; overflow: hidden; margin-top: 1rem;">
+                <div id="progress-fill" style="height: 100%; background: var(--esa-red); width: 100%; animation: pulse 1.5s infinite;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5); display: flex; align-items: center;
+    justify-content: center; z-index: 1000;
+}
+.modal-content {
+    background: #fff; padding: 2rem; border-radius: 8px;
+    max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+.modal-content h3 { color: var(--esa-navy); margin-bottom: 1.5rem; text-align: center; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    clearTimeout(window.autoRefreshTimeout);
+
+    const BATCH_ID = '{{ batch_id }}';
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        return { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() };
+    }
+
+    function formatCurrency(val) {
+        if (val === null || val === undefined) return '-';
+        return '$' + Number(val).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    }
+
+    function formatDate(iso) {
+        if (!iso) return '-';
+        return new Date(iso).toLocaleDateString('en-SG', {day: '2-digit', month: 'short', year: 'numeric'});
+    }
+
+    async function loadBatch() {
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}`, {headers: apiHeaders()});
+            const data = await res.json();
+
+            if (data.error) {
+                document.getElementById('batch-info').innerHTML = `<p style="color: #C41230;">${data.error}</p>`;
+                return;
+            }
+
+            // Batch info
+            document.getElementById('batch-info').innerHTML = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; max-width: 600px;">
+                    <div><strong>Name:</strong> ${data.name || '-'}</div>
+                    <div><strong>Status:</strong> <span class="status ${data.status === 'executed' ? 'status-completed' : data.status === 'draft' ? 'status-pending' : 'status-failed'}">${data.status}</span></div>
+                    <div><strong>Sites:</strong> ${data.site_ids.join(', ')}</div>
+                    <div><strong>Target:</strong> ${data.control_group_enabled ? 'Control Groups' : (data.target_increase_pct + '%')}</div>
+                    <div><strong>Created:</strong> ${formatDate(data.created_at)}</div>
+                    <div><strong>Notice Period:</strong> ${data.notice_period_days} days</div>
+                    ${data.notes ? `<div style="grid-column: 1/-1;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
+                </div>
+            `;
+
+            // Impact stats
+            const s = data.summary;
+            document.getElementById('impact-stats').innerHTML = `
+                <div class="stat-card"><div class="value">${data.total_ledgers}</div><div class="label">Total Ledgers</div></div>
+                <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(s.total_monthly_increase)}</div><div class="label">Monthly Increase</div></div>
+                <div class="stat-card"><div class="value">${formatCurrency(s.total_annual_increase)}</div><div class="label">Annual Increase</div></div>
+                <div class="stat-card"><div class="value">${s.api_status_counts.success}</div><div class="label">API Success</div></div>
+                <div class="stat-card" style="background: ${s.api_status_counts.failed > 0 ? '#C41230' : 'var(--esa-navy)'};">
+                    <div class="value">${s.api_status_counts.failed}</div><div class="label">API Failed</div></div>
+            `;
+
+            // Control groups
+            if (data.control_group_enabled && Object.keys(s.groups).length > 1) {
+                document.getElementById('groups-section').style.display = 'block';
+                document.getElementById('groups-tbody').innerHTML = Object.entries(s.groups).map(([g, info]) => `
+                    <tr>
+                        <td>Group ${g}</td>
+                        <td>${info.avg_pct}%</td>
+                        <td>${info.count}</td>
+                        <td>${formatCurrency(info.total_increase)}</td>
+                    </tr>
+                `).join('');
+            }
+
+            // Ledgers
+            const tbody = document.getElementById('ledgers-tbody');
+            tbody.innerHTML = data.ledgers.map(l => {
+                const statusClass = {
+                    'pending': 'status-pending',
+                    'success': 'status-completed',
+                    'failed': 'status-failed',
+                    'skipped': 'status-running'
+                }[l.api_status] || '';
+
+                return `<tr>
+                    <td>${l.site_id}</td>
+                    <td>${l.unit_name || '-'}</td>
+                    <td>${l.tenant_name || '-'}</td>
+                    <td>${l.control_group}</td>
+                    <td>${formatCurrency(l.old_rent)}</td>
+                    <td>${formatCurrency(l.new_rent)}</td>
+                    <td>${l.increase_pct}% (${formatCurrency(l.increase_amt)})</td>
+                    <td>${formatDate(l.effective_date)}</td>
+                    <td><span class="status ${statusClass}">${l.api_status}</span></td>
+                </tr>`;
+            }).join('');
+
+            // Show appropriate actions
+            if (data.status === 'draft' || data.status === 'review') {
+                document.getElementById('actions-section').style.display = 'block';
+            } else if (data.status === 'executed') {
+                document.getElementById('executed-section').style.display = 'block';
+                document.getElementById('analytics-link').href = `/ecri/batch/${BATCH_ID}/analytics`;
+            }
+
+        } catch (e) {
+            document.getElementById('batch-info').innerHTML = `<p style="color: #C41230;">Failed to load batch: ${e.message}</p>`;
+        }
+    }
+
+    function confirmExecute() {
+        if (confirm('Are you sure you want to execute this batch?\n\nThis will push rent increases to SiteLink for all pending ledgers. This action cannot be undone from this app.')) {
+            executeBatch();
+        }
+    }
+
+    async function executeBatch() {
+        document.getElementById('progress-modal').style.display = 'flex';
+
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/execute`, {
+                method: 'POST',
+                headers: apiHeaders()
+            });
+            const data = await res.json();
+
+            document.getElementById('progress-modal').style.display = 'none';
+
+            if (data.success) {
+                alert(`Batch executed.\nSuccess: ${data.results.success}\nFailed: ${data.results.failed}\nSkipped: ${data.results.skipped}`);
+                loadBatch(); // Refresh
+            } else {
+                alert('Execution failed: ' + (data.error || 'Unknown error'));
+            }
+        } catch (e) {
+            document.getElementById('progress-modal').style.display = 'none';
+            alert('Execution error: ' + e.message);
+        }
+    }
+
+    async function confirmCancel() {
+        if (confirm('Are you sure you want to cancel this batch?')) {
+            try {
+                const res = await fetch(`/ecri/api/batch/${BATCH_ID}/cancel`, {
+                    method: 'POST',
+                    headers: apiHeaders()
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('Batch cancelled.');
+                    window.location.href = '/ecri/';
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+    }
+
+    loadBatch();
+</script>
+{% endblock %}

@@ -52,6 +52,14 @@
                 </label>
 
                 <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_access_billing_tools" {% if role and role.can_access_billing_tools %}checked{% endif %}>
+                    <div>
+                        <strong>Billing Tools Access</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Access billing management tools (Billing Date Changer)</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
                     <input type="checkbox" name="can_manage_users" {% if role and role.can_manage_users %}checked{% endif %}>
                     <div>
                         <strong>User Management</strong>
@@ -80,6 +88,22 @@
                     <div>
                         <strong>Config Management</strong>
                         <p style="color: #666; font-size: 0.85rem; margin: 0;">Edit configuration files and manage secrets</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_access_ecri" {% if role and role.can_access_ecri %}checked{% endif %}>
+                    <div>
+                        <strong>ECRI View Access</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">View ECRI dashboards, eligibility lists, and analytics</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_manage_ecri" {% if role and role.can_manage_ecri %}checked{% endif %}>
+                    <div>
+                        <strong>ECRI Management</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Create batches and execute rate increase pushes to SiteLink</p>
                     </div>
                 </label>
             </div>

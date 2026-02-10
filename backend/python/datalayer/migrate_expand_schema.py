@@ -427,7 +427,7 @@ def run_migration():
         added = 0
         skipped = 0
         for col_name, col_type in TENANT_NEW_COLUMNS:
-            if add_column(conn, 'tenants', col_name, col_type):
+            if add_column(conn, 'cc_tenants', col_name, col_type):
                 added += 1
             else:
                 skipped += 1
@@ -438,7 +438,7 @@ def run_migration():
         added = 0
         skipped = 0
         for col_name, col_type in LEDGER_NEW_COLUMNS:
-            if add_column(conn, 'ledgers', col_name, col_type):
+            if add_column(conn, 'cc_ledgers', col_name, col_type):
                 added += 1
             else:
                 skipped += 1
@@ -449,7 +449,7 @@ def run_migration():
         added = 0
         skipped = 0
         for col_name, col_type in CHARGE_NEW_COLUMNS:
-            if add_column(conn, 'charges', col_name, col_type):
+            if add_column(conn, 'cc_charges', col_name, col_type):
                 added += 1
             else:
                 skipped += 1
@@ -462,7 +462,7 @@ def run_migration():
     print("Verifying final column counts...")
 
     with engine.connect() as conn:
-        for table in ['tenants', 'ledgers', 'charges']:
+        for table in ['cc_tenants', 'cc_ledgers', 'cc_charges']:
             query = text("""
                 SELECT COUNT(*)
                 FROM information_schema.columns

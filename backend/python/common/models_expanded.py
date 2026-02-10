@@ -38,7 +38,7 @@ class Tenant(Base, BaseModel, TimestampMixin):
 
     Composite unique key: SiteID + TenantID
     """
-    __tablename__ = 'tenants'
+    __tablename__ = 'cc_tenants'
 
     # =========================================================================
     # Primary Keys
@@ -265,7 +265,7 @@ class Ledger(Base, BaseModel, TimestampMixin):
 
     Composite unique key: SiteID + LedgerID
     """
-    __tablename__ = 'ledgers'
+    __tablename__ = 'cc_ledgers'
 
     # =========================================================================
     # Primary Keys
@@ -638,7 +638,7 @@ class Charge(Base, BaseModel, TimestampMixin):
     Composite unique key: SiteID + ChargeID + dcPmtAmt
     (Same ChargeID can appear multiple times for partial payments)
     """
-    __tablename__ = 'charges'
+    __tablename__ = 'cc_charges'
 
     # =========================================================================
     # Primary Keys

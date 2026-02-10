@@ -8,11 +8,30 @@
     th.sortable:hover { background: var(--esa-gray-dark); }
     th.sortable .arrow { font-size: 0.7rem; margin-left: 4px; opacity: 0.3; }
     th.sortable.active .arrow { opacity: 1; color: var(--esa-red); }
+    .user-table { font-size: 0.88rem; }
+    .user-table th, .user-table td { padding: 0.5rem 0.65rem; }
+    .pagination { display: flex; align-items: center; justify-content: center; gap: 0.25rem; margin-top: 1.25rem; flex-wrap: wrap; }
+    .pagination a, .pagination span {
+        display: inline-block; padding: 0.4rem 0.75rem; border-radius: 4px;
+        text-decoration: none; font-size: 0.85rem; font-weight: 500; border: 1px solid var(--esa-gray-dark);
+    }
+    .pagination a { color: var(--esa-navy); background: #fff; }
+    .pagination a:hover { background: var(--esa-gray); border-color: var(--esa-navy); }
+    .pagination .current { background: var(--esa-red); color: #fff; border-color: var(--esa-red); }
+    .pagination .disabled { color: #ccc; pointer-events: none; background: var(--esa-gray); }
+    .pagination .info { border: none; color: #666; font-size: 0.8rem; padding: 0.4rem 0.5rem; }
 </style>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
     <h1>User Management</h1>
-    <a href="{{ url_for('admin.create_user') }}" class="btn">Add User</a>
+    <div style="display: flex; gap: 0.5rem;">
+        <form action="{{ url_for('admin.sync_o365_profiles') }}" method="POST" style="display: inline-flex;"
+              onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='Syncing...';">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn" style="line-height: 1.2; box-sizing: border-box;">Sync O365 Profiles</button>
+        </form>
+        <a href="{{ url_for('admin.create_user') }}" class="btn" style="line-height: 1.2; box-sizing: border-box;">Add User</a>
+    </div>
 </div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -66,7 +85,7 @@
     </form>
 </div>
 
-{# Macro to build sort URL preserving current filters #}
+{# Macro to build sort URL preserving filters + page 1 #}
 {% macro sort_url(col) %}{{ url_for('admin.list_users', search=search, department=dept_filter, office=office_filter, sort=col, dir='desc' if sort_by == col and sort_dir == 'asc' else 'asc') }}{% endmacro %}
 
 {% macro sort_header(col, label) %}
@@ -78,10 +97,13 @@
 </th>
 {% endmacro %}
 
+{# Macro to build page URL preserving all current params #}
+{% macro page_url(p) %}{{ url_for('admin.list_users', search=search, department=dept_filter, office=office_filter, sort=sort_by, dir=sort_dir, page=p) }}{% endmacro %}
+
 <div class="card">
-    <h2>Users ({{ users|length }})</h2>
+    <h2>Users ({{ total }})</h2>
     <div style="overflow-x: auto;">
-    <table>
+    <table class="user-table">
         <thead>
             <tr>
                 {{ sort_header('id', 'ID') }}
@@ -118,7 +140,7 @@
                     {% endif %}
                 </td>
                 <td>{{ user.auth_provider }}</td>
-                <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
+                <td style="white-space: nowrap;">{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
                 <td style="white-space: nowrap;">
                     <a href="{{ url_for('admin.edit_user', user_id=user.id) }}" class="btn btn-sm btn-secondary">Edit</a>
                     {% if user.id != current_user.id %}
@@ -134,12 +156,44 @@
         </tbody>
     </table>
     </div>
+
+    {% if total_pages > 1 %}
+    <div class="pagination">
+        {% if page > 1 %}
+            <a href="{{ page_url(1) }}">&#171;</a>
+            <a href="{{ page_url(page - 1) }}">&#8249;</a>
+        {% else %}
+            <span class="disabled">&#171;</span>
+            <span class="disabled">&#8249;</span>
+        {% endif %}
+
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == page %}
+                <span class="current">{{ p }}</span>
+            {% elif p == 1 or p == total_pages or (p >= page - 2 and p <= page + 2) %}
+                <a href="{{ page_url(p) }}">{{ p }}</a>
+            {% elif p == page - 3 or p == page + 3 %}
+                <span class="info">...</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if page < total_pages %}
+            <a href="{{ page_url(page + 1) }}">&#8250;</a>
+            <a href="{{ page_url(total_pages) }}">&#187;</a>
+        {% else %}
+            <span class="disabled">&#8250;</span>
+            <span class="disabled">&#187;</span>
+        {% endif %}
+
+        <span class="info">{{ (page - 1) * per_page + 1 }}-{{ [page * per_page, total] | min }} of {{ total }}</span>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // Disable auto-refresh on this page when filters/sort are active
+    // Disable auto-refresh on this page when filters/sort/page are active
     if (window.location.search) {
         clearTimeout(window.autoRefreshTimeout);
     }

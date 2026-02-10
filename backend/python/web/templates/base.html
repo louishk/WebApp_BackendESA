@@ -286,6 +286,12 @@
                 {% if current_user.can_access_scheduler() %}
                     <a href="{{ url_for('scheduler.dashboard') }}" class="{{ 'active' if request.endpoint and 'scheduler' in request.endpoint else '' }}">Scheduler</a>
                 {% endif %}
+                {% if current_user.can_access_billing_tools() %}
+                    <a href="{{ url_for('tools.billing_date_changer') }}" class="{{ 'active' if request.endpoint and 'tools' in request.endpoint else '' }}">Tools</a>
+                {% endif %}
+                {% if current_user.can_access_ecri() %}
+                    <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
+                {% endif %}
                 {% if current_user.can_manage_users() or current_user.can_manage_roles() %}
                     <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint) else '' }}">User Management</a>
                 {% endif %}
@@ -305,6 +311,22 @@
         <a href="{{ url_for('scheduler.jobs_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.jobs_page' else '' }}">Jobs</a>
         <a href="{{ url_for('scheduler.history_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.history_page' else '' }}">History</a>
         <a href="{{ url_for('scheduler.settings_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.settings_page' else '' }}">Settings</a>
+    </div>
+    {% endif %}
+
+    {% if request.endpoint and 'tools' in request.endpoint %}
+    <div class="sub-navbar">
+        <a href="{{ url_for('tools.billing_date_changer') }}" class="{{ 'active' if request.endpoint == 'tools.billing_date_changer' else '' }}">Billing Date Changer</a>
+    </div>
+    {% endif %}
+
+    {% if request.endpoint and 'ecri' in request.endpoint %}
+    <div class="sub-navbar">
+        <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint == 'ecri.dashboard' else '' }}">Dashboard</a>
+        <a href="{{ url_for('ecri.eligibility') }}" class="{{ 'active' if request.endpoint == 'ecri.eligibility' else '' }}">Eligibility</a>
+        {% if current_user.can_manage_ecri() %}
+        <a href="{{ url_for('ecri.batch_create') }}" class="{{ 'active' if request.endpoint == 'ecri.batch_create' else '' }}">New Batch</a>
+        {% endif %}
     </div>
     {% endif %}
 
@@ -344,8 +366,8 @@
     </div>
 
     <script>
-        // Auto-refresh every 30 seconds
-        setTimeout(function() {
+        // Auto-refresh every 30 seconds (stored in window so pages can disable it)
+        window.autoRefreshTimeout = setTimeout(function() {
             location.reload();
         }, 30000);
     </script>

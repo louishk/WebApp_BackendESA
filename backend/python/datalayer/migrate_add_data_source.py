@@ -29,7 +29,7 @@ def run_migration():
     print(f"Database: {db_config.database}")
     print()
 
-    tables = ['tenants', 'ledgers', 'charges']
+    tables = ['cc_tenants', 'cc_ledgers', 'cc_charges']
 
     with engine.connect() as conn:
         for table in tables:
