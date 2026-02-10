@@ -23,7 +23,7 @@ ExecStart=/var/www/backend/backend/python/venv/bin/gunicorn \
 
 ExecReload=/bin/kill -HUP $MAINPID
 
-Restart=on-failure
+Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal

@@ -1,8 +1,8 @@
 #!/bin/bash
 # Install PBI Scheduler as a systemd service (WSL/Linux)
 
-SERVICE_NAME="pbi-scheduler-web"
-SERVICE_FILE="pbi-scheduler-web.service"
+SERVICE_NAME="backend-scheduler"
+SERVICE_FILE="backend-scheduler.service"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=== PBI Scheduler Service Installer ==="
