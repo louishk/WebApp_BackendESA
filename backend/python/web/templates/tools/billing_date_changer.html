@@ -9,11 +9,17 @@
 </div>
 
 <div class="card">
-    <h2>Select Site</h2>
-    <div class="form-group">
-        <select id="site-select" class="form-select">
-            <option value="">-- Select a site --</option>
-        </select>
+    <h2>Filters</h2>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+        <div class="form-group" style="flex: 1; min-width: 250px;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Sites</label>
+            <select id="site-select" class="form-select" multiple style="height: auto; min-height: 42px;">
+            </select>
+            <p style="color: #666; font-size: 0.8rem; margin-top: 0.25rem;">Hold Ctrl/Cmd to select multiple</p>
+        </div>
+        <div class="form-group">
+            <button type="button" class="btn" onclick="loadSelectedSites()">Load Tenants</button>
+        </div>
     </div>
 </div>
 
@@ -65,6 +71,7 @@
                 <thead>
                     <tr>
                         <th style="width: 40px;"><input type="checkbox" id="select-all-checkbox" onchange="toggleAll(this)"></th>
+                        <th>Site</th>
                         <th>Unit</th>
                         <th>Tenant Name</th>
                         <th>Company</th>
@@ -74,7 +81,7 @@
                     </tr>
                 </thead>
                 <tbody id="tenants-tbody">
-                    <tr><td colspan="7" style="text-align: center; color: #666;">Select a site to load tenants</td></tr>
+                    <tr><td colspan="8" style="text-align: center; color: #666;">Select sites and click Load Tenants</td></tr>
                 </tbody>
             </table>
         </div>
@@ -258,8 +265,7 @@
 
     const API_TOKEN = localStorage.getItem('api_token') || '';
     let tenantsData = [];
-    let selectedSiteCode = '';
-    let selectedSiteId = null;
+    let selectedSites = []; // Array of {site_id, site_code}
 
     // Track successfully processed ledgers (hidden until RentRoll refresh)
     let processedLedgers = new Set();
@@ -296,9 +302,7 @@
             }
             const data = await response.json();
             const select = document.getElementById('site-select');
-
-            // Clear existing options except first
-            select.innerHTML = '<option value="">-- Select a site --</option>';
+            select.innerHTML = '';
 
             data.sites.forEach(site => {
                 const option = document.createElement('option');
@@ -313,49 +317,49 @@
         }
     }
 
-    // Load tenants for selected site
-    async function loadTenants(siteId, keepProcessed = false) {
-        if (!siteId) {
-            document.getElementById('tenants-section').style.display = 'none';
+    // Load tenants for all selected sites
+    async function loadSelectedSites() {
+        const select = document.getElementById('site-select');
+        const options = Array.from(select.selectedOptions);
+
+        if (options.length === 0) {
+            alert('Please select at least one site.');
             return;
         }
 
-        // Clear processed list when changing sites (not when refreshing same site)
-        if (!keepProcessed) {
-            processedLedgers = new Set();
-        }
+        selectedSites = options.map(o => ({ site_id: o.value, site_code: o.dataset.code }));
+        processedLedgers = new Set();
+        tenantsData = [];
 
-        try {
-            const response = await fetch(`/api/billing-day/${siteId}`, {
-                headers: apiHeaders()
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+        let totalTenants = 0;
+        let totalOnFirst = 0;
+        let totalNotOnFirst = 0;
+
+        for (const site of selectedSites) {
+            try {
+                const response = await fetch(`/api/billing-day/${site.site_id}`, {
+                    headers: apiHeaders()
+                });
+                if (!response.ok) continue;
+                const data = await response.json();
+
+                const ledgers = (data.ledgers || []).map(l => ({ ...l, _site_code: data.site_code }));
+                tenantsData = tenantsData.concat(ledgers);
+                totalTenants += data.total_tenants;
+                totalOnFirst += data.on_first;
+                totalNotOnFirst += data.not_on_first;
+            } catch (e) {
+                console.error(`Failed to load site ${site.site_code}:`, e);
             }
-            const data = await response.json();
-
-            selectedSiteCode = data.site_code;
-            selectedSiteId = data.site_id;
-            tenantsData = data.ledgers || [];
-
-            // Update summary (accounting for processed items)
-            document.getElementById('total-tenants').textContent = data.total_tenants;
-            document.getElementById('on-first').textContent = data.on_first + processedLedgers.size;
-            document.getElementById('not-on-first').textContent = Math.max(0, data.not_on_first - processedLedgers.size);
-
-            // Update processed count display
-            updateProcessedDisplay();
-
-            // Show tenants section
-            document.getElementById('tenants-section').style.display = 'block';
-
-            // Render tenants needing conversion
-            renderTenants();
-            updateSelectedCount();
-        } catch (error) {
-            console.error('Failed to load tenants:', error);
-            alert('Failed to load tenant data. Please try again.');
         }
+
+        document.getElementById('total-tenants').textContent = totalTenants;
+        document.getElementById('on-first').textContent = totalOnFirst;
+        document.getElementById('not-on-first').textContent = totalNotOnFirst;
+        updateProcessedDisplay();
+        document.getElementById('tenants-section').style.display = 'block';
+        renderTenants();
+        updateSelectedCount();
     }
 
     // Update processed count display
@@ -403,8 +407,9 @@
         document.querySelector('.toolbar').style.display = 'flex';
 
         tbody.innerHTML = needsConversion.map(tenant => `
-            <tr class="tenant-row" data-ledger-id="${tenant.LedgerID}" onclick="toggleRow(this)">
+            <tr class="tenant-row" data-ledger-id="${tenant.LedgerID}" data-site-code="${tenant._site_code}" onclick="toggleRow(this)">
                 <td><input type="checkbox" class="tenant-checkbox" onclick="event.stopPropagation(); updateSelectedCount();"></td>
+                <td>${tenant._site_code || '-'}</td>
                 <td><strong>${tenant.UnitName || '-'}</strong></td>
                 <td>${tenant.TenantName || '-'}</td>
                 <td>${tenant.Company || '-'}</td>
@@ -477,8 +482,9 @@
     // Execute billing day changes
     async function executeChanges() {
         const selected = document.querySelectorAll('.tenant-checkbox:checked');
-        const ledgerIds = Array.from(selected).map(cb => {
-            return parseInt(cb.closest('tr').dataset.ledgerId);
+        const entries = Array.from(selected).map(cb => {
+            const row = cb.closest('tr');
+            return { ledgerId: parseInt(row.dataset.ledgerId), siteCode: row.dataset.siteCode };
         });
 
         // Show progress modal
@@ -489,7 +495,7 @@
         const progressStatus = document.getElementById('progress-status');
 
         progressModal.style.display = 'flex';
-        progressTotal.textContent = ledgerIds.length;
+        progressTotal.textContent = entries.length;
         progressCurrent.textContent = '0';
         progressFill.style.width = '0%';
 
@@ -497,12 +503,12 @@
         let failedCount = 0;
         const errors = [];
 
-        for (let i = 0; i < ledgerIds.length; i++) {
-            const ledgerId = ledgerIds[i];
+        for (let i = 0; i < entries.length; i++) {
+            const { ledgerId, siteCode } = entries[i];
             const tenant = tenantsData.find(t => t.LedgerID === ledgerId);
 
             progressCurrent.textContent = i + 1;
-            progressFill.style.width = ((i + 1) / ledgerIds.length * 100) + '%';
+            progressFill.style.width = ((i + 1) / entries.length * 100) + '%';
             progressStatus.textContent = `Processing: ${tenant ? tenant.UnitName : ledgerId}...`;
 
             try {
@@ -510,7 +516,7 @@
                     method: 'POST',
                     headers: apiHeaders(),
                     body: JSON.stringify({
-                        site_code: selectedSiteCode,
+                        site_code: siteCode,
                         ledger_id: ledgerId,
                         billing_day: 1,
                         commit: true
@@ -588,12 +594,6 @@
         // Uncheck master checkbox
         document.getElementById('select-all-checkbox').checked = false;
     }
-
-    // Event listeners
-    document.getElementById('site-select').addEventListener('change', function() {
-        const selectedOption = this.options[this.selectedIndex];
-        loadTenants(this.value);
-    });
 
     // Initialize
     loadSites();
