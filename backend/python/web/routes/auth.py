@@ -130,6 +130,10 @@ def oauth_callback():
 
     email = user_info.get('mail') or user_info.get('userPrincipalName')
     display_name = user_info.get('displayName', '')
+    department = user_info.get('department') or None
+    job_title = user_info.get('jobTitle') or None
+    office_location = user_info.get('officeLocation') or None
+    employee_id = user_info.get('employeeId') or None
 
     if not email:
         flash('Could not retrieve email from Microsoft account.', 'error')
@@ -170,11 +174,22 @@ def oauth_callback():
                 username=username,
                 email=email,
                 role_id=viewer_role.id,
-                auth_provider='microsoft'
+                auth_provider='microsoft',
+                department=department,
+                job_title=job_title,
+                office_location=office_location,
+                employee_id=employee_id,
             )
             db_session.add(user)
             db_session.commit()
             audit_log(AuditEvent.USER_CREATED, f"New OAuth user created: {username} ({email})", user=username)
+        else:
+            # Update profile fields from Microsoft Graph on each login
+            user.department = department
+            user.job_title = job_title
+            user.office_location = office_location
+            user.employee_id = employee_id
+            db_session.commit()
 
         login_user(user)
         audit_log(AuditEvent.OAUTH_SUCCESS, f"OAuth login for user '{user.username}' ({email})", user=user.username)

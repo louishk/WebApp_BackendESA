@@ -3,6 +3,13 @@
 {% block title %}User Management - ESA Backend{% endblock %}
 
 {% block content %}
+<style>
+    th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+    th.sortable:hover { background: var(--esa-gray-dark); }
+    th.sortable .arrow { font-size: 0.7rem; margin-left: 4px; opacity: 0.3; }
+    th.sortable.active .arrow { opacity: 1; color: var(--esa-red); }
+</style>
+
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
     <h1>User Management</h1>
     <a href="{{ url_for('admin.create_user') }}" class="btn">Add User</a>
@@ -22,17 +29,70 @@
     {% endif %}
 {% endwith %}
 
+<!-- Filter Bar -->
+<div class="card" style="margin-bottom: 1rem; padding: 1rem 1.5rem;">
+    <form method="GET" action="{{ url_for('admin.list_users') }}" style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+        <input type="hidden" name="sort" value="{{ sort_by }}">
+        <input type="hidden" name="dir" value="{{ sort_dir }}">
+        <div style="flex: 1; min-width: 200px;">
+            <label style="display: block; margin-bottom: 0.35rem; font-size: 0.8rem; font-weight: 600; color: var(--esa-navy); text-transform: uppercase;">Search</label>
+            <input type="text" name="search" value="{{ search }}" placeholder="Name, email or job title..."
+                   style="width: 100%; padding: 0.5rem 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem;">
+        </div>
+        <div style="min-width: 160px;">
+            <label style="display: block; margin-bottom: 0.35rem; font-size: 0.8rem; font-weight: 600; color: var(--esa-navy); text-transform: uppercase;">Department</label>
+            <select name="department" style="width: 100%; padding: 0.5rem 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem; background: #fff;">
+                <option value="">All Departments</option>
+                {% for dept in departments %}
+                <option value="{{ dept }}" {% if dept_filter == dept %}selected{% endif %}>{{ dept }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="min-width: 160px;">
+            <label style="display: block; margin-bottom: 0.35rem; font-size: 0.8rem; font-weight: 600; color: var(--esa-navy); text-transform: uppercase;">Office</label>
+            <select name="office" style="width: 100%; padding: 0.5rem 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.9rem; background: #fff;">
+                <option value="">All Offices</option>
+                {% for office in offices %}
+                <option value="{{ office }}" {% if office_filter == office %}selected{% endif %}>{{ office }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+            <button type="submit" class="btn btn-secondary" style="padding: 0.5rem 1rem;">Filter</button>
+            {% if search or dept_filter or office_filter %}
+            <a href="{{ url_for('admin.list_users') }}" class="btn" style="padding: 0.5rem 1rem; background: #6C757D;">Clear</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+{# Macro to build sort URL preserving current filters #}
+{% macro sort_url(col) %}{{ url_for('admin.list_users', search=search, department=dept_filter, office=office_filter, sort=col, dir='desc' if sort_by == col and sort_dir == 'asc' else 'asc') }}{% endmacro %}
+
+{% macro sort_header(col, label) %}
+<th class="sortable {{ 'active' if sort_by == col else '' }}">
+    <a href="{{ sort_url(col) }}" style="color: inherit; text-decoration: none; display: block;">
+        {{ label }}
+        <span class="arrow">{% if sort_by == col %}{% if sort_dir == 'asc' %}&#9650;{% else %}&#9660;{% endif %}{% else %}&#9650;{% endif %}</span>
+    </a>
+</th>
+{% endmacro %}
+
 <div class="card">
     <h2>Users ({{ users|length }})</h2>
+    <div style="overflow-x: auto;">
     <table>
         <thead>
             <tr>
-                <th>ID</th>
-                <th>Username</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Auth Provider</th>
-                <th>Created</th>
+                {{ sort_header('id', 'ID') }}
+                {{ sort_header('username', 'Username') }}
+                {{ sort_header('email', 'Email') }}
+                {{ sort_header('department', 'Department') }}
+                {{ sort_header('job_title', 'Job Title') }}
+                {{ sort_header('office', 'Office') }}
+                {{ sort_header('role', 'Role') }}
+                {{ sort_header('auth', 'Auth') }}
+                {{ sort_header('created', 'Created') }}
                 <th>Actions</th>
             </tr>
         </thead>
@@ -42,6 +102,9 @@
                 <td>{{ user.id }}</td>
                 <td><strong>{{ user.username }}</strong></td>
                 <td>{{ user.email or '-' }}</td>
+                <td>{{ user.department or '-' }}</td>
+                <td>{{ user.job_title or '-' }}</td>
+                <td>{{ user.office_location or '-' }}</td>
                 <td>
                     {% if user.role %}
                         <span class="status
@@ -56,7 +119,7 @@
                 </td>
                 <td>{{ user.auth_provider }}</td>
                 <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '-' }}</td>
-                <td>
+                <td style="white-space: nowrap;">
                     <a href="{{ url_for('admin.edit_user', user_id=user.id) }}" class="btn btn-sm btn-secondary">Edit</a>
                     {% if user.id != current_user.id %}
                     <form action="{{ url_for('admin.delete_user', user_id=user.id) }}" method="POST" style="display: inline;"
@@ -70,5 +133,15 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Disable auto-refresh on this page when filters/sort are active
+    if (window.location.search) {
+        clearTimeout(window.autoRefreshTimeout);
+    }
+</script>
 {% endblock %}

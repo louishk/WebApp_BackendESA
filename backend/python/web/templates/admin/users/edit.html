@@ -69,6 +69,21 @@
     </form>
 </div>
 
+{% if user and user.auth_provider == 'microsoft' %}
+<div class="card" style="margin-top: 1.5rem;">
+    <h2>Microsoft 365 Profile</h2>
+    <p style="color: #666; font-size: 0.85rem; margin-bottom: 1rem;">Synced from Azure AD on each login. These fields cannot be edited manually.</p>
+    <table>
+        <tbody>
+            <tr><td style="font-weight: 500; width: 200px;">Department</td><td>{{ user.department or '-' }}</td></tr>
+            <tr><td style="font-weight: 500;">Job Title</td><td>{{ user.job_title or '-' }}</td></tr>
+            <tr><td style="font-weight: 500;">Office Location</td><td>{{ user.office_location or '-' }}</td></tr>
+            <tr><td style="font-weight: 500;">Employee ID</td><td>{{ user.employee_id or '-' }}</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 {% if user and user.role %}
 <div class="card" style="margin-top: 1.5rem;">
     <h2>Current Role Permissions</h2>

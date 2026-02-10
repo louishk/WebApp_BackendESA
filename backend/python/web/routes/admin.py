@@ -94,10 +94,13 @@ def create_role():
                 name=name,
                 description=description,
                 can_access_scheduler=request.form.get('can_access_scheduler') == 'on',
+                can_access_billing_tools=request.form.get('can_access_billing_tools') == 'on',
                 can_manage_users=request.form.get('can_manage_users') == 'on',
                 can_manage_pages=request.form.get('can_manage_pages') == 'on',
                 can_manage_roles=request.form.get('can_manage_roles') == 'on',
                 can_manage_configs=request.form.get('can_manage_configs') == 'on',
+                can_access_ecri=request.form.get('can_access_ecri') == 'on',
+                can_manage_ecri=request.form.get('can_manage_ecri') == 'on',
                 is_system=False
             )
             db_session.add(role)
@@ -133,10 +136,13 @@ def edit_role(role_id):
         if request.method == 'POST':
             role.description = request.form.get('description', '').strip()
             role.can_access_scheduler = request.form.get('can_access_scheduler') == 'on'
+            role.can_access_billing_tools = request.form.get('can_access_billing_tools') == 'on'
             role.can_manage_users = request.form.get('can_manage_users') == 'on'
             role.can_manage_pages = request.form.get('can_manage_pages') == 'on'
             role.can_manage_roles = request.form.get('can_manage_roles') == 'on'
             role.can_manage_configs = request.form.get('can_manage_configs') == 'on'
+            role.can_access_ecri = request.form.get('can_access_ecri') == 'on'
+            role.can_manage_ecri = request.form.get('can_manage_ecri') == 'on'
 
             db_session.commit()
             audit_log(AuditEvent.ROLE_UPDATED, f"Updated role '{role.name}' (id={role_id}), permissions: {role.get_permissions_list()}")
@@ -201,13 +207,76 @@ def delete_role(role_id):
 @login_required
 @admin_required
 def list_users():
-    """List all users."""
+    """List all users with optional filtering and sorting."""
     from web.models.user import User
+    from sqlalchemy import or_, asc, desc
+
+    # Get filter parameters
+    search = request.args.get('search', '').strip()
+    dept_filter = request.args.get('department', '').strip()
+    office_filter = request.args.get('office', '').strip()
+
+    # Get sort parameters
+    SORTABLE_COLUMNS = {
+        'id': User.id,
+        'username': User.username,
+        'email': User.email,
+        'department': User.department,
+        'job_title': User.job_title,
+        'office': User.office_location,
+        'role': User.role_id,
+        'auth': User.auth_provider,
+        'created': User.created_at,
+    }
+    sort_by = request.args.get('sort', 'username')
+    sort_dir = request.args.get('dir', 'asc')
+    if sort_by not in SORTABLE_COLUMNS:
+        sort_by = 'username'
+    if sort_dir not in ('asc', 'desc'):
+        sort_dir = 'asc'
 
     db_session = get_session()
     try:
-        users = db_session.query(User).order_by(User.username).all()
-        return render_template('admin/users/list.html', users=users)
+        query = db_session.query(User)
+
+        # Text search across name and email
+        if search:
+            safe_q = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            query = query.filter(or_(
+                User.username.ilike(f'%{safe_q}%', escape='\\'),
+                User.email.ilike(f'%{safe_q}%', escape='\\'),
+                User.job_title.ilike(f'%{safe_q}%', escape='\\'),
+            ))
+
+        # Department filter (exact match from dropdown)
+        if dept_filter:
+            query = query.filter(User.department == dept_filter)
+
+        # Office location filter (exact match from dropdown)
+        if office_filter:
+            query = query.filter(User.office_location == office_filter)
+
+        # Apply sort
+        col = SORTABLE_COLUMNS[sort_by]
+        order_fn = desc if sort_dir == 'desc' else asc
+        query = query.order_by(order_fn(col))
+
+        users = query.all()
+
+        # Get distinct departments and offices for filter dropdowns
+        all_users = db_session.query(User).all()
+        departments = sorted(set(u.department for u in all_users if u.department))
+        offices = sorted(set(u.office_location for u in all_users if u.office_location))
+
+        return render_template('admin/users/list.html',
+                               users=users,
+                               departments=departments,
+                               offices=offices,
+                               search=search,
+                               dept_filter=dept_filter,
+                               office_filter=office_filter,
+                               sort_by=sort_by,
+                               sort_dir=sort_dir)
     finally:
         db_session.close()
 
