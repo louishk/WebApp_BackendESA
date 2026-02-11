@@ -7,7 +7,7 @@
 soap:
   base_url: "https://api.smdservers.net/CCWs_3.5/ReportingWs.asmx"
   corp_code: "C234"
-  corp_user: "louis"
+  corp_user: "data"
   api_key_vault: "SOAP_API_KEY"  # Reference to vault secret
   corp_password_vault: "SOAP_CORP_PASSWORD"  # Reference to vault secret
   timeout: 60
