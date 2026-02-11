@@ -317,6 +317,7 @@
     {% if request.endpoint and 'tools' in request.endpoint %}
     <div class="sub-navbar">
         <a href="{{ url_for('tools.billing_date_changer') }}" class="{{ 'active' if request.endpoint == 'tools.billing_date_changer' else '' }}">Billing Date Changer</a>
+        <a href="{{ url_for('tools.inventory_checker') }}" class="{{ 'active' if request.endpoint == 'tools.inventory_checker' else '' }}">Inventory Checker</a>
     </div>
     {% endif %}
 

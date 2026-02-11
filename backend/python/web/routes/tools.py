@@ -16,3 +16,11 @@ tools_bp = Blueprint('tools', __name__, url_prefix='/tools')
 def billing_date_changer():
     """Billing date changer tool page."""
     return render_template('tools/billing_date_changer.html')
+
+
+@tools_bp.route('/inventory-checker')
+@login_required
+@billing_tools_access_required
+def inventory_checker():
+    """Inventory naming convention checker tool page."""
+    return render_template('tools/inventory_checker.html')

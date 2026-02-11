@@ -3,3 +3,4 @@ from web.models.base import Base
 from web.models.role import Role
 from web.models.user import User
 from web.models.page import Page
+from web.models.inventory import InventoryTypeMapping, InventoryUnitOverride
