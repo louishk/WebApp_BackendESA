@@ -668,7 +668,7 @@
 
         // Auto-save just this override
         try {
-            await fetch('/api/inventory/overrides', {
+            const res = await fetch('/api/inventory/overrides', {
                 method: 'PUT',
                 headers: apiHeaders(),
                 body: JSON.stringify({
@@ -676,8 +676,18 @@
                     username: '{{ current_user.username }}',
                 }),
             });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            cb.style.outline = '2px solid #28A745';
+            setTimeout(() => { cb.style.outline = ''; }, 600);
         } catch (e) {
             console.error('Failed to save reviewed state:', e);
+            // Revert on failure
+            cb.checked = !cb.checked;
+            unit._reviewed = cb.checked;
+            overridesMap[key].reviewed = cb.checked;
+            document.getElementById('stat-reviewed').textContent = processedUnits.filter(u => u._reviewed).length;
+            cb.style.outline = '2px solid #C41230';
+            setTimeout(() => { cb.style.outline = ''; }, 1500);
         }
     }
 
