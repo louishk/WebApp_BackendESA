@@ -130,16 +130,17 @@ def require_auth(f):
             has_billing_tools = current_user.can_access_billing_tools() if hasattr(current_user, 'can_access_billing_tools') else False
 
             if not has_scheduler and not has_billing_tools:
-                role_name = current_user.role.name if current_user.role else 'none'
+                role_names = ', '.join(r.name for r in current_user.roles) if current_user.roles else 'none'
                 return jsonify({
                     'error': 'Forbidden',
-                    'message': f'Role "{role_name}" does not have API access'
+                    'message': f'Roles "{role_names}" do not have API access'
                 }), 403
 
             # Store user info in Flask's g object
             g.current_user = {
                 'sub': current_user.username,
-                'role': current_user.role.name if current_user.role else 'unknown',
+                'roles': [r.name for r in current_user.roles],
+                'role': current_user.roles[0].name if current_user.roles else 'unknown',
                 'user_id': current_user.id,
             }
             return f(*args, **kwargs)
@@ -156,12 +157,15 @@ def require_auth(f):
         try:
             payload = decode_token(token)
 
-            # Check role
-            user_role = payload.get('role', '')
-            if user_role not in API_ACCESS_ROLES:
+            # Check role(s) — supports both single 'role' and list 'roles' in JWT payload
+            user_roles = payload.get('roles', [])
+            if not user_roles:
+                single_role = payload.get('role', '')
+                user_roles = [single_role] if single_role else []
+            if not any(r in API_ACCESS_ROLES for r in user_roles):
                 return jsonify({
                     'error': 'Forbidden',
-                    'message': f'Role "{user_role}" does not have API access'
+                    'message': f'Role(s) "{", ".join(user_roles)}" do not have API access'
                 }), 403
 
             # Store user info in Flask's g object

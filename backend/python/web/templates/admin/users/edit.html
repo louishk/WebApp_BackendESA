@@ -46,18 +46,17 @@
         </div>
 
         <div style="margin-bottom: 1.25rem;">
-            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Role *</label>
-            <select name="role_id" required
-                    style="width: 100%; max-width: 400px; padding: 0.75rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
-                <option value="">-- Select a role --</option>
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Roles *</label>
+            <select name="role_ids" multiple required
+                    style="width: 100%; max-width: 400px; padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem; height: auto; min-height: 42px;">
                 {% for role in roles %}
-                <option value="{{ role.id }}" {% if user and user.role_id == role.id %}selected{% endif %}>
+                <option value="{{ role.id }}" {% if user and role in user.roles %}selected{% endif %}>
                     {{ role.name }} - {{ role.description or 'No description' }}
                 </option>
                 {% endfor %}
             </select>
             <p style="color: #666; font-size: 0.85rem; margin-top: 0.5rem;">
-                Role determines what permissions the user has in the system.
+                Hold Ctrl (or Cmd) to select multiple roles. Permissions are combined across all selected roles.
                 <a href="{{ url_for('admin.list_roles') }}" style="color: var(--esa-red);">Manage roles</a>
             </p>
         </div>
@@ -84,9 +83,13 @@
 </div>
 {% endif %}
 
-{% if user and user.role %}
+{% if user and user.roles %}
 <div class="card" style="margin-top: 1.5rem;">
-    <h2>Current Role Permissions</h2>
+    <h2>Combined Role Permissions</h2>
+    <p style="color: #666; font-size: 0.85rem; margin-bottom: 1rem;">
+        Effective permissions from {{ user.roles|length }} role{{ 's' if user.roles|length > 1 else '' }}:
+        {% for r in user.roles %}<span class="status status-running" style="margin-right: 0.25rem;">{{ r.name }}</span>{% endfor %}
+    </p>
     <table>
         <thead>
             <tr>
@@ -98,7 +101,17 @@
             <tr>
                 <td>Scheduler Access</td>
                 <td>
-                    {% if user.role.can_access_scheduler %}
+                    {% if user.can_access_scheduler() %}
+                        <span class="status status-completed">Yes</span>
+                    {% else %}
+                        <span class="status status-pending">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>Billing Tools</td>
+                <td>
+                    {% if user.can_access_billing_tools() %}
                         <span class="status status-completed">Yes</span>
                     {% else %}
                         <span class="status status-pending">No</span>
@@ -108,7 +121,7 @@
             <tr>
                 <td>User Management</td>
                 <td>
-                    {% if user.role.can_manage_users %}
+                    {% if user.can_manage_users() %}
                         <span class="status status-completed">Yes</span>
                     {% else %}
                         <span class="status status-pending">No</span>
@@ -118,7 +131,7 @@
             <tr>
                 <td>Page Management</td>
                 <td>
-                    {% if user.role.can_manage_pages %}
+                    {% if user.can_manage_pages() %}
                         <span class="status status-completed">Yes</span>
                     {% else %}
                         <span class="status status-pending">No</span>
@@ -128,7 +141,7 @@
             <tr>
                 <td>Role Management</td>
                 <td>
-                    {% if user.role.can_manage_roles %}
+                    {% if user.can_manage_roles() %}
                         <span class="status status-completed">Yes</span>
                     {% else %}
                         <span class="status status-pending">No</span>
@@ -138,7 +151,27 @@
             <tr>
                 <td>Config Management</td>
                 <td>
-                    {% if user.role.can_manage_configs %}
+                    {% if user.can_manage_configs() %}
+                        <span class="status status-completed">Yes</span>
+                    {% else %}
+                        <span class="status status-pending">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>ECRI View</td>
+                <td>
+                    {% if user.can_access_ecri() %}
+                        <span class="status status-completed">Yes</span>
+                    {% else %}
+                        <span class="status status-pending">No</span>
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td>ECRI Manage</td>
+                <td>
+                    {% if user.can_manage_ecri() %}
                         <span class="status status-completed">Yes</span>
                     {% else %}
                         <span class="status status-pending">No</span>

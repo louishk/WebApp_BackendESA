@@ -53,11 +53,16 @@ def list_roles():
     db_session = get_session()
     try:
         roles = db_session.query(Role).order_by(Role.name).all()
-        # Get user count for each role
+        # Get user count for each role via the join table
+        from web.models.user import user_roles
+        from sqlalchemy import func
         role_user_counts = {}
+        counts = db_session.query(user_roles.c.role_id, func.count(user_roles.c.user_id)).group_by(user_roles.c.role_id).all()
+        for role_id, count in counts:
+            role_user_counts[role_id] = count
+        # Ensure all roles have an entry
         for role in roles:
-            count = db_session.query(User).filter_by(role_id=role.id).count()
-            role_user_counts[role.id] = count
+            role_user_counts.setdefault(role.id, 0)
         return render_template('admin/roles/list.html', roles=roles, role_user_counts=role_user_counts)
     finally:
         db_session.close()
@@ -178,8 +183,9 @@ def delete_role(role_id):
             flash('Cannot delete system roles.', 'error')
             return redirect(url_for('admin.list_roles'))
 
-        # Check if any users have this role
-        user_count = db_session.query(User).filter_by(role_id=role_id).count()
+        # Check if any users have this role via the join table
+        from web.models.user import user_roles
+        user_count = db_session.query(user_roles).filter(user_roles.c.role_id == role_id).count()
         if user_count > 0:
             flash(f'Cannot delete role. {user_count} user(s) are assigned to this role.', 'error')
             return redirect(url_for('admin.list_roles'))
@@ -409,20 +415,20 @@ def create_user():
             username = request.form.get('username', '').strip()
             email = request.form.get('email', '').strip() or None
             password = request.form.get('password', '')
-            role_id = request.form.get('role_id', type=int)
+            role_ids = request.form.getlist('role_ids', type=int)
 
             if not username:
                 flash('Username is required.', 'error')
                 return render_template('admin/users/edit.html', user=None, roles=roles)
 
-            if not role_id:
-                flash('Role is required.', 'error')
+            if not role_ids:
+                flash('At least one role is required.', 'error')
                 return render_template('admin/users/edit.html', user=None, roles=roles)
 
-            # Verify role exists
-            role = db_session.query(Role).get(role_id)
-            if not role:
-                flash('Invalid role.', 'error')
+            # Verify all roles exist
+            selected_roles = db_session.query(Role).filter(Role.id.in_(role_ids)).all()
+            if len(selected_roles) != len(role_ids):
+                flash('One or more invalid roles.', 'error')
                 return render_template('admin/users/edit.html', user=None, roles=roles)
 
             # Check for duplicate username
@@ -443,13 +449,14 @@ def create_user():
                 username=username,
                 email=email,
                 password=hashed_password,
-                role_id=role_id,
                 auth_provider='local'
             )
+            user.roles = selected_roles
             db_session.add(user)
             db_session.commit()
 
-            audit_log(AuditEvent.USER_CREATED, f"Created user '{username}' with role_id={role_id}")
+            role_names = [r.name for r in selected_roles]
+            audit_log(AuditEvent.USER_CREATED, f"Created user '{username}' with roles: {role_names}")
             flash(f'User "{username}" created successfully.', 'success')
             return redirect(url_for('admin.list_users'))
 
@@ -482,20 +489,20 @@ def edit_user(user_id):
 
         if request.method == 'POST':
             user.email = request.form.get('email', '').strip() or None
-            role_id = request.form.get('role_id', type=int)
-            old_role_id = user.role_id
+            role_ids = request.form.getlist('role_ids', type=int)
+            old_role_names = sorted(r.name for r in user.roles)
 
-            if not role_id:
-                flash('Role is required.', 'error')
+            if not role_ids:
+                flash('At least one role is required.', 'error')
                 return render_template('admin/users/edit.html', user=user, roles=roles)
 
-            # Verify role exists
-            role = db_session.query(Role).get(role_id)
-            if not role:
-                flash('Invalid role.', 'error')
+            # Verify all roles exist
+            selected_roles = db_session.query(Role).filter(Role.id.in_(role_ids)).all()
+            if len(selected_roles) != len(role_ids):
+                flash('One or more invalid roles.', 'error')
                 return render_template('admin/users/edit.html', user=user, roles=roles)
 
-            user.role_id = role_id
+            user.roles = selected_roles
 
             # Update password if provided
             new_password = request.form.get('password', '')
@@ -511,10 +518,11 @@ def edit_user(user_id):
             db_session.commit()
 
             # Audit logging
+            new_role_names = sorted(r.name for r in selected_roles)
             changes = []
-            if old_role_id != role_id:
-                audit_log(AuditEvent.USER_ROLE_CHANGED, f"User '{user.username}' role changed from {old_role_id} to {role_id}")
-                changes.append(f"role: {old_role_id}->{role_id}")
+            if old_role_names != new_role_names:
+                audit_log(AuditEvent.USER_ROLE_CHANGED, f"User '{user.username}' roles changed from {old_role_names} to {new_role_names}")
+                changes.append(f"roles: {old_role_names}->{new_role_names}")
             if password_changed:
                 changes.append("password changed")
             audit_log(AuditEvent.USER_UPDATED, f"Updated user '{user.username}' (id={user_id}): {', '.join(changes) if changes else 'email updated'}")

@@ -2,10 +2,18 @@
 
 from datetime import datetime
 from flask_login import UserMixin
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table
 from sqlalchemy.orm import relationship
 
 from web.models.base import Base
+
+# Many-to-many join table for users <-> roles
+user_roles = Table(
+    'user_roles',
+    Base.metadata,
+    Column('user_id', Integer, ForeignKey('users.id', ondelete='CASCADE'), primary_key=True),
+    Column('role_id', Integer, ForeignKey('roles.id', ondelete='CASCADE'), primary_key=True),
+)
 
 
 class User(Base, UserMixin):
@@ -13,6 +21,7 @@ class User(Base, UserMixin):
     User model for authentication and authorization.
 
     Supports both local username/password and Microsoft OAuth authentication.
+    Users can have multiple roles; permissions are the union (OR) of all assigned roles.
     """
     __tablename__ = 'users'
 
@@ -20,7 +29,7 @@ class User(Base, UserMixin):
     username = Column(String(255), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=True)
     password = Column(String(255), nullable=True)  # NULL for OAuth-only users
-    role_id = Column(Integer, ForeignKey('roles.id'), nullable=False)
+    role_id = Column(Integer, ForeignKey('roles.id'), nullable=True)  # Legacy, kept for compat
     auth_provider = Column(String(20), default='local')  # 'local' or 'microsoft'
     department = Column(String(255), nullable=True)
     job_title = Column(String(255), nullable=True)
@@ -29,46 +38,55 @@ class User(Base, UserMixin):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationship to Role
-    role = relationship('Role', backref='users')
+    # Many-to-many relationship to Role
+    roles = relationship('Role', secondary=user_roles, backref='role_users')
+
+    @property
+    def role(self):
+        """Backward-compatible property returning the first role (or None)."""
+        return self.roles[0] if self.roles else None
 
     def can_access_scheduler(self):
         """Check if user can access scheduler functionality."""
-        return self.role.can_access_scheduler if self.role else False
+        return any(r.can_access_scheduler for r in self.roles)
 
     def can_access_billing_tools(self):
         """Check if user can access billing tools (Billing Date Changer, etc.)."""
-        return self.role.can_access_billing_tools if self.role else False
+        return any(r.can_access_billing_tools for r in self.roles)
 
     def can_manage_users(self):
         """Check if user can manage other users."""
-        return self.role.can_manage_users if self.role else False
+        return any(r.can_manage_users for r in self.roles)
 
     def can_manage_pages(self):
         """Check if user can manage pages."""
-        return self.role.can_manage_pages if self.role else False
+        return any(r.can_manage_pages for r in self.roles)
 
     def can_manage_roles(self):
         """Check if user can manage roles."""
-        return self.role.can_manage_roles if self.role else False
+        return any(r.can_manage_roles for r in self.roles)
 
     def can_manage_configs(self):
         """Check if user can manage configurations."""
-        return self.role.can_manage_configs if self.role else False
+        return any(r.can_manage_configs for r in self.roles)
 
     def can_access_ecri(self):
         """Check if user can view ECRI dashboards and eligibility."""
-        return self.role.can_access_ecri if self.role else False
+        return any(r.can_access_ecri for r in self.roles)
 
     def can_manage_ecri(self):
         """Check if user can create batches and execute ECRI pushes."""
-        return self.role.can_manage_ecri if self.role else False
+        return any(r.can_manage_ecri for r in self.roles)
 
     def has_role(self, role_names):
         """Check if user has one of the specified role names."""
         if isinstance(role_names, str):
             role_names = [role_names]
-        return self.role.name in role_names if self.role else False
+        return any(r.name in role_names for r in self.roles)
+
+    def has_any_role_id(self, role_ids):
+        """Check if user has any of the given role IDs. Used by page access control."""
+        return any(str(r.id) in role_ids for r in self.roles)
 
     def to_dict(self):
         """Convert user to dictionary (excluding password)."""
@@ -76,8 +94,9 @@ class User(Base, UserMixin):
             'id': self.id,
             'username': self.username,
             'email': self.email,
-            'role_id': self.role_id,
-            'role_name': self.role.name if self.role else None,
+            'role_id': self.roles[0].id if self.roles else None,
+            'role_name': self.roles[0].name if self.roles else None,
+            'role_names': [r.name for r in self.roles],
             'auth_provider': self.auth_provider,
             'department': self.department,
             'job_title': self.job_title,
@@ -88,5 +107,5 @@ class User(Base, UserMixin):
         }
 
     def __repr__(self):
-        role_name = self.role.name if self.role else 'no-role'
-        return f"<User {self.username} ({role_name})>"
+        role_names = ', '.join(r.name for r in self.roles) if self.roles else 'no-role'
+        return f"<User {self.username} ({role_names})>"

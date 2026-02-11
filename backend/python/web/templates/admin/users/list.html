@@ -128,13 +128,15 @@
                 <td>{{ user.job_title or '-' }}</td>
                 <td>{{ user.office_location or '-' }}</td>
                 <td>
-                    {% if user.role %}
+                    {% if user.roles %}
+                        {% for role in user.roles %}
                         <span class="status
-                            {% if user.role.name == 'admin' %}status-failed{% endif %}
-                            {% if user.role.name == 'scheduler_admin' %}status-running{% endif %}
-                            {% if user.role.name == 'editor' %}status-completed{% endif %}
-                            {% if user.role.name == 'viewer' %}status-pending{% endif %}
-                        ">{{ user.role.name }}</span>
+                            {% if role.name == 'admin' %}status-failed{% endif %}
+                            {% if role.name == 'scheduler_admin' %}status-running{% endif %}
+                            {% if role.name == 'editor' %}status-completed{% endif %}
+                            {% if role.name == 'viewer' %}status-pending{% endif %}
+                        " style="margin-right: 0.2rem;">{{ role.name }}</span>
+                        {% endfor %}
                     {% else %}
                         <span style="color: #888;">None</span>
                     {% endif %}

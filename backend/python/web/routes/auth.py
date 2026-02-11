@@ -173,13 +173,13 @@ def oauth_callback():
             user = User(
                 username=username,
                 email=email,
-                role_id=viewer_role.id,
                 auth_provider='microsoft',
                 department=department,
                 job_title=job_title,
                 office_location=office_location,
                 employee_id=employee_id,
             )
+            user.roles = [viewer_role]
             db_session.add(user)
             db_session.commit()
             audit_log(AuditEvent.USER_CREATED, f"New OAuth user created: {username} ({email})", user=username)

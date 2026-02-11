@@ -77,7 +77,7 @@ class Page(Base):
             return True
         # Check role-based access
         role_ids = self.get_view_roles_list()
-        if role_ids and str(user.role_id) in role_ids:
+        if role_ids and user.has_any_role_id(role_ids):
             return True
         # Check user-specific access
         user_ids = self.get_view_users_list()
@@ -103,7 +103,7 @@ class Page(Base):
             return False
         # Check role-based access
         role_ids = self.get_edit_roles_list()
-        if role_ids and str(user.role_id) in role_ids:
+        if role_ids and user.has_any_role_id(role_ids):
             return True
         # Check user-specific access
         user_ids = self.get_edit_users_list()
