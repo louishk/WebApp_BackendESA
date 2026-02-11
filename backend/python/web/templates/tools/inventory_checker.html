@@ -234,6 +234,10 @@
     const SHAPES = ['SS','WR','NR','OS'];
     const PILLARS = ['P','NP'];
 
+    // KR sites store dimensions in meters — convert to feet for standardization
+    const KR_SITE_CODES = ['L006','L013','L011','L019','L021','L023','L024'];
+    const M_TO_FT = 3.28084;
+
     const SIZE_RANGE_BUCKETS = [
         { label: '0-6', min: 0, max: 6 },
         { label: '6-8', min: 6, max: 8 },
@@ -430,7 +434,10 @@
         processedUnits = allUnits.map(unit => {
             const key = overrideKey(unit.SiteID, unit.UnitID);
             const override = overridesMap[key] || {};
-            const area = calcArea(unit.dcWidth, unit.dcLength);
+            const isMetric = KR_SITE_CODES.includes(unit.sLocationCode);
+            const w = isMetric ? parseFloat(unit.dcWidth || 0) * M_TO_FT : parseFloat(unit.dcWidth || 0);
+            const l = isMetric ? parseFloat(unit.dcLength || 0) * M_TO_FT : parseFloat(unit.dcLength || 0);
+            const area = calcArea(w, l);
             const mappedType = (typeMappings[unit.sTypeName] || {}).type || '';
             const mappedClimate = (typeMappings[unit.sTypeName] || {}).climate || '';
 
@@ -439,11 +446,13 @@
             const climate = override.climate_code || mappedClimate || '';
             const sizeCat = override.size_category || calcSizeCategory(area);
             const sizeRange = override.size_range || calcSizeRange(area);
-            const shape = override.shape || calcShape(unit.dcWidth, unit.dcLength);
+            const shape = override.shape || calcShape(w, l);
             const pillar = override.pillar || calcPillar(unit.sUnitNote);
 
             return {
                 ...unit,
+                _width: w,
+                _length: l,
                 _area: area,
                 _unitType: unitType,
                 _climate: climate,
@@ -504,8 +513,8 @@
                 <td>${u.sLocationCode || '-'}</td>
                 <td><strong>${u.sUnitName || '-'}</strong></td>
                 <td>${u.sTypeName || '-'}</td>
-                <td>${u.dcWidth != null ? parseFloat(u.dcWidth).toFixed(1) : '-'}</td>
-                <td>${u.dcLength != null ? parseFloat(u.dcLength).toFixed(1) : '-'}</td>
+                <td>${u._width ? u._width.toFixed(1) : '-'}</td>
+                <td>${u._length ? u._length.toFixed(1) : '-'}</td>
                 <td>${u._area ? u._area.toFixed(1) : '-'}</td>
                 <td>${u.iFloor != null ? u.iFloor : '-'}</td>
                 <td>${u.dcStdRate != null ? '$' + parseFloat(u.dcStdRate).toFixed(2) : '-'}</td>
@@ -581,7 +590,7 @@
         unit._climate = override.climate_code || mappedClimate || '';
         unit._sizeCat = override.size_category || calcSizeCategory(area);
         unit._sizeRange = override.size_range || calcSizeRange(area);
-        unit._shape = override.shape || calcShape(unit.dcWidth, unit.dcLength);
+        unit._shape = override.shape || calcShape(unit._width, unit._length);
         unit._pillar = override.pillar || calcPillar(unit.sUnitNote);
         unit._finalLabel = buildFinalLabel(unit._sizeCat, unit._sizeRange, unit._unitType, unit._climate, unit._shape, unit._pillar);
 
@@ -727,8 +736,8 @@
             'Site Code': u.sLocationCode || '',
             'Unit Name': u.sUnitName || '',
             'Current Type': u.sTypeName || '',
-            'Width (ft)': u.dcWidth != null ? parseFloat(u.dcWidth) : '',
-            'Length (ft)': u.dcLength != null ? parseFloat(u.dcLength) : '',
+            'Width (ft)': u._width ? parseFloat(u._width.toFixed(1)) : '',
+            'Length (ft)': u._length ? parseFloat(u._length.toFixed(1)) : '',
             'Area (sqft)': u._area ? parseFloat(u._area.toFixed(1)) : '',
             'Climate (Source)': u.bClimate ? 'Yes' : 'No',
             'Inside': u.bInside ? 'Yes' : 'No',
