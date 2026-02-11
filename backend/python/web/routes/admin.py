@@ -100,6 +100,7 @@ def create_role():
                 description=description,
                 can_access_scheduler=request.form.get('can_access_scheduler') == 'on',
                 can_access_billing_tools=request.form.get('can_access_billing_tools') == 'on',
+                can_access_inventory_tools=request.form.get('can_access_inventory_tools') == 'on',
                 can_manage_users=request.form.get('can_manage_users') == 'on',
                 can_manage_pages=request.form.get('can_manage_pages') == 'on',
                 can_manage_roles=request.form.get('can_manage_roles') == 'on',
@@ -142,6 +143,7 @@ def edit_role(role_id):
             role.description = request.form.get('description', '').strip()
             role.can_access_scheduler = request.form.get('can_access_scheduler') == 'on'
             role.can_access_billing_tools = request.form.get('can_access_billing_tools') == 'on'
+            role.can_access_inventory_tools = request.form.get('can_access_inventory_tools') == 'on'
             role.can_manage_users = request.form.get('can_manage_users') == 'on'
             role.can_manage_pages = request.form.get('can_manage_pages') == 'on'
             role.can_manage_roles = request.form.get('can_manage_roles') == 'on'

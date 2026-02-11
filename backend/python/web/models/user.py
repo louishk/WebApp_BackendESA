@@ -54,6 +54,10 @@ class User(Base, UserMixin):
         """Check if user can access billing tools (Billing Date Changer, etc.)."""
         return any(r.can_access_billing_tools for r in self.roles)
 
+    def can_access_inventory_tools(self):
+        """Check if user can access inventory tools (Inventory Checker, etc.)."""
+        return any(r.can_access_inventory_tools for r in self.roles)
+
     def can_manage_users(self):
         """Check if user can manage other users."""
         return any(r.can_manage_users for r in self.roles)

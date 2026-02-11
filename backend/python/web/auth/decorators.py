@@ -98,6 +98,11 @@ def billing_tools_access_required(f):
     return require_permission('can_access_billing_tools')(f)
 
 
+def inventory_tools_access_required(f):
+    """Decorator to require inventory tools access permission."""
+    return require_permission('can_access_inventory_tools')(f)
+
+
 def editor_required(f):
     """Decorator to require page management permission."""
     return require_permission('can_manage_pages')(f)

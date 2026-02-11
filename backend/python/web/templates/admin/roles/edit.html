@@ -60,6 +60,14 @@
                 </label>
 
                 <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_access_inventory_tools" {% if role and role.can_access_inventory_tools %}checked{% endif %}>
+                    <div>
+                        <strong>Inventory Tools Access</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Access inventory management tools (Inventory Checker)</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
                     <input type="checkbox" name="can_manage_users" {% if role and role.can_manage_users %}checked{% endif %}>
                     <div>
                         <strong>User Management</strong>
