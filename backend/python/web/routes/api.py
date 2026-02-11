@@ -1858,6 +1858,8 @@ def api_inventory_upsert_overrides():
                     existing.pillar = item['pillar'] or None
                 if 'climate_code' in item:
                     existing.climate_code = item['climate_code'] or None
+                if 'reviewed' in item:
+                    existing.reviewed = bool(item['reviewed'])
                 existing.updated_by = username
                 existing.updated_at = datetime.now()
             else:
@@ -1870,6 +1872,7 @@ def api_inventory_upsert_overrides():
                     shape=item.get('shape') or None,
                     pillar=item.get('pillar') or None,
                     climate_code=item.get('climate_code') or None,
+                    reviewed=bool(item.get('reviewed', False)),
                     updated_by=username,
                 )
                 session.add(override)

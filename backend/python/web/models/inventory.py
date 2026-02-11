@@ -1,7 +1,7 @@
 """Inventory checker models for naming convention standardization."""
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, UniqueConstraint
 
 from web.models.base import Base
 
@@ -52,6 +52,7 @@ class InventoryUnitOverride(Base):
     shape = Column(String(5))
     pillar = Column(String(5))
     climate_code = Column(String(5))
+    reviewed = Column(Boolean, default=False)
     updated_by = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -71,6 +72,7 @@ class InventoryUnitOverride(Base):
             'shape': self.shape,
             'pillar': self.pillar,
             'climate_code': self.climate_code,
+            'reviewed': self.reviewed or False,
             'updated_by': self.updated_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,

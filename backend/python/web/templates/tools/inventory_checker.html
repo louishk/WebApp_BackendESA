@@ -8,6 +8,26 @@
     <p style="color: #666; margin-top: 0.5rem;">Standardize unit naming conventions per SOP</p>
 </div>
 
+<!-- Mini Guide -->
+<div class="card" style="background: #f0f4ff; border-left: 4px solid var(--esa-navy, #1a3a5c);">
+    <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="document.getElementById('guide-body').style.display = document.getElementById('guide-body').style.display === 'none' ? 'block' : 'none'">
+        <h2 style="margin: 0; font-size: 1rem;">How to Use</h2>
+        <span style="font-size: 0.85rem; color: #666;">click to toggle</span>
+    </div>
+    <div id="guide-body" style="display: none; margin-top: 0.75rem; font-size: 0.85rem; color: #333; line-height: 1.6;">
+        <ol style="margin: 0; padding-left: 1.25rem;">
+            <li><strong>Select sites</strong> from the dropdown and click <strong>Load Units</strong>.</li>
+            <li><strong>Set Type Mappings</strong> first (shared across all sites) &mdash; expand the Type Mappings panel, assign a Type Code and Climate Code to each source type, then click <strong>Save Mappings</strong>.</li>
+            <li><strong>Review units row by row.</strong> The filter defaults to <em>Unreviewed</em> so you only see units that still need attention.</li>
+            <li>For each unit, verify or adjust the <strong>Type, Climate, Size, Range, Shape, Pillar</strong> dropdowns. Changes with a yellow background are per-unit overrides.</li>
+            <li><strong>Tick the checkbox</strong> in the first column to mark a unit as reviewed &mdash; this saves automatically.</li>
+            <li>When you're done adjusting overrides, click <strong>Save Overrides</strong> to persist all dropdown changes.</li>
+            <li>Use the <strong>filter dropdown</strong> to switch between All / Unreviewed / Reviewed to track your progress.</li>
+            <li><strong>Export to Excel</strong> at any time for an offline copy (includes a Reviewed column).</li>
+        </ol>
+    </div>
+</div>
+
 <!-- Filters -->
 <div class="card">
     <h2>Filters</h2>
@@ -72,6 +92,10 @@
                 <div class="value" id="stat-vacant">0</div>
                 <div class="label">Vacant</div>
             </div>
+            <div class="stat-card" style="background: #6f42c1;">
+                <div class="value" id="stat-reviewed">0</div>
+                <div class="label">Reviewed</div>
+            </div>
         </div>
     </div>
 </div>
@@ -86,34 +110,40 @@
                 <button type="button" class="btn btn-secondary btn-sm" onclick="exportToExcel()">Export to Excel</button>
             </div>
         </div>
-        <div style="margin-bottom: 0.75rem;">
+        <div style="margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
             <input type="text" id="unit-search" class="form-select" style="max-width: 300px; padding: 0.5rem 0.75rem;"
                    placeholder="Search units..." oninput="filterUnits()">
+            <select id="review-filter" onchange="filterUnits()" style="padding: 0.5rem 0.75rem; font-size: 0.9rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; background: #fff;">
+                <option value="all">All Units</option>
+                <option value="unreviewed" selected>Unreviewed</option>
+                <option value="reviewed">Reviewed</option>
+            </select>
         </div>
         <div id="units-table-container" style="max-height: 600px; overflow: auto;">
             <table id="units-table">
                 <thead>
                     <tr>
+                        <th style="width: 30px;">&#10003;</th>
                         <th>Site</th>
                         <th>Unit</th>
-                        <th>Current Type</th>
-                        <th>W (ft)</th>
-                        <th>L (ft)</th>
-                        <th>Area (sqft)</th>
-                        <th>Floor</th>
-                        <th>Std Rate</th>
-                        <th>Rented</th>
-                        <th style="min-width: 120px;">Unit Type</th>
-                        <th style="min-width: 90px;">Climate</th>
-                        <th style="min-width: 80px;">Size Cat</th>
-                        <th style="min-width: 100px;">Size Range</th>
-                        <th style="min-width: 80px;">Shape</th>
-                        <th style="min-width: 70px;">Pillar</th>
-                        <th style="min-width: 180px;">Final Label</th>
+                        <th>Src Type</th>
+                        <th>W</th>
+                        <th>L</th>
+                        <th>Area</th>
+                        <th>Fl</th>
+                        <th>Rate</th>
+                        <th>Occ</th>
+                        <th style="min-width: 75px;">Type</th>
+                        <th style="min-width: 65px;">Climate</th>
+                        <th style="min-width: 55px;">Size</th>
+                        <th style="min-width: 70px;">Range</th>
+                        <th style="min-width: 55px;">Shape</th>
+                        <th style="min-width: 50px;">Pillar</th>
+                        <th style="min-width: 140px;">Final Label</th>
                     </tr>
                 </thead>
                 <tbody id="units-tbody">
-                    <tr><td colspan="16" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
+                    <tr><td colspan="17" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
                 </tbody>
             </table>
         </div>
@@ -145,16 +175,16 @@
 .toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
 
 #units-table-container { position: relative; }
-#units-table { min-width: 1400px; border-collapse: collapse; font-size: 0.85rem; }
+#units-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 #units-table thead { position: sticky; top: 0; background: var(--esa-gray); z-index: 10; }
-#units-table th { padding: 0.5rem 0.4rem; text-align: left; font-size: 0.8rem; white-space: nowrap; }
-#units-table td { padding: 0.35rem 0.4rem; vertical-align: middle; }
+#units-table th { padding: 0.35rem 0.3rem; text-align: left; font-size: 0.75rem; white-space: nowrap; }
+#units-table td { padding: 0.25rem 0.3rem; vertical-align: middle; }
 #units-table tbody tr:hover { background: rgba(0,0,0,0.03); }
 
 #units-table select {
     width: 100%;
-    padding: 0.2rem;
-    font-size: 0.8rem;
+    padding: 0.15rem;
+    font-size: 0.75rem;
     border: 1px solid #ccc;
     border-radius: 3px;
     background: #fff;
@@ -404,10 +434,12 @@
             // Update stats
             const rentable = allUnits.filter(u => u.bRentable).length;
             const rented = allUnits.filter(u => u.bRented).length;
+            const reviewed = processedUnits.filter(u => u._reviewed).length;
             document.getElementById('stat-total').textContent = allUnits.length;
             document.getElementById('stat-rentable').textContent = rentable;
             document.getElementById('stat-rented').textContent = rented;
             document.getElementById('stat-vacant').textContent = rentable - rented;
+            document.getElementById('stat-reviewed').textContent = reviewed;
 
             // Show sections
             document.getElementById('stats-section').style.display = 'block';
@@ -460,6 +492,7 @@
                 _sizeRange: sizeRange,
                 _shape: shape,
                 _pillar: pillar,
+                _reviewed: override.reviewed || false,
                 _finalLabel: buildFinalLabel(sizeCat, sizeRange, unitType, climate, shape, pillar),
                 // Track sources for color coding
                 _src: {
@@ -495,21 +528,26 @@
         const tbody = document.getElementById('units-tbody');
         const searchTerm = (document.getElementById('unit-search').value || '').toLowerCase();
 
-        const filtered = searchTerm
+        let filtered = searchTerm
             ? processedUnits.filter(u =>
                 (u.sUnitName || '').toLowerCase().includes(searchTerm) ||
                 (u.sLocationCode || '').toLowerCase().includes(searchTerm) ||
                 (u.sTypeName || '').toLowerCase().includes(searchTerm))
-            : processedUnits;
+            : [...processedUnits];
+
+        const reviewFilter = document.getElementById('review-filter').value;
+        if (reviewFilter === 'reviewed') filtered = filtered.filter(u => u._reviewed);
+        else if (reviewFilter === 'unreviewed') filtered = filtered.filter(u => !u._reviewed);
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="16" style="text-align: center; color: #666;">No units found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="17" style="text-align: center; color: #666;">No units found</td></tr>';
             return;
         }
 
         tbody.innerHTML = filtered.map((u, i) => {
             const idx = processedUnits.indexOf(u);
             return `<tr data-idx="${idx}">
+                <td><input type="checkbox" ${u._reviewed ? 'checked' : ''} data-idx="${idx}" onchange="onReviewToggle(this)"></td>
                 <td>${u.sLocationCode || '-'}</td>
                 <td><strong>${u.sUnitName || '-'}</strong></td>
                 <td>${u.sTypeName || '-'}</td>
@@ -614,6 +652,35 @@
         td.className = value ? 'cell-override' : cellClass(unit._src[field]);
     }
 
+    async function onReviewToggle(cb) {
+        const idx = parseInt(cb.dataset.idx);
+        const unit = processedUnits[idx];
+        if (!unit) return;
+        const key = overrideKey(unit.SiteID, unit.UnitID);
+        if (!overridesMap[key]) {
+            overridesMap[key] = { site_id: unit.SiteID, unit_id: unit.UnitID };
+        }
+        overridesMap[key].reviewed = cb.checked;
+        unit._reviewed = cb.checked;
+
+        // Update reviewed stat
+        document.getElementById('stat-reviewed').textContent = processedUnits.filter(u => u._reviewed).length;
+
+        // Auto-save just this override
+        try {
+            await fetch('/api/inventory/overrides', {
+                method: 'PUT',
+                headers: apiHeaders(),
+                body: JSON.stringify({
+                    overrides: [{ site_id: unit.SiteID, unit_id: unit.UnitID, reviewed: cb.checked }],
+                    username: '{{ current_user.username }}',
+                }),
+            });
+        } catch (e) {
+            console.error('Failed to save reviewed state:', e);
+        }
+    }
+
     function onMappingChange(selectEl) {
         const sourceType = selectEl.dataset.sourceType;
         const mappingField = selectEl.dataset.mappingField;
@@ -686,9 +753,9 @@
     }
 
     async function saveOverrides() {
-        // Collect only overrides that have at least one non-null field
+        // Collect only overrides that have at least one non-null field or reviewed flag
         const overridesArray = Object.values(overridesMap)
-            .filter(o => o.unit_type_code || o.climate_code || o.size_category || o.size_range || o.shape || o.pillar)
+            .filter(o => o.unit_type_code || o.climate_code || o.size_category || o.size_range || o.shape || o.pillar || o.reviewed)
             .map(o => ({
                 site_id: o.site_id,
                 unit_id: o.unit_id,
@@ -698,6 +765,7 @@
                 size_range: o.size_range || null,
                 shape: o.shape || null,
                 pillar: o.pillar || null,
+                reviewed: o.reviewed || false,
             }));
 
         if (overridesArray.length === 0) {
@@ -759,6 +827,7 @@
             'Shape': u._shape || '',
             'Pillar': u._pillar || '',
             'Final Label': u._finalLabel || '',
+            'Reviewed': u._reviewed ? 'Yes' : 'No',
         }));
 
         const ws = XLSX.utils.json_to_sheet(rows);
