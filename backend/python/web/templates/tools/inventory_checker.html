@@ -39,6 +39,7 @@
                     <tr>
                         <th>Source Type Name</th>
                         <th style="width: 200px;">Mapped Type Code</th>
+                        <th style="width: 150px;">Climate Code</th>
                     </tr>
                 </thead>
                 <tbody id="mapping-tbody"></tbody>
@@ -103,6 +104,7 @@
                         <th>Std Rate</th>
                         <th>Rented</th>
                         <th style="min-width: 120px;">Unit Type</th>
+                        <th style="min-width: 90px;">Climate</th>
                         <th style="min-width: 80px;">Size Cat</th>
                         <th style="min-width: 100px;">Size Range</th>
                         <th style="min-width: 80px;">Shape</th>
@@ -111,7 +113,7 @@
                     </tr>
                 </thead>
                 <tbody id="units-tbody">
-                    <tr><td colspan="15" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
+                    <tr><td colspan="16" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
                 </tbody>
             </table>
         </div>
@@ -143,7 +145,7 @@
 .toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
 
 #units-table-container { position: relative; }
-#units-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+#units-table { min-width: 1400px; border-collapse: collapse; font-size: 0.85rem; }
 #units-table thead { position: sticky; top: 0; background: var(--esa-gray); z-index: 10; }
 #units-table th { padding: 0.5rem 0.4rem; text-align: left; font-size: 0.8rem; white-space: nowrap; }
 #units-table td { padding: 0.35rem 0.4rem; vertical-align: middle; }
@@ -201,20 +203,35 @@
 
     // --- State ---
     let allUnits = [];       // Raw unit data from PBI
-    let typeMappings = {};   // source_type_name -> mapped_type_code
+    let typeMappings = {};   // source_type_name -> { type, climate }
     let overridesMap = {};   // "siteId_unitId" -> override object
     let processedUnits = []; // Units with calculated fields
 
     // --- SOP Constants ---
     const TYPE_CODES = [
-        'W','WA','WD','LU','LM','LL','LAU','LAM','LAL',
-        'LDU','LDM','LDL',
-        'EW','ELU','ELM','ELL','WN','WLU','WLM','WLL',
-        'DU','WR','MB','BZ','SC','SB','SW','SLAU','SLAM','SLAL','PR'
+        'W','E','S',
+        'U','M','L','SU','SM','SL','EU','EM','EL',
+        'WN','WNU','WNM','WNL',
+        'DV','RB','MB','BZ','SC','SB','PR'
     ];
+    const TYPE_DESCS = {
+        'W': 'Walk-In', 'E': 'Executive Walk-In', 'S': 'Smart Walk-In',
+        'U': 'Locker Upper', 'M': 'Locker Middle', 'L': 'Locker Lower',
+        'SU': 'Smart Locker Upper', 'SM': 'Smart Locker Middle', 'SL': 'Smart Locker Lower',
+        'EU': 'Executive Locker Upper', 'EM': 'Executive Locker Middle', 'EL': 'Executive Locker Lower',
+        'WN': 'Wine Walk-In', 'WNU': 'Wine Locker Upper', 'WNM': 'Wine Locker Middle', 'WNL': 'Wine Locker Lower',
+        'DV': 'Drive-Up', 'RB': 'Wardrobe', 'MB': 'Mail Box',
+        'BZ': 'BizPlus', 'SC': 'Showcase', 'SB': 'SubTenant', 'PR': 'Parking',
+    };
+
+    const CLIMATE_CODES = ['NC','A','D','AD','RF'];
+    const CLIMATE_DESCS = {
+        'NC': 'No Climate Control', 'A': 'Aircon', 'D': 'Dehumidifier Only',
+        'AD': 'Aircon + Dehumidifier', 'RF': 'Refrigerated',
+    };
 
     const SIZE_CATEGORIES = ['S','M','L','XL'];
-    const SHAPES = ['SS','WR','NR','LS','TS','OS'];
+    const SHAPES = ['SS','WR','NR','OS'];
     const PILLARS = ['P','NP'];
 
     const SIZE_RANGE_BUCKETS = [
@@ -305,10 +322,9 @@
         return unitNote.toLowerCase().includes('pillar') ? 'P' : 'NP';
     }
 
-    function buildFinalLabel(typeCode, sizeCat, sizeRange, shape, pillar) {
-        const parts = [sizeCat, typeCode, sizeRange, shape, pillar].filter(Boolean);
-        const label = parts.join('/');
-        return label.substring(0, 30);
+    function buildFinalLabel(sizeCat, sizeRange, typeCode, climateCode, shape, pillar) {
+        const parts = [sizeCat, sizeRange, typeCode, climateCode, shape, pillar].filter(Boolean);
+        return parts.join('/').substring(0, 30);
     }
 
     // --- Data Loading ---
@@ -367,7 +383,10 @@
             // Build lookup maps
             typeMappings = {};
             (mappingsData.mappings || []).forEach(m => {
-                typeMappings[m.source_type_name] = m.mapped_type_code;
+                typeMappings[m.source_type_name] = {
+                    type: m.mapped_type_code || '',
+                    climate: m.mapped_climate_code || '',
+                };
             });
 
             overridesMap = {};
@@ -412,10 +431,12 @@
             const key = overrideKey(unit.SiteID, unit.UnitID);
             const override = overridesMap[key] || {};
             const area = calcArea(unit.dcWidth, unit.dcLength);
-            const mappedType = typeMappings[unit.sTypeName] || '';
+            const mappedType = (typeMappings[unit.sTypeName] || {}).type || '';
+            const mappedClimate = (typeMappings[unit.sTypeName] || {}).climate || '';
 
             // Determine values: override > mapping > auto-calc
             const unitType = override.unit_type_code || mappedType || '';
+            const climate = override.climate_code || mappedClimate || '';
             const sizeCat = override.size_category || calcSizeCategory(area);
             const sizeRange = override.size_range || calcSizeRange(area);
             const shape = override.shape || calcShape(unit.dcWidth, unit.dcLength);
@@ -425,14 +446,16 @@
                 ...unit,
                 _area: area,
                 _unitType: unitType,
+                _climate: climate,
                 _sizeCat: sizeCat,
                 _sizeRange: sizeRange,
                 _shape: shape,
                 _pillar: pillar,
-                _finalLabel: buildFinalLabel(unitType, sizeCat, sizeRange, shape, pillar),
+                _finalLabel: buildFinalLabel(sizeCat, sizeRange, unitType, climate, shape, pillar),
                 // Track sources for color coding
                 _src: {
                     unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
+                    climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : 'auto'),
                     sizeCat: override.size_category ? 'override' : 'auto',
                     sizeRange: override.size_range ? 'override' : 'auto',
                     shape: override.shape ? 'override' : 'auto',
@@ -471,7 +494,7 @@
             : processedUnits;
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="15" style="text-align: center; color: #666;">No units found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="16" style="text-align: center; color: #666;">No units found</td></tr>';
             return;
         }
 
@@ -488,6 +511,7 @@
                 <td>${u.dcStdRate != null ? '$' + parseFloat(u.dcStdRate).toFixed(2) : '-'}</td>
                 <td>${u.bRented ? 'Yes' : 'No'}</td>
                 <td class="${cellClass(u._src.unitType)}">${makeSelect(TYPE_CODES, u._unitType, `data-field="unitType" data-idx="${idx}"`)}</td>
+                <td class="${cellClass(u._src.climate)}">${makeSelect(CLIMATE_CODES, u._climate, `data-field="climate" data-idx="${idx}"`)}</td>
                 <td class="${cellClass(u._src.sizeCat)}">${makeSelect(SIZE_CATEGORIES, u._sizeCat, `data-field="sizeCat" data-idx="${idx}"`)}</td>
                 <td class="${cellClass(u._src.sizeRange)}">${makeSelect(SIZE_RANGE_BUCKETS.map(b => b.label), u._sizeRange, `data-field="sizeRange" data-idx="${idx}"`)}</td>
                 <td class="${cellClass(u._src.shape)}">${makeSelect(SHAPES, u._shape, `data-field="shape" data-idx="${idx}"`)}</td>
@@ -500,19 +524,24 @@
     function renderMappingTable(distinctTypes) {
         const tbody = document.getElementById('mapping-tbody');
         if (distinctTypes.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; color: #666;">No unit types found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #666;">No unit types found</td></tr>';
             return;
         }
 
         tbody.innerHTML = distinctTypes.map(typeName => {
-            const current = typeMappings[typeName] || '';
-            let opts = `<option value="">-- Select --</option>`;
+            const mapping = typeMappings[typeName] || { type: '', climate: '' };
+            let typeOpts = `<option value="">-- Select --</option>`;
             TYPE_CODES.forEach(code => {
-                opts += `<option value="${code}" ${code === current ? 'selected' : ''}>${code}</option>`;
+                typeOpts += `<option value="${code}" ${code === mapping.type ? 'selected' : ''}>${code} - ${TYPE_DESCS[code] || code}</option>`;
+            });
+            let climateOpts = `<option value="">-- Select --</option>`;
+            CLIMATE_CODES.forEach(code => {
+                climateOpts += `<option value="${code}" ${code === mapping.climate ? 'selected' : ''}>${code} - ${CLIMATE_DESCS[code] || code}</option>`;
             });
             return `<tr>
                 <td>${typeName}</td>
-                <td><select data-source-type="${typeName}" onchange="onMappingChange(this)">${opts}</select></td>
+                <td><select data-source-type="${typeName}" data-mapping-field="type" onchange="onMappingChange(this)">${typeOpts}</select></td>
+                <td><select data-source-type="${typeName}" data-mapping-field="climate" onchange="onMappingChange(this)">${climateOpts}</select></td>
             </tr>`;
         }).join('');
     }
@@ -533,6 +562,7 @@
         // Map field names to override keys
         const fieldMap = {
             unitType: 'unit_type_code',
+            climate: 'climate_code',
             sizeCat: 'size_category',
             sizeRange: 'size_range',
             shape: 'shape',
@@ -544,18 +574,21 @@
         // Recalculate this unit
         const override = overridesMap[key];
         const area = unit._area;
-        const mappedType = typeMappings[unit.sTypeName] || '';
+        const mappedType = (typeMappings[unit.sTypeName] || {}).type || '';
+        const mappedClimate = (typeMappings[unit.sTypeName] || {}).climate || '';
 
         unit._unitType = override.unit_type_code || mappedType || '';
+        unit._climate = override.climate_code || mappedClimate || '';
         unit._sizeCat = override.size_category || calcSizeCategory(area);
         unit._sizeRange = override.size_range || calcSizeRange(area);
         unit._shape = override.shape || calcShape(unit.dcWidth, unit.dcLength);
         unit._pillar = override.pillar || calcPillar(unit.sUnitNote);
-        unit._finalLabel = buildFinalLabel(unit._unitType, unit._sizeCat, unit._sizeRange, unit._shape, unit._pillar);
+        unit._finalLabel = buildFinalLabel(unit._sizeCat, unit._sizeRange, unit._unitType, unit._climate, unit._shape, unit._pillar);
 
         // Update source tracking
         unit._src = {
             unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
+            climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : 'auto'),
             sizeCat: override.size_category ? 'override' : 'auto',
             sizeRange: override.size_range ? 'override' : 'auto',
             shape: override.shape ? 'override' : 'auto',
@@ -574,11 +607,16 @@
 
     function onMappingChange(selectEl) {
         const sourceType = selectEl.dataset.sourceType;
-        const code = selectEl.value;
+        const mappingField = selectEl.dataset.mappingField;
+        const value = selectEl.value;
 
-        if (code) {
-            typeMappings[sourceType] = code;
-        } else {
+        if (!typeMappings[sourceType]) {
+            typeMappings[sourceType] = { type: '', climate: '' };
+        }
+        typeMappings[sourceType][mappingField] = value;
+
+        // Delete entry if both fields are empty
+        if (!typeMappings[sourceType].type && !typeMappings[sourceType].climate) {
             delete typeMappings[sourceType];
         }
 
@@ -606,10 +644,11 @@
     // --- Save Actions ---
     async function saveMappings() {
         const mappingsArray = Object.entries(typeMappings)
-            .filter(([, code]) => code)
-            .map(([source, code]) => ({
+            .filter(([, m]) => m.type || m.climate)
+            .map(([source, m]) => ({
                 source_type_name: source,
-                mapped_type_code: code,
+                mapped_type_code: m.type || '',
+                mapped_climate_code: m.climate || '',
             }));
 
         if (mappingsArray.length === 0) {
@@ -640,11 +679,12 @@
     async function saveOverrides() {
         // Collect only overrides that have at least one non-null field
         const overridesArray = Object.values(overridesMap)
-            .filter(o => o.unit_type_code || o.size_category || o.size_range || o.shape || o.pillar)
+            .filter(o => o.unit_type_code || o.climate_code || o.size_category || o.size_range || o.shape || o.pillar)
             .map(o => ({
                 site_id: o.site_id,
                 unit_id: o.unit_id,
                 unit_type_code: o.unit_type_code || null,
+                climate_code: o.climate_code || null,
                 size_category: o.size_category || null,
                 size_range: o.size_range || null,
                 shape: o.shape || null,
@@ -690,7 +730,7 @@
             'Width (ft)': u.dcWidth != null ? parseFloat(u.dcWidth) : '',
             'Length (ft)': u.dcLength != null ? parseFloat(u.dcLength) : '',
             'Area (sqft)': u._area ? parseFloat(u._area.toFixed(1)) : '',
-            'Climate': u.bClimate ? 'Yes' : 'No',
+            'Climate (Source)': u.bClimate ? 'Yes' : 'No',
             'Inside': u.bInside ? 'Yes' : 'No',
             'Power': u.bPower ? 'Yes' : 'No',
             'Alarm': u.bAlarm ? 'Yes' : 'No',
@@ -704,6 +744,7 @@
             'Unit Note': u.sUnitNote || '',
             'Unit Desc': u.sUnitDesc || '',
             'Unit Type Code': u._unitType || '',
+            'Climate Code': u._climate || '',
             'Size Category': u._sizeCat || '',
             'Size Range': u._sizeRange || '',
             'Shape': u._shape || '',

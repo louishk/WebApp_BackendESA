@@ -1617,3 +1617,271 @@ def api_list_sites():
         })
     finally:
         session.close()
+
+
+# =============================================================================
+# Inventory Checker
+# =============================================================================
+
+@api_bp.route('/inventory/units')
+@require_auth
+def api_inventory_units():
+    """Get raw unit data from units_info for selected sites."""
+    site_ids_param = request.args.get('site_ids', '')
+    if not site_ids_param:
+        return jsonify({'error': 'site_ids parameter is required'}), 400
+
+    try:
+        site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
+    except ValueError:
+        return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
+
+    if not site_ids:
+        return jsonify({'error': 'At least one site_id is required'}), 400
+
+    session = get_pbi_session()
+    try:
+        placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids))])
+        params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
+
+        query = text(f"""
+            SELECT "SiteID", "UnitID", "sLocationCode", "sUnitName", "sTypeName",
+                   "dcWidth", "dcLength", "bClimate", "bInside", "bPower", "bAlarm",
+                   "sUnitNote", "sUnitDesc", "bRented", "bRentable",
+                   "dcStdRate", "dcWebRate", "dcPushRate", "dcBoardRate",
+                   "iFloor", "UnitTypeID"
+            FROM units_info
+            WHERE "SiteID" IN ({placeholders})
+            ORDER BY "SiteID", "sUnitName"
+        """)
+
+        result = session.execute(query, params)
+        rows = result.fetchall()
+        columns = result.keys()
+
+        units = []
+        for row in rows:
+            unit = {}
+            for col, val in zip(columns, row):
+                if hasattr(val, 'isoformat'):
+                    unit[col] = val.isoformat()
+                elif isinstance(val, (int, float, bool, str)) or val is None:
+                    unit[col] = val
+                else:
+                    unit[col] = float(val) if val is not None else None
+            units.append(unit)
+
+        return jsonify({'units': units, 'count': len(units)})
+
+    finally:
+        session.close()
+
+
+@api_bp.route('/inventory/distinct-types')
+@require_auth
+@cached(ttl_seconds=300)
+def api_inventory_distinct_types():
+    """Get all distinct sTypeName values from units_info.
+
+    Optional: ?site_ids=1,2,3 to filter by sites. Without it, returns all types.
+    """
+    session = get_pbi_session()
+    try:
+        site_ids_param = request.args.get('site_ids', '')
+        if site_ids_param:
+            try:
+                site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
+            except ValueError:
+                return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
+
+            placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids))])
+            params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
+
+            query = text(f"""
+                SELECT DISTINCT "sTypeName"
+                FROM units_info
+                WHERE "SiteID" IN ({placeholders})
+                  AND "sTypeName" IS NOT NULL
+                ORDER BY "sTypeName"
+            """)
+            result = session.execute(query, params)
+        else:
+            query = text("""
+                SELECT DISTINCT "sTypeName"
+                FROM units_info
+                WHERE "sTypeName" IS NOT NULL
+                ORDER BY "sTypeName"
+            """)
+            result = session.execute(query)
+
+        types = [row[0] for row in result.fetchall()]
+        return jsonify({'types': types})
+
+    finally:
+        session.close()
+
+
+@api_bp.route('/inventory/type-mappings')
+@require_auth
+def api_inventory_get_type_mappings():
+    """Get all saved type mappings from backend DB."""
+    from web.models.inventory import InventoryTypeMapping
+
+    session = get_session()
+    try:
+        mappings = session.query(InventoryTypeMapping).order_by(
+            InventoryTypeMapping.source_type_name
+        ).all()
+        return jsonify({
+            'mappings': [m.to_dict() for m in mappings]
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/inventory/type-mappings', methods=['PUT'])
+@require_auth
+def api_inventory_upsert_type_mappings():
+    """Bulk upsert type mappings."""
+    from web.models.inventory import InventoryTypeMapping
+
+    data = request.get_json()
+    if not data or 'mappings' not in data:
+        return jsonify({'error': 'mappings array is required'}), 400
+
+    mappings_data = data['mappings']
+    username = data.get('username', 'unknown')
+
+    session = get_session()
+    try:
+        upserted = 0
+        for item in mappings_data:
+            source = item.get('source_type_name', '').strip()
+            code = item.get('mapped_type_code', '').strip() or None
+            climate = item.get('mapped_climate_code', '').strip() or None
+            if not source or (not code and not climate):
+                continue
+
+            existing = session.query(InventoryTypeMapping).filter_by(
+                source_type_name=source
+            ).first()
+
+            if existing:
+                existing.mapped_type_code = code
+                existing.mapped_climate_code = climate
+                existing.updated_at = datetime.now()
+            else:
+                mapping = InventoryTypeMapping(
+                    source_type_name=source,
+                    mapped_type_code=code,
+                    mapped_climate_code=climate,
+                    created_by=username,
+                )
+                session.add(mapping)
+
+            upserted += 1
+
+        session.commit()
+        return jsonify({'success': True, 'upserted': upserted})
+
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Error upserting type mappings: {e}")
+        return jsonify({'error': 'Failed to save mappings'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/inventory/overrides')
+@require_auth
+def api_inventory_get_overrides():
+    """Get saved per-unit overrides for selected sites."""
+    from web.models.inventory import InventoryUnitOverride
+
+    site_ids_param = request.args.get('site_ids', '')
+    if not site_ids_param:
+        return jsonify({'error': 'site_ids parameter is required'}), 400
+
+    try:
+        site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
+    except ValueError:
+        return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
+
+    session = get_session()
+    try:
+        overrides = session.query(InventoryUnitOverride).filter(
+            InventoryUnitOverride.site_id.in_(site_ids)
+        ).all()
+        return jsonify({
+            'overrides': [o.to_dict() for o in overrides]
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/inventory/overrides', methods=['PUT'])
+@require_auth
+def api_inventory_upsert_overrides():
+    """Bulk upsert per-unit overrides."""
+    from web.models.inventory import InventoryUnitOverride
+
+    data = request.get_json()
+    if not data or 'overrides' not in data:
+        return jsonify({'error': 'overrides array is required'}), 400
+
+    overrides_data = data['overrides']
+    username = data.get('username', 'unknown')
+
+    session = get_session()
+    try:
+        upserted = 0
+        for item in overrides_data:
+            site_id = item.get('site_id')
+            unit_id = item.get('unit_id')
+            if site_id is None or unit_id is None:
+                continue
+
+            existing = session.query(InventoryUnitOverride).filter_by(
+                site_id=site_id, unit_id=unit_id
+            ).first()
+
+            if existing:
+                if 'unit_type_code' in item:
+                    existing.unit_type_code = item['unit_type_code'] or None
+                if 'size_category' in item:
+                    existing.size_category = item['size_category'] or None
+                if 'size_range' in item:
+                    existing.size_range = item['size_range'] or None
+                if 'shape' in item:
+                    existing.shape = item['shape'] or None
+                if 'pillar' in item:
+                    existing.pillar = item['pillar'] or None
+                if 'climate_code' in item:
+                    existing.climate_code = item['climate_code'] or None
+                existing.updated_by = username
+                existing.updated_at = datetime.now()
+            else:
+                override = InventoryUnitOverride(
+                    site_id=site_id,
+                    unit_id=unit_id,
+                    unit_type_code=item.get('unit_type_code') or None,
+                    size_category=item.get('size_category') or None,
+                    size_range=item.get('size_range') or None,
+                    shape=item.get('shape') or None,
+                    pillar=item.get('pillar') or None,
+                    climate_code=item.get('climate_code') or None,
+                    updated_by=username,
+                )
+                session.add(override)
+
+            upserted += 1
+
+        session.commit()
+        return jsonify({'success': True, 'upserted': upserted})
+
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Error upserting overrides: {e}")
+        return jsonify({'error': 'Failed to save overrides'}), 500
+    finally:
+        session.close()
