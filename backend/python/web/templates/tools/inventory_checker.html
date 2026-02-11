@@ -1,0 +1,731 @@
+{% extends "base.html" %}
+
+{% block title %}Inventory Checker - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Inventory Checker</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Standardize unit naming conventions per SOP</p>
+</div>
+
+<!-- Filters -->
+<div class="card">
+    <h2>Filters</h2>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+        <div class="form-group" style="flex: 1; min-width: 250px;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Sites</label>
+            <select id="site-select" class="form-select" multiple style="height: auto; min-height: 42px;"></select>
+            <p style="color: #666; font-size: 0.8rem; margin-top: 0.25rem;">Hold Ctrl/Cmd to select multiple</p>
+        </div>
+        <div class="form-group">
+            <button type="button" class="btn" id="load-btn" onclick="loadUnits()">Load Units</button>
+        </div>
+    </div>
+</div>
+
+<!-- Type Mapping Panel (collapsible) -->
+<div id="mapping-section" class="card" style="display: none;">
+    <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleMappingPanel()">
+        <h2 style="margin: 0;">Type Mappings</h2>
+        <span id="mapping-toggle-icon" style="font-size: 1.2rem; color: #666;">&#9660;</span>
+    </div>
+    <div id="mapping-panel" style="margin-top: 1rem;">
+        <p style="color: #666; font-size: 0.85rem; margin-bottom: 1rem;">
+            Map each unit type name to a standardized SOP code. These mappings are shared across all sites.
+        </p>
+        <div id="mapping-table-container" style="max-height: 400px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Source Type Name</th>
+                        <th style="width: 200px;">Mapped Type Code</th>
+                    </tr>
+                </thead>
+                <tbody id="mapping-tbody"></tbody>
+            </table>
+        </div>
+        <div style="margin-top: 1rem;">
+            <button type="button" class="btn" onclick="saveMappings()">Save Mappings</button>
+        </div>
+    </div>
+</div>
+
+<!-- Summary Stats -->
+<div id="stats-section" style="display: none;">
+    <div class="card">
+        <h2>Summary</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="stat-total">0</div>
+                <div class="label">Total Units</div>
+            </div>
+            <div class="stat-card" style="background: #17a2b8;">
+                <div class="value" id="stat-rentable">0</div>
+                <div class="label">Rentable</div>
+            </div>
+            <div class="stat-card" style="background: #28A745;">
+                <div class="value" id="stat-rented">0</div>
+                <div class="label">Rented</div>
+            </div>
+            <div class="stat-card" style="background: #C41230;">
+                <div class="value" id="stat-vacant">0</div>
+                <div class="label">Vacant</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Units Table -->
+<div id="units-section" style="display: none;">
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
+            <h2 style="margin: 0;">Units</h2>
+            <div class="toolbar" style="margin-bottom: 0;">
+                <button type="button" class="btn btn-sm" onclick="saveOverrides()">Save Overrides</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="exportToExcel()">Export to Excel</button>
+            </div>
+        </div>
+        <div style="margin-bottom: 0.75rem;">
+            <input type="text" id="unit-search" class="form-select" style="max-width: 300px; padding: 0.5rem 0.75rem;"
+                   placeholder="Search units..." oninput="filterUnits()">
+        </div>
+        <div id="units-table-container" style="max-height: 600px; overflow: auto;">
+            <table id="units-table">
+                <thead>
+                    <tr>
+                        <th>Site</th>
+                        <th>Unit</th>
+                        <th>Current Type</th>
+                        <th>W (ft)</th>
+                        <th>L (ft)</th>
+                        <th>Area (sqft)</th>
+                        <th>Floor</th>
+                        <th>Std Rate</th>
+                        <th>Rented</th>
+                        <th style="min-width: 120px;">Unit Type</th>
+                        <th style="min-width: 80px;">Size Cat</th>
+                        <th style="min-width: 100px;">Size Range</th>
+                        <th style="min-width: 80px;">Shape</th>
+                        <th style="min-width: 70px;">Pillar</th>
+                        <th style="min-width: 180px;">Final Label</th>
+                    </tr>
+                </thead>
+                <tbody id="units-tbody">
+                    <tr><td colspan="15" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Legend -->
+<div id="legend-section" class="card" style="display: none;">
+    <h2>Legend</h2>
+    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; font-size: 0.85rem;">
+        <span><span class="legend-dot" style="background: #d4edda;"></span> Auto-calculated</span>
+        <span><span class="legend-dot" style="background: #fff3cd;"></span> User override</span>
+        <span><span class="legend-dot" style="background: #d1ecf1;"></span> From type mapping</span>
+    </div>
+</div>
+
+<style>
+.form-group { margin-bottom: 1rem; }
+.form-select {
+    width: 100%;
+    max-width: 400px;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border: 1px solid var(--esa-gray-dark);
+    border-radius: 4px;
+    background: #fff;
+}
+.form-select:focus { outline: none; border-color: var(--esa-navy); }
+.toolbar { margin-bottom: 1rem; display: flex; gap: 0.5rem; }
+
+#units-table-container { position: relative; }
+#units-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+#units-table thead { position: sticky; top: 0; background: var(--esa-gray); z-index: 10; }
+#units-table th { padding: 0.5rem 0.4rem; text-align: left; font-size: 0.8rem; white-space: nowrap; }
+#units-table td { padding: 0.35rem 0.4rem; vertical-align: middle; }
+#units-table tbody tr:hover { background: rgba(0,0,0,0.03); }
+
+#units-table select {
+    width: 100%;
+    padding: 0.2rem;
+    font-size: 0.8rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: #fff;
+}
+
+/* Color coding for cells */
+.cell-auto { background: #d4edda; }
+.cell-override { background: #fff3cd; }
+.cell-mapping { background: #d1ecf1; }
+
+.legend-dot {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    vertical-align: middle;
+    margin-right: 4px;
+    border: 1px solid #ccc;
+}
+
+#mapping-table-container table { width: 100%; }
+#mapping-table-container thead { position: sticky; top: 0; background: var(--esa-gray); z-index: 10; }
+#mapping-table-container select {
+    width: 100%;
+    padding: 0.3rem;
+    font-size: 0.85rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
+
+.label-cell {
+    font-family: monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script>
+    // Disable auto-refresh for this tool page
+    clearTimeout(window.autoRefreshTimeout);
+
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+
+    // --- State ---
+    let allUnits = [];       // Raw unit data from PBI
+    let typeMappings = {};   // source_type_name -> mapped_type_code
+    let overridesMap = {};   // "siteId_unitId" -> override object
+    let processedUnits = []; // Units with calculated fields
+
+    // --- SOP Constants ---
+    const TYPE_CODES = [
+        'W','WA','WD','LU','LM','LL','LAU','LAM','LAL',
+        'LDU','LDM','LDL',
+        'EW','ELU','ELM','ELL','WN','WLU','WLM','WLL',
+        'DU','WR','MB','BZ','SC','SB','SW','SLAU','SLAM','SLAL','PR'
+    ];
+
+    const SIZE_CATEGORIES = ['S','M','L','XL'];
+    const SHAPES = ['SS','WR','NR','LS','TS','OS'];
+    const PILLARS = ['P','NP'];
+
+    const SIZE_RANGE_BUCKETS = [
+        { label: '0-6', min: 0, max: 6 },
+        { label: '6-8', min: 6, max: 8 },
+        { label: '8-10', min: 8, max: 10 },
+        { label: '10-12', min: 10, max: 12 },
+        { label: '12-14', min: 12, max: 14 },
+        { label: '14-16', min: 14, max: 16 },
+        { label: '16-18', min: 16, max: 18 },
+        { label: '18-20', min: 18, max: 20 },
+        { label: '20-22', min: 20, max: 22 },
+        { label: '22-24', min: 22, max: 24 },
+        { label: '24-26', min: 24, max: 26 },
+        { label: '26-28', min: 26, max: 28 },
+        { label: '28-30', min: 28, max: 30 },
+        { label: '30-35', min: 30, max: 35 },
+        { label: '35-40', min: 35, max: 40 },
+        { label: '40-45', min: 40, max: 45 },
+        { label: '45-50', min: 45, max: 50 },
+        { label: '50-60', min: 50, max: 60 },
+        { label: '60-70', min: 60, max: 70 },
+        { label: '70-80', min: 70, max: 80 },
+        { label: '80-90', min: 80, max: 90 },
+        { label: '90-110', min: 90, max: 110 },
+        { label: '110-130', min: 110, max: 130 },
+        { label: '130-150', min: 130, max: 150 },
+        { label: '150-175', min: 150, max: 175 },
+        { label: '175-200', min: 175, max: 200 },
+        { label: '200-225', min: 200, max: 225 },
+        { label: '225-250', min: 225, max: 250 },
+        { label: '250+', min: 250, max: Infinity },
+    ];
+
+    // --- Helpers ---
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function overrideKey(siteId, unitId) {
+        return `${siteId}_${unitId}`;
+    }
+
+    // --- Calculation Logic ---
+    function calcArea(w, l) {
+        if (!w || !l) return 0;
+        return parseFloat(w) * parseFloat(l);
+    }
+
+    function calcSizeCategory(areaSqft) {
+        if (areaSqft < 30) return 'S';
+        if (areaSqft < 60) return 'M';
+        if (areaSqft < 90) return 'L';
+        return 'XL';
+    }
+
+    function calcSizeRange(areaSqft) {
+        for (const bucket of SIZE_RANGE_BUCKETS) {
+            if (areaSqft >= bucket.min && areaSqft < bucket.max) {
+                return bucket.label;
+            }
+        }
+        return '250+';
+    }
+
+    function calcShape(w, l) {
+        if (!w || !l || w <= 0 || l <= 0) return 'SS';
+        const minDim = Math.min(w, l);
+        const maxDim = Math.max(w, l);
+        const ratio = minDim / maxDim;
+        if (ratio >= 0.8 && ratio <= 1.2) return 'SS';
+        // 4.92 ft ~ 1500mm
+        if (minDim >= 4.92 && maxDim >= 4.92) return 'WR';
+        return 'NR';
+    }
+
+    function calcPillar(unitNote) {
+        if (!unitNote) return 'NP';
+        return unitNote.toLowerCase().includes('pillar') ? 'P' : 'NP';
+    }
+
+    function buildFinalLabel(typeCode, sizeCat, sizeRange, shape, pillar) {
+        const parts = [sizeCat, typeCode, sizeRange, shape, pillar].filter(Boolean);
+        const label = parts.join('/');
+        return label.substring(0, 30);
+    }
+
+    // --- Data Loading ---
+    async function loadSites() {
+        try {
+            const response = await fetch('/api/sites', { headers: apiHeaders() });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const select = document.getElementById('site-select');
+            select.innerHTML = '';
+            data.sites.forEach(site => {
+                const option = document.createElement('option');
+                option.value = site.site_id;
+                option.dataset.code = site.site_code;
+                option.textContent = `${site.site_code} - ${site.name}`;
+                select.appendChild(option);
+            });
+        } catch (error) {
+            console.error('Failed to load sites:', error);
+            alert('Failed to load sites. Please check your authentication.');
+        }
+    }
+
+    async function loadUnits() {
+        const select = document.getElementById('site-select');
+        const options = Array.from(select.selectedOptions);
+        if (options.length === 0) {
+            alert('Please select at least one site.');
+            return;
+        }
+
+        const btn = document.getElementById('load-btn');
+        btn.disabled = true;
+        btn.textContent = 'Loading...';
+
+        const siteIds = options.map(o => o.value).join(',');
+
+        try {
+            // Fetch units, type mappings, overrides, and ALL distinct types in parallel
+            const [unitsRes, mappingsRes, overridesRes, typesRes] = await Promise.all([
+                fetch(`/api/inventory/units?site_ids=${siteIds}`, { headers: apiHeaders() }),
+                fetch('/api/inventory/type-mappings', { headers: apiHeaders() }),
+                fetch(`/api/inventory/overrides?site_ids=${siteIds}`, { headers: apiHeaders() }),
+                fetch('/api/inventory/distinct-types', { headers: apiHeaders() }),
+            ]);
+
+            if (!unitsRes.ok) throw new Error(`Units API: HTTP ${unitsRes.status}`);
+
+            const unitsData = await unitsRes.json();
+            const mappingsData = mappingsRes.ok ? await mappingsRes.json() : { mappings: [] };
+            const overridesData = overridesRes.ok ? await overridesRes.json() : { overrides: [] };
+            const typesData = typesRes.ok ? await typesRes.json() : { types: [] };
+
+            allUnits = unitsData.units || [];
+
+            // Build lookup maps
+            typeMappings = {};
+            (mappingsData.mappings || []).forEach(m => {
+                typeMappings[m.source_type_name] = m.mapped_type_code;
+            });
+
+            overridesMap = {};
+            (overridesData.overrides || []).forEach(o => {
+                overridesMap[overrideKey(o.site_id, o.unit_id)] = o;
+            });
+
+            // Process units
+            processUnits();
+
+            // Update stats
+            const rentable = allUnits.filter(u => u.bRentable).length;
+            const rented = allUnits.filter(u => u.bRented).length;
+            document.getElementById('stat-total').textContent = allUnits.length;
+            document.getElementById('stat-rentable').textContent = rentable;
+            document.getElementById('stat-rented').textContent = rented;
+            document.getElementById('stat-vacant').textContent = rentable - rented;
+
+            // Show sections
+            document.getElementById('stats-section').style.display = 'block';
+            document.getElementById('units-section').style.display = 'block';
+            document.getElementById('legend-section').style.display = 'block';
+            document.getElementById('mapping-section').style.display = 'block';
+
+            // Render mapping table with distinct types
+            renderMappingTable(typesData.types || []);
+
+            // Render units table
+            renderTable();
+
+        } catch (error) {
+            console.error('Failed to load units:', error);
+            alert('Failed to load units: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Load Units';
+        }
+    }
+
+    function processUnits() {
+        processedUnits = allUnits.map(unit => {
+            const key = overrideKey(unit.SiteID, unit.UnitID);
+            const override = overridesMap[key] || {};
+            const area = calcArea(unit.dcWidth, unit.dcLength);
+            const mappedType = typeMappings[unit.sTypeName] || '';
+
+            // Determine values: override > mapping > auto-calc
+            const unitType = override.unit_type_code || mappedType || '';
+            const sizeCat = override.size_category || calcSizeCategory(area);
+            const sizeRange = override.size_range || calcSizeRange(area);
+            const shape = override.shape || calcShape(unit.dcWidth, unit.dcLength);
+            const pillar = override.pillar || calcPillar(unit.sUnitNote);
+
+            return {
+                ...unit,
+                _area: area,
+                _unitType: unitType,
+                _sizeCat: sizeCat,
+                _sizeRange: sizeRange,
+                _shape: shape,
+                _pillar: pillar,
+                _finalLabel: buildFinalLabel(unitType, sizeCat, sizeRange, shape, pillar),
+                // Track sources for color coding
+                _src: {
+                    unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
+                    sizeCat: override.size_category ? 'override' : 'auto',
+                    sizeRange: override.size_range ? 'override' : 'auto',
+                    shape: override.shape ? 'override' : 'auto',
+                    pillar: override.pillar ? 'override' : 'auto',
+                }
+            };
+        });
+    }
+
+    // --- Rendering ---
+    function cellClass(src) {
+        if (src === 'override') return 'cell-override';
+        if (src === 'mapping') return 'cell-mapping';
+        return 'cell-auto';
+    }
+
+    function makeSelect(options, selected, dataAttr) {
+        let html = `<select ${dataAttr} onchange="onCellChange(this)">`;
+        html += `<option value=""></option>`;
+        options.forEach(opt => {
+            html += `<option value="${opt}" ${opt === selected ? 'selected' : ''}>${opt}</option>`;
+        });
+        html += `</select>`;
+        return html;
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('units-tbody');
+        const searchTerm = (document.getElementById('unit-search').value || '').toLowerCase();
+
+        const filtered = searchTerm
+            ? processedUnits.filter(u =>
+                (u.sUnitName || '').toLowerCase().includes(searchTerm) ||
+                (u.sLocationCode || '').toLowerCase().includes(searchTerm) ||
+                (u.sTypeName || '').toLowerCase().includes(searchTerm))
+            : processedUnits;
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="15" style="text-align: center; color: #666;">No units found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = filtered.map((u, i) => {
+            const idx = processedUnits.indexOf(u);
+            return `<tr data-idx="${idx}">
+                <td>${u.sLocationCode || '-'}</td>
+                <td><strong>${u.sUnitName || '-'}</strong></td>
+                <td>${u.sTypeName || '-'}</td>
+                <td>${u.dcWidth != null ? parseFloat(u.dcWidth).toFixed(1) : '-'}</td>
+                <td>${u.dcLength != null ? parseFloat(u.dcLength).toFixed(1) : '-'}</td>
+                <td>${u._area ? u._area.toFixed(1) : '-'}</td>
+                <td>${u.iFloor != null ? u.iFloor : '-'}</td>
+                <td>${u.dcStdRate != null ? '$' + parseFloat(u.dcStdRate).toFixed(2) : '-'}</td>
+                <td>${u.bRented ? 'Yes' : 'No'}</td>
+                <td class="${cellClass(u._src.unitType)}">${makeSelect(TYPE_CODES, u._unitType, `data-field="unitType" data-idx="${idx}"`)}</td>
+                <td class="${cellClass(u._src.sizeCat)}">${makeSelect(SIZE_CATEGORIES, u._sizeCat, `data-field="sizeCat" data-idx="${idx}"`)}</td>
+                <td class="${cellClass(u._src.sizeRange)}">${makeSelect(SIZE_RANGE_BUCKETS.map(b => b.label), u._sizeRange, `data-field="sizeRange" data-idx="${idx}"`)}</td>
+                <td class="${cellClass(u._src.shape)}">${makeSelect(SHAPES, u._shape, `data-field="shape" data-idx="${idx}"`)}</td>
+                <td class="${cellClass(u._src.pillar)}">${makeSelect(PILLARS, u._pillar, `data-field="pillar" data-idx="${idx}"`)}</td>
+                <td class="label-cell">${u._finalLabel || '-'}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    function renderMappingTable(distinctTypes) {
+        const tbody = document.getElementById('mapping-tbody');
+        if (distinctTypes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; color: #666;">No unit types found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = distinctTypes.map(typeName => {
+            const current = typeMappings[typeName] || '';
+            let opts = `<option value="">-- Select --</option>`;
+            TYPE_CODES.forEach(code => {
+                opts += `<option value="${code}" ${code === current ? 'selected' : ''}>${code}</option>`;
+            });
+            return `<tr>
+                <td>${typeName}</td>
+                <td><select data-source-type="${typeName}" onchange="onMappingChange(this)">${opts}</select></td>
+            </tr>`;
+        }).join('');
+    }
+
+    // --- Event Handlers ---
+    function onCellChange(selectEl) {
+        const idx = parseInt(selectEl.dataset.idx);
+        const field = selectEl.dataset.field;
+        const value = selectEl.value;
+        const unit = processedUnits[idx];
+        if (!unit) return;
+
+        const key = overrideKey(unit.SiteID, unit.UnitID);
+        if (!overridesMap[key]) {
+            overridesMap[key] = { site_id: unit.SiteID, unit_id: unit.UnitID };
+        }
+
+        // Map field names to override keys
+        const fieldMap = {
+            unitType: 'unit_type_code',
+            sizeCat: 'size_category',
+            sizeRange: 'size_range',
+            shape: 'shape',
+            pillar: 'pillar'
+        };
+
+        overridesMap[key][fieldMap[field]] = value || null;
+
+        // Recalculate this unit
+        const override = overridesMap[key];
+        const area = unit._area;
+        const mappedType = typeMappings[unit.sTypeName] || '';
+
+        unit._unitType = override.unit_type_code || mappedType || '';
+        unit._sizeCat = override.size_category || calcSizeCategory(area);
+        unit._sizeRange = override.size_range || calcSizeRange(area);
+        unit._shape = override.shape || calcShape(unit.dcWidth, unit.dcLength);
+        unit._pillar = override.pillar || calcPillar(unit.sUnitNote);
+        unit._finalLabel = buildFinalLabel(unit._unitType, unit._sizeCat, unit._sizeRange, unit._shape, unit._pillar);
+
+        // Update source tracking
+        unit._src = {
+            unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
+            sizeCat: override.size_category ? 'override' : 'auto',
+            sizeRange: override.size_range ? 'override' : 'auto',
+            shape: override.shape ? 'override' : 'auto',
+            pillar: override.pillar ? 'override' : 'auto',
+        };
+
+        // Update just the label and cell colors in the row
+        const row = selectEl.closest('tr');
+        const labelCell = row.querySelector('.label-cell');
+        if (labelCell) labelCell.textContent = unit._finalLabel || '-';
+
+        // Update cell color
+        const td = selectEl.closest('td');
+        td.className = value ? 'cell-override' : cellClass(unit._src[field]);
+    }
+
+    function onMappingChange(selectEl) {
+        const sourceType = selectEl.dataset.sourceType;
+        const code = selectEl.value;
+
+        if (code) {
+            typeMappings[sourceType] = code;
+        } else {
+            delete typeMappings[sourceType];
+        }
+
+        // Reprocess all units and re-render
+        processUnits();
+        renderTable();
+    }
+
+    function toggleMappingPanel() {
+        const panel = document.getElementById('mapping-panel');
+        const icon = document.getElementById('mapping-toggle-icon');
+        if (panel.style.display === 'none') {
+            panel.style.display = 'block';
+            icon.innerHTML = '&#9660;';
+        } else {
+            panel.style.display = 'none';
+            icon.innerHTML = '&#9654;';
+        }
+    }
+
+    function filterUnits() {
+        renderTable();
+    }
+
+    // --- Save Actions ---
+    async function saveMappings() {
+        const mappingsArray = Object.entries(typeMappings)
+            .filter(([, code]) => code)
+            .map(([source, code]) => ({
+                source_type_name: source,
+                mapped_type_code: code,
+            }));
+
+        if (mappingsArray.length === 0) {
+            alert('No mappings to save.');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/inventory/type-mappings', {
+                method: 'PUT',
+                headers: apiHeaders(),
+                body: JSON.stringify({
+                    mappings: mappingsArray,
+                    username: '{{ current_user.username }}',
+                }),
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+                alert(`Saved ${result.upserted} type mapping(s).`);
+            } else {
+                alert('Failed to save mappings: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Failed to save mappings: ' + error.message);
+        }
+    }
+
+    async function saveOverrides() {
+        // Collect only overrides that have at least one non-null field
+        const overridesArray = Object.values(overridesMap)
+            .filter(o => o.unit_type_code || o.size_category || o.size_range || o.shape || o.pillar)
+            .map(o => ({
+                site_id: o.site_id,
+                unit_id: o.unit_id,
+                unit_type_code: o.unit_type_code || null,
+                size_category: o.size_category || null,
+                size_range: o.size_range || null,
+                shape: o.shape || null,
+                pillar: o.pillar || null,
+            }));
+
+        if (overridesArray.length === 0) {
+            alert('No overrides to save.');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/inventory/overrides', {
+                method: 'PUT',
+                headers: apiHeaders(),
+                body: JSON.stringify({
+                    overrides: overridesArray,
+                    username: '{{ current_user.username }}',
+                }),
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+                alert(`Saved ${result.upserted} override(s).`);
+            } else {
+                alert('Failed to save overrides: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Failed to save overrides: ' + error.message);
+        }
+    }
+
+    // --- Excel Export ---
+    function exportToExcel() {
+        if (processedUnits.length === 0) {
+            alert('No data to export.');
+            return;
+        }
+
+        const rows = processedUnits.map(u => ({
+            'Site Code': u.sLocationCode || '',
+            'Unit Name': u.sUnitName || '',
+            'Current Type': u.sTypeName || '',
+            'Width (ft)': u.dcWidth != null ? parseFloat(u.dcWidth) : '',
+            'Length (ft)': u.dcLength != null ? parseFloat(u.dcLength) : '',
+            'Area (sqft)': u._area ? parseFloat(u._area.toFixed(1)) : '',
+            'Climate': u.bClimate ? 'Yes' : 'No',
+            'Inside': u.bInside ? 'Yes' : 'No',
+            'Power': u.bPower ? 'Yes' : 'No',
+            'Alarm': u.bAlarm ? 'Yes' : 'No',
+            'Floor': u.iFloor != null ? u.iFloor : '',
+            'Std Rate': u.dcStdRate != null ? parseFloat(u.dcStdRate) : '',
+            'Web Rate': u.dcWebRate != null ? parseFloat(u.dcWebRate) : '',
+            'Push Rate': u.dcPushRate != null ? parseFloat(u.dcPushRate) : '',
+            'Board Rate': u.dcBoardRate != null ? parseFloat(u.dcBoardRate) : '',
+            'Rented': u.bRented ? 'Yes' : 'No',
+            'Rentable': u.bRentable ? 'Yes' : 'No',
+            'Unit Note': u.sUnitNote || '',
+            'Unit Desc': u.sUnitDesc || '',
+            'Unit Type Code': u._unitType || '',
+            'Size Category': u._sizeCat || '',
+            'Size Range': u._sizeRange || '',
+            'Shape': u._shape || '',
+            'Pillar': u._pillar || '',
+            'Final Label': u._finalLabel || '',
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
+
+        // Auto-width columns
+        const colWidths = Object.keys(rows[0]).map(key => ({
+            wch: Math.max(key.length, ...rows.map(r => String(r[key]).length).slice(0, 100)) + 2
+        }));
+        ws['!cols'] = colWidths;
+
+        const dateStr = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(wb, `Inventory_Checker_${dateStr}.xlsx`);
+    }
+
+    // --- Init ---
+    loadSites();
+</script>
+{% endblock %}
