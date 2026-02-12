@@ -142,7 +142,7 @@ def create_app(config=None, db_url=None):
         # Consider moving to external CSS files for stricter CSP
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",  # unsafe-inline needed for template scripts
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.sheetjs.com",  # unsafe-inline needed for template scripts; sheetjs for Excel export
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",  # For select2 and inline styles
             "img-src 'self' data:",
             "font-src 'self'",
