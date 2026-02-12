@@ -25,6 +25,9 @@ logs/
 esa-api-cache/
 media/
 
+# Documentation
+Project Documentation/
+
 # AI tool artifacts
 .ai/
 
