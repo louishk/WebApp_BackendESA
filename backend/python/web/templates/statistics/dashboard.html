@@ -1,0 +1,478 @@
+{% extends "base.html" %}
+
+{% block title %}API Statistics - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <h1>API Statistics</h1>
+        <p style="color: #666; margin-top: 0.25rem; font-size: 0.9rem;">Monitor API endpoint consumption and performance</p>
+    </div>
+    <div class="period-selector">
+        <button class="period-btn active" data-period="1d">24h</button>
+        <button class="period-btn" data-period="7d">7d</button>
+        <button class="period-btn" data-period="30d">30d</button>
+        <button class="period-btn" data-period="90d">90d</button>
+    </div>
+</div>
+
+<!-- Summary KPIs -->
+<div class="card">
+    <h2>Overview</h2>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="value" id="total-calls">--</div>
+            <div class="label">Total API Calls</div>
+        </div>
+        <div class="stat-card" style="background: #28A745;">
+            <div class="value" id="avg-response">--</div>
+            <div class="label">Avg Response (ms)</div>
+        </div>
+        <div class="stat-card" style="background: var(--esa-red);">
+            <div class="value" id="error-count">--</div>
+            <div class="label">Errors</div>
+        </div>
+        <div class="stat-card" style="background: #6C757D;">
+            <div class="value" id="error-rate">--</div>
+            <div class="label">Error Rate</div>
+        </div>
+    </div>
+</div>
+
+<!-- Daily Call Volume Chart -->
+<div class="card">
+    <h2>Call Volume</h2>
+    <div id="volume-chart" class="chart-container">
+        <div style="text-align: center; color: #666; padding: 2rem;">Loading...</div>
+    </div>
+</div>
+
+<!-- Endpoint Breakdown -->
+<div class="card">
+    <h2>Endpoint Breakdown</h2>
+    <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
+        <button class="sort-btn active" data-sort="calls">By Calls</button>
+        <button class="sort-btn" data-sort="avg_time">By Avg Time</button>
+        <button class="sort-btn" data-sort="errors">By Errors</button>
+    </div>
+    <div style="overflow-x: auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Endpoint</th>
+                    <th>Method</th>
+                    <th style="text-align: right;">Calls</th>
+                    <th style="text-align: right;">Avg (ms)</th>
+                    <th style="text-align: right;">Max (ms)</th>
+                    <th style="text-align: right;">Errors</th>
+                    <th style="text-align: right;">Error Rate</th>
+                    <th style="width: 150px;">Volume</th>
+                </tr>
+            </thead>
+            <tbody id="endpoints-tbody">
+                <tr><td colspan="8" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Two-column grid: Slow Endpoints + Top Consumers -->
+<div class="two-col-grid">
+    <div class="card">
+        <h2>Slowest Endpoints</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Endpoint</th>
+                    <th style="text-align: right;">Avg (ms)</th>
+                    <th style="text-align: right;">P95 (ms)</th>
+                    <th style="text-align: right;">Max (ms)</th>
+                </tr>
+            </thead>
+            <tbody id="slow-tbody">
+                <tr><td colspan="4" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Top Consumers</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Client IP</th>
+                    <th style="text-align: right;">Calls</th>
+                    <th style="text-align: right;">Endpoints</th>
+                    <th style="text-align: right;">Avg (ms)</th>
+                </tr>
+            </thead>
+            <tbody id="consumers-tbody">
+                <tr><td colspan="4" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="refresh-notice">Data refreshes every 60 seconds</div>
+
+<style>
+    .period-selector {
+        display: flex;
+        gap: 0.25rem;
+        background: var(--esa-gray-dark);
+        padding: 3px;
+        border-radius: 6px;
+    }
+    .period-btn {
+        padding: 0.4rem 1rem;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 0.85rem;
+        color: #666;
+        transition: all 0.2s;
+    }
+    .period-btn.active {
+        background: var(--esa-navy);
+        color: #fff;
+    }
+    .period-btn:hover:not(.active) {
+        background: #fff;
+        color: var(--esa-navy);
+    }
+
+    .sort-btn {
+        padding: 0.3rem 0.8rem;
+        border: 1px solid var(--esa-gray-dark);
+        background: #fff;
+        cursor: pointer;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        color: #666;
+        transition: all 0.2s;
+    }
+    .sort-btn.active {
+        background: var(--esa-navy);
+        color: #fff;
+        border-color: var(--esa-navy);
+    }
+
+    .two-col-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+    }
+    @media (max-width: 1200px) {
+        .two-col-grid { grid-template-columns: 1fr; }
+    }
+
+    .chart-container {
+        height: 200px;
+        position: relative;
+    }
+
+    .bar-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 100%;
+        padding: 0 0 24px 0;
+        position: relative;
+    }
+
+    .bar-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        height: 100%;
+        justify-content: flex-end;
+        position: relative;
+    }
+
+    .bar {
+        width: 100%;
+        max-width: 40px;
+        background: var(--esa-navy);
+        border-radius: 3px 3px 0 0;
+        min-height: 2px;
+        transition: height 0.3s;
+        cursor: default;
+        position: relative;
+    }
+
+    .bar:hover {
+        background: var(--esa-red);
+    }
+
+    .bar-label {
+        font-size: 0.65rem;
+        color: #999;
+        margin-top: 4px;
+        white-space: nowrap;
+        position: absolute;
+        bottom: 0;
+    }
+
+    .bar-tooltip {
+        display: none;
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--esa-navy-dark);
+        color: #fff;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        white-space: nowrap;
+        z-index: 10;
+    }
+    .bar:hover .bar-tooltip { display: block; }
+
+    .volume-bar-cell {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .volume-bar-bg {
+        flex: 1;
+        height: 8px;
+        background: var(--esa-gray);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .volume-bar-fill {
+        height: 100%;
+        background: var(--esa-navy);
+        border-radius: 4px;
+        transition: width 0.3s;
+    }
+
+    .response-badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 10px;
+        font-size: 0.8rem;
+        font-weight: 500;
+    }
+    .response-fast { background: #d4edda; color: #155724; }
+    .response-medium { background: #fff3cd; color: #856404; }
+    .response-slow { background: #f8d7da; color: #721c24; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Disable base.html auto-refresh (we use our own API-based refresh)
+    clearTimeout(window.autoRefreshTimeout);
+
+    let currentPeriod = '1d';
+    let currentSort = 'calls';
+
+    // Period selector
+    document.querySelectorAll('.period-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentPeriod = this.dataset.period;
+            refreshAll();
+        });
+    });
+
+    // Sort selector
+    document.querySelectorAll('.sort-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentSort = this.dataset.sort;
+            loadEndpoints();
+        });
+    });
+
+    function formatNumber(n) {
+        if (n === null || n === undefined) return '--';
+        if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+        return n.toLocaleString();
+    }
+
+    function responseBadge(ms) {
+        ms = parseFloat(ms);
+        if (isNaN(ms)) return '<span class="response-badge">--</span>';
+        let cls = 'response-fast';
+        if (ms > 500) cls = 'response-medium';
+        if (ms > 2000) cls = 'response-slow';
+        return `<span class="response-badge ${cls}">${ms.toFixed(0)}</span>`;
+    }
+
+    // ========= Summary =========
+    function loadSummary() {
+        fetch(`/api/statistics/summary?period=${currentPeriod}`)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('total-calls').textContent = formatNumber(data.total_calls);
+                document.getElementById('avg-response').textContent =
+                    data.avg_response_time_ms !== undefined ? data.avg_response_time_ms.toFixed(0) : '--';
+                document.getElementById('error-count').textContent = formatNumber(data.error_count);
+                document.getElementById('error-rate').textContent =
+                    data.error_rate !== undefined ? data.error_rate + '%' : '--';
+
+                renderVolumeChart(data.calls_per_day || []);
+            })
+            .catch(err => {
+                console.error('Summary error:', err);
+                document.getElementById('total-calls').textContent = 'ERR';
+            });
+    }
+
+    // ========= Volume Chart =========
+    function renderVolumeChart(dailyData) {
+        const container = document.getElementById('volume-chart');
+
+        if (!dailyData || dailyData.length === 0) {
+            container.innerHTML = '<div style="text-align: center; color: #666; padding: 2rem;">No data for this period</div>';
+            return;
+        }
+
+        const maxCount = Math.max(...dailyData.map(d => d.count), 1);
+
+        const bars = dailyData.map(d => {
+            const pct = (d.count / maxCount * 100).toFixed(1);
+            const dateObj = new Date(d.date);
+            const label = dateObj.toLocaleDateString('en-SG', {
+                timeZone: 'Asia/Singapore', month: 'short', day: 'numeric'
+            });
+
+            return `
+                <div class="bar-col">
+                    <div class="bar" style="height: ${pct}%;">
+                        <div class="bar-tooltip">${label}: ${d.count.toLocaleString()} calls</div>
+                    </div>
+                    <div class="bar-label">${label}</div>
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = `<div class="bar-chart">${bars}</div>`;
+    }
+
+    // ========= Endpoints =========
+    function loadEndpoints() {
+        fetch(`/api/statistics/endpoints?period=${currentPeriod}&sort=${currentSort}`)
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('endpoints-tbody');
+                const endpoints = data.endpoints || [];
+
+                if (endpoints.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #666;">No data for this period</td></tr>';
+                    return;
+                }
+
+                const maxCalls = Math.max(...endpoints.map(e => e.total_calls), 1);
+
+                tbody.innerHTML = endpoints.map(e => {
+                    const barPct = (e.total_calls / maxCalls * 100).toFixed(1);
+                    return `
+                        <tr>
+                            <td><code style="font-size: 0.85rem;">${e.endpoint}</code></td>
+                            <td><span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">${e.method}</span></td>
+                            <td style="text-align: right; font-weight: 600;">${e.total_calls.toLocaleString()}</td>
+                            <td style="text-align: right;">${responseBadge(e.avg_response_ms)}</td>
+                            <td style="text-align: right;">${responseBadge(e.max_response_ms)}</td>
+                            <td style="text-align: right;">${e.error_count > 0 ? '<span style="color: var(--esa-red); font-weight: 600;">' + e.error_count + '</span>' : '0'}</td>
+                            <td style="text-align: right;">${e.error_rate > 0 ? '<span style="color: var(--esa-red);">' + e.error_rate + '%</span>' : '0%'}</td>
+                            <td>
+                                <div class="volume-bar-cell">
+                                    <div class="volume-bar-bg">
+                                        <div class="volume-bar-fill" style="width: ${barPct}%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            })
+            .catch(err => {
+                console.error('Endpoints error:', err);
+                document.getElementById('endpoints-tbody').innerHTML =
+                    '<tr><td colspan="8" style="text-align: center; color: var(--esa-red);">Error loading data</td></tr>';
+            });
+    }
+
+    // ========= Slow Endpoints =========
+    function loadSlowEndpoints() {
+        fetch(`/api/statistics/slow-endpoints?period=${currentPeriod}&min_calls=3`)
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('slow-tbody');
+                const endpoints = data.endpoints || [];
+
+                if (endpoints.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666;">No data</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = endpoints.slice(0, 10).map(e => `
+                    <tr>
+                        <td><code style="font-size: 0.8rem;">${e.endpoint}</code></td>
+                        <td style="text-align: right;">${responseBadge(e.avg_response_ms)}</td>
+                        <td style="text-align: right;">${responseBadge(e.p95_response_ms)}</td>
+                        <td style="text-align: right;">${responseBadge(e.max_response_ms)}</td>
+                    </tr>
+                `).join('');
+            })
+            .catch(err => {
+                console.error('Slow endpoints error:', err);
+                document.getElementById('slow-tbody').innerHTML =
+                    '<tr><td colspan="4" style="text-align: center; color: var(--esa-red);">Error</td></tr>';
+            });
+    }
+
+    // ========= Top Consumers =========
+    function loadTopConsumers() {
+        fetch(`/api/statistics/top-consumers?period=${currentPeriod}&limit=10`)
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('consumers-tbody');
+                const consumers = data.consumers || [];
+
+                if (consumers.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666;">No data</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = consumers.map(c => `
+                    <tr>
+                        <td><code style="font-size: 0.85rem;">${c.client_ip}</code></td>
+                        <td style="text-align: right; font-weight: 600;">${c.total_calls.toLocaleString()}</td>
+                        <td style="text-align: right;">${c.unique_endpoints}</td>
+                        <td style="text-align: right;">${c.avg_response_ms.toFixed(0)} ms</td>
+                    </tr>
+                `).join('');
+            })
+            .catch(err => {
+                console.error('Consumers error:', err);
+                document.getElementById('consumers-tbody').innerHTML =
+                    '<tr><td colspan="4" style="text-align: center; color: var(--esa-red);">Error</td></tr>';
+            });
+    }
+
+    // ========= Refresh All =========
+    function refreshAll() {
+        loadSummary();
+        loadEndpoints();
+        loadSlowEndpoints();
+        loadTopConsumers();
+    }
+
+    // Initial load
+    refreshAll();
+
+    // Auto-refresh every 60 seconds
+    setInterval(refreshAll, 60000);
+</script>
+{% endblock %}
