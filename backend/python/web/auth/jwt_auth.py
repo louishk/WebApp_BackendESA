@@ -125,11 +125,13 @@ def require_auth(f):
 
         # First, check for session-based authentication (web UI)
         if current_user and current_user.is_authenticated:
-            # Check API access via RBAC permission (scheduler OR billing tools)
+            # Check API access via RBAC permission
             has_scheduler = current_user.can_access_scheduler()
             has_billing_tools = current_user.can_access_billing_tools() if hasattr(current_user, 'can_access_billing_tools') else False
+            has_inventory = current_user.can_access_inventory_tools() if hasattr(current_user, 'can_access_inventory_tools') else False
+            has_config = current_user.can_manage_configs() if hasattr(current_user, 'can_manage_configs') else False
 
-            if not has_scheduler and not has_billing_tools:
+            if not has_scheduler and not has_billing_tools and not has_inventory and not has_config:
                 role_names = ', '.join(r.name for r in current_user.roles) if current_user.roles else 'none'
                 return jsonify({
                     'error': 'Forbidden',

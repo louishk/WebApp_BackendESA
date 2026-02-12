@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+
+{% block title %}Type Mappings - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Type Mappings</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Map unit type names to standardized SOP codes. Changes apply to all sites.</p>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="flash flash-{{ category }}" style="padding: 1rem; margin-bottom: 1rem; border-radius: 4px; background: {% if category == 'success' %}#d1fae5{% elif category == 'error' %}#fee2e2{% else %}#dbeafe{% endif %};">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+<!-- Reference Card -->
+<div class="card" style="background: #f0f4ff; border-left: 4px solid var(--esa-navy, #1a3a5c);">
+    <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="document.getElementById('ref-body').style.display = document.getElementById('ref-body').style.display === 'none' ? 'block' : 'none'">
+        <h2 style="margin: 0; font-size: 1rem;">Type Code Reference</h2>
+        <span style="font-size: 0.85rem; color: #666;">click to toggle</span>
+    </div>
+    <div id="ref-body" style="display: none; margin-top: 0.75rem; font-size: 0.85rem; color: #333; line-height: 1.8;">
+        <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+            <div>
+                <strong>Type Codes:</strong><br>
+                <span id="type-ref"></span>
+            </div>
+            <div>
+                <strong>Climate Codes:</strong><br>
+                <span id="climate-ref"></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Mapping Table -->
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
+        <h2 style="margin: 0;">Mappings</h2>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="text" id="mapping-search" placeholder="Filter types..." oninput="filterMappings()"
+                   style="padding: 0.4rem 0.75rem; font-size: 0.9rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; width: 220px;">
+            <button type="button" class="btn" id="save-btn" onclick="saveMappings()">Save Mappings</button>
+        </div>
+    </div>
+    <div id="status-msg" style="display: none; padding: 0.75rem 1rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.9rem;"></div>
+    <div id="mapping-table-container" style="max-height: 600px; overflow-y: auto;">
+        <table id="mapping-table">
+            <thead>
+                <tr>
+                    <th>Source Type Name</th>
+                    <th style="width: 220px;">Mapped Type Code</th>
+                    <th style="width: 170px;">Climate Code</th>
+                </tr>
+            </thead>
+            <tbody id="mapping-tbody">
+                <tr><td colspan="3" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div style="margin-top: 0.75rem; font-size: 0.85rem; color: #666;">
+        <span id="mapping-count"></span>
+    </div>
+</div>
+
+<style>
+#mapping-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+#mapping-table thead { position: sticky; top: 0; background: var(--esa-gray); z-index: 10; }
+#mapping-table th { padding: 0.5rem 0.5rem; text-align: left; font-size: 0.8rem; }
+#mapping-table td { padding: 0.35rem 0.5rem; }
+#mapping-table select {
+    width: 100%;
+    padding: 0.35rem;
+    font-size: 0.85rem;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: #fff;
+}
+#mapping-table tbody tr:hover { background: rgba(0,0,0,0.03); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Disable auto-refresh
+    clearTimeout(window.autoRefreshTimeout);
+
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+
+    // SOP Constants
+    const TYPE_CODES = [
+        'W','E','S',
+        'U','M','L','SU','SM','SL','EU','EM','EL',
+        'WN','WNU','WNM','WNL',
+        'DV','RB','MB','BZ','SC','SB','PR'
+    ];
+    const TYPE_DESCS = {
+        'W': 'Walk-In', 'E': 'Executive Walk-In', 'S': 'Smart Walk-In',
+        'U': 'Locker Upper', 'M': 'Locker Middle', 'L': 'Locker Lower',
+        'SU': 'Smart Locker Upper', 'SM': 'Smart Locker Middle', 'SL': 'Smart Locker Lower',
+        'EU': 'Executive Locker Upper', 'EM': 'Executive Locker Middle', 'EL': 'Executive Locker Lower',
+        'WN': 'Wine Walk-In', 'WNU': 'Wine Locker Upper', 'WNM': 'Wine Locker Middle', 'WNL': 'Wine Locker Lower',
+        'DV': 'Drive-Up', 'RB': 'Wardrobe', 'MB': 'Mail Box',
+        'BZ': 'BizPlus', 'SC': 'Showcase', 'SB': 'SubTenant', 'PR': 'Parking',
+    };
+    const CLIMATE_CODES = ['NC','A','D','AD','RF'];
+    const CLIMATE_DESCS = {
+        'NC': 'No Climate Control', 'A': 'Aircon', 'D': 'Dehumidifier Only',
+        'AD': 'Aircon + Dehumidifier', 'RF': 'Refrigerated',
+    };
+
+    let typeMappings = {};
+    let allTypes = [];
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function showStatus(msg, ok) {
+        const el = document.getElementById('status-msg');
+        el.textContent = msg;
+        el.style.display = 'block';
+        el.style.background = ok ? '#d1fae5' : '#fee2e2';
+        el.style.color = ok ? '#065f46' : '#991b1b';
+        setTimeout(() => { el.style.display = 'none'; }, 4000);
+    }
+
+    // Build reference text
+    function buildReference() {
+        document.getElementById('type-ref').innerHTML = TYPE_CODES.map(c =>
+            `<code>${c}</code> = ${TYPE_DESCS[c] || c}`
+        ).join(', ');
+        document.getElementById('climate-ref').innerHTML = CLIMATE_CODES.map(c =>
+            `<code>${c}</code> = ${CLIMATE_DESCS[c] || c}`
+        ).join(', ');
+    }
+
+    async function loadData() {
+        try {
+            const [typesRes, mappingsRes] = await Promise.all([
+                fetch('/api/inventory/distinct-types', { headers: apiHeaders() }),
+                fetch('/api/inventory/type-mappings', { headers: apiHeaders() }),
+            ]);
+
+            const typesData = typesRes.ok ? await typesRes.json() : { types: [] };
+            const mappingsData = mappingsRes.ok ? await mappingsRes.json() : { mappings: [] };
+
+            allTypes = typesData.types || [];
+
+            typeMappings = {};
+            (mappingsData.mappings || []).forEach(m => {
+                typeMappings[m.source_type_name] = {
+                    type: m.mapped_type_code || '',
+                    climate: m.mapped_climate_code || '',
+                };
+            });
+
+            renderTable();
+        } catch (error) {
+            console.error('Failed to load data:', error);
+            document.getElementById('mapping-tbody').innerHTML =
+                '<tr><td colspan="3" style="text-align:center;color:#C41230;">Failed to load data. Check authentication.</td></tr>';
+        }
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('mapping-tbody');
+        const search = (document.getElementById('mapping-search').value || '').toLowerCase();
+
+        let types = allTypes;
+        if (search) {
+            types = types.filter(t => t.toLowerCase().includes(search));
+        }
+
+        if (types.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #666;">No types found</td></tr>';
+            document.getElementById('mapping-count').textContent = '';
+            return;
+        }
+
+        tbody.innerHTML = types.map(typeName => {
+            const mapping = typeMappings[typeName] || { type: '', climate: '' };
+            let typeOpts = `<option value="">-- Select --</option>`;
+            TYPE_CODES.forEach(code => {
+                typeOpts += `<option value="${code}" ${code === mapping.type ? 'selected' : ''}>${code} - ${TYPE_DESCS[code] || code}</option>`;
+            });
+            let climateOpts = `<option value="">-- Select --</option>`;
+            CLIMATE_CODES.forEach(code => {
+                climateOpts += `<option value="${code}" ${code === mapping.climate ? 'selected' : ''}>${code} - ${CLIMATE_DESCS[code] || code}</option>`;
+            });
+            return `<tr>
+                <td>${typeName}</td>
+                <td><select data-source-type="${typeName}" data-field="type" onchange="onMappingChange(this)">${typeOpts}</select></td>
+                <td><select data-source-type="${typeName}" data-field="climate" onchange="onMappingChange(this)">${climateOpts}</select></td>
+            </tr>`;
+        }).join('');
+
+        const mapped = types.filter(t => typeMappings[t] && (typeMappings[t].type || typeMappings[t].climate)).length;
+        document.getElementById('mapping-count').textContent = `${mapped} of ${types.length} types mapped`;
+    }
+
+    function onMappingChange(selectEl) {
+        const sourceType = selectEl.dataset.sourceType;
+        const field = selectEl.dataset.field;
+        const value = selectEl.value;
+
+        if (!typeMappings[sourceType]) {
+            typeMappings[sourceType] = { type: '', climate: '' };
+        }
+        typeMappings[sourceType][field] = value;
+
+        if (!typeMappings[sourceType].type && !typeMappings[sourceType].climate) {
+            delete typeMappings[sourceType];
+        }
+
+        // Update count
+        const mapped = allTypes.filter(t => typeMappings[t] && (typeMappings[t].type || typeMappings[t].climate)).length;
+        document.getElementById('mapping-count').textContent = `${mapped} of ${allTypes.length} types mapped`;
+    }
+
+    function filterMappings() {
+        renderTable();
+    }
+
+    async function saveMappings() {
+        const mappingsArray = Object.entries(typeMappings)
+            .filter(([, m]) => m.type || m.climate)
+            .map(([source, m]) => ({
+                source_type_name: source,
+                mapped_type_code: m.type || '',
+                mapped_climate_code: m.climate || '',
+            }));
+
+        if (mappingsArray.length === 0) {
+            showStatus('No mappings to save.', false);
+            return;
+        }
+
+        const btn = document.getElementById('save-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+
+        try {
+            const response = await fetch('/api/inventory/type-mappings', {
+                method: 'PUT',
+                headers: apiHeaders(),
+                body: JSON.stringify({
+                    mappings: mappingsArray,
+                    username: '{{ current_user.username }}',
+                }),
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+                showStatus(`Saved ${result.upserted} type mapping(s).`, true);
+            } else {
+                showStatus('Failed to save: ' + (result.error || 'Unknown error'), false);
+            }
+        } catch (error) {
+            showStatus('Failed to save: ' + error.message, false);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Save Mappings';
+        }
+    }
+
+    // Init
+    buildReference();
+    loadData();
+</script>
+{% endblock %}

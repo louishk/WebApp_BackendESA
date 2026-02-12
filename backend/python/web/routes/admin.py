@@ -938,3 +938,15 @@ def delete_secret(key):
         flash('Failed to delete secret.', 'error')
 
     return redirect(url_for('admin.list_secrets'))
+
+
+# =============================================================================
+# Type Mappings (Config permission required)
+# =============================================================================
+
+@admin_bp.route('/type-mappings')
+@login_required
+@config_required
+def type_mappings():
+    """Manage inventory type mappings."""
+    return render_template('admin/type_mappings/manage.html')

@@ -17,7 +17,7 @@
     <div id="guide-body" style="display: none; margin-top: 0.75rem; font-size: 0.85rem; color: #333; line-height: 1.6;">
         <ol style="margin: 0; padding-left: 1.25rem;">
             <li><strong>Select sites</strong> from the dropdown and click <strong>Load Units</strong>.</li>
-            <li><strong>Set Type Mappings</strong> first (shared across all sites) &mdash; expand the Type Mappings panel, assign a Type Code and Climate Code to each source type, then click <strong>Save Mappings</strong>.</li>
+            <li><strong>Set Type Mappings</strong> first (shared across all sites) &mdash; go to <a href="{{ url_for('admin.type_mappings') }}">Settings &gt; Type Mappings</a> to assign a Type Code and Climate Code to each source type.</li>
             <li><strong>Review units row by row.</strong> The filter defaults to <em>Unreviewed</em> so you only see units that still need attention.</li>
             <li>For each unit, verify or adjust the <strong>Type, Climate, Size, Range, Shape, Pillar</strong> dropdowns. Changes with a yellow background are per-unit overrides.</li>
             <li><strong>Tick the checkbox</strong> in the first column to mark a unit as reviewed &mdash; this saves automatically.</li>
@@ -39,34 +39,6 @@
         </div>
         <div class="form-group">
             <button type="button" class="btn" id="load-btn" onclick="loadUnits()">Load Units</button>
-        </div>
-    </div>
-</div>
-
-<!-- Type Mapping Panel (collapsible) -->
-<div id="mapping-section" class="card" style="display: none;">
-    <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleMappingPanel()">
-        <h2 style="margin: 0;">Type Mappings</h2>
-        <span id="mapping-toggle-icon" style="font-size: 1.2rem; color: #666;">&#9660;</span>
-    </div>
-    <div id="mapping-panel" style="margin-top: 1rem;">
-        <p style="color: #666; font-size: 0.85rem; margin-bottom: 1rem;">
-            Map each unit type name to a standardized SOP code. These mappings are shared across all sites.
-        </p>
-        <div id="mapping-table-container" style="max-height: 400px; overflow-y: auto;">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Source Type Name</th>
-                        <th style="width: 200px;">Mapped Type Code</th>
-                        <th style="width: 150px;">Climate Code</th>
-                    </tr>
-                </thead>
-                <tbody id="mapping-tbody"></tbody>
-            </table>
-        </div>
-        <div style="margin-top: 1rem;">
-            <button type="button" class="btn" onclick="saveMappings()">Save Mappings</button>
         </div>
     </div>
 </div>
@@ -202,16 +174,6 @@
     vertical-align: middle;
     margin-right: 4px;
     border: 1px solid #ccc;
-}
-
-#mapping-table-container table { width: 100%; }
-#mapping-table-container thead { position: sticky; top: 0; background: var(--esa-gray); z-index: 10; }
-#mapping-table-container select {
-    width: 100%;
-    padding: 0.3rem;
-    font-size: 0.85rem;
-    border: 1px solid #ccc;
-    border-radius: 3px;
 }
 
 .label-cell {
@@ -397,12 +359,11 @@
         const siteIds = options.map(o => o.value).join(',');
 
         try {
-            // Fetch units, type mappings, overrides, and ALL distinct types in parallel
-            const [unitsRes, mappingsRes, overridesRes, typesRes] = await Promise.all([
+            // Fetch units, type mappings, and overrides in parallel
+            const [unitsRes, mappingsRes, overridesRes] = await Promise.all([
                 fetch(`/api/inventory/units?site_ids=${siteIds}`, { headers: apiHeaders() }),
                 fetch('/api/inventory/type-mappings', { headers: apiHeaders() }),
                 fetch(`/api/inventory/overrides?site_ids=${siteIds}`, { headers: apiHeaders() }),
-                fetch('/api/inventory/distinct-types', { headers: apiHeaders() }),
             ]);
 
             if (!unitsRes.ok) throw new Error(`Units API: HTTP ${unitsRes.status}`);
@@ -410,7 +371,6 @@
             const unitsData = await unitsRes.json();
             const mappingsData = mappingsRes.ok ? await mappingsRes.json() : { mappings: [] };
             const overridesData = overridesRes.ok ? await overridesRes.json() : { overrides: [] };
-            const typesData = typesRes.ok ? await typesRes.json() : { types: [] };
 
             allUnits = unitsData.units || [];
 
@@ -445,10 +405,6 @@
             document.getElementById('stats-section').style.display = 'block';
             document.getElementById('units-section').style.display = 'block';
             document.getElementById('legend-section').style.display = 'block';
-            document.getElementById('mapping-section').style.display = 'block';
-
-            // Render mapping table with distinct types
-            renderMappingTable(typesData.types || []);
 
             // Render units table
             renderTable();
@@ -568,31 +524,6 @@
         }).join('');
     }
 
-    function renderMappingTable(distinctTypes) {
-        const tbody = document.getElementById('mapping-tbody');
-        if (distinctTypes.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; color: #666;">No unit types found</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = distinctTypes.map(typeName => {
-            const mapping = typeMappings[typeName] || { type: '', climate: '' };
-            let typeOpts = `<option value="">-- Select --</option>`;
-            TYPE_CODES.forEach(code => {
-                typeOpts += `<option value="${code}" ${code === mapping.type ? 'selected' : ''}>${code} - ${TYPE_DESCS[code] || code}</option>`;
-            });
-            let climateOpts = `<option value="">-- Select --</option>`;
-            CLIMATE_CODES.forEach(code => {
-                climateOpts += `<option value="${code}" ${code === mapping.climate ? 'selected' : ''}>${code} - ${CLIMATE_DESCS[code] || code}</option>`;
-            });
-            return `<tr>
-                <td>${typeName}</td>
-                <td><select data-source-type="${typeName}" data-mapping-field="type" onchange="onMappingChange(this)">${typeOpts}</select></td>
-                <td><select data-source-type="${typeName}" data-mapping-field="climate" onchange="onMappingChange(this)">${climateOpts}</select></td>
-            </tr>`;
-        }).join('');
-    }
-
     // --- Event Handlers ---
     function onCellChange(selectEl) {
         const idx = parseInt(selectEl.dataset.idx);
@@ -691,77 +622,11 @@
         }
     }
 
-    function onMappingChange(selectEl) {
-        const sourceType = selectEl.dataset.sourceType;
-        const mappingField = selectEl.dataset.mappingField;
-        const value = selectEl.value;
-
-        if (!typeMappings[sourceType]) {
-            typeMappings[sourceType] = { type: '', climate: '' };
-        }
-        typeMappings[sourceType][mappingField] = value;
-
-        // Delete entry if both fields are empty
-        if (!typeMappings[sourceType].type && !typeMappings[sourceType].climate) {
-            delete typeMappings[sourceType];
-        }
-
-        // Reprocess all units and re-render
-        processUnits();
-        renderTable();
-    }
-
-    function toggleMappingPanel() {
-        const panel = document.getElementById('mapping-panel');
-        const icon = document.getElementById('mapping-toggle-icon');
-        if (panel.style.display === 'none') {
-            panel.style.display = 'block';
-            icon.innerHTML = '&#9660;';
-        } else {
-            panel.style.display = 'none';
-            icon.innerHTML = '&#9654;';
-        }
-    }
-
     function filterUnits() {
         renderTable();
     }
 
     // --- Save Actions ---
-    async function saveMappings() {
-        const mappingsArray = Object.entries(typeMappings)
-            .filter(([, m]) => m.type || m.climate)
-            .map(([source, m]) => ({
-                source_type_name: source,
-                mapped_type_code: m.type || '',
-                mapped_climate_code: m.climate || '',
-            }));
-
-        if (mappingsArray.length === 0) {
-            alert('No mappings to save.');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/inventory/type-mappings', {
-                method: 'PUT',
-                headers: apiHeaders(),
-                body: JSON.stringify({
-                    mappings: mappingsArray,
-                    username: '{{ current_user.username }}',
-                }),
-            });
-            const result = await response.json();
-            if (response.ok && result.success) {
-                alert(`Saved ${result.upserted} type mapping(s).`);
-            } else {
-                alert('Failed to save mappings: ' + (result.error || 'Unknown error'));
-            }
-        } catch (error) {
-            alert('Failed to save mappings: ' + error.message);
-        }
-    }
-
     async function saveOverrides() {
         // Collect only overrides that have at least one non-null field or reviewed flag
         const overridesArray = Object.values(overridesMap)

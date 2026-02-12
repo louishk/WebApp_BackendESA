@@ -1742,8 +1742,14 @@ def api_inventory_get_type_mappings():
 @api_bp.route('/inventory/type-mappings', methods=['PUT'])
 @require_auth
 def api_inventory_upsert_type_mappings():
-    """Bulk upsert type mappings."""
+    """Bulk upsert type mappings. Requires config management permission."""
+    from flask_login import current_user as session_user
     from web.models.inventory import InventoryTypeMapping
+
+    # Defense-in-depth: only config managers can write type mappings
+    if session_user and session_user.is_authenticated:
+        if not session_user.can_manage_configs():
+            return jsonify({'error': 'Forbidden', 'message': 'Config management permission required'}), 403
 
     data = request.get_json()
     if not data or 'mappings' not in data:

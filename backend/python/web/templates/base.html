@@ -296,7 +296,7 @@
                     <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint) else '' }}">User Management</a>
                 {% endif %}
                 {% if current_user.can_manage_configs() %}
-                    <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint) else '' }}">Settings</a>
+                    <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint) else '' }}">Settings</a>
                 {% endif %}
                 <a href="{{ url_for('auth.logout') }}" style="margin-left: 1rem;">Logout ({{ current_user.username }})</a>
             {% else %}
@@ -351,10 +351,11 @@
     </div>
     {% endif %}
 
-    {% if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint) %}
+    {% if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint) %}
     <div class="sub-navbar">
         <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if 'config' in request.endpoint else '' }}">Config</a>
         <a href="{{ url_for('admin.list_secrets') }}" class="{{ 'active' if 'secret' in request.endpoint else '' }}">Secrets</a>
+        <a href="{{ url_for('admin.type_mappings') }}" class="{{ 'active' if 'type_mapping' in request.endpoint else '' }}">Type Mappings</a>
     </div>
     {% endif %}
 
