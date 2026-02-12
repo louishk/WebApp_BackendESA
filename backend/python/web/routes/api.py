@@ -1894,3 +1894,285 @@ def api_inventory_upsert_overrides():
         return jsonify({'error': 'Failed to save overrides'}), 500
     finally:
         session.close()
+
+
+# =============================================================================
+# API Statistics - Consumption Monitoring
+# =============================================================================
+
+@api_bp.route('/statistics/summary')
+@require_auth
+@cached(ttl_seconds=30)
+def api_statistics_summary():
+    """
+    Overall API consumption summary.
+    Query params:
+        period: 1d, 7d, 30d, 90d (default 7d)
+    """
+    from web.models.api_statistic import ApiStatistic
+
+    period = request.args.get('period', '7d')
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        base = session.query(ApiStatistic).filter(ApiStatistic.called_at >= since)
+
+        total_calls = base.count()
+
+        avg_response = session.query(
+            func.avg(ApiStatistic.response_time_ms)
+        ).filter(ApiStatistic.called_at >= since).scalar() or 0
+
+        error_count = base.filter(ApiStatistic.status_code >= 400).count()
+
+        # Calls per day
+        daily = session.query(
+            func.date_trunc('day', ApiStatistic.called_at).label('day'),
+            func.count(ApiStatistic.id).label('count')
+        ).filter(
+            ApiStatistic.called_at >= since
+        ).group_by('day').order_by('day').all()
+
+        return jsonify({
+            'period': period,
+            'since': since.isoformat(),
+            'total_calls': total_calls,
+            'avg_response_time_ms': round(float(avg_response), 2),
+            'error_count': error_count,
+            'error_rate': round(error_count / total_calls * 100, 2) if total_calls > 0 else 0,
+            'calls_per_day': [
+                {'date': d.day.isoformat() if d.day else None, 'count': d.count}
+                for d in daily
+            ],
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/statistics/endpoints')
+@require_auth
+@cached(ttl_seconds=30)
+def api_statistics_endpoints():
+    """
+    Per-endpoint breakdown of API consumption.
+    Query params:
+        period: 1d, 7d, 30d, 90d (default 7d)
+        sort: calls, avg_time, errors (default calls)
+    """
+    from web.models.api_statistic import ApiStatistic
+
+    period = request.args.get('period', '7d')
+    sort_by = request.args.get('sort', 'calls')
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        stats = session.query(
+            ApiStatistic.endpoint,
+            ApiStatistic.method,
+            func.count(ApiStatistic.id).label('total_calls'),
+            func.avg(ApiStatistic.response_time_ms).label('avg_response_ms'),
+            func.max(ApiStatistic.response_time_ms).label('max_response_ms'),
+            func.sum(case((ApiStatistic.status_code >= 400, 1), else_=0)).label('error_count'),
+        ).filter(
+            ApiStatistic.called_at >= since
+        ).group_by(
+            ApiStatistic.endpoint, ApiStatistic.method
+        ).all()
+
+        endpoints = []
+        for s in stats:
+            total = s.total_calls
+            errors = int(s.error_count or 0)
+            endpoints.append({
+                'endpoint': s.endpoint,
+                'method': s.method,
+                'total_calls': total,
+                'avg_response_ms': round(float(s.avg_response_ms or 0), 2),
+                'max_response_ms': round(float(s.max_response_ms or 0), 2),
+                'error_count': errors,
+                'error_rate': round(errors / total * 100, 2) if total > 0 else 0,
+            })
+
+        # Sort
+        sort_key = {
+            'calls': lambda x: x['total_calls'],
+            'avg_time': lambda x: x['avg_response_ms'],
+            'errors': lambda x: x['error_count'],
+        }.get(sort_by, lambda x: x['total_calls'])
+
+        endpoints.sort(key=sort_key, reverse=True)
+
+        return jsonify({
+            'period': period,
+            'since': since.isoformat(),
+            'endpoints': endpoints,
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/statistics/timeline')
+@require_auth
+@cached(ttl_seconds=30)
+def api_statistics_timeline():
+    """
+    Hourly call volume timeline for a given period.
+    Query params:
+        period: 1d, 7d, 30d (default 7d)
+        endpoint: filter to specific endpoint (optional)
+    """
+    from web.models.api_statistic import ApiStatistic
+
+    period = request.args.get('period', '7d')
+    endpoint_filter = request.args.get('endpoint')
+    days = {'1d': 1, '7d': 7, '30d': 30}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    # Use hourly buckets for <=7d, daily for longer
+    bucket = 'hour' if days <= 7 else 'day'
+
+    session = get_session()
+    try:
+        query = session.query(
+            func.date_trunc(bucket, ApiStatistic.called_at).label('bucket'),
+            func.count(ApiStatistic.id).label('count'),
+            func.avg(ApiStatistic.response_time_ms).label('avg_ms'),
+            func.sum(case((ApiStatistic.status_code >= 400, 1), else_=0)).label('errors'),
+        ).filter(
+            ApiStatistic.called_at >= since
+        )
+
+        if endpoint_filter:
+            query = query.filter(ApiStatistic.endpoint == endpoint_filter)
+
+        query = query.group_by('bucket').order_by('bucket')
+        results = query.all()
+
+        return jsonify({
+            'period': period,
+            'bucket_size': bucket,
+            'since': since.isoformat(),
+            'endpoint_filter': endpoint_filter,
+            'timeline': [
+                {
+                    'timestamp': r.bucket.isoformat() if r.bucket else None,
+                    'calls': r.count,
+                    'avg_response_ms': round(float(r.avg_ms or 0), 2),
+                    'errors': int(r.errors or 0),
+                }
+                for r in results
+            ],
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/statistics/top-consumers')
+@require_auth
+@cached(ttl_seconds=60)
+def api_statistics_top_consumers():
+    """
+    Top API consumers by client IP.
+    Query params:
+        period: 1d, 7d, 30d (default 7d)
+        limit: number of results (default 20)
+    """
+    from web.models.api_statistic import ApiStatistic
+
+    period = request.args.get('period', '7d')
+    limit = min(int(request.args.get('limit', 20)), 100)
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        stats = session.query(
+            ApiStatistic.client_ip,
+            func.count(ApiStatistic.id).label('total_calls'),
+            func.count(func.distinct(ApiStatistic.endpoint)).label('unique_endpoints'),
+            func.avg(ApiStatistic.response_time_ms).label('avg_ms'),
+        ).filter(
+            ApiStatistic.called_at >= since
+        ).group_by(
+            ApiStatistic.client_ip
+        ).order_by(
+            desc(func.count(ApiStatistic.id))
+        ).limit(limit).all()
+
+        return jsonify({
+            'period': period,
+            'since': since.isoformat(),
+            'consumers': [
+                {
+                    'client_ip': s.client_ip,
+                    'total_calls': s.total_calls,
+                    'unique_endpoints': s.unique_endpoints,
+                    'avg_response_ms': round(float(s.avg_ms or 0), 2),
+                }
+                for s in stats
+            ],
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/statistics/slow-endpoints')
+@require_auth
+@cached(ttl_seconds=60)
+def api_statistics_slow_endpoints():
+    """
+    Endpoints ranked by response time (identifies performance bottlenecks).
+    Query params:
+        period: 1d, 7d, 30d (default 7d)
+        min_calls: minimum call count to include (default 5)
+    """
+    from web.models.api_statistic import ApiStatistic
+
+    period = request.args.get('period', '7d')
+    min_calls = int(request.args.get('min_calls', 5))
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        stats = session.query(
+            ApiStatistic.endpoint,
+            ApiStatistic.method,
+            func.count(ApiStatistic.id).label('total_calls'),
+            func.avg(ApiStatistic.response_time_ms).label('avg_ms'),
+            func.percentile_cont(0.95).within_group(
+                ApiStatistic.response_time_ms
+            ).label('p95_ms'),
+            func.max(ApiStatistic.response_time_ms).label('max_ms'),
+        ).filter(
+            ApiStatistic.called_at >= since
+        ).group_by(
+            ApiStatistic.endpoint, ApiStatistic.method
+        ).having(
+            func.count(ApiStatistic.id) >= min_calls
+        ).order_by(
+            desc(func.avg(ApiStatistic.response_time_ms))
+        ).all()
+
+        return jsonify({
+            'period': period,
+            'since': since.isoformat(),
+            'min_calls': min_calls,
+            'endpoints': [
+                {
+                    'endpoint': s.endpoint,
+                    'method': s.method,
+                    'total_calls': s.total_calls,
+                    'avg_response_ms': round(float(s.avg_ms or 0), 2),
+                    'p95_response_ms': round(float(s.p95_ms or 0), 2),
+                    'max_response_ms': round(float(s.max_ms or 0), 2),
+                }
+                for s in stats
+            ],
+        })
+    finally:
+        session.close()

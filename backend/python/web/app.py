@@ -120,6 +120,10 @@ def create_app(config=None, db_url=None):
     from web.utils.audit import setup_audit_logging
     setup_audit_logging(app)
 
+    # Initialize API statistics tracking
+    from web.utils.api_stats import init_api_stats
+    init_api_stats(app)
+
     # Add security headers and prevent caching of API responses
     @app.after_request
     def add_security_headers(response):
