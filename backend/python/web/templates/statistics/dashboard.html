@@ -292,6 +292,13 @@
         });
     });
 
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(String(str)));
+        return div.innerHTML;
+    }
+
     function formatNumber(n) {
         if (n === null || n === undefined) return '--';
         if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
@@ -378,8 +385,8 @@
                     const barPct = (e.total_calls / maxCalls * 100).toFixed(1);
                     return `
                         <tr>
-                            <td><code style="font-size: 0.85rem;">${e.endpoint}</code></td>
-                            <td><span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">${e.method}</span></td>
+                            <td><code style="font-size: 0.85rem;">${escapeHtml(e.endpoint)}</code></td>
+                            <td><span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">${escapeHtml(e.method)}</span></td>
                             <td style="text-align: right; font-weight: 600;">${e.total_calls.toLocaleString()}</td>
                             <td style="text-align: right;">${responseBadge(e.avg_response_ms)}</td>
                             <td style="text-align: right;">${responseBadge(e.max_response_ms)}</td>
@@ -418,7 +425,7 @@
 
                 tbody.innerHTML = endpoints.slice(0, 10).map(e => `
                     <tr>
-                        <td><code style="font-size: 0.8rem;">${e.endpoint}</code></td>
+                        <td><code style="font-size: 0.8rem;">${escapeHtml(e.endpoint)}</code></td>
                         <td style="text-align: right;">${responseBadge(e.avg_response_ms)}</td>
                         <td style="text-align: right;">${responseBadge(e.p95_response_ms)}</td>
                         <td style="text-align: right;">${responseBadge(e.max_response_ms)}</td>
@@ -447,7 +454,7 @@
 
                 tbody.innerHTML = consumers.map(c => `
                     <tr>
-                        <td><code style="font-size: 0.85rem;">${c.client_ip}</code></td>
+                        <td><code style="font-size: 0.85rem;">${escapeHtml(c.client_ip)}</code></td>
                         <td style="text-align: right; font-weight: 600;">${c.total_calls.toLocaleString()}</td>
                         <td style="text-align: right;">${c.unique_endpoints}</td>
                         <td style="text-align: right;">${c.avg_response_ms.toFixed(0)} ms</td>

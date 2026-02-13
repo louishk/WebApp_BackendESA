@@ -1902,6 +1902,7 @@ def api_inventory_upsert_overrides():
 
 @api_bp.route('/statistics/summary')
 @require_auth
+@rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=30)
 def api_statistics_summary():
     """
@@ -1953,6 +1954,7 @@ def api_statistics_summary():
 
 @api_bp.route('/statistics/endpoints')
 @require_auth
+@rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=30)
 def api_statistics_endpoints():
     """
@@ -2017,6 +2019,7 @@ def api_statistics_endpoints():
 
 @api_bp.route('/statistics/timeline')
 @require_auth
+@rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=30)
 def api_statistics_timeline():
     """
@@ -2073,6 +2076,7 @@ def api_statistics_timeline():
 
 @api_bp.route('/statistics/top-consumers')
 @require_auth
+@rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=60)
 def api_statistics_top_consumers():
     """
@@ -2084,7 +2088,10 @@ def api_statistics_top_consumers():
     from web.models.api_statistic import ApiStatistic
 
     period = request.args.get('period', '7d')
-    limit = min(int(request.args.get('limit', 20)), 100)
+    try:
+        limit = min(int(request.args.get('limit', 20)), 100)
+    except (ValueError, TypeError):
+        limit = 20
     days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
     since = datetime.utcnow() - timedelta(days=days)
 
@@ -2122,6 +2129,7 @@ def api_statistics_top_consumers():
 
 @api_bp.route('/statistics/slow-endpoints')
 @require_auth
+@rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=60)
 def api_statistics_slow_endpoints():
     """
@@ -2133,7 +2141,10 @@ def api_statistics_slow_endpoints():
     from web.models.api_statistic import ApiStatistic
 
     period = request.args.get('period', '7d')
-    min_calls = int(request.args.get('min_calls', 5))
+    try:
+        min_calls = int(request.args.get('min_calls', 5))
+    except (ValueError, TypeError):
+        min_calls = 5
     days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
     since = datetime.utcnow() - timedelta(days=days)
 
