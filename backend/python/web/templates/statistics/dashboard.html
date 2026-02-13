@@ -8,114 +8,235 @@
         <h1>API Statistics</h1>
         <p style="color: #666; margin-top: 0.25rem; font-size: 0.9rem;">Monitor API endpoint consumption and performance</p>
     </div>
-    <div class="period-selector">
-        <button class="period-btn active" data-period="1d">24h</button>
-        <button class="period-btn" data-period="7d">7d</button>
-        <button class="period-btn" data-period="30d">30d</button>
-        <button class="period-btn" data-period="90d">90d</button>
-    </div>
-</div>
-
-<!-- Summary KPIs -->
-<div class="card">
-    <h2>Overview</h2>
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="value" id="total-calls">--</div>
-            <div class="label">Total API Calls</div>
+    <div style="display: flex; gap: 1rem; align-items: center;">
+        <div class="tab-selector">
+            <button class="tab-btn" data-tab="inbound">Inbound</button>
+            <button class="tab-btn active" data-tab="outbound">Outbound</button>
         </div>
-        <div class="stat-card" style="background: #28A745;">
-            <div class="value" id="avg-response">--</div>
-            <div class="label">Avg Response (ms)</div>
-        </div>
-        <div class="stat-card" style="background: var(--esa-red);">
-            <div class="value" id="error-count">--</div>
-            <div class="label">Errors</div>
-        </div>
-        <div class="stat-card" style="background: #6C757D;">
-            <div class="value" id="error-rate">--</div>
-            <div class="label">Error Rate</div>
+        <div class="period-selector">
+            <button class="period-btn active" data-period="1d">24h</button>
+            <button class="period-btn" data-period="7d">7d</button>
+            <button class="period-btn" data-period="30d">30d</button>
+            <button class="period-btn" data-period="90d">90d</button>
         </div>
     </div>
 </div>
 
-<!-- Daily Call Volume Chart -->
-<div class="card">
-    <h2>Call Volume</h2>
-    <div id="volume-chart" class="chart-container">
-        <div style="text-align: center; color: #666; padding: 2rem;">Loading...</div>
-    </div>
-</div>
-
-<!-- Endpoint Breakdown -->
-<div class="card">
-    <h2>Endpoint Breakdown</h2>
-    <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
-        <button class="sort-btn active" data-sort="calls">By Calls</button>
-        <button class="sort-btn" data-sort="avg_time">By Avg Time</button>
-        <button class="sort-btn" data-sort="errors">By Errors</button>
-    </div>
-    <div style="overflow-x: auto;">
-        <table>
-            <thead>
-                <tr>
-                    <th>Endpoint</th>
-                    <th>Method</th>
-                    <th style="text-align: right;">Calls</th>
-                    <th style="text-align: right;">Avg (ms)</th>
-                    <th style="text-align: right;">Max (ms)</th>
-                    <th style="text-align: right;">Errors</th>
-                    <th style="text-align: right;">Error Rate</th>
-                    <th style="width: 150px;">Volume</th>
-                </tr>
-            </thead>
-            <tbody id="endpoints-tbody">
-                <tr><td colspan="8" style="text-align: center; color: #666;">Loading...</td></tr>
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<!-- Two-column grid: Slow Endpoints + Top Consumers -->
-<div class="two-col-grid">
+<!-- ==================== INBOUND VIEW ==================== -->
+<div id="inbound-view" style="display: none;">
+    <!-- Summary KPIs -->
     <div class="card">
-        <h2>Slowest Endpoints</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Endpoint</th>
-                    <th style="text-align: right;">Avg (ms)</th>
-                    <th style="text-align: right;">P95 (ms)</th>
-                    <th style="text-align: right;">Max (ms)</th>
-                </tr>
-            </thead>
-            <tbody id="slow-tbody">
-                <tr><td colspan="4" style="text-align: center; color: #666;">Loading...</td></tr>
-            </tbody>
-        </table>
+        <h2>Overview</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="total-calls">--</div>
+                <div class="label">Total API Calls</div>
+            </div>
+            <div class="stat-card" style="background: #28A745;">
+                <div class="value" id="avg-response">--</div>
+                <div class="label">Avg Response (ms)</div>
+            </div>
+            <div class="stat-card" style="background: var(--esa-red);">
+                <div class="value" id="error-count">--</div>
+                <div class="label">Errors</div>
+            </div>
+            <div class="stat-card" style="background: #6C757D;">
+                <div class="value" id="error-rate">--</div>
+                <div class="label">Error Rate</div>
+            </div>
+        </div>
     </div>
 
+    <!-- Daily Call Volume Chart -->
     <div class="card">
-        <h2>Top Consumers</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Client IP</th>
-                    <th style="text-align: right;">Calls</th>
-                    <th style="text-align: right;">Endpoints</th>
-                    <th style="text-align: right;">Avg (ms)</th>
-                </tr>
-            </thead>
-            <tbody id="consumers-tbody">
-                <tr><td colspan="4" style="text-align: center; color: #666;">Loading...</td></tr>
-            </tbody>
-        </table>
+        <h2>Call Volume</h2>
+        <div id="volume-chart" class="chart-container">
+            <div style="text-align: center; color: #666; padding: 2rem;">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Endpoint Breakdown -->
+    <div class="card">
+        <h2>Endpoint Breakdown</h2>
+        <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
+            <button class="sort-btn active" data-sort="calls">By Calls</button>
+            <button class="sort-btn" data-sort="avg_time">By Avg Time</button>
+            <button class="sort-btn" data-sort="errors">By Errors</button>
+        </div>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Endpoint</th>
+                        <th>Method</th>
+                        <th style="text-align: right;">Calls</th>
+                        <th style="text-align: right;">Avg (ms)</th>
+                        <th style="text-align: right;">Max (ms)</th>
+                        <th style="text-align: right;">Errors</th>
+                        <th style="text-align: right;">Error Rate</th>
+                        <th style="width: 150px;">Volume</th>
+                    </tr>
+                </thead>
+                <tbody id="endpoints-tbody">
+                    <tr><td colspan="8" style="text-align: center; color: #666;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Two-column grid: Slow Endpoints + Top Consumers -->
+    <div class="two-col-grid">
+        <div class="card">
+            <h2>Slowest Endpoints</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Endpoint</th>
+                        <th style="text-align: right;">Avg (ms)</th>
+                        <th style="text-align: right;">P95 (ms)</th>
+                        <th style="text-align: right;">Max (ms)</th>
+                    </tr>
+                </thead>
+                <tbody id="slow-tbody">
+                    <tr><td colspan="4" style="text-align: center; color: #666;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Top Consumers</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Client IP</th>
+                        <th style="text-align: right;">Calls</th>
+                        <th style="text-align: right;">Endpoints</th>
+                        <th style="text-align: right;">Avg (ms)</th>
+                    </tr>
+                </thead>
+                <tbody id="consumers-tbody">
+                    <tr><td colspan="4" style="text-align: center; color: #666;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== OUTBOUND VIEW ==================== -->
+<div id="outbound-view">
+    <!-- Outbound Summary KPIs -->
+    <div class="card">
+        <h2>External API Overview</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="ext-total-calls">--</div>
+                <div class="label">Total Outbound Calls</div>
+            </div>
+            <div class="stat-card" style="background: #28A745;">
+                <div class="value" id="ext-avg-response">--</div>
+                <div class="label">Avg Response (ms)</div>
+            </div>
+            <div class="stat-card" style="background: var(--esa-red);">
+                <div class="value" id="ext-error-count">--</div>
+                <div class="label">Errors</div>
+            </div>
+            <div class="stat-card" style="background: #6C757D;">
+                <div class="value" id="ext-error-rate">--</div>
+                <div class="label">Error Rate</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Outbound Volume Chart -->
+    <div class="card">
+        <h2>Outbound Call Volume</h2>
+        <div id="ext-volume-chart" class="chart-container">
+            <div style="text-align: center; color: #666; padding: 2rem;">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Service Breakdown -->
+    <div class="card">
+        <h2>Service Breakdown</h2>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th style="text-align: right;">Calls</th>
+                        <th style="text-align: right;">Avg (ms)</th>
+                        <th style="text-align: right;">Errors</th>
+                        <th style="width: 150px;">Volume</th>
+                    </tr>
+                </thead>
+                <tbody id="ext-services-tbody">
+                    <tr><td colspan="5" style="text-align: center; color: #666;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Outbound Endpoint Detail -->
+    <div class="card">
+        <h2>Endpoint Detail</h2>
+        <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+            <label style="font-size: 0.85rem; color: #666;">Filter service:</label>
+            <select id="ext-service-filter" style="padding: 0.3rem 0.6rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.8rem;">
+                <option value="">All Services</option>
+            </select>
+        </div>
+        <div style="overflow-x: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Service</th>
+                        <th>Endpoint / Operation</th>
+                        <th>Method</th>
+                        <th style="text-align: right;">Calls</th>
+                        <th style="text-align: right;">Avg (ms)</th>
+                        <th style="text-align: right;">Max (ms)</th>
+                        <th style="text-align: right;">Errors</th>
+                        <th style="text-align: right;">Error Rate</th>
+                    </tr>
+                </thead>
+                <tbody id="ext-endpoints-tbody">
+                    <tr><td colspan="8" style="text-align: center; color: #666;">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
 
 <div class="refresh-notice">Data refreshes every 60 seconds</div>
 
 <style>
+    .tab-selector {
+        display: flex;
+        gap: 0;
+        background: var(--esa-gray-dark);
+        padding: 3px;
+        border-radius: 6px;
+    }
+    .tab-btn {
+        padding: 0.4rem 1.2rem;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: #666;
+        transition: all 0.2s;
+    }
+    .tab-btn.active {
+        background: var(--esa-navy);
+        color: #fff;
+    }
+    .tab-btn:hover:not(.active) {
+        background: #fff;
+        color: var(--esa-navy);
+    }
+
     .period-selector {
         display: flex;
         gap: 0.25rem;
@@ -261,6 +382,20 @@
     .response-fast { background: #d4edda; color: #155724; }
     .response-medium { background: #fff3cd; color: #856404; }
     .response-slow { background: #f8d7da; color: #721c24; }
+
+    .service-badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 10px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .service-soap { background: #e8d5f5; color: #6f42c1; }
+    .service-sugarcrm { background: #d4edda; color: #155724; }
+    .service-http { background: #cce5ff; color: #004085; }
+    .service-ms_graph { background: #fff3cd; color: #856404; }
+    .service-default { background: var(--esa-gray); color: #333; }
 </style>
 {% endblock %}
 
@@ -271,6 +406,19 @@
 
     let currentPeriod = '1d';
     let currentSort = 'calls';
+    let currentTab = 'outbound';
+
+    // Tab selector
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentTab = this.dataset.tab;
+            document.getElementById('inbound-view').style.display = currentTab === 'inbound' ? '' : 'none';
+            document.getElementById('outbound-view').style.display = currentTab === 'outbound' ? '' : 'none';
+            refreshAll();
+        });
+    });
 
     // Period selector
     document.querySelectorAll('.period-btn').forEach(btn => {
@@ -290,6 +438,11 @@
             currentSort = this.dataset.sort;
             loadEndpoints();
         });
+    });
+
+    // Service filter
+    document.getElementById('ext-service-filter').addEventListener('change', function() {
+        loadExtEndpoints();
     });
 
     function escapeHtml(str) {
@@ -315,7 +468,16 @@
         return `<span class="response-badge ${cls}">${ms.toFixed(0)}</span>`;
     }
 
-    // ========= Summary =========
+    function serviceBadge(name) {
+        const n = escapeHtml(name || 'unknown');
+        const cls = {soap: 'service-soap', sugarcrm: 'service-sugarcrm', http: 'service-http', ms_graph: 'service-ms_graph'}[n] || 'service-default';
+        return `<span class="service-badge ${cls}">${n}</span>`;
+    }
+
+    // =====================================================================
+    // INBOUND
+    // =====================================================================
+
     function loadSummary() {
         fetch(`/api/statistics/summary?period=${currentPeriod}`)
             .then(r => r.json())
@@ -327,7 +489,7 @@
                 document.getElementById('error-rate').textContent =
                     data.error_rate !== undefined ? data.error_rate + '%' : '--';
 
-                renderVolumeChart(data.calls_per_day || []);
+                renderVolumeChart(data.calls_per_day || [], 'volume-chart');
             })
             .catch(err => {
                 console.error('Summary error:', err);
@@ -335,9 +497,8 @@
             });
     }
 
-    // ========= Volume Chart =========
-    function renderVolumeChart(dailyData) {
-        const container = document.getElementById('volume-chart');
+    function renderVolumeChart(dailyData, containerId) {
+        const container = document.getElementById(containerId);
 
         if (!dailyData || dailyData.length === 0) {
             container.innerHTML = '<div style="text-align: center; color: #666; padding: 2rem;">No data for this period</div>';
@@ -366,7 +527,6 @@
         container.innerHTML = `<div class="bar-chart">${bars}</div>`;
     }
 
-    // ========= Endpoints =========
     function loadEndpoints() {
         fetch(`/api/statistics/endpoints?period=${currentPeriod}&sort=${currentSort}`)
             .then(r => r.json())
@@ -410,7 +570,6 @@
             });
     }
 
-    // ========= Slow Endpoints =========
     function loadSlowEndpoints() {
         fetch(`/api/statistics/slow-endpoints?period=${currentPeriod}&min_calls=3`)
             .then(r => r.json())
@@ -439,7 +598,6 @@
             });
     }
 
-    // ========= Top Consumers =========
     function loadTopConsumers() {
         fetch(`/api/statistics/top-consumers?period=${currentPeriod}&limit=10`)
             .then(r => r.json())
@@ -468,12 +626,115 @@
             });
     }
 
-    // ========= Refresh All =========
+    // =====================================================================
+    // OUTBOUND (External APIs)
+    // =====================================================================
+
+    function loadExtSummary() {
+        fetch(`/api/statistics/external/summary?period=${currentPeriod}`)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('ext-total-calls').textContent = formatNumber(data.total_calls);
+                document.getElementById('ext-avg-response').textContent =
+                    data.avg_response_time_ms !== undefined ? data.avg_response_time_ms.toFixed(0) : '--';
+                document.getElementById('ext-error-count').textContent = formatNumber(data.error_count);
+                document.getElementById('ext-error-rate').textContent =
+                    data.error_rate !== undefined ? data.error_rate + '%' : '--';
+
+                renderVolumeChart(data.calls_per_day || [], 'ext-volume-chart');
+
+                // Render service breakdown
+                const services = data.by_service || [];
+                const stbody = document.getElementById('ext-services-tbody');
+
+                if (services.length === 0) {
+                    stbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">No data</td></tr>';
+                    return;
+                }
+
+                const maxSvcCalls = Math.max(...services.map(s => s.total_calls), 1);
+                stbody.innerHTML = services.map(s => {
+                    const barPct = (s.total_calls / maxSvcCalls * 100).toFixed(1);
+                    return `
+                        <tr>
+                            <td>${serviceBadge(s.service_name)}</td>
+                            <td style="text-align: right; font-weight: 600;">${s.total_calls.toLocaleString()}</td>
+                            <td style="text-align: right;">${responseBadge(s.avg_response_ms)}</td>
+                            <td style="text-align: right;">${s.error_count > 0 ? '<span style="color: var(--esa-red); font-weight: 600;">' + s.error_count + '</span>' : '0'}</td>
+                            <td>
+                                <div class="volume-bar-cell">
+                                    <div class="volume-bar-bg">
+                                        <div class="volume-bar-fill" style="width: ${barPct}%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+                // Update service filter dropdown
+                const filterEl = document.getElementById('ext-service-filter');
+                const currentFilter = filterEl.value;
+                filterEl.innerHTML = '<option value="">All Services</option>' +
+                    services.map(s => `<option value="${escapeHtml(s.service_name)}">${escapeHtml(s.service_name)}</option>`).join('');
+                filterEl.value = currentFilter;
+            })
+            .catch(err => {
+                console.error('Ext summary error:', err);
+                document.getElementById('ext-total-calls').textContent = 'ERR';
+            });
+    }
+
+    function loadExtEndpoints() {
+        const serviceFilter = document.getElementById('ext-service-filter').value;
+        let url = `/api/statistics/external/services?period=${currentPeriod}`;
+        if (serviceFilter) url += `&service=${encodeURIComponent(serviceFilter)}`;
+
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                const tbody = document.getElementById('ext-endpoints-tbody');
+                const endpoints = data.endpoints || [];
+
+                if (endpoints.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #666;">No data for this period</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = endpoints.map(e => `
+                    <tr>
+                        <td>${serviceBadge(e.service_name)}</td>
+                        <td><code style="font-size: 0.8rem;">${escapeHtml(e.endpoint)}</code></td>
+                        <td><span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">${escapeHtml(e.method)}</span></td>
+                        <td style="text-align: right; font-weight: 600;">${e.total_calls.toLocaleString()}</td>
+                        <td style="text-align: right;">${responseBadge(e.avg_response_ms)}</td>
+                        <td style="text-align: right;">${responseBadge(e.max_response_ms)}</td>
+                        <td style="text-align: right;">${e.error_count > 0 ? '<span style="color: var(--esa-red); font-weight: 600;">' + e.error_count + '</span>' : '0'}</td>
+                        <td style="text-align: right;">${e.error_rate > 0 ? '<span style="color: var(--esa-red);">' + e.error_rate + '%</span>' : '0%'}</td>
+                    </tr>
+                `).join('');
+            })
+            .catch(err => {
+                console.error('Ext endpoints error:', err);
+                document.getElementById('ext-endpoints-tbody').innerHTML =
+                    '<tr><td colspan="8" style="text-align: center; color: var(--esa-red);">Error loading data</td></tr>';
+            });
+    }
+
+    // =====================================================================
+    // Refresh
+    // =====================================================================
+
     function refreshAll() {
-        loadSummary();
-        loadEndpoints();
-        loadSlowEndpoints();
-        loadTopConsumers();
+        if (currentTab === 'inbound') {
+            loadSummary();
+            loadEndpoints();
+            loadSlowEndpoints();
+            loadTopConsumers();
+        } else {
+            loadExtSummary();
+            loadExtEndpoints();
+        }
     }
 
     // Initial load

@@ -9,6 +9,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from common.outbound_stats import track_outbound_api
+
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,10 @@ class HTTPClient:
 
         return session
 
+    @track_outbound_api(
+        service_name="http",
+        endpoint_extractor=lambda args, kwargs: kwargs.get('url', args[2] if len(args) > 2 else 'unknown')
+    )
     def request(
         self,
         method: str,

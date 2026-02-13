@@ -36,6 +36,8 @@ import time
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from common.outbound_stats import track_outbound_api
+
 
 class SOAPFaultError(Exception):
     """Exception raised when a SOAP fault is encountered."""
@@ -105,6 +107,10 @@ class SOAPClient:
 
         return session
 
+    @track_outbound_api(
+        service_name="soap",
+        endpoint_extractor=lambda args, kwargs: kwargs.get('operation', args[1] if len(args) > 1 else 'unknown')
+    )
     def call(
         self,
         operation: str,
@@ -274,6 +280,7 @@ class SOAPClient:
 
         return results
 
+    @track_outbound_api(service_name="soap", endpoint_extractor=lambda args, kwargs: "ManagementSummary")
     def call_management_summary(
         self,
         parameters: Dict[str, Any],

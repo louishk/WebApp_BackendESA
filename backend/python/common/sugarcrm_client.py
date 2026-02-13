@@ -22,6 +22,8 @@ from datetime import datetime, timedelta
 
 import requests
 
+from common.outbound_stats import track_outbound_api
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,6 +122,7 @@ class SugarCRMClient:
     # Authentication
     # =========================================================================
 
+    @track_outbound_api(service_name="sugarcrm", endpoint_extractor=lambda args, kwargs: "oauth2/token")
     def authenticate(self) -> bool:
         """
         Authenticate with SugarCRM using OAuth2 password grant.
@@ -236,6 +239,10 @@ class SugarCRMClient:
     # Core Request Methods
     # =========================================================================
 
+    @track_outbound_api(
+        service_name="sugarcrm",
+        endpoint_extractor=lambda args, kwargs: kwargs.get('endpoint', args[2] if len(args) > 2 else 'unknown')
+    )
     def _request(
         self,
         method: str,

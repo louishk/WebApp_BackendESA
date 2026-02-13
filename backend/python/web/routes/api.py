@@ -2187,3 +2187,138 @@ def api_statistics_slow_endpoints():
         })
     finally:
         session.close()
+
+
+# =============================================================================
+# External API Statistics - Outbound Call Monitoring
+# =============================================================================
+
+@api_bp.route('/statistics/external/summary')
+@require_auth
+@rate_limit_api(max_requests=30, window_seconds=60)
+@cached(ttl_seconds=30)
+def api_ext_statistics_summary():
+    """
+    Outbound API call summary.
+    Query params: period (1d, 7d, 30d, 90d)
+    """
+    from web.models.external_api_statistic import ExternalApiStatistic
+
+    period = request.args.get('period', '7d')
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        base = session.query(ExternalApiStatistic).filter(
+            ExternalApiStatistic.called_at >= since
+        )
+        total = base.count()
+        avg_ms = session.query(
+            func.avg(ExternalApiStatistic.response_time_ms)
+        ).filter(ExternalApiStatistic.called_at >= since).scalar() or 0
+        error_count = base.filter(ExternalApiStatistic.success == False).count()
+
+        by_service = session.query(
+            ExternalApiStatistic.service_name,
+            func.count(ExternalApiStatistic.id).label('count'),
+            func.avg(ExternalApiStatistic.response_time_ms).label('avg_ms'),
+            func.sum(case((ExternalApiStatistic.success == False, 1), else_=0)).label('errors'),
+        ).filter(
+            ExternalApiStatistic.called_at >= since
+        ).group_by(ExternalApiStatistic.service_name).all()
+
+        daily = session.query(
+            func.date_trunc('day', ExternalApiStatistic.called_at).label('day'),
+            func.count(ExternalApiStatistic.id).label('count'),
+        ).filter(
+            ExternalApiStatistic.called_at >= since
+        ).group_by('day').order_by('day').all()
+
+        return jsonify({
+            'period': period,
+            'since': since.isoformat(),
+            'total_calls': total,
+            'avg_response_time_ms': round(float(avg_ms), 2),
+            'error_count': error_count,
+            'error_rate': round(error_count / total * 100, 2) if total > 0 else 0,
+            'by_service': [
+                {
+                    'service_name': s.service_name,
+                    'total_calls': s.count,
+                    'avg_response_ms': round(float(s.avg_ms or 0), 2),
+                    'error_count': int(s.errors or 0),
+                }
+                for s in by_service
+            ],
+            'calls_per_day': [
+                {'date': d.day.isoformat() if d.day else None, 'count': d.count}
+                for d in daily
+            ],
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/statistics/external/services')
+@require_auth
+@rate_limit_api(max_requests=30, window_seconds=60)
+@cached(ttl_seconds=30)
+def api_ext_statistics_services():
+    """
+    Per-service/endpoint breakdown of outbound API calls.
+    Query params:
+        period: 1d, 7d, 30d, 90d (default 7d)
+        service: filter to specific service (optional)
+    """
+    from web.models.external_api_statistic import ExternalApiStatistic
+
+    period = request.args.get('period', '7d')
+    service = request.args.get('service')
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        query = session.query(
+            ExternalApiStatistic.service_name,
+            ExternalApiStatistic.endpoint,
+            ExternalApiStatistic.method,
+            func.count(ExternalApiStatistic.id).label('total_calls'),
+            func.avg(ExternalApiStatistic.response_time_ms).label('avg_ms'),
+            func.max(ExternalApiStatistic.response_time_ms).label('max_ms'),
+            func.sum(case((ExternalApiStatistic.success == False, 1), else_=0)).label('errors'),
+        ).filter(
+            ExternalApiStatistic.called_at >= since
+        )
+
+        if service:
+            query = query.filter(ExternalApiStatistic.service_name == service)
+
+        query = query.group_by(
+            ExternalApiStatistic.service_name,
+            ExternalApiStatistic.endpoint,
+            ExternalApiStatistic.method,
+        ).order_by(func.count(ExternalApiStatistic.id).desc())
+
+        results = query.all()
+
+        return jsonify({
+            'period': period,
+            'service_filter': service,
+            'endpoints': [
+                {
+                    'service_name': r.service_name,
+                    'endpoint': r.endpoint,
+                    'method': r.method,
+                    'total_calls': r.total_calls,
+                    'avg_response_ms': round(float(r.avg_ms or 0), 2),
+                    'max_response_ms': round(float(r.max_ms or 0), 2),
+                    'error_count': int(r.errors or 0),
+                    'error_rate': round(int(r.errors or 0) / r.total_calls * 100, 2) if r.total_calls > 0 else 0,
+                }
+                for r in results
+            ],
+        })
+    finally:
+        session.close()

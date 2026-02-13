@@ -124,6 +124,10 @@ def create_app(config=None, db_url=None):
     from web.utils.api_stats import init_api_stats
     init_api_stats(app)
 
+    # Initialize outbound (external) API statistics tracking
+    from common.outbound_stats import init_outbound_stats
+    init_outbound_stats(app)
+
     # Add security headers and prevent caching of API responses
     @app.after_request
     def add_security_headers(response):
