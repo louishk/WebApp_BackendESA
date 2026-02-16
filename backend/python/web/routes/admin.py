@@ -107,6 +107,7 @@ def create_role():
                 can_manage_configs=request.form.get('can_manage_configs') == 'on',
                 can_access_ecri=request.form.get('can_access_ecri') == 'on',
                 can_manage_ecri=request.form.get('can_manage_ecri') == 'on',
+                can_access_statistics=request.form.get('can_access_statistics') == 'on',
                 is_system=False
             )
             db_session.add(role)
@@ -150,6 +151,7 @@ def edit_role(role_id):
             role.can_manage_configs = request.form.get('can_manage_configs') == 'on'
             role.can_access_ecri = request.form.get('can_access_ecri') == 'on'
             role.can_manage_ecri = request.form.get('can_manage_ecri') == 'on'
+            role.can_access_statistics = request.form.get('can_access_statistics') == 'on'
 
             db_session.commit()
             audit_log(AuditEvent.ROLE_UPDATED, f"Updated role '{role.name}' (id={role_id}), permissions: {role.get_permissions_list()}")

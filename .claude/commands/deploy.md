@@ -38,17 +38,27 @@ Ask the user: **"Push successful. Do you want to deploy to the VM now?"**
 
 ## Step 4: Deploy to VM
 
-SSH into the production VM and run the update script. Connection details are in `.env`:
-- Host: `VM_SSH_HOST`
-- Port: `VM_SSH_PORT`
-- User: `VM_SSH_ROOT_USERNAME`
-- Password: `VM_SSH_PASSWORD`
+SSH into the production VM using key-based authentication and run the update script.
 
-Read the `.env` file to get the actual values, then execute:
+Connection details:
+- Host: `57.158.27.35`
+- Port: `22`
+- User: `esa_pbi_admin`
+- SSH key: `~/.ssh/id_ed25519_vm`
+- Password (for sudo only): read `VM_SSH_PASSWORD` from `.env`
+
+Execute in a **single command**:
 
 ```
-sshpass -p '<password>' ssh -o StrictHostKeyChecking=no -p <port> <user>@<host> 'bash /update.sh'
+ssh -i ~/.ssh/id_ed25519_vm -o StrictHostKeyChecking=no esa_pbi_admin@57.158.27.35 'sed -i "s/\r$//" /tmp/update.sh && echo <VM_SSH_PASSWORD> | sudo -S bash /tmp/update.sh'
 ```
+
+Key details:
+- Uses SSH key auth (no `sshpass` needed)
+- The update script is at `/tmp/update.sh` (NOT `/update.sh`)
+- Fix Windows line endings with `sed` before running
+- The script requires `sudo` — read `VM_SSH_PASSWORD` from `.env` and pipe via `echo <password> | sudo -S`
+- Do this all in one SSH command to avoid multiple round trips
 
 Report the deployment output to the user.
 

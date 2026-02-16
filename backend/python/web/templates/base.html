@@ -285,6 +285,8 @@
                 <a href="{{ url_for('main.pages_list') }}" class="{{ 'active' if request.endpoint == 'main.pages_list' or request.endpoint == 'main.serve_page' or (request.endpoint and 'admin' in request.endpoint and 'page' in request.endpoint) else '' }}">Pages</a>
                 {% if current_user.can_access_scheduler() %}
                     <a href="{{ url_for('scheduler.dashboard') }}" class="{{ 'active' if request.endpoint and 'scheduler' in request.endpoint else '' }}">Scheduler</a>
+                {% endif %}
+                {% if current_user.can_access_statistics() %}
                     <a href="{{ url_for('statistics.dashboard') }}" class="{{ 'active' if request.endpoint and 'statistics' in request.endpoint else '' }}">Statistics</a>
                 {% endif %}
                 {% if current_user.can_access_billing_tools() %}

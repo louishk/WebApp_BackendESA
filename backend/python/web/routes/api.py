@@ -1900,6 +1900,59 @@ def api_inventory_upsert_overrides():
 # API Statistics - Consumption Monitoring
 # =============================================================================
 
+
+def _build_volume_timeline(period, db_rows):
+    """
+    Build a full timeline with all expected time slots for the given period.
+    Fills gaps with count=0. All timestamps in Asia/Singapore.
+
+    Args:
+        period: '1d', '7d', '30d', '90d'
+        db_rows: list of (bucket_datetime, count) from DB query
+
+    Returns:
+        (time_unit, list of {'date': iso_str, 'count': int})
+    """
+    now_sg = datetime.now(SGT)
+
+    if period == '1d':
+        unit = 'hour'
+        # Start from the current hour, go back 24 hours
+        current_hour = now_sg.replace(minute=0, second=0, microsecond=0)
+        slots = [current_hour - timedelta(hours=i) for i in range(24)]
+        slots.reverse()
+    else:
+        unit = 'day'
+        days_count = {'7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+        current_day = now_sg.replace(hour=0, minute=0, second=0, microsecond=0)
+        slots = [current_day - timedelta(days=i) for i in range(days_count)]
+        slots.reverse()
+
+    # Index DB rows by their bucket (already in SGT from the query)
+    data_map = {}
+    for row in db_rows:
+        if row.bucket:
+            b = row.bucket
+            # DB returns naive SGT (via double timezone conversion)
+            if b.tzinfo is not None:
+                b = b.replace(tzinfo=None)
+            if unit == 'hour':
+                key = b.replace(minute=0, second=0, microsecond=0)
+            else:
+                key = b.replace(hour=0, minute=0, second=0, microsecond=0)
+            data_map[key] = row.count
+
+    # Merge
+    result = []
+    for slot in slots:
+        key = slot.replace(tzinfo=None)
+        result.append({
+            'date': slot.isoformat(),
+            'count': data_map.get(key, 0),
+        })
+
+    return unit, result
+
 @api_bp.route('/statistics/summary')
 @require_auth
 @rate_limit_api(max_requests=30, window_seconds=60)
@@ -1928,13 +1981,17 @@ def api_statistics_summary():
 
         error_count = base.filter(ApiStatistic.status_code >= 400).count()
 
-        # Calls per day
-        daily = session.query(
-            func.date_trunc('day', ApiStatistic.called_at).label('day'),
+        # Calls per time bucket in SGT (hourly for 24h, daily otherwise)
+        trunc_unit = 'hour' if period == '1d' else 'day'
+        sgt_time = func.timezone('Asia/Singapore', func.timezone('UTC', ApiStatistic.called_at))
+        volume = session.query(
+            func.date_trunc(trunc_unit, sgt_time).label('bucket'),
             func.count(ApiStatistic.id).label('count')
         ).filter(
             ApiStatistic.called_at >= since
-        ).group_by('day').order_by('day').all()
+        ).group_by('bucket').order_by('bucket').all()
+
+        time_unit, timeline = _build_volume_timeline(period, volume)
 
         return jsonify({
             'period': period,
@@ -1943,10 +2000,8 @@ def api_statistics_summary():
             'avg_response_time_ms': round(float(avg_response), 2),
             'error_count': error_count,
             'error_rate': round(error_count / total_calls * 100, 2) if total_calls > 0 else 0,
-            'calls_per_day': [
-                {'date': d.day.isoformat() if d.day else None, 'count': d.count}
-                for d in daily
-            ],
+            'time_unit': time_unit,
+            'calls_per_day': timeline,
         })
     finally:
         session.close()
@@ -2228,12 +2283,16 @@ def api_ext_statistics_summary():
             ExternalApiStatistic.called_at >= since
         ).group_by(ExternalApiStatistic.service_name).all()
 
-        daily = session.query(
-            func.date_trunc('day', ExternalApiStatistic.called_at).label('day'),
+        trunc_unit = 'hour' if period == '1d' else 'day'
+        sgt_time = func.timezone('Asia/Singapore', func.timezone('UTC', ExternalApiStatistic.called_at))
+        volume = session.query(
+            func.date_trunc(trunc_unit, sgt_time).label('bucket'),
             func.count(ExternalApiStatistic.id).label('count'),
         ).filter(
             ExternalApiStatistic.called_at >= since
-        ).group_by('day').order_by('day').all()
+        ).group_by('bucket').order_by('bucket').all()
+
+        time_unit, timeline = _build_volume_timeline(period, volume)
 
         return jsonify({
             'period': period,
@@ -2242,6 +2301,7 @@ def api_ext_statistics_summary():
             'avg_response_time_ms': round(float(avg_ms), 2),
             'error_count': error_count,
             'error_rate': round(error_count / total * 100, 2) if total > 0 else 0,
+            'time_unit': time_unit,
             'by_service': [
                 {
                     'service_name': s.service_name,
@@ -2251,10 +2311,7 @@ def api_ext_statistics_summary():
                 }
                 for s in by_service
             ],
-            'calls_per_day': [
-                {'date': d.day.isoformat() if d.day else None, 'count': d.count}
-                for d in daily
-            ],
+            'calls_per_day': timeline,
         })
     finally:
         session.close()

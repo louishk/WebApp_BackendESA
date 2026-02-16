@@ -290,17 +290,48 @@
     }
 
     .chart-container {
-        height: 200px;
+        height: 220px;
         position: relative;
     }
 
+    .chart-wrapper {
+        display: flex;
+        height: 100%;
+    }
+
+    .y-axis {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        align-items: flex-end;
+        padding: 0 8px 24px 0;
+        min-width: 36px;
+    }
+
+    .y-tick {
+        font-size: 0.65rem;
+        color: #999;
+        line-height: 1;
+    }
+
     .bar-chart {
+        flex: 1;
         display: flex;
         align-items: flex-end;
-        gap: 2px;
+        gap: 1px;
         height: 100%;
         padding: 0 0 24px 0;
         position: relative;
+        border-left: 1px solid #e5e7eb;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    .chart-gridline {
+        position: absolute;
+        left: 0;
+        right: 0;
+        border-top: 1px dashed #eee;
+        pointer-events: none;
     }
 
     .bar-col {
@@ -315,10 +346,10 @@
 
     .bar {
         width: 100%;
-        max-width: 40px;
+        max-width: 36px;
         background: var(--esa-navy);
         border-radius: 3px 3px 0 0;
-        min-height: 2px;
+        min-height: 0;
         transition: height 0.3s;
         cursor: default;
         position: relative;
@@ -328,8 +359,16 @@
         background: var(--esa-red);
     }
 
+    .bar-data-label {
+        font-size: 0.6rem;
+        color: #555;
+        font-weight: 600;
+        margin-bottom: 2px;
+        white-space: nowrap;
+    }
+
     .bar-label {
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         color: #999;
         margin-top: 4px;
         white-space: nowrap;
@@ -340,7 +379,7 @@
     .bar-tooltip {
         display: none;
         position: absolute;
-        bottom: calc(100% + 6px);
+        bottom: calc(100% + 20px);
         left: 50%;
         transform: translateX(-50%);
         background: var(--esa-navy-dark);
@@ -489,7 +528,7 @@
                 document.getElementById('error-rate').textContent =
                     data.error_rate !== undefined ? data.error_rate + '%' : '--';
 
-                renderVolumeChart(data.calls_per_day || [], 'volume-chart');
+                renderVolumeChart(data.calls_per_day || [], 'volume-chart', data.time_unit);
             })
             .catch(err => {
                 console.error('Summary error:', err);
@@ -497,8 +536,9 @@
             });
     }
 
-    function renderVolumeChart(dailyData, containerId) {
+    function renderVolumeChart(dailyData, containerId, timeUnit) {
         const container = document.getElementById(containerId);
+        const isHourly = timeUnit === 'hour';
 
         if (!dailyData || dailyData.length === 0) {
             container.innerHTML = '<div style="text-align: center; color: #666; padding: 2rem;">No data for this period</div>';
@@ -507,24 +547,69 @@
 
         const maxCount = Math.max(...dailyData.map(d => d.count), 1);
 
-        const bars = dailyData.map(d => {
-            const pct = (d.count / maxCount * 100).toFixed(1);
+        // Build nice Y-axis ticks (0, mid, max) with rounded values
+        const niceMax = maxCount <= 5 ? maxCount : Math.ceil(maxCount / 5) * 5;
+        const midVal = Math.round(niceMax / 2);
+        const yTicks = `
+            <div class="y-tick">${formatNumber(niceMax)}</div>
+            <div class="y-tick">${formatNumber(midVal)}</div>
+            <div class="y-tick">0</div>
+        `;
+
+        // Gridlines at 50% and 100% from bottom (inside bar-chart, positioned via bottom%)
+        const gridlines = `
+            <div class="chart-gridline" style="bottom: calc(50% + 24px);"></div>
+            <div class="chart-gridline" style="bottom: calc(100% + 24px);"></div>
+        `;
+
+        // Show every Nth label to avoid overlap
+        const totalBars = dailyData.length;
+        let labelEvery = 1;
+        if (isHourly) {
+            labelEvery = totalBars > 12 ? 3 : (totalBars > 6 ? 2 : 1);
+        } else {
+            labelEvery = totalBars > 14 ? 4 : (totalBars > 7 ? 2 : 1);
+        }
+
+        const bars = dailyData.map((d, i) => {
+            const pct = (d.count / niceMax * 100).toFixed(1);
             const dateObj = new Date(d.date);
-            const label = dateObj.toLocaleDateString('en-SG', {
-                timeZone: 'Asia/Singapore', month: 'short', day: 'numeric'
-            });
+            let label, tooltip;
+
+            if (isHourly) {
+                label = dateObj.toLocaleTimeString('en-SG', {
+                    timeZone: 'Asia/Singapore', hour: '2-digit', minute: '2-digit', hour12: false
+                });
+                tooltip = dateObj.toLocaleDateString('en-SG', {
+                    timeZone: 'Asia/Singapore', month: 'short', day: 'numeric'
+                }) + ' ' + label;
+            } else {
+                label = dateObj.toLocaleDateString('en-SG', {
+                    timeZone: 'Asia/Singapore', month: 'short', day: 'numeric'
+                });
+                tooltip = label;
+            }
+
+            const showLabel = (i % labelEvery === 0) || i === totalBars - 1;
+            const dataLabel = d.count > 0 ? `<div class="bar-data-label">${d.count}</div>` : '';
 
             return `
                 <div class="bar-col">
+                    ${dataLabel}
                     <div class="bar" style="height: ${pct}%;">
-                        <div class="bar-tooltip">${label}: ${d.count.toLocaleString()} calls</div>
+                        <div class="bar-tooltip">${tooltip}: ${d.count.toLocaleString()} calls</div>
                     </div>
-                    <div class="bar-label">${label}</div>
+                    ${showLabel ? `<div class="bar-label">${label}</div>` : ''}
                 </div>
             `;
         }).join('');
 
-        container.innerHTML = `<div class="bar-chart">${bars}</div>`;
+        container.innerHTML = `
+            <div class="chart-wrapper">
+                <div class="y-axis">${yTicks}</div>
+                <div class="bar-chart">${gridlines}${bars}</div>
+            </div>
+        `;
     }
 
     function loadEndpoints() {
@@ -641,7 +726,7 @@
                 document.getElementById('ext-error-rate').textContent =
                     data.error_rate !== undefined ? data.error_rate + '%' : '--';
 
-                renderVolumeChart(data.calls_per_day || [], 'ext-volume-chart');
+                renderVolumeChart(data.calls_per_day || [], 'ext-volume-chart', data.time_unit);
 
                 // Render service breakdown
                 const services = data.by_service || [];

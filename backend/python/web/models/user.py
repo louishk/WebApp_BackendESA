@@ -82,6 +82,10 @@ class User(Base, UserMixin):
         """Check if user can create batches and execute ECRI pushes."""
         return any(r.can_manage_ecri for r in self.roles)
 
+    def can_access_statistics(self):
+        """Check if user can access API statistics dashboard."""
+        return any(r.can_access_statistics for r in self.roles)
+
     def has_role(self, role_names):
         """Check if user has one of the specified role names."""
         if isinstance(role_names, str):

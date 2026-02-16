@@ -126,3 +126,8 @@ def ecri_access_required(f):
 def ecri_manage_required(f):
     """Decorator to require ECRI management permission."""
     return require_permission('can_manage_ecri')(f)
+
+
+def statistics_access_required(f):
+    """Decorator to require statistics access permission."""
+    return require_permission('can_access_statistics')(f)
