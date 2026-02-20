@@ -48,6 +48,8 @@ from common import (
     deduplicate_records,
     # Current month delete utility
     delete_current_month_records,
+    # Closed month cleanup utility
+    delete_non_eom_records,
 )
 from common.config import get_pipeline_config
 
@@ -190,6 +192,11 @@ def push_to_database(
         if status == "current":
             deleted = delete_current_month_records(session, Discount, year, month)
             tqdm.write(f"  v Deleted {deleted} previous current-month records")
+        elif status == "closed":
+            # Clean up stale non-EOM records left over from when this month was 'current'
+            cleaned = delete_non_eom_records(session, Discount, year, month)
+            if cleaned > 0:
+                tqdm.write(f"  v Cleaned {cleaned} stale non-EOM records for {year}-{month:02d}")
 
         upsert_ops = UpsertOperations(session, db_config.db_type)
 

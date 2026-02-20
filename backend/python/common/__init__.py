@@ -75,6 +75,7 @@ from .upsert_strategies import (
     MariaDBUpsertStrategy,
     AzureSQLUpsertStrategy,
     delete_current_month_records,
+    delete_non_eom_records,
 )
 
 # HTTP client
@@ -171,6 +172,7 @@ __all__ = [
     'MariaDBUpsertStrategy',
     'AzureSQLUpsertStrategy',
     'delete_current_month_records',
+    'delete_non_eom_records',
 
     # HTTP & Cache
     'HTTPClient',

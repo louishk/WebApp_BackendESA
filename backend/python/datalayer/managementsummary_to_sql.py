@@ -79,6 +79,9 @@ from common import (
     convert_to_int,
     convert_to_decimal,
     convert_to_datetime,
+    # Month cleanup utilities
+    delete_current_month_records,
+    delete_non_eom_records,
 )
 
 
@@ -630,7 +633,10 @@ def fetch_management_summary_data(
 
 def push_to_database(
     all_tables: Dict[str, List[Dict[str, Any]]],
-    config: DataLayerConfig
+    config: DataLayerConfig,
+    year: int = None,
+    month: int = None,
+    status: str = None
 ) -> Dict[str, int]:
     """Push all management summary tables to PostgreSQL database."""
     record_counts = {}
@@ -652,6 +658,19 @@ def push_to_database(
     chunk_size = env_config('MANAGEMENTSUMMARY_SQL_CHUNK_SIZE', default=500, cast=int)
 
     with session_manager.session_scope() as session:
+        # Handle month cleanup based on status
+        if year is not None and month is not None and status is not None:
+            for table_name, model_cfg in MODEL_CONFIG.items():
+                model = model_cfg['model']
+                if status == "current":
+                    deleted = delete_current_month_records(session, model, year, month)
+                    if deleted > 0:
+                        tqdm.write(f"  ✓ Deleted {deleted} previous current-month records from {table_name}")
+                elif status == "closed":
+                    cleaned = delete_non_eom_records(session, model, year, month)
+                    if cleaned > 0:
+                        tqdm.write(f"  ✓ Cleaned {cleaned} stale non-EOM records from {table_name} for {year}-{month:02d}")
+
         upsert_ops = UpsertOperations(session, db_config.db_type)
 
         for table_name, records in all_tables.items():
@@ -807,7 +826,7 @@ def main():
         # Push to database
         total_table_records = sum(len(records) for records in all_tables.values())
         if total_table_records > 0:
-            record_counts = push_to_database(all_tables, config)
+            record_counts = push_to_database(all_tables, config, year, month, status)
             total_records += sum(record_counts.values())
         else:
             print(f"  ⚠ No data found for {first_day.strftime('%b %Y')}")

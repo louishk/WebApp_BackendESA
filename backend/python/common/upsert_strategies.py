@@ -258,6 +258,52 @@ class UpsertFactory:
         return strategy
 
 
+def delete_non_eom_records(
+    session: Session,
+    model: Type,
+    year: int,
+    month: int
+) -> int:
+    """
+    Delete stale non-EOM records for a closed month.
+
+    When a month transitions from 'current' to 'closed', there may be
+    leftover records with an extract_date that is NOT the last day of
+    the month (e.g. extract_date = Jan 30 from the last 'current' run).
+    These cause double-counting alongside the proper EOM records.
+
+    Only deletes records where extract_date falls within the month but
+    is NOT the last day - preserving the actual EOM snapshot.
+
+    Args:
+        session: SQLAlchemy session
+        model: SQLAlchemy model class (RentRoll, Discount, etc.)
+        year: Target year
+        month: Target month (1-12)
+
+    Returns:
+        Number of deleted stale records
+    """
+    from .date_utils import get_first_day_of_month, get_last_day_of_month
+
+    first_day = get_first_day_of_month(year, month)
+    last_day = get_last_day_of_month(year, month)
+
+    # Delete records within the month that are NOT the EOM date
+    deleted = session.query(model).filter(
+        model.extract_date >= first_day,
+        model.extract_date < last_day  # strictly less than last day
+    ).delete(synchronize_session=False)
+
+    if deleted > 0:
+        logger.info(
+            f"Cleaned up {deleted} non-EOM records from {model.__tablename__} "
+            f"for {year}-{month:02d} (kept only {last_day})"
+        )
+
+    return deleted
+
+
 def delete_current_month_records(
     session: Session,
     model: Type,
