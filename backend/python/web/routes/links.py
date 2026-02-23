@@ -10,7 +10,7 @@ import hashlib
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
-from flask import Blueprint, jsonify, request, redirect, current_app, g
+from flask import Blueprint, jsonify, request, redirect, render_template, current_app, g
 from sqlalchemy import desc, func, case
 
 from web.auth.jwt_auth import require_auth
@@ -162,12 +162,87 @@ def _get_username():
 # Public: Redirect endpoint (no auth required)
 # =============================================================================
 
+def _find_deep_link_rule(session, original_url):
+    """
+    Find a matching app link rule for the given URL's domain.
+    Returns the best-matching AppLinkRule or None.
+    """
+    from web.models.app_link_rule import AppLinkRule
+
+    try:
+        parsed = urlparse(original_url)
+        domain = parsed.netloc.lower().lstrip('www.')
+    except Exception:
+        return None
+
+    # Try exact domain match first, then progressively broader matches
+    # e.g. for "m.youtube.com" try: "m.youtube.com", "youtube.com"
+    domain_parts = domain.split('.')
+    candidates = []
+    for i in range(len(domain_parts) - 1):
+        candidates.append('.'.join(domain_parts[i:]))
+
+    for candidate in candidates:
+        rule = session.query(AppLinkRule).filter_by(
+            domain_pattern=candidate,
+            is_active=True,
+        ).order_by(desc(AppLinkRule.priority)).first()
+        if rule:
+            return rule
+
+    return None
+
+
+def _build_app_scheme_url(rule, original_url, os_name):
+    """
+    Build the appropriate native app URI for the given rule and platform.
+    For Android, replaces the placeholder domain in intent:// URLs with the actual path.
+    For iOS, appends the URL path to the scheme.
+    """
+    parsed = urlparse(original_url)
+    path_and_query = parsed.path
+    if parsed.query:
+        path_and_query += '?' + parsed.query
+    if parsed.fragment:
+        path_and_query += '#' + parsed.fragment
+
+    if os_name == 'iOS' and rule.ios_scheme:
+        # Most iOS apps handle scheme://path format
+        scheme = rule.ios_scheme.rstrip('/')
+        return scheme + path_and_query if path_and_query != '/' else scheme + '/'
+
+    if os_name == 'Android' and rule.android_scheme:
+        # Android intents: replace the placeholder domain with the actual URL
+        if rule.android_scheme.startswith('intent://'):
+            # Build a proper intent URL with the full original URL
+            domain = parsed.netloc
+            return (
+                f"intent://{domain}{path_and_query}"
+                f"#Intent;scheme=https;"
+                f"package={_extract_package(rule.android_scheme)};"
+                f"S.browser_fallback_url={original_url};"
+                f"end"
+            )
+        return rule.android_scheme
+
+    return None
+
+
+def _extract_package(intent_url):
+    """Extract the Android package name from an intent:// URL."""
+    if 'package=' in intent_url:
+        start = intent_url.index('package=') + 8
+        end = intent_url.index(';', start)
+        return intent_url[start:end]
+    return ''
+
+
 @links_bp.route('/s/<short_code>')
 def redirect_short_link(short_code):
     """
     Redirect a short link to its original URL.
-    Tracks the click asynchronously.
-    This is the public-facing endpoint - no authentication required.
+    Tracks the click. If deep linking is enabled and the visitor is on a mobile
+    device, serves a smart redirect page that tries to open the native app first.
     """
     from web.models.short_link import ShortLink, LinkClick
 
@@ -227,6 +302,26 @@ def redirect_short_link(short_code):
 
         session.commit()
 
+        # Deep linking: if enabled and visitor is on mobile, try native app
+        if link.deep_link_enabled and device in ('mobile', 'tablet'):
+            rule = _find_deep_link_rule(session, original_url)
+            if rule:
+                app_scheme = _build_app_scheme_url(rule, original_url, os_name)
+                store_url = None
+                if os_name == 'iOS':
+                    store_url = rule.ios_app_store_url
+                elif os_name == 'Android':
+                    store_url = rule.android_play_store_url
+
+                if app_scheme:
+                    return render_template(
+                        'deep_link_redirect.html',
+                        app_name=rule.name,
+                        app_scheme=app_scheme,
+                        fallback_url=original_url,
+                        store_url=store_url,
+                    )
+
         return redirect(original_url, code=302)
 
     except Exception as e:
@@ -256,6 +351,7 @@ def create_link():
         expires_at (optional): ISO 8601 expiry datetime
         password (optional): Password to protect the link
         max_clicks (optional): Maximum number of clicks before link deactivates
+        deep_link_enabled (optional): Enable smart app redirect for mobile (default false)
     """
     from web.models.short_link import ShortLink
 
@@ -334,6 +430,8 @@ def create_link():
             except (ValueError, TypeError):
                 return jsonify({'error': 'max_clicks must be an integer'}), 400
 
+        deep_link_enabled = bool(data.get('deep_link_enabled', False))
+
         link = ShortLink(
             short_code=short_code,
             original_url=url,
@@ -342,6 +440,7 @@ def create_link():
             expires_at=expires_at,
             password_hash=password_hash,
             max_clicks=max_clicks,
+            deep_link_enabled=deep_link_enabled,
             created_by=_get_username(),
         )
         session.add(link)
@@ -474,7 +573,7 @@ def update_link(link_id):
     """
     Update a shortened link.
 
-    Updatable fields: title, tags, is_active, expires_at, password, max_clicks, original_url
+    Updatable fields: title, tags, is_active, expires_at, password, max_clicks, original_url, deep_link_enabled
     """
     from web.models.short_link import ShortLink
 
@@ -542,6 +641,9 @@ def update_link(link_id):
                         return jsonify({'error': 'max_clicks must be at least 1'}), 400
                 except (ValueError, TypeError):
                     return jsonify({'error': 'max_clicks must be an integer'}), 400
+
+        if 'deep_link_enabled' in data:
+            link.deep_link_enabled = bool(data['deep_link_enabled'])
 
         link.updated_at = datetime.utcnow()
         session.commit()
@@ -992,6 +1094,337 @@ def get_link_qr(link_id):
             'short_code': link.short_code,
             'short_url': short_url,
             'title': link.title,
+        })
+    finally:
+        session.close()
+
+
+# =============================================================================
+# API: Deep Link Preview - check if a URL has a matching app rule
+# =============================================================================
+
+@links_bp.route('/api/links/<int:link_id>/deeplink', methods=['GET'])
+@require_auth
+def get_link_deeplink_info(link_id):
+    """
+    Get deep link information for a specific link.
+    Shows whether a matching app rule exists and what the native app URIs would be.
+    """
+    from web.models.short_link import ShortLink
+
+    session = get_session()
+    try:
+        link = session.query(ShortLink).filter_by(id=link_id).first()
+        if not link:
+            return jsonify({'error': 'Link not found'}), 404
+
+        rule = _find_deep_link_rule(session, link.original_url)
+
+        result = {
+            'link_id': link_id,
+            'short_code': link.short_code,
+            'deep_link_enabled': link.deep_link_enabled,
+            'has_matching_rule': rule is not None,
+        }
+
+        if rule:
+            ios_scheme = _build_app_scheme_url(rule, link.original_url, 'iOS')
+            android_scheme = _build_app_scheme_url(rule, link.original_url, 'Android')
+            result['rule'] = {
+                'id': rule.id,
+                'name': rule.name,
+                'domain_pattern': rule.domain_pattern,
+                'ios_scheme': ios_scheme,
+                'ios_app_store_url': rule.ios_app_store_url,
+                'android_scheme': android_scheme,
+                'android_play_store_url': rule.android_play_store_url,
+            }
+
+        return jsonify(result)
+    finally:
+        session.close()
+
+
+# =============================================================================
+# API: App Link Rules Management (auth required)
+# =============================================================================
+
+def _validate_rule_data(data, session, exclude_id=None):
+    """Validate app link rule input data. Returns (errors, cleaned_data)."""
+    from web.models.app_link_rule import AppLinkRule
+
+    errors = []
+
+    domain = data.get('domain_pattern', '').strip().lower()
+    if not domain:
+        errors.append('domain_pattern is required')
+    elif len(domain) > 255:
+        errors.append('domain_pattern must be 255 characters or less')
+    elif not re.match(r'^[a-z0-9.*-]+\.[a-z]{2,}$', domain):
+        errors.append('domain_pattern must be a valid domain (e.g. "youtube.com")')
+    else:
+        # Check uniqueness
+        existing = session.query(AppLinkRule).filter_by(domain_pattern=domain).first()
+        if existing and (exclude_id is None or existing.id != exclude_id):
+            errors.append(f'A rule for "{domain}" already exists')
+
+    name = data.get('name', '').strip()
+    if not name:
+        errors.append('name is required')
+    elif len(name) > 100:
+        errors.append('name must be 100 characters or less')
+
+    ios_scheme = data.get('ios_scheme', '').strip() or None
+    android_scheme = data.get('android_scheme', '').strip() or None
+    if not ios_scheme and not android_scheme:
+        errors.append('At least one of ios_scheme or android_scheme is required')
+
+    cleaned = {
+        'domain_pattern': domain,
+        'name': name,
+        'ios_scheme': ios_scheme,
+        'ios_app_store_url': data.get('ios_app_store_url', '').strip()[:500] or None,
+        'android_scheme': android_scheme,
+        'android_play_store_url': data.get('android_play_store_url', '').strip()[:500] or None,
+        'is_active': bool(data.get('is_active', True)),
+        'priority': int(data.get('priority', 0)),
+    }
+
+    return errors, cleaned
+
+
+@links_bp.route('/api/links/app-rules', methods=['GET'])
+@require_auth
+@rate_limit_api(max_requests=60, window_seconds=60)
+def list_app_link_rules():
+    """
+    List all app link rules for deep linking.
+
+    Query params:
+        search: Search in domain_pattern or name
+        is_active: Filter by active status (true/false)
+        limit: Results per page (default 50, max 200)
+        offset: Pagination offset
+    """
+    from web.models.app_link_rule import AppLinkRule
+
+    session = get_session()
+    try:
+        query = session.query(AppLinkRule)
+
+        search = request.args.get('search', '').strip()
+        if search:
+            search_pattern = f'%{search}%'
+            query = query.filter(
+                (AppLinkRule.domain_pattern.ilike(search_pattern)) |
+                (AppLinkRule.name.ilike(search_pattern))
+            )
+
+        is_active = request.args.get('is_active')
+        if is_active is not None:
+            query = query.filter(AppLinkRule.is_active == (is_active.lower() == 'true'))
+
+        total = query.count()
+
+        query = query.order_by(desc(AppLinkRule.priority), AppLinkRule.name)
+
+        try:
+            limit = min(int(request.args.get('limit', 50)), 200)
+        except (ValueError, TypeError):
+            limit = 50
+        try:
+            offset = int(request.args.get('offset', 0))
+        except (ValueError, TypeError):
+            offset = 0
+
+        rules = query.offset(offset).limit(limit).all()
+
+        return jsonify({
+            'total': total,
+            'offset': offset,
+            'limit': limit,
+            'rules': [rule.to_dict() for rule in rules],
+        })
+    finally:
+        session.close()
+
+
+@links_bp.route('/api/links/app-rules', methods=['POST'])
+@require_auth
+@rate_limit_api(max_requests=20, window_seconds=60)
+def create_app_link_rule():
+    """
+    Create a new app link rule for deep linking.
+
+    Request body:
+        domain_pattern (required): Domain to match (e.g. "youtube.com")
+        name (required): Human-readable app name
+        ios_scheme (optional): iOS app URI scheme
+        ios_app_store_url (optional): iOS App Store fallback URL
+        android_scheme (optional): Android intent or scheme URL
+        android_play_store_url (optional): Google Play Store fallback URL
+        is_active (optional): Whether rule is active (default true)
+        priority (optional): Match priority (default 0, higher = first)
+    """
+    from web.models.app_link_rule import AppLinkRule
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body is required'}), 400
+
+    session = get_session()
+    try:
+        errors, cleaned = _validate_rule_data(data, session)
+        if errors:
+            return jsonify({'error': '; '.join(errors)}), 400
+
+        rule = AppLinkRule(
+            domain_pattern=cleaned['domain_pattern'],
+            name=cleaned['name'],
+            ios_scheme=cleaned['ios_scheme'],
+            ios_app_store_url=cleaned['ios_app_store_url'],
+            android_scheme=cleaned['android_scheme'],
+            android_play_store_url=cleaned['android_play_store_url'],
+            is_active=cleaned['is_active'],
+            priority=cleaned['priority'],
+            created_by=_get_username(),
+        )
+        session.add(rule)
+        session.commit()
+
+        return jsonify(rule.to_dict()), 201
+
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Error creating app link rule: {e}")
+        return jsonify({'error': 'Failed to create rule'}), 500
+    finally:
+        session.close()
+
+
+@links_bp.route('/api/links/app-rules/<int:rule_id>', methods=['GET'])
+@require_auth
+def get_app_link_rule(rule_id):
+    """Get a single app link rule by ID."""
+    from web.models.app_link_rule import AppLinkRule
+
+    session = get_session()
+    try:
+        rule = session.query(AppLinkRule).filter_by(id=rule_id).first()
+        if not rule:
+            return jsonify({'error': 'Rule not found'}), 404
+        return jsonify(rule.to_dict())
+    finally:
+        session.close()
+
+
+@links_bp.route('/api/links/app-rules/<int:rule_id>', methods=['PUT'])
+@require_auth
+@rate_limit_api(max_requests=20, window_seconds=60)
+def update_app_link_rule(rule_id):
+    """Update an app link rule."""
+    from web.models.app_link_rule import AppLinkRule
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body is required'}), 400
+
+    session = get_session()
+    try:
+        rule = session.query(AppLinkRule).filter_by(id=rule_id).first()
+        if not rule:
+            return jsonify({'error': 'Rule not found'}), 404
+
+        errors, cleaned = _validate_rule_data(data, session, exclude_id=rule_id)
+        if errors:
+            return jsonify({'error': '; '.join(errors)}), 400
+
+        rule.domain_pattern = cleaned['domain_pattern']
+        rule.name = cleaned['name']
+        rule.ios_scheme = cleaned['ios_scheme']
+        rule.ios_app_store_url = cleaned['ios_app_store_url']
+        rule.android_scheme = cleaned['android_scheme']
+        rule.android_play_store_url = cleaned['android_play_store_url']
+        rule.is_active = cleaned['is_active']
+        rule.priority = cleaned['priority']
+        rule.updated_at = datetime.utcnow()
+
+        session.commit()
+        return jsonify(rule.to_dict())
+
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Error updating app link rule {rule_id}: {e}")
+        return jsonify({'error': 'Failed to update rule'}), 500
+    finally:
+        session.close()
+
+
+@links_bp.route('/api/links/app-rules/<int:rule_id>', methods=['DELETE'])
+@require_auth
+@rate_limit_api(max_requests=20, window_seconds=60)
+def delete_app_link_rule(rule_id):
+    """Delete an app link rule."""
+    from web.models.app_link_rule import AppLinkRule
+
+    session = get_session()
+    try:
+        rule = session.query(AppLinkRule).filter_by(id=rule_id).first()
+        if not rule:
+            return jsonify({'error': 'Rule not found'}), 404
+
+        session.delete(rule)
+        session.commit()
+        return jsonify({'success': True, 'message': f'Rule "{rule.name}" deleted'})
+
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Error deleting app link rule {rule_id}: {e}")
+        return jsonify({'error': 'Failed to delete rule'}), 500
+    finally:
+        session.close()
+
+
+@links_bp.route('/api/links/app-rules/check', methods=['POST'])
+@require_auth
+def check_url_deep_link():
+    """
+    Check if a URL matches any app link rule.
+    Useful for the frontend to show if deep linking is available before creating a link.
+
+    Request body:
+        url (required): The URL to check
+    """
+    data = request.get_json()
+    if not data or not data.get('url'):
+        return jsonify({'error': 'url is required'}), 400
+
+    url = data['url'].strip()
+    is_valid, error = _validate_url(url)
+    if not is_valid:
+        return jsonify({'error': error}), 400
+
+    session = get_session()
+    try:
+        rule = _find_deep_link_rule(session, url)
+
+        if not rule:
+            return jsonify({
+                'url': url,
+                'has_matching_rule': False,
+                'message': 'No app link rule found for this URL domain',
+            })
+
+        return jsonify({
+            'url': url,
+            'has_matching_rule': True,
+            'rule': {
+                'id': rule.id,
+                'name': rule.name,
+                'domain_pattern': rule.domain_pattern,
+                'has_ios': bool(rule.ios_scheme),
+                'has_android': bool(rule.android_scheme),
+            },
         })
     finally:
         session.close()

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting...</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #f8f9fa;
+            color: #333;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 400px;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e9ecef;
+            border-top-color: #495057;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        h2 { font-size: 1.25rem; margin-bottom: 0.5rem; font-weight: 600; }
+        p { font-size: 0.9rem; color: #6c757d; margin-bottom: 1.5rem; }
+        .app-name { color: #495057; font-weight: 600; }
+        .btn {
+            display: inline-block;
+            padding: 0.6rem 1.5rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: background 0.15s;
+        }
+        .btn-primary {
+            background: #495057;
+            color: #fff;
+        }
+        .btn-primary:hover { background: #343a40; }
+        .btn-secondary {
+            background: #e9ecef;
+            color: #495057;
+            margin-left: 0.5rem;
+        }
+        .btn-secondary:hover { background: #dee2e6; }
+        .actions { margin-top: 1rem; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner" id="spinner"></div>
+        <h2>Opening in <span class="app-name">{{ app_name }}</span></h2>
+        <p>If the app doesn't open automatically, use the buttons below.</p>
+
+        <div class="actions" id="fallback-actions">
+            {% if app_scheme %}
+            <a href="{{ app_scheme }}" class="btn btn-primary" id="open-app-btn">Open App</a>
+            {% endif %}
+            <a href="{{ fallback_url }}" class="btn btn-secondary" id="open-web-btn">Open in Browser</a>
+        </div>
+
+        {% if store_url %}
+        <div class="actions hidden" id="store-action">
+            <p style="margin-top: 1rem;">Don't have the app?</p>
+            <a href="{{ store_url }}" class="btn btn-primary">Get the App</a>
+            <a href="{{ fallback_url }}" class="btn btn-secondary">Open in Browser</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        (function() {
+            var appScheme = {{ app_scheme|tojson }};
+            var fallbackUrl = {{ fallback_url|tojson }};
+            var storeUrl = {{ store_url|tojson }};
+            var TIMEOUT_MS = 1500;
+            var startTime = Date.now();
+            var didNavigate = false;
+
+            // If no app scheme, go straight to fallback
+            if (!appScheme) {
+                window.location.href = fallbackUrl;
+                return;
+            }
+
+            // Try to open the native app via URI scheme
+            var iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = appScheme;
+            document.body.appendChild(iframe);
+
+            // Fallback: if the app didn't open, redirect to web URL
+            setTimeout(function() {
+                if (didNavigate) return;
+
+                // If we're still on this page after the timeout,
+                // the app either isn't installed or didn't handle the scheme
+                var elapsed = Date.now() - startTime;
+                if (elapsed < TIMEOUT_MS + 500) {
+                    // App didn't open. Show store link if available.
+                    var spinner = document.getElementById('spinner');
+                    if (spinner) spinner.style.display = 'none';
+
+                    if (storeUrl) {
+                        var storeAction = document.getElementById('store-action');
+                        if (storeAction) storeAction.classList.remove('hidden');
+                    } else {
+                        // No store URL, just redirect to web
+                        window.location.href = fallbackUrl;
+                    }
+                }
+            }, TIMEOUT_MS);
+
+            // Detect if user navigated away (app opened)
+            window.addEventListener('blur', function() {
+                didNavigate = true;
+            });
+
+            // Also listen for visibility change (app opened in foreground)
+            document.addEventListener('visibilitychange', function() {
+                if (document.hidden) {
+                    didNavigate = true;
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

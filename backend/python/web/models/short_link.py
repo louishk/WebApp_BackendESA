@@ -25,6 +25,7 @@ class ShortLink(Base):
     max_clicks = Column(Integer, nullable=True)
     total_clicks = Column(Integer, nullable=False, default=0)
     unique_clicks = Column(Integer, nullable=False, default=0)
+    deep_link_enabled = Column(Boolean, nullable=False, default=False)
     created_by = Column(String(255))
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -65,6 +66,7 @@ class ShortLink(Base):
             'max_clicks': self.max_clicks,
             'total_clicks': self.total_clicks,
             'unique_clicks': self.unique_clicks,
+            'deep_link_enabled': self.deep_link_enabled,
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
