@@ -6,3 +6,4 @@ from web.models.page import Page
 from web.models.inventory import InventoryTypeMapping, InventoryUnitOverride
 from web.models.api_statistic import ApiStatistic
 from web.models.external_api_statistic import ExternalApiStatistic
+from web.models.short_link import ShortLink, LinkClick

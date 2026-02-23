@@ -130,8 +130,9 @@ def require_auth(f):
             has_billing_tools = current_user.can_access_billing_tools() if hasattr(current_user, 'can_access_billing_tools') else False
             has_inventory = current_user.can_access_inventory_tools() if hasattr(current_user, 'can_access_inventory_tools') else False
             has_config = current_user.can_manage_configs() if hasattr(current_user, 'can_manage_configs') else False
+            has_links = current_user.can_manage_links() if hasattr(current_user, 'can_manage_links') else False
 
-            if not has_scheduler and not has_billing_tools and not has_inventory and not has_config:
+            if not has_scheduler and not has_billing_tools and not has_inventory and not has_config and not has_links:
                 role_names = ', '.join(r.name for r in current_user.roles) if current_user.roles else 'none'
                 return jsonify({
                     'error': 'Forbidden',
