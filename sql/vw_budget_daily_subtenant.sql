@@ -1,0 +1,73 @@
+-- View: vw_budget_daily_subtenant
+-- Daily budget view for Subtenant only
+-- Prorates monthly budget values into daily values (÷ days in month)
+-- Adds _sgd columns for all monetary fields using fx_rates_monthly
+
+CREATE OR REPLACE VIEW vw_budget_daily_subtenant AS
+SELECT
+    b.id AS budget_id,
+    b.internal_code,
+    b.site_code,
+    d.day::date AS date,
+    b.currency,
+    b.metric,
+    b.type,
+    b.sub_type,
+    b.total_available_nla,
+    b.occupied_nla,
+    b.occupancy_growth              / days_in.cnt AS occupancy_growth,
+    b.avr_rental_rate,
+    CASE WHEN b.currency = 'SGD' THEN b.avr_rental_rate
+         ELSE b.avr_rental_rate / fx.avg_rate
+    END AS avr_rental_rate_sgd,
+    b.rental_revenue                / days_in.cnt AS rental_revenue,
+    CASE WHEN b.currency = 'SGD' THEN b.rental_revenue / days_in.cnt
+         ELSE b.rental_revenue / days_in.cnt / fx.avg_rate
+    END AS rental_revenue_sgd,
+    b.occupancy_pct,
+    b.maintenance                   / days_in.cnt AS maintenance,
+    CASE WHEN b.currency = 'SGD' THEN b.maintenance / days_in.cnt
+         ELSE b.maintenance / days_in.cnt / fx.avg_rate
+    END AS maintenance_sgd,
+    b.electricity                   / days_in.cnt AS electricity,
+    CASE WHEN b.currency = 'SGD' THEN b.electricity / days_in.cnt
+         ELSE b.electricity / days_in.cnt / fx.avg_rate
+    END AS electricity_sgd,
+    b.carpark_revenue               / days_in.cnt AS carpark_revenue,
+    CASE WHEN b.currency = 'SGD' THEN b.carpark_revenue / days_in.cnt
+         ELSE b.carpark_revenue / days_in.cnt / fx.avg_rate
+    END AS carpark_revenue_sgd,
+    b.insurance_revenue             / days_in.cnt AS insurance_revenue,
+    CASE WHEN b.currency = 'SGD' THEN b.insurance_revenue / days_in.cnt
+         ELSE b.insurance_revenue / days_in.cnt / fx.avg_rate
+    END AS insurance_revenue_sgd,
+    b.copier_revenue                / days_in.cnt AS copier_revenue,
+    CASE WHEN b.currency = 'SGD' THEN b.copier_revenue / days_in.cnt
+         ELSE b.copier_revenue / days_in.cnt / fx.avg_rate
+    END AS copier_revenue_sgd,
+    b.facility_revenue              / days_in.cnt AS facility_revenue,
+    CASE WHEN b.currency = 'SGD' THEN b.facility_revenue / days_in.cnt
+         ELSE b.facility_revenue / days_in.cnt / fx.avg_rate
+    END AS facility_revenue_sgd,
+    b.others_revenue                / days_in.cnt AS others_revenue,
+    CASE WHEN b.currency = 'SGD' THEN b.others_revenue / days_in.cnt
+         ELSE b.others_revenue / days_in.cnt / fx.avg_rate
+    END AS others_revenue_sgd
+FROM budget b
+CROSS JOIN LATERAL (
+    SELECT DATE_PART('days',
+        DATE_TRUNC('month', b.date) + INTERVAL '1 month' - INTERVAL '1 day'
+    )::numeric AS cnt
+) days_in
+CROSS JOIN LATERAL (
+    SELECT generate_series(
+        b.date,
+        (b.date + INTERVAL '1 month' - INTERVAL '1 day')::date,
+        INTERVAL '1 day'
+    ) AS day
+) d
+LEFT JOIN fx_rates_monthly fx
+    ON to_char(b.date, 'YYYY-MM') = fx.year_month
+    AND fx.target_currency = b.currency
+    AND b.currency <> 'SGD'
+WHERE b.type = 'Subtenant';
