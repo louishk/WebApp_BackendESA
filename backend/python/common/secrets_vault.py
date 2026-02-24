@@ -67,6 +67,9 @@ class LocalSecretsVault:
         # Backend Auth
         'BACKEND_AUTH_SECRET',
 
+        # EmbedSocial
+        'EMBEDSOCIAL_API_KEY',
+
         # ===========================================
         # Generic patterns (auto-detected)
         # ===========================================

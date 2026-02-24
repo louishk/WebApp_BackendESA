@@ -2845,3 +2845,49 @@ class ECRIOutcome(Base, BaseModel):
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
+
+# ============================================================================
+# EmbedSocial Reviews Model
+# ============================================================================
+
+
+class EmbedSocialReview(Base, BaseModel):
+    """
+    EmbedSocial review data for tracking Google review scores over time per location.
+
+    Data Source: EmbedSocial GetItems API
+    Unique key: review_id (EmbedSocial item ID)
+    """
+    __tablename__ = 'embedsocial_reviews'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    review_id = Column(String(50), nullable=False, unique=True,
+                       comment="EmbedSocial item ID")
+    source_id = Column(String(50), nullable=False, index=True,
+                       comment="Links to listing/location")
+    source_name = Column(String(255), nullable=True,
+                         comment="Location/listing name")
+    source_address = Column(String(500), nullable=True,
+                            comment="Location address")
+    author_name = Column(String(255), nullable=True,
+                         comment="Review author name")
+    rating = Column(Integer, nullable=False,
+                    comment="1-5 star rating")
+    caption_text = Column(Text, nullable=True,
+                          comment="Review text content")
+    review_link = Column(String(500), nullable=True,
+                         comment="Link to original review")
+    original_created_on = Column(DateTime, nullable=False,
+                                 comment="When the review was posted")
+    reply_text = Column(Text, nullable=True,
+                        comment="First reply text")
+    reply_created_on = Column(DateTime, nullable=True,
+                              comment="When the reply was posted")
+    synced_at = Column(DateTime, nullable=False, default=datetime.utcnow,
+                       comment="When the review was synced to DB")
+
+    __table_args__ = (
+        Index('ix_es_reviews_source_date', 'source_id', 'original_created_on'),
+        Index('ix_es_reviews_rating', 'rating'),
+    )
+

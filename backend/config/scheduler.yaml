@@ -98,6 +98,11 @@ pipelines:
     historical_start: "2010-01-01"
     incremental_days: 7
 
+  embedsocial:
+    sql_chunk_size: 500
+    page_size: 50
+    incremental_pages: 5
+
   sugarcrm:
     sql_chunk_size: 500
     batch_size: 200
