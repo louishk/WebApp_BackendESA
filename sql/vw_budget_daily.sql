@@ -39,6 +39,35 @@ SELECT
             + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
             * b.avr_rental_rate / days_in.cnt / fx.avg_rate
     END)::numeric(18,6) AS rental_revenue_sgd,
+    -- Revenue growth: day-over-day change in rental revenue
+    ((b.occupied_nla
+        + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
+        * b.avr_rental_rate / days_in.cnt
+     - LAG(
+        (b.occupied_nla
+            + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
+            * b.avr_rental_rate / days_in.cnt
+       ) OVER (PARTITION BY b.site_code ORDER BY d.day)
+    )::numeric(18,6) AS revenue_growth,
+    (CASE WHEN b.currency = 'SGD' THEN
+        (b.occupied_nla
+            + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
+            * b.avr_rental_rate / days_in.cnt
+        - LAG(
+            (b.occupied_nla
+                + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
+                * b.avr_rental_rate / days_in.cnt
+          ) OVER (PARTITION BY b.site_code ORDER BY d.day)
+     ELSE
+        ((b.occupied_nla
+            + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
+            * b.avr_rental_rate / days_in.cnt
+        - LAG(
+            (b.occupied_nla
+                + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
+                * b.avr_rental_rate / days_in.cnt
+          ) OVER (PARTITION BY b.site_code ORDER BY d.day)) / fx.avg_rate
+    END)::numeric(18,6) AS revenue_growth_sgd,
     -- Occupancy pct recalculated from daily NLA
     ((b.occupied_nla
         + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
