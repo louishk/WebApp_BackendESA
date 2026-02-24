@@ -23,6 +23,12 @@ SELECT
     (CASE WHEN b.currency = 'SGD' THEN b.rental_revenue
          ELSE b.rental_revenue / fx.avg_rate
     END)::numeric(18,6) AS rental_revenue_sgd,
+    (b.rental_revenue - LAG(b.rental_revenue) OVER (PARTITION BY b.site_code ORDER BY b.date))::numeric(18,6) AS revenue_growth,
+    (CASE WHEN b.currency = 'SGD' THEN
+        b.rental_revenue - LAG(b.rental_revenue) OVER (PARTITION BY b.site_code ORDER BY b.date)
+     ELSE
+        (b.rental_revenue - LAG(b.rental_revenue) OVER (PARTITION BY b.site_code ORDER BY b.date)) / fx.avg_rate
+    END)::numeric(18,6) AS revenue_growth_sgd,
     b.occupancy_pct,
     b.maintenance,
     (CASE WHEN b.currency = 'SGD' THEN b.maintenance
