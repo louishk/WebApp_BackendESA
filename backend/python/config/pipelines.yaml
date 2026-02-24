@@ -186,6 +186,28 @@ pipelines:
     data_freshness:
       table: sugarcrm_leads
       date_column: synced_at
+  embedsocial:
+    display_name: EmbedSocial Reviews
+    description: Sync Google reviews from EmbedSocial API for review score tracking
+    module_path: datalayer.embedsocial_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 7 * * *
+    default_args:
+      mode: auto
+    priority: 6
+    resource_group: http_api
+    max_db_connections: 2
+    estimated_duration_seconds: 120
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 600
+    data_freshness:
+      table: embedsocial_reviews
+      date_column: synced_at
   ecri_outcome_tracking:
     display_name: ECRI Outcome Tracking
     description: Track churn/stay outcomes for executed ECRI batches within attribution window

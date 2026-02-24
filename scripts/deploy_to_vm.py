@@ -159,7 +159,6 @@ def step_stop_services(credentials: dict, verbose: bool = True) -> bool:
     stop_cmd = """
         sudo systemctl stop esa-backend 2>/dev/null || true
         sudo systemctl stop backend-scheduler 2>/dev/null || true
-        sudo systemctl stop backend-scheduler-web 2>/dev/null || true
 
         # Kill any stray Python/gunicorn processes from backend
         sudo pkill -9 -f '/var/www/backend.*python' 2>/dev/null || true
@@ -382,29 +381,46 @@ def step_start_services(credentials: dict, verbose: bool = True) -> bool:
         # Reload systemd in case service files changed
         sudo systemctl daemon-reload
 
-        # Copy service file if not exists
+        # Copy service files if they exist
         if [ -f "{VM_PYTHON_PATH}/systemd/esa-backend.service" ]; then
             sudo cp {VM_PYTHON_PATH}/systemd/esa-backend.service /etc/systemd/system/
-            sudo systemctl daemon-reload
         fi
+        if [ -f "{VM_PYTHON_PATH}/systemd/backend-scheduler.service" ]; then
+            sudo cp {VM_PYTHON_PATH}/systemd/backend-scheduler.service /etc/systemd/system/
+        fi
+        sudo systemctl daemon-reload
 
         # Create log directory if needed
         sudo mkdir -p /var/log/esa-backend
         sudo chown www-data:www-data /var/log/esa-backend
 
-        # Enable and start esa-backend
+        # Enable and start esa-backend (web UI)
         sudo systemctl enable esa-backend
         sudo systemctl start esa-backend
 
+        # Enable and start backend-scheduler (scheduler daemon)
+        sudo systemctl enable backend-scheduler
+        sudo systemctl start backend-scheduler
+
         sleep 3
 
-        # Check status
+        # Check esa-backend status
         if sudo systemctl is-active --quiet esa-backend; then
             echo "esa-backend: RUNNING"
             sudo systemctl status esa-backend --no-pager | head -5
         else
             echo "esa-backend: FAILED"
             sudo journalctl -u esa-backend --no-pager -n 20
+            exit 1
+        fi
+
+        # Check backend-scheduler status
+        if sudo systemctl is-active --quiet backend-scheduler; then
+            echo "backend-scheduler: RUNNING"
+            sudo systemctl status backend-scheduler --no-pager | head -5
+        else
+            echo "backend-scheduler: FAILED"
+            sudo journalctl -u backend-scheduler --no-pager -n 20
             exit 1
         fi
     """
