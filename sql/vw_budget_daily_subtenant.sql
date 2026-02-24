@@ -17,20 +17,20 @@ SELECT
     b.sub_type,
     b.total_available_nla,
     -- Interpolated occupied NLA: centered linear growth so monthly average = occupied_nla
-    b.occupied_nla
+    (b.occupied_nla
         + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt)
-        AS occupied_nla,
+    )::numeric AS occupied_nla,
     b.occupancy_growth              / days_in.cnt AS occupancy_growth,
     b.avr_rental_rate,
     CASE WHEN b.currency = 'SGD' THEN b.avr_rental_rate
          ELSE b.avr_rental_rate / fx.avg_rate
     END AS avr_rental_rate_sgd,
     -- Rental revenue recalculated from daily NLA × rate
-    (b.occupied_nla
+    ((b.occupied_nla
         + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
         * b.avr_rental_rate / days_in.cnt
-        AS rental_revenue,
-    CASE WHEN b.currency = 'SGD' THEN
+    )::numeric AS rental_revenue,
+    (CASE WHEN b.currency = 'SGD' THEN
         (b.occupied_nla
             + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
             * b.avr_rental_rate / days_in.cnt
@@ -38,12 +38,12 @@ SELECT
         (b.occupied_nla
             + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
             * b.avr_rental_rate / days_in.cnt / fx.avg_rate
-    END AS rental_revenue_sgd,
+    END)::numeric AS rental_revenue_sgd,
     -- Occupancy pct recalculated from daily NLA
-    (b.occupied_nla
+    ((b.occupied_nla
         + COALESCE(b.occupancy_growth, 0) * (2 * EXTRACT(DAY FROM d.day::date) - days_in.cnt - 1) / (2 * days_in.cnt))
         / NULLIF(b.total_available_nla, 0)
-        AS occupancy_pct,
+    )::numeric AS occupancy_pct,
     -- Other revenue fields: simple prorate (unchanged)
     b.maintenance                   / days_in.cnt AS maintenance,
     CASE WHEN b.currency = 'SGD' THEN b.maintenance / days_in.cnt
