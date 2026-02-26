@@ -132,10 +132,13 @@
                         <th style="min-width: 55px;">Shape</th>
                         <th style="min-width: 50px;">Pillar</th>
                         <th style="min-width: 140px;">Final Label</th>
-                        <th>Climate Info</th>
+                        <th>Climate Type</th>
+                        <th>Dehum</th>
                         <th>NOKE</th>
                         <th>Deck</th>
                         <th>Pillar Info</th>
+                        <th>Odd Shape</th>
+                        <th>Cases</th>
                     </tr>
                     <tr id="filter-row">
                         <td><span style="font-size: 0.65rem; color: #999;">&#10003;</span></td>
@@ -153,14 +156,17 @@
                         <td><select class="col-filter" data-col="shape" onchange="filterUnits()"><option value="">All</option></select></td>
                         <td><select class="col-filter" data-col="pillar" onchange="filterUnits()"><option value="">All</option></select></td>
                         <td></td>
-                        <td><select class="col-filter" data-col="climateInfo" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="climateType" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="dehum" onchange="filterUnits()"><option value="">All</option></select></td>
                         <td><select class="col-filter" data-col="noke" onchange="filterUnits()"><option value="">All</option></select></td>
                         <td><select class="col-filter" data-col="deck" onchange="filterUnits()"><option value="">All</option></select></td>
                         <td><select class="col-filter" data-col="pillarInfo" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="oddShape" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="cases" onchange="filterUnits()"><option value="">All</option></select></td>
                     </tr>
                 </thead>
                 <tbody id="units-tbody">
-                    <tr><td colspan="21" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
+                    <tr><td colspan="23" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
                 </tbody>
             </table>
         </div>
@@ -528,9 +534,6 @@
             const shape = override.shape || viewShape || calcShape(w, l);
             const pillar = override.pillar || viewPillar || calcPillar(unit.sUnitNote);
 
-            // Climate/NOKE/Deck info for display
-            const climateInfo = [unit.climate_type, unit.has_dehumidifier ? 'Dehum' : ''].filter(Boolean).join(' + ') || '';
-
             return {
                 ...unit,
                 _width: w,
@@ -545,10 +548,13 @@
                 _reviewed: override.reviewed || false,
                 _finalLabel: buildFinalLabel(sizeCat, sizeRange, unitType, climate, shape, pillar),
                 // Info columns from view
-                _climateInfo: climateInfo,
+                _climateType: unit.climate_type || '',
+                _dehum: unit.has_dehumidifier ? 'Yes' : '',
                 _noke: unit.noke_status || '',
                 _deck: unit.deck_position || '',
                 _pillarInfo: unit.has_pillar ? (unit.pillar_size || 'Yes') : '',
+                _oddShape: unit.is_odd_shape ? 'Yes' : '',
+                _cases: unit.case_count != null ? String(unit.case_count) : '',
                 // Track sources for color coding
                 _src: {
                     unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
@@ -575,10 +581,13 @@
             range:       u => u._sizeRange || '',
             shape:       u => u._shape || '',
             pillar:      u => u._pillar || '',
-            climateInfo: u => u._climateInfo || '',
+            climateType: u => u._climateType || '',
+            dehum:       u => u._dehum || '',
             noke:        u => u._noke || '',
             deck:        u => u._deck || '',
             pillarInfo:  u => u._pillarInfo || '',
+            oddShape:    u => u._oddShape || '',
+            cases:       u => u._cases || '',
         };
 
         for (const [col, getter] of Object.entries(cols)) {
@@ -617,10 +626,13 @@
                 case 'range':       if ((u._sizeRange || '') !== val) return false; break;
                 case 'shape':       if ((u._shape || '') !== val) return false; break;
                 case 'pillar':      if ((u._pillar || '') !== val) return false; break;
-                case 'climateInfo': if ((u._climateInfo || '') !== val) return false; break;
+                case 'climateType': if ((u._climateType || '') !== val) return false; break;
+                case 'dehum':       if ((u._dehum || '') !== val) return false; break;
                 case 'noke':        if ((u._noke || '') !== val) return false; break;
                 case 'deck':        if ((u._deck || '') !== val) return false; break;
                 case 'pillarInfo':  if ((u._pillarInfo || '') !== val) return false; break;
+                case 'oddShape':    if ((u._oddShape || '') !== val) return false; break;
+                case 'cases':       if ((u._cases || '') !== val) return false; break;
             }
         }
         return true;
@@ -662,7 +674,7 @@
             `(${filteredUnits.length} of ${processedUnits.length})`;
 
         if (filteredUnits.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="21" style="text-align: center; color: #666;">No units found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="23" style="text-align: center; color: #666;">No units found</td></tr>';
             return;
         }
 
@@ -687,10 +699,13 @@
                 <td class="${cellClass(u._src.shape)}">${makeSelect(SHAPES, u._shape, `data-field="shape" data-idx="${idx}"`)}</td>
                 <td class="${cellClass(u._src.pillar)}">${makeSelect(PILLARS, u._pillar, `data-field="pillar" data-idx="${idx}"`)}</td>
                 <td class="label-cell">${u._finalLabel || '-'}</td>
-                <td class="cell-info">${u._climateInfo || '-'}</td>
+                <td class="cell-info">${u._climateType || '-'}</td>
+                <td class="cell-info">${u._dehum || '-'}</td>
                 <td class="cell-info">${u._noke || '-'}</td>
                 <td class="cell-info">${u._deck || '-'}</td>
                 <td class="cell-info">${u._pillarInfo || '-'}</td>
+                <td class="cell-info">${u._oddShape || '-'}</td>
+                <td class="cell-info">${u._cases || '-'}</td>
             </tr>`;
         }).join('');
 
@@ -1018,10 +1033,13 @@
             'Shape': u._shape || '',
             'Pillar': u._pillar || '',
             'Final Label': u._finalLabel || '',
-            'Climate Info': u._climateInfo || '',
+            'Climate Type': u._climateType || '',
+            'Dehumidifier': u._dehum || '',
             'NOKE': u._noke || '',
             'Deck Position': u._deck || '',
             'Pillar Info': u._pillarInfo || '',
+            'Odd Shape': u._oddShape || '',
+            'Case Count': u._cases || '',
             'Reviewed': u._reviewed ? 'Yes' : 'No',
         }));
 
