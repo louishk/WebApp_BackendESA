@@ -29,7 +29,6 @@ class User(Base, UserMixin):
     username = Column(String(255), unique=True, nullable=False)
     email = Column(String(255), unique=True, nullable=True)
     password = Column(String(255), nullable=True)  # NULL for OAuth-only users
-    role_id = Column(Integer, ForeignKey('roles.id'), nullable=True)  # Legacy, kept for compat
     auth_provider = Column(String(20), default='local')  # 'local' or 'microsoft'
     department = Column(String(255), nullable=True)
     job_title = Column(String(255), nullable=True)

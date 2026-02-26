@@ -234,7 +234,7 @@ def list_users():
         'department': User.department,
         'job_title': User.job_title,
         'office': User.office_location,
-        'role': User.role_id,
+        'role': User.username,  # Role sorting not meaningful with multi-role; fallback to username
         'auth': User.auth_provider,
         'created': User.created_at,
     }
