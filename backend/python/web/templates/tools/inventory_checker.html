@@ -18,12 +18,12 @@
         <ol style="margin: 0; padding-left: 1.25rem;">
             <li><strong>Select sites</strong> from the dropdown and click <strong>Load Units</strong>.</li>
             <li><strong>Set Type Mappings</strong> first (shared across all sites) &mdash; go to <a href="{{ url_for('admin.type_mappings') }}">Settings &gt; Type Mappings</a> to assign a Type Code and Climate Code to each source type.</li>
-            <li><strong>Review units row by row.</strong> The filter defaults to <em>Unreviewed</em> so you only see units that still need attention.</li>
-            <li>For each unit, verify or adjust the <strong>Type, Climate, Size, Range, Shape, Pillar</strong> dropdowns. Changes with a yellow background are per-unit overrides.</li>
-            <li><strong>Tick the checkbox</strong> in the first column to mark a unit as reviewed &mdash; this saves automatically.</li>
-            <li>When you're done adjusting overrides, click <strong>Save Overrides</strong> to persist all dropdown changes.</li>
-            <li>Use the <strong>filter dropdown</strong> to switch between All / Unreviewed / Reviewed to track your progress.</li>
-            <li><strong>Export to Excel</strong> at any time for an offline copy (includes a Reviewed column).</li>
+            <li><strong>Filter columns</strong> using the dropdowns in the header row to narrow down units.</li>
+            <li><strong>Select units</strong> with checkboxes (or Select All) and use the <strong>Batch Actions</strong> bar to set Type, Climate, Shape, or Pillar for all selected units at once.</li>
+            <li>For individual units, adjust the <strong>Type, Climate, Size, Range, Shape, Pillar</strong> dropdowns directly in the row.</li>
+            <li><strong>Tick the review checkbox</strong> in the first column to mark a unit as reviewed &mdash; this saves automatically.</li>
+            <li>Click <strong>Save Overrides</strong> to persist all dropdown changes.</li>
+            <li><strong>Export to Excel</strong> at any time for an offline copy.</li>
         </ol>
     </div>
 </div>
@@ -72,30 +72,50 @@
     </div>
 </div>
 
+<!-- Batch Actions Bar -->
+<div id="batch-bar" style="display: none;">
+    <div class="card" style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 0.6rem 1rem;">
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; font-size: 0.85rem;">
+            <strong id="batch-count">0 selected</strong>
+            <select id="batch-type" style="padding: 0.2rem 0.4rem; font-size: 0.8rem;">
+                <option value="">Type...</option>
+            </select>
+            <select id="batch-climate" style="padding: 0.2rem 0.4rem; font-size: 0.8rem;">
+                <option value="">Climate...</option>
+            </select>
+            <select id="batch-shape" style="padding: 0.2rem 0.4rem; font-size: 0.8rem;">
+                <option value="">Shape...</option>
+            </select>
+            <select id="batch-pillar" style="padding: 0.2rem 0.4rem; font-size: 0.8rem;">
+                <option value="">Pillar...</option>
+            </select>
+            <button type="button" class="btn btn-sm" onclick="applyBatch()">Apply</button>
+            <button type="button" class="btn btn-sm" onclick="batchMarkReviewed(true)">Mark Reviewed</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="clearSelection()">Clear</button>
+        </div>
+    </div>
+</div>
+
 <!-- Units Table -->
 <div id="units-section" style="display: none;">
     <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;">
-            <h2 style="margin: 0;">Units</h2>
+            <h2 style="margin: 0;">Units <span id="filtered-count" style="font-size: 0.85rem; font-weight: normal; color: #666;"></span></h2>
             <div class="toolbar" style="margin-bottom: 0;">
+                <select id="review-filter" onchange="filterUnits()" style="padding: 0.3rem 0.5rem; font-size: 0.8rem; border: 1px solid #ccc; border-radius: 4px;">
+                    <option value="">All Units</option>
+                    <option value="unreviewed" selected>Unreviewed</option>
+                    <option value="reviewed">Reviewed</option>
+                </select>
                 <button type="button" class="btn btn-sm" onclick="saveOverrides()">Save Overrides</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="exportToExcel()">Export to Excel</button>
             </div>
-        </div>
-        <div style="margin-bottom: 0.75rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-            <input type="text" id="unit-search" class="form-select" style="max-width: 300px; padding: 0.5rem 0.75rem;"
-                   placeholder="Search units..." oninput="filterUnits()">
-            <select id="review-filter" onchange="filterUnits()" style="padding: 0.5rem 0.75rem; font-size: 0.9rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; background: #fff;">
-                <option value="all">All Units</option>
-                <option value="unreviewed" selected>Unreviewed</option>
-                <option value="reviewed">Reviewed</option>
-            </select>
         </div>
         <div id="units-table-container" style="max-height: 600px; overflow: auto;">
             <table id="units-table">
                 <thead>
                     <tr>
-                        <th style="width: 30px;">&#10003;</th>
+                        <th style="width: 30px;"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)" title="Select all visible"></th>
                         <th>Site</th>
                         <th>Unit</th>
                         <th>Src Type</th>
@@ -116,6 +136,27 @@
                         <th>NOKE</th>
                         <th>Deck</th>
                         <th>Pillar Info</th>
+                    </tr>
+                    <tr id="filter-row">
+                        <td><span style="font-size: 0.65rem; color: #999;">&#10003;</span></td>
+                        <td><select class="col-filter" data-col="site" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><input  class="col-filter" data-col="unit" oninput="filterUnits()" placeholder="..." style="width:60px;"></td>
+                        <td><select class="col-filter" data-col="srcType" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td></td><td></td><td></td>
+                        <td><select class="col-filter" data-col="floor" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td></td>
+                        <td><select class="col-filter" data-col="occ" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="type" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="climate" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="size" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="range" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="shape" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="pillar" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td></td>
+                        <td><select class="col-filter" data-col="climateInfo" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="noke" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="deck" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="pillarInfo" onchange="filterUnits()"><option value="">All</option></select></td>
                     </tr>
                 </thead>
                 <tbody id="units-tbody">
@@ -157,12 +198,25 @@
 #units-table th { padding: 0.35rem 0.3rem; text-align: left; font-size: 0.75rem; white-space: nowrap; }
 #units-table td { padding: 0.25rem 0.3rem; vertical-align: middle; }
 #units-table tbody tr:hover { background: rgba(0,0,0,0.03); }
+#units-table tbody tr.row-selected { background: rgba(255,193,7,0.12); }
 
 #units-table select {
     width: 100%;
     padding: 0.15rem;
     font-size: 0.75rem;
     border: 1px solid #ccc;
+    border-radius: 3px;
+    background: #fff;
+}
+
+/* Filter row */
+#filter-row { background: #f8f9fa !important; }
+#filter-row td { padding: 0.2rem 0.2rem; }
+#filter-row select, #filter-row input {
+    width: 100%;
+    padding: 0.15rem 0.2rem;
+    font-size: 0.7rem;
+    border: 1px solid #ddd;
     border-radius: 3px;
     background: #fff;
 }
@@ -207,6 +261,8 @@
     let typeMappings = {};   // source_type_name -> { type, climate }
     let overridesMap = {};   // "siteId_unitId" -> override object
     let processedUnits = []; // Units with calculated fields
+    let filteredUnits = [];  // Currently visible units after filtering
+    let selectedSet = new Set(); // Set of processedUnits indices that are selected
 
     // --- SOP Constants ---
     const TYPE_CODES = [
@@ -400,6 +456,10 @@
             // Process units
             processUnits();
 
+            // Reset selection
+            selectedSet.clear();
+            updateBatchBar();
+
             // Update stats
             const rentable = allUnits.filter(u => u.bRentable).length;
             const rented = allUnits.filter(u => u.bRented).length;
@@ -414,6 +474,12 @@
             document.getElementById('stats-section').style.display = 'block';
             document.getElementById('units-section').style.display = 'block';
             document.getElementById('legend-section').style.display = 'block';
+
+            // Populate column filters
+            populateColumnFilters();
+
+            // Populate batch dropdowns
+            populateBatchDropdowns();
 
             // Render units table
             renderTable();
@@ -496,6 +562,70 @@
         });
     }
 
+    // --- Column Filters ---
+    function populateColumnFilters() {
+        const cols = {
+            site:        u => u.sLocationCode || '',
+            srcType:     u => u.sTypeName || '',
+            floor:       u => u.iFloor != null ? String(u.iFloor) : '',
+            occ:         u => u.bRented ? 'Yes' : 'No',
+            type:        u => u._unitType || '',
+            climate:     u => u._climate || '',
+            size:        u => u._sizeCat || '',
+            range:       u => u._sizeRange || '',
+            shape:       u => u._shape || '',
+            pillar:      u => u._pillar || '',
+            climateInfo: u => u._climateInfo || '',
+            noke:        u => u._noke || '',
+            deck:        u => u._deck || '',
+            pillarInfo:  u => u._pillarInfo || '',
+        };
+
+        for (const [col, getter] of Object.entries(cols)) {
+            const el = document.querySelector(`.col-filter[data-col="${col}"]`);
+            if (!el || el.tagName !== 'SELECT') continue;
+            const prev = el.value;
+            const values = [...new Set(processedUnits.map(getter))].filter(Boolean).sort();
+            el.innerHTML = '<option value="">All</option>' + values.map(v =>
+                `<option value="${v}" ${v === prev ? 'selected' : ''}>${v}</option>`
+            ).join('');
+        }
+    }
+
+    function getColumnFilters() {
+        const filters = {};
+        document.querySelectorAll('.col-filter').forEach(el => {
+            const col = el.dataset.col;
+            const val = el.value;
+            if (val) filters[col] = val;
+        });
+        return filters;
+    }
+
+    function unitMatchesFilters(u, filters) {
+        for (const [col, val] of Object.entries(filters)) {
+            const lval = val.toLowerCase();
+            switch (col) {
+                case 'site':        if ((u.sLocationCode || '') !== val) return false; break;
+                case 'unit':        if (!(u.sUnitName || '').toLowerCase().includes(lval)) return false; break;
+                case 'srcType':     if ((u.sTypeName || '') !== val) return false; break;
+                case 'floor':       if (String(u.iFloor ?? '') !== val) return false; break;
+                case 'occ':         if ((u.bRented ? 'Yes' : 'No') !== val) return false; break;
+                case 'type':        if ((u._unitType || '') !== val) return false; break;
+                case 'climate':     if ((u._climate || '') !== val) return false; break;
+                case 'size':        if ((u._sizeCat || '') !== val) return false; break;
+                case 'range':       if ((u._sizeRange || '') !== val) return false; break;
+                case 'shape':       if ((u._shape || '') !== val) return false; break;
+                case 'pillar':      if ((u._pillar || '') !== val) return false; break;
+                case 'climateInfo': if ((u._climateInfo || '') !== val) return false; break;
+                case 'noke':        if ((u._noke || '') !== val) return false; break;
+                case 'deck':        if ((u._deck || '') !== val) return false; break;
+                case 'pillarInfo':  if ((u._pillarInfo || '') !== val) return false; break;
+            }
+        }
+        return true;
+    }
+
     // --- Rendering ---
     function cellClass(src) {
         if (src === 'override') return 'cell-override';
@@ -516,28 +646,31 @@
 
     function renderTable() {
         const tbody = document.getElementById('units-tbody');
-        const searchTerm = (document.getElementById('unit-search').value || '').toLowerCase();
+        const colFilters = getColumnFilters();
 
-        let filtered = searchTerm
-            ? processedUnits.filter(u =>
-                (u.sUnitName || '').toLowerCase().includes(searchTerm) ||
-                (u.sLocationCode || '').toLowerCase().includes(searchTerm) ||
-                (u.sTypeName || '').toLowerCase().includes(searchTerm))
-            : [...processedUnits];
+        const reviewFilter = (document.getElementById('review-filter') || {}).value || '';
 
-        const reviewFilter = document.getElementById('review-filter').value;
-        if (reviewFilter === 'reviewed') filtered = filtered.filter(u => u._reviewed);
-        else if (reviewFilter === 'unreviewed') filtered = filtered.filter(u => !u._reviewed);
+        filteredUnits = processedUnits.filter(u => {
+            if (reviewFilter === 'reviewed' && !u._reviewed) return false;
+            if (reviewFilter === 'unreviewed' && u._reviewed) return false;
+            if (!unitMatchesFilters(u, colFilters)) return false;
+            return true;
+        });
 
-        if (filtered.length === 0) {
+        // Update filtered count
+        document.getElementById('filtered-count').textContent =
+            `(${filteredUnits.length} of ${processedUnits.length})`;
+
+        if (filteredUnits.length === 0) {
             tbody.innerHTML = '<tr><td colspan="21" style="text-align: center; color: #666;">No units found</td></tr>';
             return;
         }
 
-        tbody.innerHTML = filtered.map((u, i) => {
+        tbody.innerHTML = filteredUnits.map((u, i) => {
             const idx = processedUnits.indexOf(u);
-            return `<tr data-idx="${idx}">
-                <td><input type="checkbox" ${u._reviewed ? 'checked' : ''} data-idx="${idx}" onchange="onReviewToggle(this)"></td>
+            const isSelected = selectedSet.has(idx);
+            return `<tr data-idx="${idx}" class="${isSelected ? 'row-selected' : ''}">
+                <td><input type="checkbox" class="row-select" ${isSelected ? 'checked' : ''} data-idx="${idx}" onchange="onRowSelect(this)"></td>
                 <td>${u.sLocationCode || '-'}</td>
                 <td><strong>${u.sUnitName || '-'}</strong></td>
                 <td>${u.sTypeName || '-'}</td>
@@ -560,6 +693,144 @@
                 <td class="cell-info">${u._pillarInfo || '-'}</td>
             </tr>`;
         }).join('');
+
+        // Sync select-all checkbox
+        const selectAllCb = document.getElementById('select-all');
+        const visibleIdxs = filteredUnits.map(u => processedUnits.indexOf(u));
+        selectAllCb.checked = visibleIdxs.length > 0 && visibleIdxs.every(i => selectedSet.has(i));
+    }
+
+    // --- Selection ---
+    function onRowSelect(cb) {
+        const idx = parseInt(cb.dataset.idx);
+        if (cb.checked) selectedSet.add(idx);
+        else selectedSet.delete(idx);
+        cb.closest('tr').classList.toggle('row-selected', cb.checked);
+        updateBatchBar();
+        // Sync select-all
+        const selectAllCb = document.getElementById('select-all');
+        const visibleIdxs = filteredUnits.map(u => processedUnits.indexOf(u));
+        selectAllCb.checked = visibleIdxs.length > 0 && visibleIdxs.every(i => selectedSet.has(i));
+    }
+
+    function toggleSelectAll(cb) {
+        const visibleIdxs = filteredUnits.map(u => processedUnits.indexOf(u));
+        visibleIdxs.forEach(idx => {
+            if (cb.checked) selectedSet.add(idx);
+            else selectedSet.delete(idx);
+        });
+        // Update row checkboxes
+        document.querySelectorAll('.row-select').forEach(rowCb => {
+            const idx = parseInt(rowCb.dataset.idx);
+            if (visibleIdxs.includes(idx)) {
+                rowCb.checked = cb.checked;
+                rowCb.closest('tr').classList.toggle('row-selected', cb.checked);
+            }
+        });
+        updateBatchBar();
+    }
+
+    function clearSelection() {
+        selectedSet.clear();
+        document.querySelectorAll('.row-select').forEach(cb => {
+            cb.checked = false;
+            cb.closest('tr').classList.remove('row-selected');
+        });
+        document.getElementById('select-all').checked = false;
+        updateBatchBar();
+    }
+
+    function updateBatchBar() {
+        const bar = document.getElementById('batch-bar');
+        const count = selectedSet.size;
+        document.getElementById('batch-count').textContent = `${count} selected`;
+        bar.style.display = count > 0 ? 'block' : 'none';
+    }
+
+    // --- Batch Actions ---
+    function populateBatchDropdowns() {
+        const fill = (id, options) => {
+            const el = document.getElementById(id);
+            const label = el.options[0].textContent;
+            el.innerHTML = `<option value="">${label}</option>` +
+                options.map(o => `<option value="${o}">${o}</option>`).join('');
+        };
+        fill('batch-type', TYPE_CODES);
+        fill('batch-climate', CLIMATE_CODES);
+        fill('batch-shape', SHAPES);
+        fill('batch-pillar', PILLARS);
+    }
+
+    function applyBatch() {
+        const batchType = document.getElementById('batch-type').value;
+        const batchClimate = document.getElementById('batch-climate').value;
+        const batchShape = document.getElementById('batch-shape').value;
+        const batchPillar = document.getElementById('batch-pillar').value;
+
+        if (!batchType && !batchClimate && !batchShape && !batchPillar) {
+            alert('Select at least one value to apply.');
+            return;
+        }
+
+        let changed = 0;
+        selectedSet.forEach(idx => {
+            const unit = processedUnits[idx];
+            if (!unit) return;
+            const key = overrideKey(unit.SiteID, unit.UnitID);
+            if (!overridesMap[key]) {
+                overridesMap[key] = { site_id: unit.SiteID, unit_id: unit.UnitID };
+            }
+            if (batchType)    overridesMap[key].unit_type_code = batchType;
+            if (batchClimate) overridesMap[key].climate_code = batchClimate;
+            if (batchShape)   overridesMap[key].shape = batchShape;
+            if (batchPillar)  overridesMap[key].pillar = batchPillar;
+            changed++;
+        });
+
+        // Reprocess and re-render
+        processUnits();
+        // Preserve selection across reprocess
+        renderTable();
+        populateColumnFilters();
+
+        // Reset batch dropdowns
+        document.getElementById('batch-type').value = '';
+        document.getElementById('batch-climate').value = '';
+        document.getElementById('batch-shape').value = '';
+        document.getElementById('batch-pillar').value = '';
+
+        alert(`Applied batch changes to ${changed} unit(s). Click Save Overrides to persist.`);
+    }
+
+    async function batchMarkReviewed(reviewed) {
+        const indices = [...selectedSet];
+        if (indices.length === 0) return;
+
+        const overrides = indices.map(idx => {
+            const unit = processedUnits[idx];
+            const key = overrideKey(unit.SiteID, unit.UnitID);
+            if (!overridesMap[key]) {
+                overridesMap[key] = { site_id: unit.SiteID, unit_id: unit.UnitID };
+            }
+            overridesMap[key].reviewed = reviewed;
+            unit._reviewed = reviewed;
+            return { site_id: unit.SiteID, unit_id: unit.UnitID, reviewed };
+        });
+
+        try {
+            const res = await fetch('/api/inventory/overrides', {
+                method: 'PUT',
+                headers: apiHeaders(),
+                body: JSON.stringify({ overrides, username: '{{ current_user.username }}' }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+            document.getElementById('stat-reviewed').textContent = processedUnits.filter(u => u._reviewed).length;
+            renderTable();
+            alert(`Marked ${indices.length} unit(s) as reviewed.`);
+        } catch (e) {
+            alert('Failed to save: ' + e.message);
+        }
     }
 
     // --- Event Handlers ---
