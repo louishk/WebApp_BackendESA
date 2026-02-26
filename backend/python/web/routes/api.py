@@ -1645,14 +1645,18 @@ def api_inventory_units():
         params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
 
         query = text(f"""
-            SELECT "SiteID", "UnitID", "sLocationCode", "sUnitName", "sTypeName",
-                   "dcWidth", "dcLength", "bClimate", "bInside", "bPower", "bAlarm",
-                   "sUnitNote", "sUnitDesc", "bRented", "bRentable",
-                   "dcStdRate", "dcWebRate", "dcPushRate", "dcBoardRate",
-                   "iFloor", "UnitTypeID"
-            FROM units_info
-            WHERE "SiteID" IN ({placeholders})
-            ORDER BY "SiteID", "sUnitName"
+            SELECT u."SiteID", u."UnitID", u."sLocationCode", u."sUnitName", u."sTypeName",
+                   u."dcWidth", u."dcLength", u."bClimate", u."bInside", u."bPower", u."bAlarm",
+                   u."sUnitNote", u."sUnitDesc", u."bRented", u."bRentable",
+                   u."dcStdRate", u."dcWebRate", u."dcPushRate", u."dcBoardRate",
+                   u."iFloor", u."UnitTypeID",
+                   v.climate_type, v.has_dehumidifier, v.noke_status,
+                   v.has_pillar, v.pillar_size, v.is_odd_shape, v.deck_position
+            FROM units_info u
+            LEFT JOIN vw_units_inventory v
+                ON v.unit_id = u."UnitID"
+            WHERE u."SiteID" IN ({placeholders})
+            ORDER BY u."SiteID", u."sUnitName"
         """)
 
         result = session.execute(query, params)

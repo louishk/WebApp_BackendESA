@@ -112,10 +112,14 @@
                         <th style="min-width: 55px;">Shape</th>
                         <th style="min-width: 50px;">Pillar</th>
                         <th style="min-width: 140px;">Final Label</th>
+                        <th>Climate Info</th>
+                        <th>NOKE</th>
+                        <th>Deck</th>
+                        <th>Pillar Info</th>
                     </tr>
                 </thead>
                 <tbody id="units-tbody">
-                    <tr><td colspan="17" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
+                    <tr><td colspan="21" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
                 </tbody>
             </table>
         </div>
@@ -129,6 +133,7 @@
         <span><span class="legend-dot" style="background: #d4edda;"></span> Auto-calculated</span>
         <span><span class="legend-dot" style="background: #fff3cd;"></span> User override</span>
         <span><span class="legend-dot" style="background: #d1ecf1;"></span> From type mapping</span>
+        <span><span class="legend-dot" style="background: #e8daef;"></span> From inventory view</span>
     </div>
 </div>
 
@@ -166,6 +171,10 @@
 .cell-auto { background: #d4edda; }
 .cell-override { background: #fff3cd; }
 .cell-mapping { background: #d1ecf1; }
+.cell-view { background: #e8daef; }
+
+/* Info columns */
+.cell-info { font-size: 0.72rem; color: #555; white-space: nowrap; }
 
 .legend-dot {
     display: inline-block;
@@ -418,6 +427,17 @@
         }
     }
 
+    // Map Excel climate_type to SOP climate code
+    function mapClimateType(climateType, hasDehumidifier) {
+        if (!climateType) return '';
+        const ct = climateType.toUpperCase();
+        if (ct.includes('REFRIGERAT')) return 'RF';
+        if (ct.includes('AIR') && hasDehumidifier) return 'AD';
+        if (ct.includes('AIR')) return 'A';
+        if (hasDehumidifier) return 'D';
+        return 'NC';
+    }
+
     function processUnits() {
         processedUnits = allUnits.map(unit => {
             const key = overrideKey(unit.SiteID, unit.UnitID);
@@ -429,13 +449,21 @@
             const mappedType = (typeMappings[unit.sTypeName] || {}).type || '';
             const mappedClimate = (typeMappings[unit.sTypeName] || {}).climate || '';
 
-            // Determine values: override > mapping > auto-calc
+            // View-derived prefills from vw_units_inventory
+            const viewClimate = mapClimateType(unit.climate_type, unit.has_dehumidifier);
+            const viewPillar = unit.has_pillar ? 'P' : 'NP';
+            const viewShape = unit.is_odd_shape ? 'OS' : null;
+
+            // Determine values: override > mapping > view-prefill > auto-calc
             const unitType = override.unit_type_code || mappedType || '';
-            const climate = override.climate_code || mappedClimate || '';
+            const climate = override.climate_code || mappedClimate || viewClimate || '';
             const sizeCat = override.size_category || calcSizeCategory(area);
             const sizeRange = override.size_range || calcSizeRange(area);
-            const shape = override.shape || calcShape(w, l);
-            const pillar = override.pillar || calcPillar(unit.sUnitNote);
+            const shape = override.shape || viewShape || calcShape(w, l);
+            const pillar = override.pillar || viewPillar || calcPillar(unit.sUnitNote);
+
+            // Climate/NOKE/Deck info for display
+            const climateInfo = [unit.climate_type, unit.has_dehumidifier ? 'Dehum' : ''].filter(Boolean).join(' + ') || '';
 
             return {
                 ...unit,
@@ -450,14 +478,19 @@
                 _pillar: pillar,
                 _reviewed: override.reviewed || false,
                 _finalLabel: buildFinalLabel(sizeCat, sizeRange, unitType, climate, shape, pillar),
+                // Info columns from view
+                _climateInfo: climateInfo,
+                _noke: unit.noke_status || '',
+                _deck: unit.deck_position || '',
+                _pillarInfo: unit.has_pillar ? (unit.pillar_size || 'Yes') : '',
                 // Track sources for color coding
                 _src: {
                     unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
-                    climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : 'auto'),
+                    climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : (viewClimate ? 'view' : 'auto')),
                     sizeCat: override.size_category ? 'override' : 'auto',
                     sizeRange: override.size_range ? 'override' : 'auto',
-                    shape: override.shape ? 'override' : 'auto',
-                    pillar: override.pillar ? 'override' : 'auto',
+                    shape: override.shape ? 'override' : (viewShape ? 'view' : 'auto'),
+                    pillar: override.pillar ? 'override' : (unit.has_pillar != null ? 'view' : 'auto'),
                 }
             };
         });
@@ -467,6 +500,7 @@
     function cellClass(src) {
         if (src === 'override') return 'cell-override';
         if (src === 'mapping') return 'cell-mapping';
+        if (src === 'view') return 'cell-view';
         return 'cell-auto';
     }
 
@@ -496,7 +530,7 @@
         else if (reviewFilter === 'unreviewed') filtered = filtered.filter(u => !u._reviewed);
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="17" style="text-align: center; color: #666;">No units found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="21" style="text-align: center; color: #666;">No units found</td></tr>';
             return;
         }
 
@@ -520,6 +554,10 @@
                 <td class="${cellClass(u._src.shape)}">${makeSelect(SHAPES, u._shape, `data-field="shape" data-idx="${idx}"`)}</td>
                 <td class="${cellClass(u._src.pillar)}">${makeSelect(PILLARS, u._pillar, `data-field="pillar" data-idx="${idx}"`)}</td>
                 <td class="label-cell">${u._finalLabel || '-'}</td>
+                <td class="cell-info">${u._climateInfo || '-'}</td>
+                <td class="cell-info">${u._noke || '-'}</td>
+                <td class="cell-info">${u._deck || '-'}</td>
+                <td class="cell-info">${u._pillarInfo || '-'}</td>
             </tr>`;
         }).join('');
     }
@@ -554,23 +592,26 @@
         const area = unit._area;
         const mappedType = (typeMappings[unit.sTypeName] || {}).type || '';
         const mappedClimate = (typeMappings[unit.sTypeName] || {}).climate || '';
+        const viewClimate = mapClimateType(unit.climate_type, unit.has_dehumidifier);
+        const viewPillar = unit.has_pillar ? 'P' : 'NP';
+        const viewShape = unit.is_odd_shape ? 'OS' : null;
 
         unit._unitType = override.unit_type_code || mappedType || '';
-        unit._climate = override.climate_code || mappedClimate || '';
+        unit._climate = override.climate_code || mappedClimate || viewClimate || '';
         unit._sizeCat = override.size_category || calcSizeCategory(area);
         unit._sizeRange = override.size_range || calcSizeRange(area);
-        unit._shape = override.shape || calcShape(unit._width, unit._length);
-        unit._pillar = override.pillar || calcPillar(unit.sUnitNote);
+        unit._shape = override.shape || viewShape || calcShape(unit._width, unit._length);
+        unit._pillar = override.pillar || viewPillar || calcPillar(unit.sUnitNote);
         unit._finalLabel = buildFinalLabel(unit._sizeCat, unit._sizeRange, unit._unitType, unit._climate, unit._shape, unit._pillar);
 
         // Update source tracking
         unit._src = {
             unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
-            climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : 'auto'),
+            climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : (viewClimate ? 'view' : 'auto')),
             sizeCat: override.size_category ? 'override' : 'auto',
             sizeRange: override.size_range ? 'override' : 'auto',
-            shape: override.shape ? 'override' : 'auto',
-            pillar: override.pillar ? 'override' : 'auto',
+            shape: override.shape ? 'override' : (viewShape ? 'view' : 'auto'),
+            pillar: override.pillar ? 'override' : (unit.has_pillar != null ? 'view' : 'auto'),
         };
 
         // Update just the label and cell colors in the row
@@ -706,6 +747,10 @@
             'Shape': u._shape || '',
             'Pillar': u._pillar || '',
             'Final Label': u._finalLabel || '',
+            'Climate Info': u._climateInfo || '',
+            'NOKE': u._noke || '',
+            'Deck Position': u._deck || '',
+            'Pillar Info': u._pillarInfo || '',
             'Reviewed': u._reviewed ? 'Yes' : 'No',
         }));
 
