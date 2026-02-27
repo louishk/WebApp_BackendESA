@@ -139,6 +139,7 @@
                         <th>Pillar Info</th>
                         <th>Odd Shape</th>
                         <th>Cases</th>
+                        <th>Storage Type</th>
                     </tr>
                     <tr id="filter-row">
                         <td><span style="font-size: 0.65rem; color: #999;">&#10003;</span></td>
@@ -163,10 +164,11 @@
                         <td><select class="col-filter" data-col="pillarInfo" onchange="filterUnits()"><option value="">All</option></select></td>
                         <td><select class="col-filter" data-col="oddShape" onchange="filterUnits()"><option value="">All</option></select></td>
                         <td><select class="col-filter" data-col="cases" onchange="filterUnits()"><option value="">All</option></select></td>
+                        <td><select class="col-filter" data-col="storageType" onchange="filterUnits()"><option value="">All</option></select></td>
                     </tr>
                 </thead>
                 <tbody id="units-tbody">
-                    <tr><td colspan="23" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
+                    <tr><td colspan="24" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
                 </tbody>
             </table>
         </div>
@@ -510,6 +512,60 @@
         return 'NC';
     }
 
+    // Map deck_position to U/M/L position code
+    function deckToPosition(deck) {
+        if (!deck) return '';
+        const d = deck.toLowerCase().trim();
+        if (d === 'upper' || d === '1st') return 'U';
+        if (d === 'middle' || d === '2nd') return 'M';
+        if (d === 'lower' || d === '3rd' || d === 'single' || d === '4th') return 'L';
+        return '';
+    }
+
+    // Infer SOP type code from view data (storage_type, noke_status, deck_position)
+    function inferTypeCode(unit) {
+        const st = (unit.storage_type || '').trim();
+        const noke = (unit.noke_status || '').trim().toLowerCase();
+        const pos = deckToPosition(unit.deck_position);
+
+        if (!st && noke !== 'yes' && !pos) return '';
+
+        // Drive-Up
+        if (st.toLowerCase().includes('drive')) return 'DV';
+        // Wine (storage_type is 'W or WL' or similar)
+        if ((/\bw\b/i.test(st) && /\bwl\b/i.test(st)) || st.toLowerCase().includes('wine')) {
+            return pos ? 'WN' + pos : 'WN';
+        }
+        // Executive
+        if (st.toLowerCase().includes('executive')) {
+            return pos ? 'E' + pos : 'E';
+        }
+        // Smart/NOKE
+        if (noke === 'yes') {
+            return pos ? 'S' + pos : 'S';
+        }
+        // Standard locker (has deck position but no special qualifier)
+        if (pos) return pos;
+        // Standard walk-in (no deck position, no qualifier, but has storage_type data)
+        if (st) return 'W';
+
+        return '';
+    }
+
+    // Refine a base type code with deck position info
+    function refineType(baseType, deckPosition) {
+        if (!baseType || !deckPosition) return baseType;
+        const pos = deckToPosition(deckPosition);
+        if (!pos) return baseType;
+        const bt = baseType.toUpperCase();
+        // Only refine walk-in base types that lack position specificity
+        if (bt === 'W') return pos;
+        if (bt === 'S') return 'S' + pos;
+        if (bt === 'E') return 'E' + pos;
+        if (bt === 'WN') return 'WN' + pos;
+        return baseType;
+    }
+
     function processUnits() {
         processedUnits = allUnits.map(unit => {
             const key = overrideKey(unit.SiteID, unit.UnitID);
@@ -526,13 +582,23 @@
             const viewPillar = unit.has_pillar ? 'P' : 'NP';
             const viewShape = unit.is_odd_shape ? 'OS' : null;
 
-            // Determine values: override > mapping > view-prefill > auto-calc
-            const unitType = override.unit_type_code || mappedType || '';
+            // View-derived type inference
+            const refinedType = refineType(mappedType, unit.deck_position);
+            const inferredType = inferTypeCode(unit);
+
+            // Determine values: override > refined mapping > inferred > empty
+            const unitType = override.unit_type_code || refinedType || inferredType || '';
             const climate = override.climate_code || mappedClimate || viewClimate || '';
             const sizeCat = override.size_category || calcSizeCategory(area);
             const sizeRange = override.size_range || calcSizeRange(area);
             const shape = override.shape || viewShape || calcShape(w, l);
             const pillar = override.pillar || viewPillar || calcPillar(unit.sUnitNote);
+
+            // Determine unitType source for color coding
+            let unitTypeSrc = 'auto';
+            if (override.unit_type_code) unitTypeSrc = 'override';
+            else if (refinedType) unitTypeSrc = 'mapping';
+            else if (inferredType) unitTypeSrc = 'view';
 
             return {
                 ...unit,
@@ -555,9 +621,10 @@
                 _pillarInfo: unit.has_pillar ? (unit.pillar_size || 'Yes') : '',
                 _oddShape: unit.is_odd_shape ? 'Yes' : '',
                 _cases: unit.case_count != null ? String(unit.case_count) : '',
+                _storageType: unit.storage_type || '',
                 // Track sources for color coding
                 _src: {
-                    unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
+                    unitType: unitTypeSrc,
                     climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : (viewClimate ? 'view' : 'auto')),
                     sizeCat: override.size_category ? 'override' : 'auto',
                     sizeRange: override.size_range ? 'override' : 'auto',
@@ -588,6 +655,7 @@
             pillarInfo:  u => u._pillarInfo || '',
             oddShape:    u => u._oddShape || '',
             cases:       u => u._cases || '',
+            storageType: u => u._storageType || '',
         };
 
         for (const [col, getter] of Object.entries(cols)) {
@@ -596,7 +664,7 @@
             const prev = el.value;
             const values = [...new Set(processedUnits.map(getter))].filter(Boolean).sort();
             el.innerHTML = '<option value="">All</option>' + values.map(v =>
-                `<option value="${v}" ${v === prev ? 'selected' : ''}>${v}</option>`
+                `<option value="${h(v)}" ${v === prev ? 'selected' : ''}>${h(v)}</option>`
             ).join('');
         }
     }
@@ -633,12 +701,18 @@
                 case 'pillarInfo':  if ((u._pillarInfo || '') !== val) return false; break;
                 case 'oddShape':    if ((u._oddShape || '') !== val) return false; break;
                 case 'cases':       if ((u._cases || '') !== val) return false; break;
+                case 'storageType': if ((u._storageType || '') !== val) return false; break;
             }
         }
         return true;
     }
 
     // --- Rendering ---
+    function h(str) {
+        if (str == null) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
     function cellClass(src) {
         if (src === 'override') return 'cell-override';
         if (src === 'mapping') return 'cell-mapping';
@@ -674,7 +748,7 @@
             `(${filteredUnits.length} of ${processedUnits.length})`;
 
         if (filteredUnits.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="23" style="text-align: center; color: #666;">No units found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="24" style="text-align: center; color: #666;">No units found</td></tr>';
             return;
         }
 
@@ -683,9 +757,9 @@
             const isSelected = selectedSet.has(idx);
             return `<tr data-idx="${idx}" class="${isSelected ? 'row-selected' : ''}">
                 <td><input type="checkbox" class="row-select" ${isSelected ? 'checked' : ''} data-idx="${idx}" onchange="onRowSelect(this)"></td>
-                <td>${u.sLocationCode || '-'}</td>
-                <td><strong>${u.sUnitName || '-'}</strong></td>
-                <td>${u.sTypeName || '-'}</td>
+                <td>${h(u.sLocationCode) || '-'}</td>
+                <td><strong>${h(u.sUnitName) || '-'}</strong></td>
+                <td>${h(u.sTypeName) || '-'}</td>
                 <td>${u._width ? u._width.toFixed(1) : '-'}</td>
                 <td>${u._length ? u._length.toFixed(1) : '-'}</td>
                 <td>${u._area ? u._area.toFixed(1) : '-'}</td>
@@ -698,14 +772,15 @@
                 <td class="${cellClass(u._src.sizeRange)}">${makeSelect(SIZE_RANGE_BUCKETS.map(b => b.label), u._sizeRange, `data-field="sizeRange" data-idx="${idx}"`)}</td>
                 <td class="${cellClass(u._src.shape)}">${makeSelect(SHAPES, u._shape, `data-field="shape" data-idx="${idx}"`)}</td>
                 <td class="${cellClass(u._src.pillar)}">${makeSelect(PILLARS, u._pillar, `data-field="pillar" data-idx="${idx}"`)}</td>
-                <td class="label-cell">${u._finalLabel || '-'}</td>
-                <td class="cell-info">${u._climateType || '-'}</td>
-                <td class="cell-info">${u._dehum || '-'}</td>
-                <td class="cell-info">${u._noke || '-'}</td>
-                <td class="cell-info">${u._deck || '-'}</td>
-                <td class="cell-info">${u._pillarInfo || '-'}</td>
-                <td class="cell-info">${u._oddShape || '-'}</td>
-                <td class="cell-info">${u._cases || '-'}</td>
+                <td class="label-cell">${h(u._finalLabel) || '-'}</td>
+                <td class="cell-info">${h(u._climateType) || '-'}</td>
+                <td class="cell-info">${h(u._dehum) || '-'}</td>
+                <td class="cell-info">${h(u._noke) || '-'}</td>
+                <td class="cell-info">${h(u._deck) || '-'}</td>
+                <td class="cell-info">${h(u._pillarInfo) || '-'}</td>
+                <td class="cell-info">${h(u._oddShape) || '-'}</td>
+                <td class="cell-info">${h(u._cases) || '-'}</td>
+                <td class="cell-info">${h(u._storageType) || '-'}</td>
             </tr>`;
         }).join('');
 
@@ -881,8 +956,10 @@
         const viewClimate = mapClimateType(unit.climate_type, unit.has_dehumidifier);
         const viewPillar = unit.has_pillar ? 'P' : 'NP';
         const viewShape = unit.is_odd_shape ? 'OS' : null;
+        const refinedType = refineType(mappedType, unit.deck_position);
+        const inferredType = inferTypeCode(unit);
 
-        unit._unitType = override.unit_type_code || mappedType || '';
+        unit._unitType = override.unit_type_code || refinedType || inferredType || '';
         unit._climate = override.climate_code || mappedClimate || viewClimate || '';
         unit._sizeCat = override.size_category || calcSizeCategory(area);
         unit._sizeRange = override.size_range || calcSizeRange(area);
@@ -891,8 +968,13 @@
         unit._finalLabel = buildFinalLabel(unit._sizeCat, unit._sizeRange, unit._unitType, unit._climate, unit._shape, unit._pillar);
 
         // Update source tracking
+        let unitTypeSrc = 'auto';
+        if (override.unit_type_code) unitTypeSrc = 'override';
+        else if (refinedType) unitTypeSrc = 'mapping';
+        else if (inferredType) unitTypeSrc = 'view';
+
         unit._src = {
-            unitType: override.unit_type_code ? 'override' : (mappedType ? 'mapping' : 'auto'),
+            unitType: unitTypeSrc,
             climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : (viewClimate ? 'view' : 'auto')),
             sizeCat: override.size_category ? 'override' : 'auto',
             sizeRange: override.size_range ? 'override' : 'auto',
@@ -1040,6 +1122,7 @@
             'Pillar Info': u._pillarInfo || '',
             'Odd Shape': u._oddShape || '',
             'Case Count': u._cases || '',
+            'Storage Type': u._storageType || '',
             'Reviewed': u._reviewed ? 'Yes' : 'No',
         }));
 

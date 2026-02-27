@@ -1652,7 +1652,7 @@ def api_inventory_units():
                    u."iFloor", u."UnitTypeID",
                    v.climate_type, v.has_dehumidifier, v.noke_status,
                    v.has_pillar, v.pillar_size, v.is_odd_shape, v.deck_position,
-                   v.case_count
+                   v.case_count, v.storage_type
             FROM units_info u
             LEFT JOIN vw_units_inventory v
                 ON v.unit_id = u."UnitID"
