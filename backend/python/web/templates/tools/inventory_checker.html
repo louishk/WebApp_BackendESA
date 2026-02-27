@@ -512,10 +512,15 @@
         }
     }
 
-    // Map Excel climate_type to SOP climate code
+    // Map climate_type to SOP climate code
     function mapClimateType(climateType, hasDehumidifier) {
         if (!climateType) return '';
-        const ct = climateType.toUpperCase();
+        const ct = climateType.toUpperCase().trim();
+        // Already-standardized codes
+        if (ct === 'RF' || ct === 'AD' || ct === 'D') return ct;
+        if (ct === 'A') return hasDehumidifier ? 'AD' : 'A';
+        if (ct === 'NC') return hasDehumidifier ? 'D' : 'NC';
+        // Legacy raw values
         if (ct.includes('REFRIGERAT') || ct.includes('WINE')) return 'RF';
         const isAirCon = (ct.includes('AIR') && !ct.includes('NON')) || ct.includes('CLIMATE');
         if (isAirCon && hasDehumidifier) return 'AD';
