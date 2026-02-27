@@ -638,6 +638,20 @@
         return baseType;
     }
 
+    // Upgrade type code when unit has noke (Smart variant)
+    function applyNoke(typeCode, nokeStatus) {
+        if (!typeCode || (nokeStatus || '').trim().toLowerCase() !== 'yes') return typeCode;
+        const tc = typeCode.toUpperCase();
+        // Already smart
+        if (tc.startsWith('S')) return typeCode;
+        // Wine → Smart Wine
+        if (tc.startsWith('WN')) return 'S' + typeCode;
+        // Walk-in W → S, Locker U/M/L → SU/SM/SL, Executive E → keep as-is
+        if (tc === 'W') return 'S';
+        if (tc === 'U' || tc === 'M' || tc === 'L') return 'S' + typeCode;
+        return typeCode;
+    }
+
     function processUnits() {
         processedUnits = allUnits.map(unit => {
             const key = overrideKey(unit.SiteID, unit.UnitID);
@@ -659,7 +673,8 @@
             const inferredType = inferTypeCode(unit);
 
             // Determine values: override > refined mapping > inferred > empty
-            const unitType = override.unit_type_code || refinedType || inferredType || '';
+            const rawType = override.unit_type_code || refinedType || inferredType || '';
+            const unitType = override.unit_type_code ? rawType : applyNoke(rawType, unit.noke_status);
             const typeOnly = isTypeOnly(unitType);
             const climate = typeOnly ? '' : (override.climate_code || viewClimate || mappedClimate || '');
             const sizeCat = typeOnly ? '' : (override.size_category || calcSizeCategory(area));
@@ -1034,7 +1049,8 @@
         const refinedType = refineType(mappedType, unit.deck_position);
         const inferredType = inferTypeCode(unit);
 
-        unit._unitType = override.unit_type_code || refinedType || inferredType || '';
+        const rawType = override.unit_type_code || refinedType || inferredType || '';
+        unit._unitType = override.unit_type_code ? rawType : applyNoke(rawType, unit.noke_status);
         const typeOnly = isTypeOnly(unit._unitType);
         unit._climate = typeOnly ? '' : (override.climate_code || viewClimate || mappedClimate || '');
         unit._sizeCat = typeOnly ? '' : (override.size_category || calcSizeCategory(area));
