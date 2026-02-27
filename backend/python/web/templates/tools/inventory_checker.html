@@ -39,7 +39,8 @@
                 <tr><td style="padding: 3px 6px;"><code>L</code></td><td style="padding: 3px 6px;">Locker &mdash; Single deck or 4th tier</td><td style="padding: 3px 6px;">Size/Range/<strong>L</strong>/Climate/Shape/Pillar</td></tr>
                 <tr><td style="padding: 3px 6px;"><code>S / SU / SM / SL</code></td><td style="padding: 3px 6px;">Smart (Noke) + deck position</td><td style="padding: 3px 6px;">Size/Range/<strong>SU</strong>/Climate/Shape/Pillar</td></tr>
                 <tr><td style="padding: 3px 6px;"><code>E / EU / EM / EL</code></td><td style="padding: 3px 6px;">Executive + deck position</td><td style="padding: 3px 6px;">Size/Range/<strong>EU</strong>/Climate/Shape/Pillar</td></tr>
-                <tr><td style="padding: 3px 6px;"><code>WN / WNU</code></td><td style="padding: 3px 6px;">Wine Walk-In / Wine Locker</td><td style="padding: 3px 6px;">Size/Range/<strong>WN</strong>/Climate/Shape/Pillar</td></tr>
+                <tr><td style="padding: 3px 6px;"><code>WN / WNU / WNM / WNL</code></td><td style="padding: 3px 6px;">Wine Walk-In / Wine Locker + deck</td><td style="padding: 3px 6px;">Size/Range/<strong>WN</strong>/Climate/Shape/Pillar</td></tr>
+                <tr><td style="padding: 3px 6px;"><code>SWN / SWNU / SWNM / SWNL</code></td><td style="padding: 3px 6px;">Smart Wine Walk-In / Locker + deck</td><td style="padding: 3px 6px;">Size/Range/<strong>SWN</strong>/Climate/Shape/Pillar</td></tr>
                 <tr><td style="padding: 3px 6px;"><code>DV</code></td><td style="padding: 3px 6px;">Drive-Up</td><td style="padding: 3px 6px;">Size/Range/<strong>DV</strong>/Climate/Shape/Pillar</td></tr>
                 <tr><td style="padding: 3px 6px;"><code>RB</code></td><td style="padding: 3px 6px;">Portable / Wardrobe</td><td style="padding: 3px 6px;">Size/Range/<strong>RB</strong>/Climate/Shape/Pillar</td></tr>
                 <tr style="background: #f5f5f5;"><td style="padding: 3px 6px;"><code>MB</code></td><td style="padding: 3px 6px;">Mailbox</td><td style="padding: 3px 6px;"><strong>MB</strong> (type only)</td></tr>
@@ -315,7 +316,7 @@
     const TYPE_CODES = [
         'W','E','S',
         'U','M','L','SU','SM','SL','EU','EM','EL',
-        'WN','WNU','WNM','WNL',
+        'WN','WNU','WNM','WNL','SWN','SWNU','SWNM','SWNL',
         'DV','RB','MB','BZ','SC','SB','PR'
     ];
     const TYPE_DESCS = {
@@ -324,6 +325,7 @@
         'SU': 'Smart Locker Upper', 'SM': 'Smart Locker Middle', 'SL': 'Smart Locker Lower',
         'EU': 'Executive Locker Upper', 'EM': 'Executive Locker Middle', 'EL': 'Executive Locker Lower',
         'WN': 'Wine Walk-In', 'WNU': 'Wine Locker Upper', 'WNM': 'Wine Locker Middle', 'WNL': 'Wine Locker Lower',
+        'SWN': 'Smart Wine Walk-In', 'SWNU': 'Smart Wine Locker Upper', 'SWNM': 'Smart Wine Locker Middle', 'SWNL': 'Smart Wine Locker Lower',
         'DV': 'Drive-Up', 'RB': 'Wardrobe', 'MB': 'Mail Box',
         'BZ': 'BizPlus', 'SC': 'Showcase', 'SB': 'SubTenant', 'PR': 'Parking',
     };
@@ -598,7 +600,8 @@
         if (st.toLowerCase().includes('drive')) return 'DV';
         // Wine (storage_type is 'W or WL' or similar)
         if ((/\bw\b/i.test(st) && /\bwl\b/i.test(st)) || st.toLowerCase().includes('wine')) {
-            return pos ? 'WN' + pos : 'WN';
+            const base = noke === 'yes' ? 'SWN' : 'WN';
+            return pos ? base + pos : base;
         }
         // Executive
         if (st.toLowerCase().includes('executive')) {
@@ -629,6 +632,9 @@
         if (bt === 'S') return 'S' + pos;
         if (bt === 'E') return 'E' + pos;
         if (bt === 'WN') return 'WN' + pos;
+        if (bt === 'SWN') return 'SWN' + pos;
+        if (bt === 'WNU' || bt === 'WNM' || bt === 'WNL') return 'WN' + pos;
+        if (bt === 'SWNU' || bt === 'SWNM' || bt === 'SWNL') return 'SWN' + pos;
         return baseType;
     }
 
