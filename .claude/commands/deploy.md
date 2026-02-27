@@ -1,6 +1,9 @@
-# Deploy Pipeline: Security Check → Commit → Push → Deploy
+# Deploy
 
-Execute a secure deployment pipeline with the following steps. Stop immediately if any gate fails.
+Secure deployment pipeline: Security Check → Commit → Push → Deploy. Stop immediately if any gate fails.
+
+Usage: `/deploy <commit context or description of changes>`
+Example: `/deploy added inventory filtering and batch actions`
 
 Context for this commit: $ARGUMENTS
 

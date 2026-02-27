@@ -506,8 +506,9 @@
         if (!climateType) return '';
         const ct = climateType.toUpperCase();
         if (ct.includes('REFRIGERAT')) return 'RF';
-        if (ct.includes('AIR') && hasDehumidifier) return 'AD';
-        if (ct.includes('AIR')) return 'A';
+        const isAirCon = ct.includes('AIR') && !ct.includes('NON');
+        if (isAirCon && hasDehumidifier) return 'AD';
+        if (isAirCon) return 'A';
         if (hasDehumidifier) return 'D';
         return 'NC';
     }
@@ -558,6 +559,8 @@
         const pos = deckToPosition(deckPosition);
         if (!pos) return baseType;
         const bt = baseType.toUpperCase();
+        // Replace bare position codes with actual deck position
+        if (bt === 'U' || bt === 'M' || bt === 'L') return pos;
         // Only refine walk-in base types that lack position specificity
         if (bt === 'W') return pos;
         if (bt === 'S') return 'S' + pos;
@@ -588,7 +591,7 @@
 
             // Determine values: override > refined mapping > inferred > empty
             const unitType = override.unit_type_code || refinedType || inferredType || '';
-            const climate = override.climate_code || mappedClimate || viewClimate || '';
+            const climate = override.climate_code || viewClimate || mappedClimate || '';
             const sizeCat = override.size_category || calcSizeCategory(area);
             const sizeRange = override.size_range || calcSizeRange(area);
             const shape = override.shape || viewShape || calcShape(w, l);
@@ -625,7 +628,7 @@
                 // Track sources for color coding
                 _src: {
                     unitType: unitTypeSrc,
-                    climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : (viewClimate ? 'view' : 'auto')),
+                    climate: override.climate_code ? 'override' : (viewClimate ? 'view' : (mappedClimate ? 'mapping' : 'auto')),
                     sizeCat: override.size_category ? 'override' : 'auto',
                     sizeRange: override.size_range ? 'override' : 'auto',
                     shape: override.shape ? 'override' : (viewShape ? 'view' : 'auto'),
@@ -960,7 +963,7 @@
         const inferredType = inferTypeCode(unit);
 
         unit._unitType = override.unit_type_code || refinedType || inferredType || '';
-        unit._climate = override.climate_code || mappedClimate || viewClimate || '';
+        unit._climate = override.climate_code || viewClimate || mappedClimate || '';
         unit._sizeCat = override.size_category || calcSizeCategory(area);
         unit._sizeRange = override.size_range || calcSizeRange(area);
         unit._shape = override.shape || viewShape || calcShape(unit._width, unit._length);
@@ -975,7 +978,7 @@
 
         unit._src = {
             unitType: unitTypeSrc,
-            climate: override.climate_code ? 'override' : (mappedClimate ? 'mapping' : (viewClimate ? 'view' : 'auto')),
+            climate: override.climate_code ? 'override' : (viewClimate ? 'view' : (mappedClimate ? 'mapping' : 'auto')),
             sizeCat: override.size_category ? 'override' : 'auto',
             sizeRange: override.size_range ? 'override' : 'auto',
             shape: override.shape ? 'override' : (viewShape ? 'view' : 'auto'),

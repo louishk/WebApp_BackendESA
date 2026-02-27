@@ -1,6 +1,9 @@
-# Security Review & Auto-Remediation Pipeline
+# Security Review
 
-Execute a full security audit with automated remediation. This is an iterative process that loops until all critical, high, and medium issues are resolved.
+Full security audit with automated remediation. Iterates until all critical, high, and medium issues are resolved.
+
+Usage: `/security-review <scope>` or `/security-review` (defaults to recently modified files)
+Example: `/security-review backend/python/web/routes/api.py`
 
 Scope: $ARGUMENTS
 If no scope is provided, review all recently modified files (use `git diff --name-only` and `git ls-files --others --exclude-standard`).
