@@ -404,12 +404,23 @@
             const data = await response.json();
             const select = document.getElementById('site-select');
             select.innerHTML = '';
+            const grouped = {};
             data.sites.forEach(site => {
-                const option = document.createElement('option');
-                option.value = site.site_id;
-                option.dataset.code = site.site_code;
-                option.textContent = `${site.site_code} - ${site.name}`;
-                select.appendChild(option);
+                const country = site.country || 'Other';
+                if (!grouped[country]) grouped[country] = [];
+                grouped[country].push(site);
+            });
+            Object.keys(grouped).forEach(country => {
+                const group = document.createElement('optgroup');
+                group.label = country;
+                grouped[country].forEach(site => {
+                    const option = document.createElement('option');
+                    option.value = site.site_id;
+                    option.dataset.code = site.site_code;
+                    option.textContent = `${site.site_code} - ${site.name}`;
+                    group.appendChild(option);
+                });
+                select.appendChild(group);
             });
         } catch (error) {
             console.error('Failed to load sites:', error);
@@ -617,7 +628,7 @@
                 _reviewed: override.reviewed || false,
                 _finalLabel: buildFinalLabel(sizeCat, sizeRange, unitType, climate, shape, pillar),
                 // Info columns from view
-                _climateType: unit.climate_type || '',
+                _climateType: mapClimateType(unit.climate_type, false) || '',
                 _dehum: unit.has_dehumidifier ? 'Yes' : '',
                 _noke: unit.noke_status || '',
                 _deck: unit.deck_position || '',

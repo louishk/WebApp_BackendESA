@@ -1604,13 +1604,14 @@ def api_list_sites():
 
     session = get_pbi_session()
     try:
-        sites = session.query(SiteInfo).order_by(SiteInfo.Name).all()
+        sites = session.query(SiteInfo).order_by(SiteInfo.Country, SiteInfo.SiteCode).all()
         return jsonify({
             'sites': [
                 {
                     'site_id': s.SiteID,
                     'site_code': s.SiteCode,
-                    'name': s.Name
+                    'name': s.Name,
+                    'country': s.Country
                 }
                 for s in sites
             ]
