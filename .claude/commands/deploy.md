@@ -53,13 +53,13 @@ Connection details:
 Execute in a **single command**:
 
 ```
-ssh -i ~/.ssh/id_ed25519_vm -o StrictHostKeyChecking=no esa_pbi_admin@57.158.27.35 'sed -i "s/\r$//" /tmp/update.sh && echo <VM_SSH_PASSWORD> | sudo -S bash /tmp/update.sh'
+ssh -i ~/.ssh/id_ed25519_vm -o StrictHostKeyChecking=no esa_pbi_admin@57.158.27.35 'echo <VM_SSH_PASSWORD> | sudo -S sed -i "s/\r$//" /var/www/backend/update.sh && echo <VM_SSH_PASSWORD> | sudo -S bash /var/www/backend/update.sh'
 ```
 
 Key details:
 - Uses SSH key auth (no `sshpass` needed)
-- The update script is at `/tmp/update.sh` (NOT `/update.sh`)
-- Fix Windows line endings with `sed` before running
+- The update script is at `/var/www/backend/update.sh` (owned by root, requires sudo)
+- Fix Windows line endings with `sudo sed` before running (directory is root-owned)
 - The script requires `sudo` — read `VM_SSH_PASSWORD` from `.env` and pipe via `echo <password> | sudo -S`
 - Do this all in one SSH command to avoid multiple round trips
 
