@@ -391,7 +391,15 @@
         return unitNote.toLowerCase().includes('pillar') ? 'P' : 'NP';
     }
 
+    // Special types: label = type code only (no climate/size/shape/pillar)
+    const TYPE_ONLY_CODES = new Set(['MB', 'BZ', 'SC', 'SB', 'PR']);
+
+    function isTypeOnly(typeCode) {
+        return TYPE_ONLY_CODES.has((typeCode || '').toUpperCase());
+    }
+
     function buildFinalLabel(sizeCat, sizeRange, typeCode, climateCode, shape, pillar) {
+        if (isTypeOnly(typeCode)) return typeCode;
         const parts = [sizeCat, sizeRange, typeCode, climateCode, shape, pillar].filter(Boolean);
         return parts.join('/').substring(0, 30);
     }
@@ -607,11 +615,12 @@
 
             // Determine values: override > refined mapping > inferred > empty
             const unitType = override.unit_type_code || refinedType || inferredType || '';
-            const climate = override.climate_code || viewClimate || mappedClimate || '';
-            const sizeCat = override.size_category || calcSizeCategory(area);
-            const sizeRange = override.size_range || calcSizeRange(area);
-            const shape = override.shape || viewShape || calcShape(w, l);
-            const pillar = override.pillar || viewPillar || calcPillar(unit.sUnitNote);
+            const typeOnly = isTypeOnly(unitType);
+            const climate = typeOnly ? '' : (override.climate_code || viewClimate || mappedClimate || '');
+            const sizeCat = typeOnly ? '' : (override.size_category || calcSizeCategory(area));
+            const sizeRange = typeOnly ? '' : (override.size_range || calcSizeRange(area));
+            const shape = typeOnly ? '' : (override.shape || viewShape || calcShape(w, l));
+            const pillar = typeOnly ? '' : (override.pillar || viewPillar || calcPillar(unit.sUnitNote));
 
             // Determine unitType source for color coding
             let unitTypeSrc = 'auto';
@@ -979,11 +988,12 @@
         const inferredType = inferTypeCode(unit);
 
         unit._unitType = override.unit_type_code || refinedType || inferredType || '';
-        unit._climate = override.climate_code || viewClimate || mappedClimate || '';
-        unit._sizeCat = override.size_category || calcSizeCategory(area);
-        unit._sizeRange = override.size_range || calcSizeRange(area);
-        unit._shape = override.shape || viewShape || calcShape(unit._width, unit._length);
-        unit._pillar = override.pillar || viewPillar || calcPillar(unit.sUnitNote);
+        const typeOnly = isTypeOnly(unit._unitType);
+        unit._climate = typeOnly ? '' : (override.climate_code || viewClimate || mappedClimate || '');
+        unit._sizeCat = typeOnly ? '' : (override.size_category || calcSizeCategory(area));
+        unit._sizeRange = typeOnly ? '' : (override.size_range || calcSizeRange(area));
+        unit._shape = typeOnly ? '' : (override.shape || viewShape || calcShape(unit._width, unit._length));
+        unit._pillar = typeOnly ? '' : (override.pillar || viewPillar || calcPillar(unit.sUnitNote));
         unit._finalLabel = buildFinalLabel(unit._sizeCat, unit._sizeRange, unit._unitType, unit._climate, unit._shape, unit._pillar);
 
         // Update source tracking
