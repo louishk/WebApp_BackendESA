@@ -136,6 +136,17 @@ def _build_plan_from_form(form, plan=None):
     plan.registration_flow = form.get('registration_flow', '').strip() or None
     plan.department_notes = _parse_json_field(form.get('department_notes_json'), {})
 
+    # Custom fields - dynamic key/value pairs from the form
+    cf_keys = form.getlist('cf_key')
+    cf_vals = form.getlist('cf_value')
+    custom = {}
+    for k, v in zip(cf_keys, cf_vals):
+        k = k.strip()
+        v = v.strip()
+        if k:
+            custom[k] = v
+    plan.custom_fields = custom if custom else {}
+
     # Status
     plan.is_active = form.get('is_active') == 'on'
     raw_sort = form.get('sort_order', '0').strip()

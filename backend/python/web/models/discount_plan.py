@@ -97,6 +97,14 @@ class DiscountPlan(Base):
     department_notes = Column(JSONB, comment="Per-department notes, e.g. {REV: '...', OPS: '...', MKG: '...'}")
 
     # =========================================================================
+    # Extensible Custom Fields
+    # =========================================================================
+    # JSONB bag for arbitrary key-value pairs added from the UI.
+    # Allows new discount attributes to be created without schema migrations.
+    # Structure: {"field_label": "value", ...}
+    custom_fields = Column(JSONB, default=dict, comment="User-defined extra fields as key-value pairs")
+
+    # =========================================================================
     # Status & Ordering
     # =========================================================================
     is_active = Column(Boolean, nullable=False, default=True, comment="Whether plan is currently active")
@@ -156,6 +164,8 @@ class DiscountPlan(Base):
             'collateral_url': self.collateral_url,
             'registration_flow': self.registration_flow,
             'department_notes': self.department_notes or {},
+            # Custom fields
+            'custom_fields': self.custom_fields or {},
             # Status
             'is_active': self.is_active,
             'sort_order': self.sort_order,

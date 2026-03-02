@@ -323,6 +323,28 @@
     </div>
 
     <!-- ================================================================= -->
+    <!-- Custom Fields (extensible key-value pairs) -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Custom Fields</h3>
+        <p style="font-size: 0.8rem; color: #888; margin-bottom: 0.75rem;">
+            Add any additional fields that are not covered above. These are stored as flexible key-value pairs and can be extended at any time.
+        </p>
+        <div id="custom-fields-container">
+            {% if plan and plan.custom_fields %}
+                {% for key, value in plan.custom_fields.items() %}
+                <div class="cf-row" style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
+                    <input type="text" name="cf_key" value="{{ key }}" placeholder="Field name" style="flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">
+                    <input type="text" name="cf_value" value="{{ value }}" placeholder="Value" style="flex: 2; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">
+                    <button type="button" onclick="this.parentElement.remove()" class="btn btn-sm" style="background: #dc2626; padding: 0.4rem 0.6rem;">Remove</button>
+                </div>
+                {% endfor %}
+            {% endif %}
+        </div>
+        <button type="button" id="add-custom-field" class="btn btn-sm btn-secondary" style="margin-top: 0.5rem;">+ Add Field</button>
+    </div>
+
+    <!-- ================================================================= -->
     <!-- Status -->
     <!-- ================================================================= -->
     <div class="card form-section">
@@ -350,5 +372,19 @@
 {% block scripts %}
 <script>
 clearTimeout(window.autoRefreshTimeout);
+
+// Dynamic custom fields
+document.getElementById('add-custom-field').addEventListener('click', function() {
+    var container = document.getElementById('custom-fields-container');
+    var row = document.createElement('div');
+    row.className = 'cf-row';
+    row.style.cssText = 'display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;';
+    row.innerHTML =
+        '<input type="text" name="cf_key" placeholder="Field name" style="flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">' +
+        '<input type="text" name="cf_value" placeholder="Value" style="flex: 2; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">' +
+        '<button type="button" onclick="this.parentElement.remove()" class="btn btn-sm" style="background: #dc2626; padding: 0.4rem 0.6rem;">Remove</button>';
+    container.appendChild(row);
+    row.querySelector('input').focus();
+});
 </script>
 {% endblock %}

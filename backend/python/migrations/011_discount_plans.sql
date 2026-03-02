@@ -60,6 +60,9 @@ CREATE TABLE IF NOT EXISTS discount_plans (
     registration_flow   TEXT,
     department_notes    JSONB,
 
+    -- Extensible custom fields (arbitrary key-value pairs from UI)
+    custom_fields       JSONB DEFAULT '{}',
+
     -- Status
     is_active           BOOLEAN NOT NULL DEFAULT TRUE,
     sort_order          INTEGER DEFAULT 0,

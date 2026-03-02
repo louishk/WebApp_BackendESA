@@ -12,7 +12,7 @@ import threading
 
 import re
 
-from flask import Blueprint, jsonify, request, current_app
+from flask import Blueprint, jsonify, request, current_app, g
 from sqlalchemy import desc, func, case, text
 
 from web.auth.jwt_auth import require_auth
@@ -2383,5 +2383,242 @@ def api_ext_statistics_services():
                 for r in results
             ],
         })
+    finally:
+        session.close()
+
+
+# =============================================================================
+# Discount Plans API — External-facing REST endpoints
+# =============================================================================
+# Usable by external systems (chatbot, website, partner integrations)
+# via JWT Bearer token or session auth.
+#
+# GET  /api/discount-plans            — list all active plans
+# GET  /api/discount-plans/<id>       — get single plan by id
+# GET  /api/discount-plans/by-name/<name> — get single plan by name
+# POST /api/discount-plans            — create a new plan (admin only)
+# PUT  /api/discount-plans/<id>       — update a plan (admin only)
+# =============================================================================
+
+def _get_discount_plan_model():
+    """Lazy import to avoid circular imports."""
+    from web.models.discount_plan import DiscountPlan
+    return DiscountPlan
+
+
+def _apply_plan_json(plan, data, is_create=False):
+    """
+    Apply JSON payload fields to a DiscountPlan instance.
+    Only touches fields that are present in the payload (PATCH semantics).
+    """
+    SIMPLE_STR_FIELDS = [
+        'plan_type', 'plan_name', 'sitelink_discount_name',
+        'notes', 'objective',
+        'period_range', 'move_in_range',
+        'discount_value', 'discount_type', 'discount_segmentation',
+        'clawback_condition',
+        'deposit', 'payment_terms', 'termination_notice', 'extra_offer',
+        'chatbot_notes',
+        'sales_extra_discount', 'switch_to_us', 'referral_program',
+        'distribution_channel',
+        'rate_rules', 'rate_rules_sites',
+        'collateral_url', 'registration_flow',
+    ]
+    BOOL_FIELDS = ['hidden_rate', 'available_for_chatbot', 'is_active']
+    JSONB_FIELDS = [
+        'applicable_sites', 'offers', 'terms_conditions', 'terms_conditions_cn',
+        'promotion_codes', 'department_notes', 'custom_fields',
+    ]
+
+    for field in SIMPLE_STR_FIELDS:
+        if field in data:
+            setattr(plan, field, data[field])
+
+    for field in BOOL_FIELDS:
+        if field in data:
+            setattr(plan, field, bool(data[field]))
+
+    for field in JSONB_FIELDS:
+        if field in data:
+            setattr(plan, field, data[field])
+
+    if 'discount_numeric' in data:
+        val = data['discount_numeric']
+        plan.discount_numeric = float(val) if val is not None else None
+
+    if 'sort_order' in data:
+        plan.sort_order = int(data['sort_order'])
+
+    # Date fields
+    from datetime import date as date_cls
+    for field in ('period_start', 'period_end'):
+        if field in data:
+            val = data[field]
+            if val and isinstance(val, str):
+                setattr(plan, field, date_cls.fromisoformat(val))
+            else:
+                setattr(plan, field, None)
+
+
+@api_bp.route('/discount-plans', methods=['GET'])
+@require_auth
+@rate_limit_api(max_requests=60, window_seconds=60)
+def api_discount_plans_list():
+    """
+    List discount plans.
+
+    Query parameters:
+        active_only  — "true" (default) returns only active plans; "false" returns all
+        plan_type    — filter by plan_type, e.g. "Evergreen"
+        site         — filter by applicable site code, e.g. "L004"
+    """
+    DiscountPlan = _get_discount_plan_model()
+    session = current_app.get_db_session()
+    try:
+        q = session.query(DiscountPlan)
+
+        # Filter: active only (default true)
+        active_only = request.args.get('active_only', 'true').lower() != 'false'
+        if active_only:
+            q = q.filter(DiscountPlan.is_active == True)  # noqa: E712
+
+        # Filter: plan_type
+        plan_type = request.args.get('plan_type')
+        if plan_type:
+            q = q.filter(DiscountPlan.plan_type == plan_type)
+
+        # Filter: applicable site
+        site = request.args.get('site')
+        if site:
+            # JSONB containment: applicable_sites->>'L004' = 'true'
+            q = q.filter(
+                text("applicable_sites->>:site = 'true'").bindparams(site=site)
+            )
+
+        plans = q.order_by(DiscountPlan.sort_order, DiscountPlan.plan_name).all()
+        return jsonify({
+            'count': len(plans),
+            'plans': [p.to_dict() for p in plans],
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/discount-plans/<int:plan_id>', methods=['GET'])
+@require_auth
+@rate_limit_api(max_requests=60, window_seconds=60)
+def api_discount_plans_get(plan_id):
+    """Get a single discount plan by ID."""
+    DiscountPlan = _get_discount_plan_model()
+    session = current_app.get_db_session()
+    try:
+        plan = session.query(DiscountPlan).get(plan_id)
+        if not plan:
+            return jsonify({'error': 'Not found', 'message': f'No discount plan with id {plan_id}'}), 404
+        return jsonify(plan.to_dict())
+    finally:
+        session.close()
+
+
+@api_bp.route('/discount-plans/by-name/<path:plan_name>', methods=['GET'])
+@require_auth
+@rate_limit_api(max_requests=60, window_seconds=60)
+def api_discount_plans_get_by_name(plan_name):
+    """Get a single discount plan by name (URL-encoded)."""
+    DiscountPlan = _get_discount_plan_model()
+    session = current_app.get_db_session()
+    try:
+        plan = session.query(DiscountPlan).filter_by(plan_name=plan_name).first()
+        if not plan:
+            return jsonify({'error': 'Not found', 'message': f'No discount plan named "{plan_name}"'}), 404
+        return jsonify(plan.to_dict())
+    finally:
+        session.close()
+
+
+@api_bp.route('/discount-plans', methods=['POST'])
+@require_auth
+@rate_limit_api(max_requests=20, window_seconds=60)
+def api_discount_plans_create():
+    """
+    Create a new discount plan.
+
+    Expects JSON body with at minimum: plan_type, plan_name.
+    All other fields are optional.
+    """
+    DiscountPlan = _get_discount_plan_model()
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'error': 'Bad request', 'message': 'JSON body required'}), 400
+
+    if not data.get('plan_type') or not data.get('plan_name'):
+        return jsonify({'error': 'Validation', 'message': 'plan_type and plan_name are required'}), 400
+
+    session = current_app.get_db_session()
+    try:
+        existing = session.query(DiscountPlan).filter_by(plan_name=data['plan_name']).first()
+        if existing:
+            return jsonify({'error': 'Conflict', 'message': f'Plan "{data["plan_name"]}" already exists'}), 409
+
+        plan = DiscountPlan()
+        _apply_plan_json(plan, data, is_create=True)
+
+        # Audit
+        user = g.current_user.get('sub', 'api') if hasattr(g, 'current_user') and g.current_user else 'api'
+        plan.created_by = user
+
+        session.add(plan)
+        session.commit()
+        session.refresh(plan)
+
+        return jsonify(plan.to_dict()), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"API create discount plan error: {e}")
+        return jsonify({'error': 'Server error', 'message': str(e)}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/discount-plans/<int:plan_id>', methods=['PUT'])
+@require_auth
+@rate_limit_api(max_requests=20, window_seconds=60)
+def api_discount_plans_update(plan_id):
+    """
+    Update an existing discount plan.
+
+    PATCH semantics: only fields present in the JSON body are updated.
+    """
+    DiscountPlan = _get_discount_plan_model()
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'error': 'Bad request', 'message': 'JSON body required'}), 400
+
+    session = current_app.get_db_session()
+    try:
+        plan = session.query(DiscountPlan).get(plan_id)
+        if not plan:
+            return jsonify({'error': 'Not found', 'message': f'No discount plan with id {plan_id}'}), 404
+
+        # Name uniqueness check if name is changing
+        if 'plan_name' in data and data['plan_name'] != plan.plan_name:
+            existing = session.query(DiscountPlan).filter_by(plan_name=data['plan_name']).first()
+            if existing:
+                return jsonify({'error': 'Conflict', 'message': f'Plan "{data["plan_name"]}" already exists'}), 409
+
+        _apply_plan_json(plan, data)
+
+        # Audit
+        user = g.current_user.get('sub', 'api') if hasattr(g, 'current_user') and g.current_user else 'api'
+        plan.updated_by = user
+
+        session.commit()
+        session.refresh(plan)
+
+        return jsonify(plan.to_dict())
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"API update discount plan error: {e}")
+        return jsonify({'error': 'Server error', 'message': str(e)}), 500
     finally:
         session.close()

@@ -285,6 +285,23 @@
         {% endif %}
         {% endif %}
 
+        <!-- ============================================================ -->
+        <!-- Custom Fields (extensible) -->
+        <!-- ============================================================ -->
+        {% if plan.custom_fields %}
+        {% set cf_items = plan.custom_fields.items() | list %}
+        {% for key, value in cf_items %}
+        <tr>
+            {% if loop.first %}
+            <td class="dept-cell" rowspan="{{ cf_items|length }}">EXTRA</td>
+            {% endif %}
+            <td class="item-cell">{{ key }}</td>
+            <td class="value-cell">{{ value }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+
     </tbody>
 </table>
 </div>
