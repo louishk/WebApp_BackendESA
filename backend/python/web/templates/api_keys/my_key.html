@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}My API Key - ESA Backend{% endblock %}
+
+{% block content %}
+<style>
+    .scope-badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        margin: 1px;
+    }
+    .scope-read { background: #dbeafe; color: #2563eb; }
+    .scope-write { background: #fef3c7; color: #d97706; }
+    .key-prefix {
+        font-family: monospace;
+        background: var(--esa-gray);
+        padding: 0.2rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.95rem;
+    }
+    .info-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .info-row strong { min-width: 100px; color: var(--esa-navy); }
+</style>
+
+<div class="page-header">
+    <h1>My API Key</h1>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                    {% if category == 'info' %}background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+{% if api_key %}
+<!-- Existing Key -->
+<div class="card">
+    <h2>Your API Key</h2>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+            <div class="info-row">
+                <strong>Key Prefix:</strong>
+                <span class="key-prefix">esa_{{ api_key.key_id }}...</span>
+            </div>
+            <div class="info-row">
+                <strong>Status:</strong>
+                {% if api_key.is_active %}
+                    <span class="status status-completed">Active</span>
+                {% else %}
+                    <span class="status status-pending">Inactive</span>
+                {% endif %}
+            </div>
+            <div class="info-row">
+                <strong>Created:</strong>
+                {{ api_key.created_at.strftime('%Y-%m-%d %H:%M') if api_key.created_at else '-' }}
+            </div>
+            <div class="info-row">
+                <strong>Last Used:</strong>
+                {{ api_key.last_used_at.strftime('%Y-%m-%d %H:%M') if api_key.last_used_at else 'Never' }}
+            </div>
+        </div>
+        <div>
+            <div class="info-row">
+                <strong>Rate Limit:</strong>
+                {{ api_key.rate_limit }} req/min {{ '(unlimited)' if api_key.rate_limit == 0 else '' }}
+            </div>
+            <div class="info-row">
+                <strong>Daily Quota:</strong>
+                {% if api_key.daily_quota == 0 %}
+                    Unlimited
+                {% else %}
+                    {{ api_key.daily_usage or 0 }} / {{ api_key.daily_quota }}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div style="margin-top: 0.75rem;">
+        <strong style="font-size: 0.85rem; color: var(--esa-navy);">Assigned Scopes:</strong>
+        {% if api_key.scopes and api_key.scopes|length > 0 %}
+            <div style="margin-top: 0.4rem;">
+                {% for scope in api_key.scopes %}
+                    <span class="scope-badge {{ 'scope-write' if ':write' in scope else 'scope-read' }}">{{ scope }}</span>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p style="font-size: 0.85rem; color: #888; margin-top: 0.25rem;">
+                No scopes assigned yet. Contact an admin to configure your API key permissions.
+            </p>
+        {% endif %}
+    </div>
+
+    <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--esa-gray-dark);">
+        <form action="{{ url_for('api_keys.regenerate_key') }}" method="POST" style="display: inline;"
+              onsubmit="return confirm('Regenerate your API key? The current key will stop working immediately. Your scopes and settings will be preserved.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn" style="background: #d97706;">Regenerate Key</button>
+        </form>
+        <span style="font-size: 0.8rem; color: #888; margin-left: 0.75rem;">
+            This will invalidate your current key and generate a new one.
+        </span>
+    </div>
+</div>
+
+{% else %}
+<!-- No Key Yet -->
+<div class="card">
+    <h2>Your API Key</h2>
+    <p style="color: #888; text-align: center; padding: 1.5rem;">
+        You don't have an API key yet. Generate one to access the REST API from external systems.
+    </p>
+    <div style="text-align: center;">
+        <form action="{{ url_for('api_keys.generate_key') }}" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn">Generate API Key</button>
+        </form>
+    </div>
+    <p style="font-size: 0.8rem; color: #888; text-align: center; margin-top: 0.75rem;">
+        After generating, an admin will assign scopes to control which API endpoints you can access.
+    </p>
+</div>
+{% endif %}
+
+<!-- Usage Guide -->
+<div class="card">
+    <h2>API Usage</h2>
+    <div style="font-size: 0.9rem;">
+        <p style="margin-bottom: 0.5rem;">Send your API key in the <code>X-API-Key</code> header:</p>
+        <pre style="background: var(--esa-navy); color: #fff; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem;">curl -H "X-API-Key: esa_xxxxxxxx.your_secret_here" \
+     https://your-domain.com/api/discount-plans</pre>
+
+        <p style="margin-top: 1rem; margin-bottom: 0.5rem;"><strong>Available endpoints:</strong></p>
+        <table>
+            <thead>
+                <tr><th>Method</th><th>Endpoint</th><th>Scope Required</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>GET</td><td><code>/api/discount-plans</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>List all plans (with filters)</td></tr>
+                <tr><td>GET</td><td><code>/api/discount-plans/&lt;id&gt;</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>Get plan by ID</td></tr>
+                <tr><td>GET</td><td><code>/api/discount-plans/by-name/&lt;name&gt;</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>Get plan by name</td></tr>
+                <tr><td>POST</td><td><code>/api/discount-plans</code></td><td><span class="scope-badge scope-write">discount_plans:write</span></td><td>Create new plan</td></tr>
+                <tr><td>PUT</td><td><code>/api/discount-plans/&lt;id&gt;</code></td><td><span class="scope-badge scope-write">discount_plans:write</span></td><td>Update a plan</td></tr>
+            </tbody>
+        </table>
+
+        <div style="margin-top: 1rem; padding: 0.75rem; background: var(--esa-gray); border-radius: 6px; font-size: 0.85rem;">
+            <strong>Response headers:</strong> Each API response includes rate limit and quota information:
+            <ul style="margin-top: 0.25rem; margin-left: 1.5rem;">
+                <li><code>X-RateLimit-Limit</code> — your per-minute rate limit</li>
+                <li><code>X-Quota-Limit</code> — your daily quota</li>
+                <li><code>X-Quota-Remaining</code> — remaining requests for today</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+clearTimeout(window.autoRefreshTimeout);
+</script>
+{% endblock %}

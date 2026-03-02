@@ -112,19 +112,23 @@ def _authenticate_api_key():
     Key format: esa_<key_id>.<secret>
 
     Returns dict of user info if valid, else None.
-    Also sets g.api_key_scopes for scope checking.
+    Also sets g.api_key_scopes for scope checking and
+    g.api_key_rate_limit for rate limiting.
+
+    Returns (dict, error_tuple) — if error_tuple is not None,
+    return it as the response (quota/rate exceeded).
     """
     from flask import current_app
 
     api_key_header = request.headers.get('X-API-Key', '')
     if not api_key_header or not api_key_header.startswith('esa_'):
-        return None
+        return None, None
 
     try:
         without_prefix = api_key_header[4:]  # strip "esa_"
         key_id, raw_secret = without_prefix.split('.', 1)
     except ValueError:
-        return None
+        return None, None
 
     try:
         from web.models.api_key import ApiKey
@@ -132,7 +136,17 @@ def _authenticate_api_key():
         try:
             api_key = session.query(ApiKey).filter_by(key_id=key_id).first()
             if not api_key or not api_key.is_valid() or not api_key.verify_secret(raw_secret):
-                return None
+                return None, None
+
+            # Check daily quota (auto-resets on new day)
+            allowed, remaining = api_key.check_and_increment_quota()
+            if not allowed:
+                session.commit()
+                return None, (jsonify({
+                    'error': 'Quota exceeded',
+                    'message': f'Daily API quota of {api_key.daily_quota} requests exceeded. Resets at midnight.',
+                    'daily_quota': api_key.daily_quota,
+                }), 429)
 
             # Update last_used_at
             from datetime import datetime, timezone
@@ -140,8 +154,9 @@ def _authenticate_api_key():
             session.commit()
 
             g.api_key_scopes = api_key.scopes or []
+            g.api_key_rate_limit = api_key.rate_limit
 
-            return {
+            user_info = {
                 'sub': api_key.user.username if api_key.user else f'key:{key_id}',
                 'user_id': api_key.user_id,
                 'roles': [r.name for r in api_key.user.roles] if api_key.user else [],
@@ -149,10 +164,16 @@ def _authenticate_api_key():
                 'auth_method': 'api_key',
                 'key_id': key_id,
             }
+
+            # Add quota info to response headers later
+            g.api_key_quota_remaining = remaining
+            g.api_key_daily_quota = api_key.daily_quota
+
+            return user_info, None
         finally:
             session.close()
     except Exception:
-        return None
+        return None, None
 
 
 def require_auth(f):
@@ -197,10 +218,40 @@ def require_auth(f):
             return f(*args, **kwargs)
 
         # 2. API key authentication (X-API-Key header)
-        api_key_user = _authenticate_api_key()
+        api_key_user, api_key_error = _authenticate_api_key()
+        if api_key_error:
+            return api_key_error  # quota exceeded
         if api_key_user:
             g.current_user = api_key_user
-            return f(*args, **kwargs)
+
+            # Enforce per-key rate limit (uses the global rate limiter)
+            rate = getattr(g, 'api_key_rate_limit', 0)
+            if rate and rate > 0:
+                from web.utils.rate_limit import api_limiter, get_client_ip
+                ip = get_client_ip()
+                rl_key = f"apikey:{api_key_user.get('key_id')}:{ip}"
+                is_limited, retry_after = api_limiter.is_rate_limited(rl_key, rate, 60)
+                if is_limited:
+                    return jsonify({
+                        'error': 'Rate limit exceeded',
+                        'message': f'API key rate limit: {rate} req/min. Retry after {retry_after}s.',
+                        'retry_after': retry_after,
+                    }), 429
+                api_limiter.record_attempt(rl_key)
+
+            # Call the endpoint, then add quota headers to response
+            response = f(*args, **kwargs)
+
+            # Add quota info headers if available
+            quota_remaining = getattr(g, 'api_key_quota_remaining', None)
+            daily_quota = getattr(g, 'api_key_daily_quota', None)
+            if quota_remaining is not None and daily_quota:
+                # Handle both Response objects and tuples
+                if hasattr(response, 'headers'):
+                    response.headers['X-RateLimit-Limit'] = str(rate or 'unlimited')
+                    response.headers['X-Quota-Limit'] = str(daily_quota)
+                    response.headers['X-Quota-Remaining'] = str(max(0, quota_remaining))
+            return response
 
         # 3. JWT authentication (Bearer token)
         token = get_token_from_header()

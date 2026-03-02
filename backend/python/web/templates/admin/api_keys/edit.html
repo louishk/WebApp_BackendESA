@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Edit API Key: {{ user.username }} - ESA Backend{% endblock %}
+
+{% block content %}
+<style>
+    .scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem 1.5rem; }
+    .scope-grid label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; cursor: pointer; }
+    .scope-grid .scope-desc { color: #888; font-size: 0.8rem; margin-left: 1.4rem; }
+    .form-group { margin-bottom: 0.75rem; }
+    .form-group label { display: block; font-weight: 600; font-size: 0.85rem; color: var(--esa-navy); margin-bottom: 0.25rem; }
+    .form-group input[type="number"] { width: 200px; padding: 0.5rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem; }
+    .form-group .hint { font-size: 0.75rem; color: #888; margin-top: 0.15rem; }
+</style>
+
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>API Key Settings: {{ user.username }}</h1>
+    <a href="{{ url_for('admin.list_api_keys') }}" class="btn btn-secondary">Back to List</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+{% if not api_key %}
+<div class="card">
+    <p style="color: #888; text-align: center; padding: 2rem;">
+        This user has not generated an API key yet. They must generate one from their "My API Key" page first.<br>
+        Once generated, you can configure scopes, rate limits, and quotas here.
+    </p>
+</div>
+{% else %}
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- Key Info -->
+    <div class="card">
+        <h2>Key Info</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; font-size: 0.9rem;">
+            <div>
+                <strong>Key Prefix:</strong>
+                <code style="background: var(--esa-gray); padding: 0.2rem 0.5rem; border-radius: 3px;">esa_{{ api_key.key_id }}...</code>
+            </div>
+            <div>
+                <strong>Created:</strong> {{ api_key.created_at.strftime('%Y-%m-%d %H:%M') if api_key.created_at else '-' }}
+            </div>
+            <div>
+                <strong>Last Used:</strong> {{ api_key.last_used_at.strftime('%Y-%m-%d %H:%M') if api_key.last_used_at else 'Never' }}
+            </div>
+        </div>
+        <div style="margin-top: 0.75rem;">
+            <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                <input type="checkbox" name="is_active" {{ 'checked' if api_key.is_active }}>
+                <strong>Active</strong>
+            </label>
+        </div>
+    </div>
+
+    <!-- Scopes -->
+    <div class="card">
+        <h2>API Scopes</h2>
+        <p style="font-size: 0.85rem; color: #888; margin-bottom: 0.75rem;">
+            Select which API endpoints this key can access:
+        </p>
+        <div class="scope-grid">
+            {% for scope, desc in all_scopes.items() %}
+            <div>
+                <label>
+                    <input type="checkbox" name="scopes" value="{{ scope }}"
+                           {{ 'checked' if api_key.scopes and scope in api_key.scopes }}>
+                    <code>{{ scope }}</code>
+                </label>
+                <div class="scope-desc">{{ desc }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Rate Limits & Quotas -->
+    <div class="card">
+        <h2>Rate Limits &amp; Quotas</h2>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+            <div class="form-group">
+                <label>Rate Limit (requests per minute)</label>
+                <input type="number" name="rate_limit" min="0" value="{{ api_key.rate_limit }}">
+                <div class="hint">0 = unlimited. Default: {{ default_rate_limit }}</div>
+            </div>
+            <div class="form-group">
+                <label>Daily Quota (requests per day)</label>
+                <input type="number" name="daily_quota" min="0" value="{{ api_key.daily_quota }}">
+                <div class="hint">0 = unlimited. Default: {{ default_daily_quota }}. Usage today: {{ api_key.daily_usage or 0 }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+        <button type="submit" class="btn">Save Changes</button>
+        <a href="{{ url_for('admin.list_api_keys') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>clearTimeout(window.autoRefreshTimeout);</script>
+{% endblock %}

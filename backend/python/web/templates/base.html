@@ -299,12 +299,13 @@
                     <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint and 'discount_plans' in request.endpoint else '' }}">Discount Plans</a>
                 {% endif %}
                 {% if current_user.can_manage_users() or current_user.can_manage_roles() %}
-                    <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint) else '' }}">User Management</a>
+                    <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and ('admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint or 'api_key' in request.endpoint)) or (request.endpoint and 'api_keys' in request.endpoint) else '' }}">User Management</a>
+                {% else %}
+                    <a href="{{ url_for('api_keys.my_key') }}" class="{{ 'active' if request.endpoint and 'api_keys' in request.endpoint else '' }}" style="font-size: 0.85rem;">My API Key</a>
                 {% endif %}
                 {% if current_user.can_manage_configs() %}
                     <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint) else '' }}">Settings</a>
                 {% endif %}
-                <a href="{{ url_for('api_keys.list_keys') }}" class="{{ 'active' if request.endpoint and 'api_keys' in request.endpoint else '' }}" style="font-size: 0.85rem;">API Keys</a>
                 <a href="{{ url_for('auth.logout') }}" style="margin-left: 1rem;">Logout ({{ current_user.username }})</a>
             {% else %}
                 <a href="{{ url_for('auth.login') }}">Login</a>
@@ -347,14 +348,18 @@
     </div>
     {% endif %}
 
-    {% if request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint) %}
+    {% if (request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint or 'api_key' in request.endpoint)) or (request.endpoint and 'api_keys' in request.endpoint) %}
     <div class="sub-navbar">
         {% if current_user.can_manage_users() %}
-        <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if 'user' in request.endpoint else '' }}">Users</a>
+        <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and 'user' in request.endpoint else '' }}">Users</a>
         {% endif %}
         {% if current_user.can_manage_roles() %}
-        <a href="{{ url_for('admin.list_roles') }}" class="{{ 'active' if 'role' in request.endpoint else '' }}">Roles</a>
+        <a href="{{ url_for('admin.list_roles') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and 'role' in request.endpoint else '' }}">Roles</a>
         {% endif %}
+        {% if current_user.can_manage_users() %}
+        <a href="{{ url_for('admin.list_api_keys') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and 'api_key' in request.endpoint else '' }}">API Keys</a>
+        {% endif %}
+        <a href="{{ url_for('api_keys.my_key') }}" class="{{ 'active' if request.endpoint and 'api_keys' in request.endpoint else '' }}">My API Key</a>
     </div>
     {% endif %}
 

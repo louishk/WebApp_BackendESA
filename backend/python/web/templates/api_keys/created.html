@@ -25,9 +25,9 @@
         </button>
     </div>
 
+    {% if scopes and scopes|length > 0 %}
     <div style="margin-top: 1rem; font-size: 0.9rem;">
-        <p><strong>Name:</strong> {{ key_name }}</p>
-        <p style="margin-top: 0.25rem;"><strong>Scopes:</strong>
+        <p><strong>Scopes:</strong>
             {% for scope in scopes %}
                 <span style="display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.8rem; margin: 1px;
                     {% if ':write' in scope %}background: #fef3c7; color: #d97706;{% else %}background: #dbeafe; color: #2563eb;{% endif %}">
@@ -36,6 +36,12 @@
             {% endfor %}
         </p>
     </div>
+    {% else %}
+    <div style="margin-top: 1rem; padding: 0.75rem; background: #dbeafe; border-radius: 6px; font-size: 0.85rem; color: #2563eb;">
+        <strong>Note:</strong> No scopes have been assigned to this key yet.
+        An admin needs to configure your API permissions under User Management before the key can access any endpoints.
+    </div>
+    {% endif %}
 
     <div style="margin-top: 1.5rem; padding: 0.75rem; background: var(--esa-gray); border-radius: 6px; font-size: 0.85rem;">
         <strong>Usage example:</strong>
@@ -45,7 +51,7 @@
 </div>
 
 <div style="margin-top: 1rem;">
-    <a href="{{ url_for('api_keys.list_keys') }}" class="btn btn-secondary">Back to API Keys</a>
+    <a href="{{ url_for('api_keys.my_key') }}" class="btn btn-secondary">Back to My API Key</a>
 </div>
 {% endblock %}
 

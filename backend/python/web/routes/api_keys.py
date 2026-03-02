@@ -1,9 +1,10 @@
 """
-API Key management routes.
-Users can generate, view, and revoke their own API keys.
+API Key management routes — user-facing.
+Each user can have one API key. Scopes are managed by admins under User Management.
+Users can generate, view, and regenerate their key here.
 """
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, current_app
+from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app
 from flask_login import login_required, current_user
 
 from web.utils.audit import audit_log, AuditEvent
@@ -17,133 +18,106 @@ def get_session():
 
 @api_keys_bp.route('/')
 @login_required
-def list_keys():
-    """List the current user's API keys."""
+def my_key():
+    """Show the current user's single API key (or prompt to generate one)."""
     from web.models.api_key import ApiKey, API_SCOPES
 
     db = get_session()
     try:
-        keys = (db.query(ApiKey)
-                .filter_by(user_id=current_user.id)
-                .order_by(ApiKey.created_at.desc())
-                .all())
-        return render_template('api_keys/list.html',
-                               keys=keys,
+        api_key = db.query(ApiKey).filter_by(user_id=current_user.id).first()
+        return render_template('api_keys/my_key.html',
+                               api_key=api_key,
                                all_scopes=API_SCOPES)
     finally:
         db.close()
 
 
-@api_keys_bp.route('/create', methods=['POST'])
+@api_keys_bp.route('/generate', methods=['POST'])
 @login_required
-def create_key():
-    """Generate a new API key for the current user."""
+def generate_key():
+    """Generate a new API key for the current user (one per user)."""
     from web.models.api_key import ApiKey, API_SCOPES, generate_api_key, hash_api_secret
-
-    name = request.form.get('key_name', '').strip()
-    if not name:
-        flash('Key name is required.', 'error')
-        return redirect(url_for('api_keys.list_keys'))
-
-    # Collect scopes from checkboxes
-    scopes = request.form.getlist('scopes')
-    # Validate scopes
-    scopes = [s for s in scopes if s in API_SCOPES]
-    if not scopes:
-        flash('Select at least one API scope.', 'error')
-        return redirect(url_for('api_keys.list_keys'))
 
     db = get_session()
     try:
-        # Limit: max 5 active keys per user
-        active_count = db.query(ApiKey).filter_by(user_id=current_user.id, is_active=True).count()
-        if active_count >= 5:
-            flash('Maximum 5 active API keys per user. Revoke an existing key first.', 'error')
-            return redirect(url_for('api_keys.list_keys'))
+        # Check if the user already has a key
+        existing = db.query(ApiKey).filter_by(user_id=current_user.id).first()
+        if existing:
+            flash('You already have an API key. Use "Regenerate" to create a new one.', 'error')
+            return redirect(url_for('api_keys.my_key'))
 
         key_id, raw_secret, full_key = generate_api_key()
 
         api_key = ApiKey(
             user_id=current_user.id,
-            name=name,
+            name='Default',
             key_id=key_id,
             key_hash=hash_api_secret(raw_secret),
-            scopes=scopes,
+            scopes=[],  # Empty — admin will assign scopes
             is_active=True,
         )
         db.add(api_key)
         db.commit()
 
-        audit_log(AuditEvent.CONFIG_UPDATED, f"Created API key '{name}' (key_id={key_id})")
+        audit_log(AuditEvent.CONFIG_UPDATED, f"Generated API key (key_id={key_id})")
 
-        # Show the key once — it can't be retrieved later
-        flash(f'API key created. Copy it now — it will not be shown again:', 'success')
         return render_template('api_keys/created.html',
-                               key_name=name,
                                full_key=full_key,
-                               scopes=scopes,
-                               all_scopes=API_SCOPES)
+                               key_name='Default',
+                               scopes=[])
     except Exception as e:
         db.rollback()
-        current_app.logger.error(f"Error creating API key: {e}")
-        flash('An error occurred while creating the key.', 'error')
-        return redirect(url_for('api_keys.list_keys'))
+        current_app.logger.error(f"Error generating API key: {e}")
+        flash('An error occurred while generating the key.', 'error')
+        return redirect(url_for('api_keys.my_key'))
     finally:
         db.close()
 
 
-@api_keys_bp.route('/<int:key_id>/revoke', methods=['POST'])
+@api_keys_bp.route('/regenerate', methods=['POST'])
 @login_required
-def revoke_key(key_id):
-    """Revoke (deactivate) an API key."""
-    from web.models.api_key import ApiKey
+def regenerate_key():
+    """Delete the existing key and create a new one."""
+    from web.models.api_key import ApiKey, generate_api_key, hash_api_secret
 
     db = get_session()
     try:
-        api_key = db.query(ApiKey).filter_by(id=key_id, user_id=current_user.id).first()
-        if not api_key:
-            flash('API key not found.', 'error')
-            return redirect(url_for('api_keys.list_keys'))
+        existing = db.query(ApiKey).filter_by(user_id=current_user.id).first()
 
-        api_key.is_active = False
+        # Preserve scopes and settings from old key
+        old_scopes = existing.scopes if existing and existing.scopes else []
+        old_rate_limit = existing.rate_limit if existing else 60
+        old_daily_quota = existing.daily_quota if existing else 10000
+
+        if existing:
+            db.delete(existing)
+            db.flush()
+
+        key_id, raw_secret, full_key = generate_api_key()
+
+        api_key = ApiKey(
+            user_id=current_user.id,
+            name='Default',
+            key_id=key_id,
+            key_hash=hash_api_secret(raw_secret),
+            scopes=old_scopes,
+            rate_limit=old_rate_limit,
+            daily_quota=old_daily_quota,
+            is_active=True,
+        )
+        db.add(api_key)
         db.commit()
 
-        audit_log(AuditEvent.CONFIG_UPDATED, f"Revoked API key '{api_key.name}' (key_id={api_key.key_id})")
-        flash(f'API key "{api_key.name}" has been revoked.', 'success')
+        audit_log(AuditEvent.CONFIG_UPDATED, f"Regenerated API key (new key_id={key_id})")
+
+        return render_template('api_keys/created.html',
+                               full_key=full_key,
+                               key_name='Default',
+                               scopes=old_scopes)
     except Exception as e:
         db.rollback()
-        current_app.logger.error(f"Error revoking API key: {e}")
-        flash('An error occurred.', 'error')
+        current_app.logger.error(f"Error regenerating API key: {e}")
+        flash('An error occurred while regenerating the key.', 'error')
+        return redirect(url_for('api_keys.my_key'))
     finally:
         db.close()
-
-    return redirect(url_for('api_keys.list_keys'))
-
-
-@api_keys_bp.route('/<int:key_id>/delete', methods=['POST'])
-@login_required
-def delete_key(key_id):
-    """Permanently delete an API key."""
-    from web.models.api_key import ApiKey
-
-    db = get_session()
-    try:
-        api_key = db.query(ApiKey).filter_by(id=key_id, user_id=current_user.id).first()
-        if not api_key:
-            flash('API key not found.', 'error')
-            return redirect(url_for('api_keys.list_keys'))
-
-        name = api_key.name
-        db.delete(api_key)
-        db.commit()
-
-        audit_log(AuditEvent.CONFIG_UPDATED, f"Deleted API key '{name}' (key_id={api_key.key_id})")
-        flash(f'API key "{name}" has been deleted.', 'success')
-    except Exception as e:
-        db.rollback()
-        current_app.logger.error(f"Error deleting API key: {e}")
-        flash('An error occurred.', 'error')
-    finally:
-        db.close()
-
-    return redirect(url_for('api_keys.list_keys'))

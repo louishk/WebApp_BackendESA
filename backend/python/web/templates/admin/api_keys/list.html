@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}API Key Management - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>API Key Management</h1>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<div class="card">
+    <h2>Users &amp; API Keys</h2>
+    <p style="font-size: 0.85rem; color: #888; margin-bottom: 1rem;">
+        Manage API key scopes, rate limits, and quotas per user. Users generate their own keys via the "My API Key" page.
+    </p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Key Status</th>
+                <th>Scopes</th>
+                <th>Rate Limit</th>
+                <th>Daily Quota</th>
+                <th>Usage Today</th>
+                <th>Last Used</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            {% set key = key_map.get(user.id) %}
+            <tr>
+                <td><strong>{{ user.username }}</strong></td>
+                <td>
+                    {% if key %}
+                        {% if key.is_active %}
+                            <span class="status status-completed">Active</span>
+                        {% else %}
+                            <span class="status status-failed">Revoked</span>
+                        {% endif %}
+                    {% else %}
+                        <span class="status status-pending">No Key</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if key and key.scopes %}
+                        {% for scope in key.scopes %}
+                            <span style="display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem; margin: 1px;
+                                {% if ':write' in scope %}background: #fef3c7; color: #d97706;{% else %}background: #dbeafe; color: #2563eb;{% endif %}">{{ scope }}</span>
+                        {% endfor %}
+                    {% elif key %}
+                        <span style="color: #dc2626; font-size: 0.85rem;">No scopes</span>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>{{ key.rate_limit if key else '-' }} <span style="color: #888; font-size: 0.8rem;">req/min</span></td>
+                <td>{{ key.daily_quota if key else '-' }} <span style="color: #888; font-size: 0.8rem;">req/day</span></td>
+                <td>
+                    {% if key %}
+                        {{ key.daily_usage or 0 }}
+                        {% if key.daily_quota > 0 %}
+                            <span style="color: #888; font-size: 0.8rem;">/ {{ key.daily_quota }}</span>
+                        {% endif %}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td style="font-size: 0.85rem;">{{ key.last_used_at.strftime('%Y-%m-%d %H:%M') if key and key.last_used_at else 'Never' }}</td>
+                <td style="white-space: nowrap;">
+                    {% if key %}
+                        <a href="{{ url_for('admin.edit_api_key', user_id=user.id) }}" class="btn btn-sm btn-secondary">Edit</a>
+                        {% if key.is_active %}
+                        <form action="{{ url_for('admin.admin_revoke_api_key', user_id=user.id) }}" method="POST" style="display: inline;"
+                              onsubmit="return confirm('Revoke API key for {{ user.username }}?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm" style="background: #d97706;">Revoke</button>
+                        </form>
+                        {% endif %}
+                        <form action="{{ url_for('admin.admin_delete_api_key', user_id=user.id) }}" method="POST" style="display: inline;"
+                              onsubmit="return confirm('Delete API key for {{ user.username }}? They can generate a new one.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-sm" style="background: #dc2626;">Delete</button>
+                        </form>
+                    {% else %}
+                        <span style="color: #888; font-size: 0.85rem;">User must generate key first</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Scope Reference</h2>
+    <table>
+        <thead><tr><th>Scope</th><th>Description</th></tr></thead>
+        <tbody>
+            {% for scope, desc in all_scopes.items() %}
+            <tr>
+                <td><code>{{ scope }}</code></td>
+                <td>{{ desc }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>clearTimeout(window.autoRefreshTimeout);</script>
+{% endblock %}

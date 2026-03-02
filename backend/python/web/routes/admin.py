@@ -952,3 +952,141 @@ def delete_secret(key):
 def type_mappings():
     """Manage inventory type mappings."""
     return render_template('admin/type_mappings/manage.html')
+
+
+# =============================================================================
+# API Key Management (Admin — under User Management section)
+# =============================================================================
+# Admins manage: scopes, rate limits, quotas per user's API key.
+# Users can only view/regenerate their own key (separate route).
+
+@admin_bp.route('/api-keys')
+@login_required
+@admin_required
+def list_api_keys():
+    """List all users and their API key status."""
+    from web.models.user import User
+    from web.models.api_key import ApiKey, API_SCOPES
+
+    db = get_session()
+    try:
+        users = db.query(User).order_by(User.username).all()
+        # Build a map of user_id -> ApiKey
+        keys = db.query(ApiKey).all()
+        key_map = {k.user_id: k for k in keys}
+
+        return render_template('admin/api_keys/list.html',
+                               users=users,
+                               key_map=key_map,
+                               all_scopes=API_SCOPES)
+    finally:
+        db.close()
+
+
+@admin_bp.route('/api-keys/<int:user_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def edit_api_key(user_id):
+    """Edit scopes, rate limit, and quota for a user's API key."""
+    from web.models.user import User
+    from web.models.api_key import ApiKey, API_SCOPES, DEFAULT_RATE_LIMIT, DEFAULT_DAILY_QUOTA
+
+    db = get_session()
+    try:
+        user = db.query(User).get(user_id)
+        if not user:
+            flash('User not found.', 'error')
+            return redirect(url_for('admin.list_api_keys'))
+
+        api_key = db.query(ApiKey).filter_by(user_id=user_id).first()
+
+        if request.method == 'POST':
+            if not api_key:
+                flash('This user has no API key yet. They must generate one first.', 'error')
+                return redirect(url_for('admin.list_api_keys'))
+
+            # Update scopes
+            scopes = request.form.getlist('scopes')
+            scopes = [s for s in scopes if s in API_SCOPES]
+            api_key.scopes = scopes
+
+            # Update rate limit
+            rl = request.form.get('rate_limit', str(DEFAULT_RATE_LIMIT)).strip()
+            api_key.rate_limit = int(rl) if rl.isdigit() else DEFAULT_RATE_LIMIT
+
+            # Update daily quota
+            dq = request.form.get('daily_quota', str(DEFAULT_DAILY_QUOTA)).strip()
+            api_key.daily_quota = int(dq) if dq.isdigit() else DEFAULT_DAILY_QUOTA
+
+            # Update active status
+            api_key.is_active = request.form.get('is_active') == 'on'
+
+            db.commit()
+            audit_log(AuditEvent.CONFIG_UPDATED,
+                      f"Updated API key config for user '{user.username}': scopes={scopes}, "
+                      f"rate_limit={api_key.rate_limit}, daily_quota={api_key.daily_quota}")
+            flash(f'API key settings updated for {user.username}.', 'success')
+            return redirect(url_for('admin.list_api_keys'))
+
+        return render_template('admin/api_keys/edit.html',
+                               user=user,
+                               api_key=api_key,
+                               all_scopes=API_SCOPES,
+                               default_rate_limit=DEFAULT_RATE_LIMIT,
+                               default_daily_quota=DEFAULT_DAILY_QUOTA)
+    finally:
+        db.close()
+
+
+@admin_bp.route('/api-keys/<int:user_id>/revoke', methods=['POST'])
+@login_required
+@admin_required
+def admin_revoke_api_key(user_id):
+    """Admin revoke a user's API key."""
+    from web.models.api_key import ApiKey
+
+    db = get_session()
+    try:
+        api_key = db.query(ApiKey).filter_by(user_id=user_id).first()
+        if api_key:
+            api_key.is_active = False
+            db.commit()
+            audit_log(AuditEvent.CONFIG_UPDATED, f"Admin revoked API key for user_id={user_id}")
+            flash('API key revoked.', 'success')
+        else:
+            flash('No API key found for this user.', 'error')
+    except Exception as e:
+        db.rollback()
+        current_app.logger.error(f"Error revoking API key: {e}")
+        flash('An error occurred.', 'error')
+    finally:
+        db.close()
+
+    return redirect(url_for('admin.list_api_keys'))
+
+
+@admin_bp.route('/api-keys/<int:user_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def admin_delete_api_key(user_id):
+    """Admin delete a user's API key entirely."""
+    from web.models.api_key import ApiKey
+
+    db = get_session()
+    try:
+        api_key = db.query(ApiKey).filter_by(user_id=user_id).first()
+        if api_key:
+            db.delete(api_key)
+            db.commit()
+            audit_log(AuditEvent.CONFIG_UPDATED, f"Admin deleted API key for user_id={user_id}")
+            flash('API key deleted. User can generate a new one.', 'success')
+        else:
+            flash('No API key found for this user.', 'error')
+    except Exception as e:
+        db.rollback()
+        current_app.logger.error(f"Error deleting API key: {e}")
+        flash('An error occurred.', 'error')
+    finally:
+        db.close()
+
+    return redirect(url_for('admin.list_api_keys'))
