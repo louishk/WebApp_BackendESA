@@ -289,8 +289,8 @@
                 {% if current_user.can_access_statistics() %}
                     <a href="{{ url_for('statistics.dashboard') }}" class="{{ 'active' if request.endpoint and 'statistics' in request.endpoint else '' }}">Statistics</a>
                 {% endif %}
-                {% if current_user.can_access_billing_tools() %}
-                    <a href="{{ url_for('tools.billing_date_changer') }}" class="{{ 'active' if request.endpoint and 'tools' in request.endpoint else '' }}">Tools</a>
+                {% if current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() %}
+                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else url_for('tools.inventory_checker') }}" class="{{ 'active' if request.endpoint and 'tools' in request.endpoint else '' }}">Tools</a>
                 {% endif %}
                 {% if current_user.can_access_ecri() %}
                     <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
@@ -324,8 +324,12 @@
 
     {% if request.endpoint and 'tools' in request.endpoint %}
     <div class="sub-navbar">
+        {% if current_user.can_access_billing_tools() %}
         <a href="{{ url_for('tools.billing_date_changer') }}" class="{{ 'active' if request.endpoint == 'tools.billing_date_changer' else '' }}">Billing Date Changer</a>
+        {% endif %}
+        {% if current_user.can_access_inventory_tools() %}
         <a href="{{ url_for('tools.inventory_checker') }}" class="{{ 'active' if request.endpoint == 'tools.inventory_checker' else '' }}">Inventory Checker</a>
+        {% endif %}
     </div>
     {% endif %}
 
