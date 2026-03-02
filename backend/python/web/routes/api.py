@@ -15,7 +15,7 @@ import re
 from flask import Blueprint, jsonify, request, current_app, g
 from sqlalchemy import desc, func, case, text
 
-from web.auth.jwt_auth import require_auth
+from web.auth.jwt_auth import require_auth, require_api_scope
 from web.utils.rate_limit import rate_limit_api
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -2462,6 +2462,7 @@ def _apply_plan_json(plan, data, is_create=False):
 
 @api_bp.route('/discount-plans', methods=['GET'])
 @require_auth
+@require_api_scope('discount_plans:read')
 @rate_limit_api(max_requests=60, window_seconds=60)
 def api_discount_plans_list():
     """
@@ -2506,6 +2507,7 @@ def api_discount_plans_list():
 
 @api_bp.route('/discount-plans/<int:plan_id>', methods=['GET'])
 @require_auth
+@require_api_scope('discount_plans:read')
 @rate_limit_api(max_requests=60, window_seconds=60)
 def api_discount_plans_get(plan_id):
     """Get a single discount plan by ID."""
@@ -2522,6 +2524,7 @@ def api_discount_plans_get(plan_id):
 
 @api_bp.route('/discount-plans/by-name/<path:plan_name>', methods=['GET'])
 @require_auth
+@require_api_scope('discount_plans:read')
 @rate_limit_api(max_requests=60, window_seconds=60)
 def api_discount_plans_get_by_name(plan_name):
     """Get a single discount plan by name (URL-encoded)."""
@@ -2538,6 +2541,7 @@ def api_discount_plans_get_by_name(plan_name):
 
 @api_bp.route('/discount-plans', methods=['POST'])
 @require_auth
+@require_api_scope('discount_plans:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_discount_plans_create():
     """
@@ -2582,6 +2586,7 @@ def api_discount_plans_create():
 
 @api_bp.route('/discount-plans/<int:plan_id>', methods=['PUT'])
 @require_auth
+@require_api_scope('discount_plans:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_discount_plans_update(plan_id):
     """

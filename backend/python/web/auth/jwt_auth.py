@@ -106,10 +106,59 @@ def decode_token(token):
         raise AuthError(f'Invalid token: {str(e)}')
 
 
+def _authenticate_api_key():
+    """
+    Authenticate via API key (X-API-Key header).
+    Key format: esa_<key_id>.<secret>
+
+    Returns dict of user info if valid, else None.
+    Also sets g.api_key_scopes for scope checking.
+    """
+    from flask import current_app
+
+    api_key_header = request.headers.get('X-API-Key', '')
+    if not api_key_header or not api_key_header.startswith('esa_'):
+        return None
+
+    try:
+        without_prefix = api_key_header[4:]  # strip "esa_"
+        key_id, raw_secret = without_prefix.split('.', 1)
+    except ValueError:
+        return None
+
+    try:
+        from web.models.api_key import ApiKey
+        session = current_app.get_db_session()
+        try:
+            api_key = session.query(ApiKey).filter_by(key_id=key_id).first()
+            if not api_key or not api_key.is_valid() or not api_key.verify_secret(raw_secret):
+                return None
+
+            # Update last_used_at
+            from datetime import datetime, timezone
+            api_key.last_used_at = datetime.now(timezone.utc)
+            session.commit()
+
+            g.api_key_scopes = api_key.scopes or []
+
+            return {
+                'sub': api_key.user.username if api_key.user else f'key:{key_id}',
+                'user_id': api_key.user_id,
+                'roles': [r.name for r in api_key.user.roles] if api_key.user else [],
+                'role': api_key.user.roles[0].name if api_key.user and api_key.user.roles else 'api_key',
+                'auth_method': 'api_key',
+                'key_id': key_id,
+            }
+        finally:
+            session.close()
+    except Exception:
+        return None
+
+
 def require_auth(f):
     """
     Decorator to require authentication for a route.
-    Accepts both JWT tokens (for API clients) and session auth (for web UI).
+    Accepts API keys (X-API-Key), JWT tokens (Bearer), and session auth.
     Sets g.current_user with the user info.
 
     Usage:
@@ -123,9 +172,8 @@ def require_auth(f):
     def decorated(*args, **kwargs):
         from flask_login import current_user
 
-        # First, check for session-based authentication (web UI)
+        # 1. Session-based authentication (web UI)
         if current_user and current_user.is_authenticated:
-            # Check API access via RBAC permission
             has_scheduler = current_user.can_access_scheduler()
             has_billing_tools = current_user.can_access_billing_tools() if hasattr(current_user, 'can_access_billing_tools') else False
             has_inventory = current_user.can_access_inventory_tools() if hasattr(current_user, 'can_access_inventory_tools') else False
@@ -138,28 +186,34 @@ def require_auth(f):
                     'message': f'Roles "{role_names}" do not have API access'
                 }), 403
 
-            # Store user info in Flask's g object
             g.current_user = {
                 'sub': current_user.username,
                 'roles': [r.name for r in current_user.roles],
                 'role': current_user.roles[0].name if current_user.roles else 'unknown',
                 'user_id': current_user.id,
+                'auth_method': 'session',
             }
+            g.api_key_scopes = None  # session users bypass scope checks
             return f(*args, **kwargs)
 
-        # Fall back to JWT authentication (API clients)
+        # 2. API key authentication (X-API-Key header)
+        api_key_user = _authenticate_api_key()
+        if api_key_user:
+            g.current_user = api_key_user
+            return f(*args, **kwargs)
+
+        # 3. JWT authentication (Bearer token)
         token = get_token_from_header()
 
         if not token:
             return jsonify({
                 'error': 'Unauthorized',
-                'message': 'Missing authentication token'
+                'message': 'Missing authentication. Use X-API-Key, Bearer JWT, or session cookie.'
             }), 401
 
         try:
             payload = decode_token(token)
 
-            # Check role(s) — supports both single 'role' and list 'roles' in JWT payload
             user_roles = payload.get('roles', [])
             if not user_roles:
                 single_role = payload.get('role', '')
@@ -170,8 +224,9 @@ def require_auth(f):
                     'message': f'Role(s) "{", ".join(user_roles)}" do not have API access'
                 }), 403
 
-            # Store user info in Flask's g object
+            payload['auth_method'] = 'jwt'
             g.current_user = payload
+            g.api_key_scopes = None  # JWT users bypass scope checks
 
         except AuthError as e:
             return jsonify({
@@ -182,6 +237,37 @@ def require_auth(f):
         return f(*args, **kwargs)
 
     return decorated
+
+
+def require_api_scope(scope):
+    """
+    Decorator to enforce a specific API scope on an endpoint.
+
+    - Session and JWT users: always pass (they use RBAC roles instead).
+    - API key users: must have the scope in their key's scopes list.
+
+    Usage:
+        @app.route('/api/discount-plans')
+        @require_auth
+        @require_api_scope('discount_plans:read')
+        def list_plans():
+            ...
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            # g.api_key_scopes is None for session/JWT (bypass)
+            # or a list of scopes for API key users
+            scopes = getattr(g, 'api_key_scopes', None)
+            if scopes is not None:
+                if scope not in scopes:
+                    return jsonify({
+                        'error': 'Forbidden',
+                        'message': f'API key missing required scope: {scope}'
+                    }), 403
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
 
 
 def require_role(allowed_roles):

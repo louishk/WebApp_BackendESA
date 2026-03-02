@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}API Keys - ESA Backend{% endblock %}
+
+{% block content %}
+<style>
+    .scope-badge {
+        display: inline-block;
+        padding: 0.15rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        margin: 1px;
+    }
+    .scope-read { background: #dbeafe; color: #2563eb; }
+    .scope-write { background: #fef3c7; color: #d97706; }
+    .key-prefix {
+        font-family: monospace;
+        background: var(--esa-gray);
+        padding: 0.2rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.85rem;
+    }
+    .form-section { margin-top: 1.5rem; }
+    .scope-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.4rem 1.5rem;
+    }
+    .scope-grid label {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.9rem;
+        cursor: pointer;
+    }
+    .scope-grid .scope-desc { color: #888; font-size: 0.8rem; margin-left: 1.4rem; }
+</style>
+
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>API Keys</h1>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                    {% if category == 'info' %}background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<!-- Existing Keys -->
+<div class="card">
+    <h2>Your API Keys ({{ keys|length }})</h2>
+    <p style="font-size: 0.85rem; color: #888; margin-bottom: 1rem;">
+        Use API keys to access the REST API from external systems (chatbot, scripts, integrations).
+        Send the key via the <code>X-API-Key</code> header.
+    </p>
+
+    {% if keys %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Key Prefix</th>
+                <th>Scopes</th>
+                <th>Status</th>
+                <th>Last Used</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for key in keys %}
+            <tr>
+                <td><strong>{{ key.name }}</strong></td>
+                <td><span class="key-prefix">{{ 'esa_' ~ key.key_id }}...</span></td>
+                <td>
+                    {% for scope in key.scopes %}
+                        <span class="scope-badge {{ 'scope-write' if ':write' in scope else 'scope-read' }}">{{ scope }}</span>
+                    {% endfor %}
+                </td>
+                <td>
+                    {% if key.is_active %}
+                        <span class="status status-completed">Active</span>
+                    {% else %}
+                        <span class="status status-pending">Revoked</span>
+                    {% endif %}
+                </td>
+                <td>{{ key.last_used_at.strftime('%Y-%m-%d %H:%M') if key.last_used_at else 'Never' }}</td>
+                <td>{{ key.created_at.strftime('%Y-%m-%d %H:%M') if key.created_at else '-' }}</td>
+                <td style="white-space: nowrap;">
+                    {% if key.is_active %}
+                    <form action="{{ url_for('api_keys.revoke_key', key_id=key.id) }}" method="POST" style="display: inline;"
+                          onsubmit="return confirm('Revoke API key &quot;{{ key.name }}&quot;? It will immediately stop working.');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm" style="background: #d97706;">Revoke</button>
+                    </form>
+                    {% endif %}
+                    <form action="{{ url_for('api_keys.delete_key', key_id=key.id) }}" method="POST" style="display: inline;"
+                          onsubmit="return confirm('Permanently delete API key &quot;{{ key.name }}&quot;?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm" style="background: #dc2626;">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: #888; text-align: center; padding: 1.5rem;">No API keys yet. Create one below.</p>
+    {% endif %}
+</div>
+
+<!-- Create New Key -->
+<div class="card">
+    <h2>Generate New API Key</h2>
+    <form method="POST" action="{{ url_for('api_keys.create_key') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div style="display: grid; grid-template-columns: 1fr; gap: 0.75rem; max-width: 600px;">
+            <div>
+                <label style="font-weight: 600; font-size: 0.85rem; color: var(--esa-navy);">Key Name *</label>
+                <input type="text" name="key_name" required placeholder="e.g. ChatBot Integration, Sales Dashboard"
+                       style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px;">
+            </div>
+        </div>
+
+        <div class="form-section">
+            <label style="font-weight: 600; font-size: 0.85rem; color: var(--esa-navy); display: block; margin-bottom: 0.5rem;">API Scopes *</label>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 0.5rem;">Select which API endpoints this key can access:</p>
+            <div class="scope-grid">
+                {% for scope, description in all_scopes.items() %}
+                <div>
+                    <label>
+                        <input type="checkbox" name="scopes" value="{{ scope }}">
+                        <code>{{ scope }}</code>
+                    </label>
+                    <div class="scope-desc">{{ description }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <button type="submit" class="btn" style="margin-top: 1rem;">Generate Key</button>
+    </form>
+</div>
+
+<!-- Usage Guide -->
+<div class="card">
+    <h2>API Usage</h2>
+    <div style="font-size: 0.9rem;">
+        <p style="margin-bottom: 0.5rem;">Send your API key in the <code>X-API-Key</code> header:</p>
+        <pre style="background: var(--esa-navy); color: #fff; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem;">curl -H "X-API-Key: esa_xxxxxxxx.your_secret_here" \
+     https://your-domain.com/api/discount-plans</pre>
+
+        <p style="margin-top: 1rem; margin-bottom: 0.5rem;"><strong>Available endpoints:</strong></p>
+        <table>
+            <thead>
+                <tr><th>Method</th><th>Endpoint</th><th>Scope Required</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>GET</td><td><code>/api/discount-plans</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>List all plans (with filters)</td></tr>
+                <tr><td>GET</td><td><code>/api/discount-plans/&lt;id&gt;</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>Get plan by ID</td></tr>
+                <tr><td>GET</td><td><code>/api/discount-plans/by-name/&lt;name&gt;</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>Get plan by name</td></tr>
+                <tr><td>POST</td><td><code>/api/discount-plans</code></td><td><span class="scope-badge scope-write">discount_plans:write</span></td><td>Create new plan</td></tr>
+                <tr><td>PUT</td><td><code>/api/discount-plans/&lt;id&gt;</code></td><td><span class="scope-badge scope-write">discount_plans:write</span></td><td>Update a plan</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+clearTimeout(window.autoRefreshTimeout);
+</script>
+{% endblock %}

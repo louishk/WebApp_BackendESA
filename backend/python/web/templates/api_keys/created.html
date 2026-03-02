@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}API Key Created - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>API Key Created</h1>
+</div>
+
+<div class="card" style="border: 2px solid #059669;">
+    <h2 style="border-bottom-color: #059669;">Copy Your API Key</h2>
+    <p style="color: #dc2626; font-weight: 600; margin-bottom: 1rem;">
+        This is the only time you will see this key. Copy it now and store it securely.
+    </p>
+
+    <div style="position: relative;">
+        <input type="text" id="api-key-value" value="{{ full_key }}" readonly
+               style="width: 100%; padding: 0.75rem; font-family: monospace; font-size: 1rem;
+                      background: var(--esa-navy); color: #4ade80; border: none; border-radius: 6px;">
+        <button onclick="copyKey()" id="copy-btn"
+                style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+                       background: var(--esa-red); color: #fff; border: none; padding: 0.4rem 1rem;
+                       border-radius: 4px; cursor: pointer; font-weight: 500;">
+            Copy
+        </button>
+    </div>
+
+    <div style="margin-top: 1rem; font-size: 0.9rem;">
+        <p><strong>Name:</strong> {{ key_name }}</p>
+        <p style="margin-top: 0.25rem;"><strong>Scopes:</strong>
+            {% for scope in scopes %}
+                <span style="display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.8rem; margin: 1px;
+                    {% if ':write' in scope %}background: #fef3c7; color: #d97706;{% else %}background: #dbeafe; color: #2563eb;{% endif %}">
+                    {{ scope }}
+                </span>
+            {% endfor %}
+        </p>
+    </div>
+
+    <div style="margin-top: 1.5rem; padding: 0.75rem; background: var(--esa-gray); border-radius: 6px; font-size: 0.85rem;">
+        <strong>Usage example:</strong>
+        <pre style="margin-top: 0.5rem; background: var(--esa-navy); color: #fff; padding: 0.75rem; border-radius: 4px; overflow-x: auto;">curl -H "X-API-Key: {{ full_key }}" \
+     https://your-domain.com/api/discount-plans</pre>
+    </div>
+</div>
+
+<div style="margin-top: 1rem;">
+    <a href="{{ url_for('api_keys.list_keys') }}" class="btn btn-secondary">Back to API Keys</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+clearTimeout(window.autoRefreshTimeout);
+
+function copyKey() {
+    var input = document.getElementById('api-key-value');
+    input.select();
+    input.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(input.value).then(function() {
+        var btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copied!';
+        btn.style.background = '#059669';
+        setTimeout(function() {
+            btn.textContent = 'Copy';
+            btn.style.background = 'var(--esa-red)';
+        }, 2000);
+    });
+}
+</script>
+{% endblock %}

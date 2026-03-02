@@ -184,6 +184,7 @@ def create_app(config=None, db_url=None):
     from web.routes.ecri import ecri_bp
     from web.routes.statistics import statistics_bp
     from web.routes.discount_plans import discount_plans_bp
+    from web.routes.api_keys import api_keys_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
@@ -194,6 +195,7 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(ecri_bp)
     app.register_blueprint(statistics_bp)
     app.register_blueprint(discount_plans_bp)
+    app.register_blueprint(api_keys_bp)
 
     # Exempt API routes from CSRF (they use JWT authentication)
     csrf.exempt(api_bp)

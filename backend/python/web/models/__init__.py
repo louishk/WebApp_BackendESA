@@ -7,3 +7,4 @@ from web.models.inventory import InventoryTypeMapping, InventoryUnitOverride
 from web.models.api_statistic import ApiStatistic
 from web.models.external_api_statistic import ExternalApiStatistic
 from web.models.discount_plan import DiscountPlan
+from web.models.api_key import ApiKey

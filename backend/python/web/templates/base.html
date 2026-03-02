@@ -304,6 +304,7 @@
                 {% if current_user.can_manage_configs() %}
                     <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint) else '' }}">Settings</a>
                 {% endif %}
+                <a href="{{ url_for('api_keys.list_keys') }}" class="{{ 'active' if request.endpoint and 'api_keys' in request.endpoint else '' }}" style="font-size: 0.85rem;">API Keys</a>
                 <a href="{{ url_for('auth.logout') }}" style="margin-left: 1rem;">Logout ({{ current_user.username }})</a>
             {% else %}
                 <a href="{{ url_for('auth.login') }}">Login</a>
