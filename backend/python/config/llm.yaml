@@ -1,0 +1,7 @@
+# LLM Configuration — Azure AI Foundry (Grok 3 Mini)
+# API key is stored in vault as 'AZURE_FOUNDRY_API_KEY'
+
+azure_foundry:
+  base_url: "https://esa-foundry.services.ai.azure.com/openai/v1/"
+  model: "grok-3-mini"
+  api_key_vault: "AZURE_FOUNDRY_API_KEY"

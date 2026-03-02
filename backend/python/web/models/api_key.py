@@ -1,6 +1,7 @@
 """API Key model for external API access with per-endpoint scopes, rate limits, and quotas."""
 
 import hashlib
+import hmac
 import secrets
 from datetime import datetime, date
 
@@ -89,8 +90,8 @@ class ApiKey(Base):
     user = relationship('User', backref='api_key', uselist=False)
 
     def verify_secret(self, raw_secret):
-        """Check a raw secret against the stored hash."""
-        return hash_api_secret(raw_secret) == self.key_hash
+        """Check a raw secret against the stored hash (timing-safe)."""
+        return hmac.compare_digest(hash_api_secret(raw_secret), self.key_hash)
 
     def has_scope(self, scope):
         """Check if this key has the given scope."""

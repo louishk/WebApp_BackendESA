@@ -58,10 +58,6 @@
     .not-eligible { color: var(--esa-red); font-weight: 600; }
     .eligible { color: #059669; font-weight: 600; }
 
-    .tc-bilingual { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-    .tc-bilingual .tc-en { font-size: 0.85rem; }
-    .tc-bilingual .tc-cn { font-size: 0.85rem; color: #555; }
-
     .site-badge {
         display: inline-block;
         background: #d1fae5;
@@ -71,6 +67,14 @@
         font-size: 0.8rem;
         margin: 2px;
     }
+
+    .translation-section { margin-top: 1rem; }
+    .translation-section summary {
+        cursor: pointer; font-weight: 600; color: var(--esa-navy); font-size: 0.9rem;
+    }
+    .translation-section .lang-block { margin: 0.5rem 0; padding: 0.5rem; background: #f9fafb; border-radius: 4px; }
+    .translation-section .lang-label { font-weight: 600; font-size: 0.85rem; color: var(--esa-navy); margin-bottom: 0.25rem; }
+    .translation-section ol { margin: 0; padding-left: 1.5rem; font-size: 0.85rem; }
 
     @media print {
         .navbar, .sub-navbar, .footer, .brief-actions, .btn { display: none !important; }
@@ -111,7 +115,7 @@
         <!-- ALL Department -->
         <!-- ============================================================ -->
         <tr>
-            <td class="dept-cell" rowspan="13">ALL</td>
+            <td class="dept-cell" rowspan="{{ 14 + (1 if plan.lock_in_period else 0) }}">ALL</td>
             <td class="item-cell">Name</td>
             <td class="value-cell">{{ plan.plan_name }}</td>
             <td class="notes-cell"></td>
@@ -136,7 +140,7 @@
                 {% if plan.applicable_sites %}
                     {% for code in site_codes %}
                         {% if plan.applicable_sites.get(code) %}
-                            <span class="site-badge">{{ code }}</span>
+                            <span class="site-badge">{{ code }} {{ site_name_map.get(code, '') }}</span>
                         {% endif %}
                     {% endfor %}
                 {% else %}
@@ -202,6 +206,13 @@
             <td class="value-cell">{{ plan.deposit or '-' }}</td>
             <td class="notes-cell"></td>
         </tr>
+        {% if plan.lock_in_period %}
+        <tr>
+            <td class="item-cell">Lock-In Period</td>
+            <td class="value-cell">{{ plan.lock_in_period }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+        {% endif %}
         <tr>
             <td class="item-cell">Distribution</td>
             <td class="value-cell">{{ plan.distribution_channel or '-' }}</td>
@@ -234,6 +245,28 @@
             </td>
             <td class="notes-cell"></td>
         </tr>
+        {% endif %}
+
+        <!-- ============================================================ -->
+        <!-- Linked Sitelink Plans -->
+        <!-- ============================================================ -->
+        {% if linked_details %}
+        {% for ld in linked_details %}
+        <tr>
+            {% if loop.first %}
+            <td class="dept-cell" rowspan="{{ linked_details|length }}">LINK</td>
+            <td class="item-cell" rowspan="{{ linked_details|length }}">Sitelink Plans</td>
+            {% endif %}
+            <td class="value-cell">
+                {{ ld.site_name }} - {{ ld.plan_name }}
+                {% if ld.discount_pct %}<span style="color: #059669; font-weight: 600;">({{ ld.discount_pct }}%)</span>{% endif %}
+            </td>
+            <td class="notes-cell">
+                {% if ld.start %}{{ ld.start }}{% endif %}
+                {% if ld.end %} to {{ ld.end }}{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
         {% endif %}
 
         <!-- ============================================================ -->
@@ -272,7 +305,13 @@
         <tr>
             <td class="dept-cell" rowspan="{{ 2 if plan.registration_flow else 1 }}">MKG</td>
             <td class="item-cell">Collateral</td>
-            <td class="value-cell"><a href="{{ plan.collateral_url }}" target="_blank" rel="noopener">View Collateral</a></td>
+            <td class="value-cell">
+                {% if plan.collateral_url and plan.collateral_url.startswith(('http://', 'https://')) %}
+                    <a href="{{ plan.collateral_url }}" target="_blank" rel="noopener noreferrer">View Collateral</a>
+                {% else %}
+                    {{ plan.collateral_url or '-' }}
+                {% endif %}
+            </td>
             <td class="notes-cell">{{ plan.department_notes.get('MKG', '') if plan.department_notes else '' }}</td>
         </tr>
         {% endif %}
@@ -305,6 +344,27 @@
     </tbody>
 </table>
 </div>
+
+<!-- ================================================================= -->
+<!-- AI Translated T&Cs -->
+<!-- ================================================================= -->
+{% set translations = plan.terms_conditions_translations or {} %}
+{% if translations %}
+<div class="card translation-section" style="margin-top: 1rem;">
+    <h3 style="color: var(--esa-navy); font-size: 1rem; border-bottom: 2px solid var(--esa-red); display: inline-block; padding-bottom: 0.3rem; margin-bottom: 0.75rem;">Translated T&amp;Cs</h3>
+    {% set lang_names = {'ko': 'Korean', 'zh_cn': 'Chinese (Simplified)', 'zh_tw': 'Chinese (Traditional)', 'ms': 'Malay', 'ja': 'Japanese'} %}
+    {% for lang, terms in translations.items() %}
+    <details class="lang-block">
+        <summary>{{ lang_names.get(lang, lang) }}</summary>
+        <ol style="margin-top: 0.3rem;">
+            {% for t in terms %}
+            <li>{{ t }}</li>
+            {% endfor %}
+        </ol>
+    </details>
+    {% endfor %}
+</div>
+{% endif %}
 
 <div style="margin-top: 1rem; font-size: 0.8rem; color: #888;">
     Last updated: {{ plan.updated_at.strftime('%Y-%m-%d %H:%M') if plan.updated_at else '-' }}

@@ -39,16 +39,20 @@
     .form-group textarea { resize: vertical; min-height: 60px; }
     .form-group .hint { font-size: 0.75rem; color: #888; margin-top: 0.15rem; }
     .form-full { grid-column: 1 / -1; }
-    .site-checkboxes { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+    .site-country-group { margin-bottom: 0.75rem; }
+    .site-country-group h4 { font-size: 0.85rem; color: var(--esa-navy); margin-bottom: 0.3rem; font-weight: 700; }
+    .site-checkboxes { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
     .site-checkboxes label {
         display: flex; align-items: center; gap: 0.3rem;
         font-weight: 500; font-size: 0.85rem; cursor: pointer;
     }
-    .tc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .tc-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem; align-items: start; }
     .tc-row label { font-size: 0.8rem; color: #555; }
-    .tc-number { display: inline-block; width: 24px; font-weight: 700; color: var(--esa-navy); }
+    .tc-number { display: inline-block; width: 28px; font-weight: 700; color: var(--esa-navy); }
     .toggle-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
     .toggle-row label { font-weight: 500; cursor: pointer; }
+    .linked-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; background: #f0f4f8; border-radius: 4px; margin-bottom: 0.3rem; font-size: 0.85rem; }
+    .linked-item .remove-link { color: #dc2626; cursor: pointer; font-weight: 700; }
 </style>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
@@ -69,7 +73,7 @@
     {% endif %}
 {% endwith %}
 
-<form method="POST">
+<form method="POST" id="discount-plan-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
     <!-- ================================================================= -->
@@ -144,15 +148,20 @@
         </div>
         <div class="form-group" style="margin-top: 0.75rem;">
             <label>Applicable Sites</label>
-            <div class="site-checkboxes">
-                {% for code in site_codes %}
-                <label>
-                    <input type="checkbox" name="site_{{ code }}"
-                           {{ 'checked' if plan and plan.applicable_sites and plan.applicable_sites.get(code) }}>
-                    {{ code }}
-                </label>
-                {% endfor %}
+            {% for country, country_sites in sites_by_country.items() %}
+            <div class="site-country-group">
+                <h4>{{ country }}</h4>
+                <div class="site-checkboxes">
+                    {% for site in country_sites %}
+                    <label>
+                        <input type="checkbox" name="site_code" value="{{ site.code }}"
+                               {{ 'checked' if plan and plan.applicable_sites and plan.applicable_sites.get(site.code) }}>
+                        {{ site.code }} - {{ site.name }}
+                    </label>
+                    {% endfor %}
+                </div>
             </div>
+            {% endfor %}
         </div>
     </div>
 
@@ -216,6 +225,10 @@
                 <input type="text" name="termination_notice" value="{{ plan.termination_notice if plan else form_data.get('termination_notice', '') }}" placeholder="e.g. 1 Month">
             </div>
             <div class="form-group">
+                <label>Lock-In Period</label>
+                <input type="text" name="lock_in_period" value="{{ plan.lock_in_period if plan else form_data.get('lock_in_period', '') }}" placeholder="e.g. Minimum 6 months">
+            </div>
+            <div class="form-group">
                 <label>Extra Offer</label>
                 <input type="text" name="extra_offer" value="{{ plan.extra_offer if plan else form_data.get('extra_offer', '') }}" placeholder="e.g. -20% Off Merchandise">
             </div>
@@ -223,18 +236,34 @@
 
         <div style="margin-top: 1rem;">
             <label style="font-weight: 600; color: var(--esa-navy); font-size: 0.85rem;">T&amp;C Clauses (EN / CN)</label>
-            {% for i in range(1, 9) %}
-            <div class="tc-row">
-                <div>
-                    <label><span class="tc-number">T{{ i }}</span> English</label>
-                    <textarea name="tc_{{ i }}" rows="2" style="width:100%; font-size: 0.85rem;">{{ plan.terms_conditions[i-1] if plan and plan.terms_conditions and i <= (plan.terms_conditions|length) else form_data.get('tc_' ~ i, '') }}</textarea>
+            <div class="hint" style="margin-bottom: 0.5rem;">Add as many T&amp;C rows as needed. Each row has an English and Chinese clause.</div>
+            <div id="tc-container">
+                {% set tc_en = plan.terms_conditions or [] if plan else [] %}
+                {% set tc_cn = plan.terms_conditions_cn or [] if plan else [] %}
+                {% set tc_count = [tc_en|length, tc_cn|length, 1] | max %}
+                {% for i in range(tc_count) %}
+                <div class="tc-row">
+                    <div>
+                        <label><span class="tc-number">T{{ i + 1 }}</span> English</label>
+                        <textarea name="tc_en" rows="2" style="width:100%; font-size: 0.85rem;">{{ tc_en[i] if i < tc_en|length else '' }}</textarea>
+                    </div>
+                    <div>
+                        <label><span class="tc-number">T{{ i + 1 }}</span> Chinese</label>
+                        <textarea name="tc_cn" rows="2" style="width:100%; font-size: 0.85rem;">{{ tc_cn[i] if i < tc_cn|length else '' }}</textarea>
+                    </div>
+                    <div style="padding-top: 1.3rem;">
+                        <button type="button" onclick="removeTcRow(this)" class="btn btn-sm" style="background: #dc2626; padding: 0.3rem 0.5rem; font-size: 0.8rem;">X</button>
+                    </div>
                 </div>
-                <div>
-                    <label><span class="tc-number">T{{ i }}</span> Chinese</label>
-                    <textarea name="tc_cn_{{ i }}" rows="2" style="width:100%; font-size: 0.85rem;">{{ plan.terms_conditions_cn[i-1] if plan and plan.terms_conditions_cn and i <= (plan.terms_conditions_cn|length) else form_data.get('tc_cn_' ~ i, '') }}</textarea>
-                </div>
+                {% endfor %}
             </div>
-            {% endfor %}
+            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                <button type="button" id="add-tc-row" class="btn btn-sm btn-secondary">+ Add T&amp;C</button>
+                {% if plan and plan.id %}
+                <button type="button" id="translate-tcs-btn" class="btn btn-sm" style="background: #6366f1;">Translate T&amp;Cs</button>
+                <span id="translate-status" style="font-size: 0.8rem; color: #888; align-self: center;"></span>
+                {% endif %}
+            </div>
         </div>
     </div>
 
@@ -285,6 +314,31 @@
             <label>Distribution Channel</label>
             <input type="text" name="distribution_channel" value="{{ plan.distribution_channel if plan else '' }}" placeholder="e.g. Direct Mailing, Online, WhatsApp">
         </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Linked Sitelink Plans -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Linked Sitelink Plans</h3>
+        <p style="font-size: 0.8rem; color: #888; margin-bottom: 0.75rem;">
+            Link this marketing plan to actual Sitelink concession entries (optional).
+        </p>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Search Concessions</label>
+                <input type="text" id="concession-search" placeholder="Type plan name to search..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">
+                <div id="concession-results" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; display: none; margin-top: 0.25rem;"></div>
+            </div>
+            <div class="form-group">
+                <label>Linked Entries</label>
+                <div id="linked-concessions-display">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+        <input type="hidden" name="linked_concessions_json" id="linked-concessions-json"
+               value="{{ (plan.linked_concessions | tojson) if plan and plan.linked_concessions else '[]' }}">
     </div>
 
     <!-- ================================================================= -->
@@ -373,7 +427,43 @@
 <script>
 clearTimeout(window.autoRefreshTimeout);
 
+// =========================================================================
+// Dynamic T&C rows
+// =========================================================================
+var tcContainer = document.getElementById('tc-container');
+var tcCounter = tcContainer.querySelectorAll('.tc-row').length;
+
+function renumberTcRows() {
+    var rows = tcContainer.querySelectorAll('.tc-row');
+    rows.forEach(function(row, idx) {
+        var nums = row.querySelectorAll('.tc-number');
+        nums.forEach(function(n) { n.textContent = 'T' + (idx + 1); });
+    });
+}
+
+function removeTcRow(btn) {
+    btn.closest('.tc-row').remove();
+    renumberTcRows();
+}
+
+document.getElementById('add-tc-row').addEventListener('click', function() {
+    tcCounter++;
+    var row = document.createElement('div');
+    row.className = 'tc-row';
+    row.innerHTML =
+        '<div><label><span class="tc-number">T' + tcCounter + '</span> English</label>' +
+        '<textarea name="tc_en" rows="2" style="width:100%; font-size: 0.85rem;"></textarea></div>' +
+        '<div><label><span class="tc-number">T' + tcCounter + '</span> Chinese</label>' +
+        '<textarea name="tc_cn" rows="2" style="width:100%; font-size: 0.85rem;"></textarea></div>' +
+        '<div style="padding-top: 1.3rem;"><button type="button" onclick="removeTcRow(this)" class="btn btn-sm" style="background: #dc2626; padding: 0.3rem 0.5rem; font-size: 0.8rem;">X</button></div>';
+    tcContainer.appendChild(row);
+    renumberTcRows();
+    row.querySelector('textarea').focus();
+});
+
+// =========================================================================
 // Dynamic custom fields
+// =========================================================================
 document.getElementById('add-custom-field').addEventListener('click', function() {
     var container = document.getElementById('custom-fields-container');
     var row = document.createElement('div');
@@ -386,5 +476,119 @@ document.getElementById('add-custom-field').addEventListener('click', function()
     container.appendChild(row);
     row.querySelector('input').focus();
 });
+
+// =========================================================================
+// Linked Sitelink Concessions
+// =========================================================================
+var linkedData = JSON.parse(document.getElementById('linked-concessions-json').value || '[]');
+
+function renderLinked() {
+    var display = document.getElementById('linked-concessions-display');
+    if (linkedData.length === 0) {
+        display.innerHTML = '<div style="color: #888; font-size: 0.85rem;">No concessions linked yet.</div>';
+        return;
+    }
+    display.innerHTML = linkedData.map(function(item, idx) {
+        return '<div class="linked-item">' +
+            '<span>' + (item.site_code || 'Site ' + item.site_id) + ' - ' + (item.plan_name || 'Concession ' + item.concession_id) + '</span>' +
+            (item.discount_pct ? ' <span style="color: #059669; font-weight: 600;">(' + item.discount_pct + '%)</span>' : '') +
+            '<span class="remove-link" onclick="removeLinked(' + idx + ')" title="Remove">X</span>' +
+            '</div>';
+    }).join('');
+    document.getElementById('linked-concessions-json').value = JSON.stringify(linkedData.map(function(item) {
+        return {site_id: item.site_id, concession_id: item.concession_id};
+    }));
+}
+
+function removeLinked(idx) {
+    linkedData.splice(idx, 1);
+    renderLinked();
+}
+
+renderLinked();
+
+var searchInput = document.getElementById('concession-search');
+var resultsDiv = document.getElementById('concession-results');
+var searchTimeout = null;
+
+searchInput.addEventListener('input', function() {
+    clearTimeout(searchTimeout);
+    var q = this.value.trim();
+    if (q.length < 2) { resultsDiv.style.display = 'none'; return; }
+    searchTimeout = setTimeout(function() {
+        fetch('{{ url_for("discount_plans.api_search_concessions") }}?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                resultsDiv.textContent = '';
+                if (!Array.isArray(data) || data.length === 0) {
+                    var noResult = document.createElement('div');
+                    noResult.style.cssText = 'padding: 0.5rem; color: #888; font-size: 0.85rem;';
+                    noResult.textContent = 'No results';
+                    resultsDiv.appendChild(noResult);
+                } else {
+                    data.forEach(function(r) {
+                        var row = document.createElement('div');
+                        row.style.cssText = 'padding: 0.4rem 0.6rem; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid #eee;';
+                        row.onmouseover = function() { this.style.background = '#f0f4f8'; };
+                        row.onmouseout = function() { this.style.background = '#fff'; };
+                        row.onclick = function() { addConcession(r); };
+                        var label = (r.site_code || '') + ' ' + (r.site_name || '') + ' - ' + (r.plan_name || '');
+                        if (r.discount_pct) label += ' (' + r.discount_pct + '%)';
+                        row.textContent = label;
+                        resultsDiv.appendChild(row);
+                    });
+                }
+                resultsDiv.style.display = 'block';
+            });
+    }, 300);
+});
+
+function addConcession(item) {
+    // Check for duplicates
+    for (var i = 0; i < linkedData.length; i++) {
+        if (linkedData[i].site_id === item.site_id && linkedData[i].concession_id === item.concession_id) return;
+    }
+    linkedData.push(item);
+    renderLinked();
+    resultsDiv.style.display = 'none';
+    searchInput.value = '';
+}
+
+// =========================================================================
+// AI Translation
+// =========================================================================
+{% if plan and plan.id %}
+document.getElementById('translate-tcs-btn').addEventListener('click', function() {
+    var btn = this;
+    var status = document.getElementById('translate-status');
+    btn.disabled = true;
+    status.textContent = 'Translating...';
+    status.style.color = '#6366f1';
+
+    fetch('{{ url_for("discount_plans.translate_tcs", plan_id=plan.id) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrf_token]').value
+        }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            status.textContent = 'Translations saved! (ko, zh_cn, zh_tw, ms, ja)';
+            status.style.color = '#059669';
+        } else {
+            status.textContent = 'Error: ' + (data.error || 'Unknown');
+            status.style.color = '#dc2626';
+        }
+        btn.disabled = false;
+    })
+    .catch(function(err) {
+        status.textContent = 'Error: ' + err.message;
+        status.style.color = '#dc2626';
+        btn.disabled = false;
+    });
+});
+{% endif %}
 </script>
 {% endblock %}

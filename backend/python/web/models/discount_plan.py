@@ -65,8 +65,10 @@ class DiscountPlan(Base):
     payment_terms = Column(String(100), comment="Payment terms, e.g. Monthly, Prepaid (6M)")
     termination_notice = Column(String(100), comment="Termination notice period, e.g. 1 Month")
     extra_offer = Column(String(255), comment="Additional offer, e.g. -20% Off Merchandise")
+    lock_in_period = Column(String(255), comment="Lock-in period, e.g. Minimum 6 months")
     terms_conditions = Column(JSONB, comment="Array of T&C clauses (English)")
     terms_conditions_cn = Column(JSONB, comment="Array of T&C clauses (Chinese)")
+    terms_conditions_translations = Column(JSONB, default=dict, comment="AI-translated T&Cs keyed by language code")
 
     # =========================================================================
     # Promotion Brief: Eligibility & Channel
@@ -95,6 +97,12 @@ class DiscountPlan(Base):
 
     # General department notes (flexible JSONB for per-dept remarks)
     department_notes = Column(JSONB, comment="Per-department notes, e.g. {REV: '...', OPS: '...', MKG: '...'}")
+
+    # =========================================================================
+    # =========================================================================
+    # Sitelink Concession Linking
+    # =========================================================================
+    linked_concessions = Column(JSONB, default=list, comment="Array of {site_id, concession_id} pairs linking to cc_discount")
 
     # =========================================================================
     # Extensible Custom Fields
@@ -143,12 +151,14 @@ class DiscountPlan(Base):
             'clawback_condition': self.clawback_condition,
             'offers': self.offers or [],
             # Terms
+            'lock_in_period': self.lock_in_period,
             'deposit': self.deposit,
             'payment_terms': self.payment_terms,
             'termination_notice': self.termination_notice,
             'extra_offer': self.extra_offer,
             'terms_conditions': self.terms_conditions or [],
             'terms_conditions_cn': self.terms_conditions_cn or [],
+            'terms_conditions_translations': self.terms_conditions_translations or {},
             # Promotion brief
             'hidden_rate': self.hidden_rate,
             'available_for_chatbot': self.available_for_chatbot,
@@ -164,6 +174,8 @@ class DiscountPlan(Base):
             'collateral_url': self.collateral_url,
             'registration_flow': self.registration_flow,
             'department_notes': self.department_notes or {},
+            # Sitelink linking
+            'linked_concessions': self.linked_concessions or [],
             # Custom fields
             'custom_fields': self.custom_fields or {},
             # Status

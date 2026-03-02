@@ -24,6 +24,13 @@
     {% endif %}
 {% endwith %}
 
+{% set site_name_map = {} %}
+{% for country, country_sites in sites_by_country.items() %}
+    {% for s in country_sites %}
+        {% if site_name_map.update({s.code: s.name}) %}{% endif %}
+    {% endfor %}
+{% endfor %}
+
 <div class="card">
     <h2>All Plans ({{ plans|length }})</h2>
     <div style="overflow-x: auto;">
@@ -57,7 +64,7 @@
                     {% if plan.applicable_sites %}
                         {% for code in site_codes %}
                             {% if plan.applicable_sites.get(code) %}
-                                <span style="display: inline-block; background: #d1fae5; color: #059669; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem; margin: 1px;">{{ code }}</span>
+                                <span style="display: inline-block; background: #d1fae5; color: #059669; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem; margin: 1px;" title="{{ site_name_map.get(code, '') }}">{{ code }}</span>
                             {% endif %}
                         {% endfor %}
                     {% else %}

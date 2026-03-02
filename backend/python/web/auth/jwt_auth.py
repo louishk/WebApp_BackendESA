@@ -194,19 +194,8 @@ def require_auth(f):
         from flask_login import current_user
 
         # 1. Session-based authentication (web UI)
+        # Session users only need to be authenticated; route-level decorators handle RBAC.
         if current_user and current_user.is_authenticated:
-            has_scheduler = current_user.can_access_scheduler()
-            has_billing_tools = current_user.can_access_billing_tools() if hasattr(current_user, 'can_access_billing_tools') else False
-            has_inventory = current_user.can_access_inventory_tools() if hasattr(current_user, 'can_access_inventory_tools') else False
-            has_config = current_user.can_manage_configs() if hasattr(current_user, 'can_manage_configs') else False
-
-            if not has_scheduler and not has_billing_tools and not has_inventory and not has_config:
-                role_names = ', '.join(r.name for r in current_user.roles) if current_user.roles else 'none'
-                return jsonify({
-                    'error': 'Forbidden',
-                    'message': f'Roles "{role_names}" do not have API access'
-                }), 403
-
             g.current_user = {
                 'sub': current_user.username,
                 'roles': [r.name for r in current_user.roles],

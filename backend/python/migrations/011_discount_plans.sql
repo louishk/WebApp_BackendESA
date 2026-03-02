@@ -78,4 +78,11 @@ CREATE INDEX IF NOT EXISTS idx_discount_plans_type ON discount_plans(plan_type);
 CREATE INDEX IF NOT EXISTS idx_discount_plans_active ON discount_plans(is_active);
 CREATE INDEX IF NOT EXISTS idx_discount_plans_sort ON discount_plans(sort_order);
 
+-- ============================================================================
+-- Post-merge additions: lock_in_period, linked_concessions, translations
+-- ============================================================================
+ALTER TABLE discount_plans ADD COLUMN IF NOT EXISTS lock_in_period VARCHAR(255);
+ALTER TABLE discount_plans ADD COLUMN IF NOT EXISTS linked_concessions JSONB DEFAULT '[]';
+ALTER TABLE discount_plans ADD COLUMN IF NOT EXISTS terms_conditions_translations JSONB DEFAULT '{}';
+
 COMMIT;

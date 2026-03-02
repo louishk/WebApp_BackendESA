@@ -2414,7 +2414,7 @@ def _apply_plan_json(plan, data, is_create=False):
     SIMPLE_STR_FIELDS = [
         'plan_type', 'plan_name', 'sitelink_discount_name',
         'notes', 'objective',
-        'period_range', 'move_in_range',
+        'period_range', 'move_in_range', 'lock_in_period',
         'discount_value', 'discount_type', 'discount_segmentation',
         'clawback_condition',
         'deposit', 'payment_terms', 'termination_notice', 'extra_offer',
@@ -2427,7 +2427,9 @@ def _apply_plan_json(plan, data, is_create=False):
     BOOL_FIELDS = ['hidden_rate', 'available_for_chatbot', 'is_active']
     JSONB_FIELDS = [
         'applicable_sites', 'offers', 'terms_conditions', 'terms_conditions_cn',
+        'terms_conditions_translations',
         'promotion_codes', 'department_notes', 'custom_fields',
+        'linked_concessions',
     ]
 
     for field in SIMPLE_STR_FIELDS:
@@ -2458,6 +2460,59 @@ def _apply_plan_json(plan, data, is_create=False):
                 setattr(plan, field, date_cls.fromisoformat(val))
             else:
                 setattr(plan, field, None)
+
+
+def _validate_discount_plan_data(data, exclude_id=None):
+    """
+    Validate discount plan JSON payload.
+    Returns (errors: list[str]) — empty list means valid.
+    """
+    errors = []
+
+    # Required fields
+    if 'plan_type' in data or exclude_id is None:
+        if not data.get('plan_type'):
+            errors.append('plan_type is required')
+    if 'plan_name' in data or exclude_id is None:
+        if not data.get('plan_name'):
+            errors.append('plan_name is required')
+
+    # Type checks
+    if 'discount_numeric' in data and data['discount_numeric'] is not None:
+        try:
+            float(data['discount_numeric'])
+        except (TypeError, ValueError):
+            errors.append('discount_numeric must be a number')
+
+    if 'sort_order' in data and data['sort_order'] is not None:
+        try:
+            int(data['sort_order'])
+        except (TypeError, ValueError):
+            errors.append('sort_order must be an integer')
+
+    # JSONB field type checks
+    list_fields = ['offers', 'terms_conditions', 'terms_conditions_cn', 'promotion_codes', 'linked_concessions']
+    for f in list_fields:
+        if f in data and data[f] is not None and not isinstance(data[f], list):
+            errors.append(f'{f} must be a JSON array')
+
+    dict_fields = ['applicable_sites', 'department_notes', 'custom_fields', 'terms_conditions_translations']
+    for f in dict_fields:
+        if f in data and data[f] is not None and not isinstance(data[f], dict):
+            errors.append(f'{f} must be a JSON object')
+
+    # Name uniqueness
+    if data.get('plan_name'):
+        DiscountPlan = _get_discount_plan_model()
+        session = current_app.get_db_session()
+        try:
+            existing = session.query(DiscountPlan).filter_by(plan_name=data['plan_name']).first()
+            if existing and (exclude_id is None or existing.id != exclude_id):
+                errors.append(f'Plan name "{data["plan_name"]}" already exists')
+        finally:
+            session.close()
+
+    return errors
 
 
 @api_bp.route('/discount-plans', methods=['GET'])
@@ -2510,14 +2565,50 @@ def api_discount_plans_list():
 @require_api_scope('discount_plans:read')
 @rate_limit_api(max_requests=60, window_seconds=60)
 def api_discount_plans_get(plan_id):
-    """Get a single discount plan by ID."""
+    """
+    Get a single discount plan by ID.
+    Query params: include_concessions=true to resolve linked Sitelink data.
+    """
     DiscountPlan = _get_discount_plan_model()
     session = current_app.get_db_session()
     try:
         plan = session.query(DiscountPlan).get(plan_id)
         if not plan:
             return jsonify({'error': 'Not found', 'message': f'No discount plan with id {plan_id}'}), 404
-        return jsonify(plan.to_dict())
+
+        result = plan.to_dict()
+
+        # Optionally resolve linked concession details
+        if request.args.get('include_concessions', '').lower() == 'true' and plan.linked_concessions:
+            try:
+                from common.models import CCDiscount, Site
+                pbi_session = get_pbi_session()
+                try:
+                    details = []
+                    for link in plan.linked_concessions:
+                        cc = (pbi_session.query(CCDiscount)
+                              .filter_by(SiteID=link.get('site_id'), ConcessionID=link.get('concession_id'))
+                              .first())
+                        if cc:
+                            site = pbi_session.query(Site.sSiteName, Site.sLocationCode).filter_by(SiteID=cc.SiteID).first()
+                            details.append({
+                                'site_id': cc.SiteID,
+                                'site_code': site.sLocationCode if site else None,
+                                'site_name': site.sSiteName if site else None,
+                                'concession_id': cc.ConcessionID,
+                                'plan_name': cc.sPlanName or cc.sDefPlanName,
+                                'discount_pct': float(cc.dcPCDiscount) if cc.dcPCDiscount else None,
+                                'start': cc.dPlanStrt.isoformat() if cc.dPlanStrt else None,
+                                'end': cc.dPlanEnd.isoformat() if cc.dPlanEnd else None,
+                            })
+                    result['linked_concession_details'] = details
+                finally:
+                    pbi_session.close()
+            except Exception as e:
+                result['linked_concession_details'] = []
+                result['_concession_error'] = str(e)[:200]
+
+        return jsonify(result)
     finally:
         session.close()
 
@@ -2555,15 +2646,12 @@ def api_discount_plans_create():
     if not data:
         return jsonify({'error': 'Bad request', 'message': 'JSON body required'}), 400
 
-    if not data.get('plan_type') or not data.get('plan_name'):
-        return jsonify({'error': 'Validation', 'message': 'plan_type and plan_name are required'}), 400
+    errors = _validate_discount_plan_data(data, exclude_id=None)
+    if errors:
+        return jsonify({'error': 'Validation', 'message': '; '.join(errors), 'errors': errors}), 400
 
     session = current_app.get_db_session()
     try:
-        existing = session.query(DiscountPlan).filter_by(plan_name=data['plan_name']).first()
-        if existing:
-            return jsonify({'error': 'Conflict', 'message': f'Plan "{data["plan_name"]}" already exists'}), 409
-
         plan = DiscountPlan()
         _apply_plan_json(plan, data, is_create=True)
 
@@ -2599,17 +2687,15 @@ def api_discount_plans_update(plan_id):
     if not data:
         return jsonify({'error': 'Bad request', 'message': 'JSON body required'}), 400
 
+    errors = _validate_discount_plan_data(data, exclude_id=plan_id)
+    if errors:
+        return jsonify({'error': 'Validation', 'message': '; '.join(errors), 'errors': errors}), 400
+
     session = current_app.get_db_session()
     try:
         plan = session.query(DiscountPlan).get(plan_id)
         if not plan:
             return jsonify({'error': 'Not found', 'message': f'No discount plan with id {plan_id}'}), 404
-
-        # Name uniqueness check if name is changing
-        if 'plan_name' in data and data['plan_name'] != plan.plan_name:
-            existing = session.query(DiscountPlan).filter_by(plan_name=data['plan_name']).first()
-            if existing:
-                return jsonify({'error': 'Conflict', 'message': f'Plan "{data["plan_name"]}" already exists'}), 409
 
         _apply_plan_json(plan, data)
 
