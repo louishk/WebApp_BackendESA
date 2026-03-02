@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Discount Plans - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Discount Plans</h1>
+    {% if current_user.can_manage_configs() %}
+    <a href="{{ url_for('discount_plans.create_plan') }}" class="btn">Add Plan</a>
+    {% endif %}
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                    {% if category == 'info' %}background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<div class="card">
+    <h2>All Plans ({{ plans|length }})</h2>
+    <div style="overflow-x: auto;">
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Plan Type</th>
+                <th>Plan Name</th>
+                <th>Sitelink Name</th>
+                <th>Period</th>
+                <th>Sites</th>
+                <th>Discount</th>
+                <th>Payment</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for plan in plans %}
+            <tr>
+                <td>{{ plan.sort_order }}</td>
+                <td>
+                    <span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">{{ plan.plan_type }}</span>
+                </td>
+                <td><strong>{{ plan.plan_name }}</strong></td>
+                <td>{{ plan.sitelink_discount_name or '-' }}</td>
+                <td>{{ plan.period_range or '-' }}</td>
+                <td>
+                    {% if plan.applicable_sites %}
+                        {% for code in site_codes %}
+                            {% if plan.applicable_sites.get(code) %}
+                                <span style="display: inline-block; background: #d1fae5; color: #059669; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem; margin: 1px;">{{ code }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>{{ plan.discount_value or '-' }}</td>
+                <td>{{ plan.payment_terms or '-' }}</td>
+                <td>
+                    {% if plan.is_active %}
+                        <span class="status status-completed">Active</span>
+                    {% else %}
+                        <span class="status status-pending">Inactive</span>
+                    {% endif %}
+                </td>
+                <td style="white-space: nowrap;">
+                    <a href="{{ url_for('discount_plans.view_brief', plan_id=plan.id) }}" class="btn btn-sm btn-secondary" title="View Brief">Brief</a>
+                    {% if current_user.can_manage_configs() %}
+                    <a href="{{ url_for('discount_plans.edit_plan', plan_id=plan.id) }}" class="btn btn-sm btn-secondary">Edit</a>
+                    <form action="{{ url_for('discount_plans.delete_plan', plan_id=plan.id) }}" method="POST" style="display: inline;"
+                          onsubmit="return confirm('Delete plan &quot;{{ plan.plan_name }}&quot;?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm" style="background: #dc2626;">Delete</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not plans %}
+            <tr><td colspan="10" style="text-align: center; color: #888; padding: 2rem;">No discount plans yet. Click "Add Plan" to create one.</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Disable auto-refresh on list pages
+clearTimeout(window.autoRefreshTimeout);
+</script>
+{% endblock %}

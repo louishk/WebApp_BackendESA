@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit' if plan else 'Create' }} Discount Plan - ESA Backend{% endblock %}
+
+{% block content %}
+<style>
+    .form-section { margin-bottom: 1.5rem; }
+    .form-section h3 {
+        color: var(--esa-navy);
+        font-size: 1rem;
+        padding-bottom: 0.4rem;
+        border-bottom: 2px solid var(--esa-red);
+        display: inline-block;
+        margin-bottom: 0.75rem;
+    }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1.5rem; }
+    .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem 1.5rem; }
+    .form-group { margin-bottom: 0.5rem; }
+    .form-group label {
+        display: block;
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: var(--esa-navy);
+        margin-bottom: 0.25rem;
+    }
+    .form-group input[type="text"],
+    .form-group input[type="number"],
+    .form-group input[type="date"],
+    .form-group input[type="url"],
+    .form-group select,
+    .form-group textarea {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--esa-gray-dark);
+        border-radius: 4px;
+        font-size: 0.9rem;
+        font-family: inherit;
+    }
+    .form-group textarea { resize: vertical; min-height: 60px; }
+    .form-group .hint { font-size: 0.75rem; color: #888; margin-top: 0.15rem; }
+    .form-full { grid-column: 1 / -1; }
+    .site-checkboxes { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+    .site-checkboxes label {
+        display: flex; align-items: center; gap: 0.3rem;
+        font-weight: 500; font-size: 0.85rem; cursor: pointer;
+    }
+    .tc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .tc-row label { font-size: 0.8rem; color: #555; }
+    .tc-number { display: inline-block; width: 24px; font-weight: 700; color: var(--esa-navy); }
+    .toggle-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .toggle-row label { font-weight: 500; cursor: pointer; }
+</style>
+
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>{{ 'Edit' if plan else 'Create' }} Discount Plan</h1>
+    <a href="{{ url_for('discount_plans.list_plans') }}" class="btn btn-secondary">Back to List</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- ================================================================= -->
+    <!-- Plan Identification -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Plan Identification</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Plan Type *</label>
+                <select name="plan_type" required>
+                    <option value="">-- Select --</option>
+                    {% for pt in plan_types %}
+                    <option value="{{ pt }}" {{ 'selected' if (plan and plan.plan_type == pt) or form_data.get('plan_type') == pt }}>{{ pt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Plan Name *</label>
+                <input type="text" name="plan_name" value="{{ plan.plan_name if plan else form_data.get('plan_name', '') }}" required placeholder="e.g. Standard Rate, Prepaid - 6M">
+            </div>
+            <div class="form-group">
+                <label>Sitelink Discount Name</label>
+                <input type="text" name="sitelink_discount_name" value="{{ plan.sitelink_discount_name if plan else form_data.get('sitelink_discount_name', '') }}" placeholder="Name in Sitelink system">
+            </div>
+            <div class="form-group">
+                <label>Sort Order</label>
+                <input type="number" name="sort_order" value="{{ plan.sort_order if plan else form_data.get('sort_order', '0') }}" min="0">
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Description -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Description</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Objective</label>
+                <textarea name="objective" rows="2" placeholder="Business objective of this plan">{{ plan.objective if plan else form_data.get('objective', '') }}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea name="notes" rows="2" placeholder="Internal notes">{{ plan.notes if plan else form_data.get('notes', '') }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Availability / Sites -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Availability</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Period Range</label>
+                <input type="text" name="period_range" value="{{ plan.period_range if plan else form_data.get('period_range', '') }}" placeholder="e.g. Permanent, From X till Y">
+            </div>
+            <div class="form-group">
+                <label>Move-In Range</label>
+                <input type="text" name="move_in_range" value="{{ plan.move_in_range if plan else form_data.get('move_in_range', '') }}" placeholder="e.g. Maximum 14 days after the booking date">
+            </div>
+            <div class="form-group">
+                <label>Period Start</label>
+                <input type="date" name="period_start" value="{{ plan.period_start.isoformat() if plan and plan.period_start else form_data.get('period_start', '') }}">
+            </div>
+            <div class="form-group">
+                <label>Period End</label>
+                <input type="date" name="period_end" value="{{ plan.period_end.isoformat() if plan and plan.period_end else form_data.get('period_end', '') }}">
+            </div>
+        </div>
+        <div class="form-group" style="margin-top: 0.75rem;">
+            <label>Applicable Sites</label>
+            <div class="site-checkboxes">
+                {% for code in site_codes %}
+                <label>
+                    <input type="checkbox" name="site_{{ code }}"
+                           {{ 'checked' if plan and plan.applicable_sites and plan.applicable_sites.get(code) }}>
+                    {{ code }}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Discount Details -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Discount Details</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Discount Value</label>
+                <input type="text" name="discount_value" value="{{ plan.discount_value if plan else form_data.get('discount_value', '') }}" placeholder="e.g. 5%, 300HKD, First 2 Weeks Free">
+            </div>
+            <div class="form-group">
+                <label>Discount Type</label>
+                <select name="discount_type">
+                    <option value="">-- Select --</option>
+                    {% for dt in discount_types %}
+                    <option value="{{ dt }}" {{ 'selected' if (plan and plan.discount_type == dt) or form_data.get('discount_type') == dt }}>{{ dt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Discount Numeric</label>
+                <input type="number" name="discount_numeric" step="0.01"
+                       value="{{ plan.discount_numeric if plan and plan.discount_numeric is not none else form_data.get('discount_numeric', '') }}"
+                       placeholder="Numeric value for calculations">
+            </div>
+            <div class="form-group">
+                <label>Discount Segmentation</label>
+                <input type="text" name="discount_segmentation" value="{{ plan.discount_segmentation if plan else form_data.get('discount_segmentation', '') }}" placeholder="e.g. >=5% < 10%">
+            </div>
+            <div class="form-group form-full">
+                <label>Clawback Condition</label>
+                <input type="text" name="clawback_condition" value="{{ plan.clawback_condition if plan else form_data.get('clawback_condition', '') }}" placeholder="e.g. If Tenure less than 6M, 2 weeks will be charged">
+            </div>
+        </div>
+        <div class="form-group" style="margin-top: 0.75rem;">
+            <label>Offer Tiers (JSON)</label>
+            <textarea name="offers_json" rows="3" placeholder='[{"tier": "Flexi", "discount": "45% off"}, {"tier": "LT12M", "discount": "50% off", "note": "with free transportation"}]'>{{ (plan.offers | tojson) if plan and plan.offers else form_data.get('offers_json', '') }}</textarea>
+            <div class="hint">For multi-tier promotions. JSON array of objects with "tier", "discount", and optional "note" fields.</div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Terms & Conditions -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Terms &amp; Conditions</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Deposit</label>
+                <input type="text" name="deposit" value="{{ plan.deposit if plan else form_data.get('deposit', '') }}" placeholder="e.g. 1 Month (Refundable)">
+            </div>
+            <div class="form-group">
+                <label>Payment Terms</label>
+                <input type="text" name="payment_terms" value="{{ plan.payment_terms if plan else form_data.get('payment_terms', '') }}" placeholder="e.g. Monthly, Prepaid (6M)">
+            </div>
+            <div class="form-group">
+                <label>Termination Notice</label>
+                <input type="text" name="termination_notice" value="{{ plan.termination_notice if plan else form_data.get('termination_notice', '') }}" placeholder="e.g. 1 Month">
+            </div>
+            <div class="form-group">
+                <label>Extra Offer</label>
+                <input type="text" name="extra_offer" value="{{ plan.extra_offer if plan else form_data.get('extra_offer', '') }}" placeholder="e.g. -20% Off Merchandise">
+            </div>
+        </div>
+
+        <div style="margin-top: 1rem;">
+            <label style="font-weight: 600; color: var(--esa-navy); font-size: 0.85rem;">T&amp;C Clauses (EN / CN)</label>
+            {% for i in range(1, 9) %}
+            <div class="tc-row">
+                <div>
+                    <label><span class="tc-number">T{{ i }}</span> English</label>
+                    <textarea name="tc_{{ i }}" rows="2" style="width:100%; font-size: 0.85rem;">{{ plan.terms_conditions[i-1] if plan and plan.terms_conditions and i <= (plan.terms_conditions|length) else form_data.get('tc_' ~ i, '') }}</textarea>
+                </div>
+                <div>
+                    <label><span class="tc-number">T{{ i }}</span> Chinese</label>
+                    <textarea name="tc_cn_{{ i }}" rows="2" style="width:100%; font-size: 0.85rem;">{{ plan.terms_conditions_cn[i-1] if plan and plan.terms_conditions_cn and i <= (plan.terms_conditions_cn|length) else form_data.get('tc_cn_' ~ i, '') }}</textarea>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Promotion Brief: Eligibility & Channel -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Promotion Brief</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <div class="toggle-row">
+                    <input type="checkbox" name="hidden_rate" id="hidden_rate"
+                           {{ 'checked' if plan and plan.hidden_rate }}>
+                    <label for="hidden_rate">Hidden Rate</label>
+                </div>
+                <div class="toggle-row">
+                    <input type="checkbox" name="available_for_chatbot" id="available_for_chatbot"
+                           {{ 'checked' if plan and plan.available_for_chatbot }}>
+                    <label for="available_for_chatbot">Available for ChatBot</label>
+                </div>
+                <div class="form-group" style="margin-top: 0.25rem;">
+                    <label>ChatBot Notes</label>
+                    <input type="text" name="chatbot_notes" value="{{ plan.chatbot_notes if plan else '' }}" placeholder="e.g. But on special condition">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Sales Extra Discount</label>
+                <select name="sales_extra_discount">
+                    {% for opt in eligibility_options %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.sales_extra_discount == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+                <label style="margin-top: 0.5rem;">Switch To Us</label>
+                <select name="switch_to_us">
+                    {% for opt in eligibility_options %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.switch_to_us == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+                <label style="margin-top: 0.5rem;">Referral Program</label>
+                <select name="referral_program">
+                    {% for opt in eligibility_options %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.referral_program == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-group" style="margin-top: 0.75rem;">
+            <label>Distribution Channel</label>
+            <input type="text" name="distribution_channel" value="{{ plan.distribution_channel if plan else '' }}" placeholder="e.g. Direct Mailing, Online, WhatsApp">
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Departmental Info -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Departmental Info</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Rate Rules (REV)</label>
+                <textarea name="rate_rules" rows="2">{{ plan.rate_rules if plan else '' }}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Rate Rules - Sites</label>
+                <input type="text" name="rate_rules_sites" value="{{ plan.rate_rules_sites if plan else '' }}" placeholder="e.g. L004 Yau Tong, L005 Tuen Mun">
+            </div>
+            <div class="form-group form-full">
+                <label>Promotion Codes (JSON)</label>
+                <textarea name="promotion_codes_json" rows="2" placeholder='["Direct Mail Flexi 45% off", "Direct Mail LT12M 50% off"]'>{{ (plan.promotion_codes | tojson) if plan and plan.promotion_codes else '' }}</textarea>
+                <div class="hint">JSON array of promotion code strings for OPS &amp; SALES.</div>
+            </div>
+            <div class="form-group">
+                <label>Collateral URL (MKG)</label>
+                <input type="url" name="collateral_url" value="{{ plan.collateral_url if plan else '' }}" placeholder="Link to flyer, PDF, SharePoint...">
+            </div>
+            <div class="form-group">
+                <label>Registration Flow (MKG)</label>
+                <textarea name="registration_flow" rows="2">{{ plan.registration_flow if plan else '' }}</textarea>
+            </div>
+            <div class="form-group form-full">
+                <label>Department Notes (JSON)</label>
+                <textarea name="department_notes_json" rows="2" placeholder='{"REV": "...", "OPS": "...", "MKG": "..."}'>{{ (plan.department_notes | tojson) if plan and plan.department_notes else '' }}</textarea>
+                <div class="hint">Per-department remarks as JSON object.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Status -->
+    <!-- ================================================================= -->
+    <div class="card form-section">
+        <h3>Status</h3>
+        <div class="toggle-row">
+            <input type="checkbox" name="is_active" id="is_active"
+                   {{ 'checked' if (plan and plan.is_active) or not plan }}>
+            <label for="is_active">Active</label>
+        </div>
+        {% if plan %}
+        <div style="font-size: 0.8rem; color: #888; margin-top: 0.5rem;">
+            Created: {{ plan.created_at.strftime('%Y-%m-%d %H:%M') if plan.created_at else '-' }} by {{ plan.created_by or '-' }}
+            | Updated: {{ plan.updated_at.strftime('%Y-%m-%d %H:%M') if plan.updated_at else '-' }} by {{ plan.updated_by or '-' }}
+        </div>
+        {% endif %}
+    </div>
+
+    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+        <button type="submit" class="btn">{{ 'Save Changes' if plan else 'Create Plan' }}</button>
+        <a href="{{ url_for('discount_plans.list_plans') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+clearTimeout(window.autoRefreshTimeout);
+</script>
+{% endblock %}

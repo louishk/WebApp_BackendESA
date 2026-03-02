@@ -295,6 +295,9 @@
                 {% if current_user.can_access_ecri() %}
                     <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
                 {% endif %}
+                {% if current_user.can_manage_configs() or current_user.can_access_billing_tools() %}
+                    <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint and 'discount_plans' in request.endpoint else '' }}">Discount Plans</a>
+                {% endif %}
                 {% if current_user.can_manage_users() or current_user.can_manage_roles() %}
                     <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint) else '' }}">User Management</a>
                 {% endif %}

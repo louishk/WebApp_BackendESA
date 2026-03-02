@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+
+{% block title %}{{ plan.plan_name }} - Promotion Brief{% endblock %}
+
+{% block content %}
+<style>
+    .brief-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    .brief-header h1 { color: var(--esa-navy); font-size: 1.4rem; }
+    .brief-actions { display: flex; gap: 0.5rem; }
+
+    .brief-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+    }
+    .brief-table th,
+    .brief-table td {
+        padding: 0.6rem 1rem;
+        border: 1px solid var(--esa-gray-dark);
+        vertical-align: top;
+    }
+    .brief-table .dept-cell {
+        background: var(--esa-navy);
+        color: #fff;
+        font-weight: 700;
+        text-align: center;
+        width: 70px;
+        font-size: 0.8rem;
+    }
+    .brief-table .item-cell {
+        background: var(--esa-gray);
+        font-weight: 600;
+        color: var(--esa-navy);
+        width: 160px;
+        white-space: nowrap;
+    }
+    .brief-table .value-cell {
+        background: #fff;
+    }
+    .brief-table .notes-cell {
+        background: #fff;
+        color: #555;
+        font-style: italic;
+    }
+    .brief-table .section-row td {
+        background: var(--esa-navy);
+        color: #fff;
+        font-weight: 700;
+        font-size: 0.85rem;
+        padding: 0.4rem 1rem;
+    }
+
+    .not-eligible { color: var(--esa-red); font-weight: 600; }
+    .eligible { color: #059669; font-weight: 600; }
+
+    .tc-bilingual { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .tc-bilingual .tc-en { font-size: 0.85rem; }
+    .tc-bilingual .tc-cn { font-size: 0.85rem; color: #555; }
+
+    .site-badge {
+        display: inline-block;
+        background: #d1fae5;
+        color: #059669;
+        padding: 0.15rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.8rem;
+        margin: 2px;
+    }
+
+    @media print {
+        .navbar, .sub-navbar, .footer, .brief-actions, .btn { display: none !important; }
+        .container { max-width: 100%; padding: 0; }
+        .card { box-shadow: none; border: none; }
+    }
+</style>
+
+<div class="brief-header">
+    <h1>Promotion Brief: {{ plan.plan_name }}</h1>
+    <div class="brief-actions">
+        <button onclick="window.print()" class="btn btn-secondary btn-sm">Print / PDF</button>
+        {% if current_user.can_manage_configs() %}
+        <a href="{{ url_for('discount_plans.edit_plan', plan_id=plan.id) }}" class="btn btn-sm">Edit</a>
+        {% endif %}
+        <a href="{{ url_for('discount_plans.list_plans') }}" class="btn btn-secondary btn-sm">Back</a>
+    </div>
+</div>
+
+<div class="card" style="padding: 0; overflow: hidden;">
+<table class="brief-table">
+    <colgroup>
+        <col style="width: 70px;">
+        <col style="width: 160px;">
+        <col>
+        <col style="width: 300px;">
+    </colgroup>
+    <thead>
+        <tr>
+            <th style="background: var(--esa-navy); color: #fff;">Dept</th>
+            <th style="background: var(--esa-navy); color: #fff;">Items</th>
+            <th style="background: var(--esa-navy); color: #fff;">Promotion Parameters</th>
+            <th style="background: var(--esa-navy); color: #fff;">Note/Remarks</th>
+        </tr>
+    </thead>
+    <tbody>
+        <!-- ============================================================ -->
+        <!-- ALL Department -->
+        <!-- ============================================================ -->
+        <tr>
+            <td class="dept-cell" rowspan="13">ALL</td>
+            <td class="item-cell">Name</td>
+            <td class="value-cell">{{ plan.plan_name }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Objective</td>
+            <td class="value-cell">{{ plan.objective or '-' }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Period Range</td>
+            <td class="value-cell">{{ plan.period_range or '-' }}</td>
+            <td class="notes-cell">
+                {% if plan.period_start or plan.period_end %}
+                    {{ plan.period_start }} to {{ plan.period_end }}
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <td class="item-cell">RedBox Location</td>
+            <td class="value-cell">
+                {% if plan.applicable_sites %}
+                    {% for code in site_codes %}
+                        {% if plan.applicable_sites.get(code) %}
+                            <span class="site-badge">{{ code }}</span>
+                        {% endif %}
+                    {% endfor %}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            <td class="notes-cell">{{ plan.rate_rules_sites or '' }}</td>
+        </tr>
+        <tr>
+            <td class="item-cell">Offers</td>
+            <td class="value-cell">
+                {% if plan.offers %}
+                    {% for offer in plan.offers %}
+                        <div>{{ offer.get('tier', '') }} {{ offer.get('discount', '') }}{% if offer.get('note') %}*{% endif %}</div>
+                    {% endfor %}
+                {% elif plan.discount_value %}
+                    {{ plan.discount_value }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            <td class="notes-cell">
+                {% if plan.offers %}
+                    {% for offer in plan.offers %}
+                        {% if offer.get('note') %}<div>*{{ offer.get('note') }}</div>{% endif %}
+                    {% endfor %}
+                {% endif %}
+                {{ plan.clawback_condition or '' }}
+            </td>
+        </tr>
+        <tr>
+            <td class="item-cell">Hidden Rate</td>
+            <td class="value-cell">{{ 'Yes' if plan.hidden_rate else 'No' }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Available for ChatBot</td>
+            <td class="value-cell">{{ 'Yes' if plan.available_for_chatbot else 'No' }}</td>
+            <td class="notes-cell">{{ plan.chatbot_notes or '' }}</td>
+        </tr>
+        <tr>
+            <td class="item-cell">Sales Extra Discount</td>
+            <td class="value-cell"><span class="{{ 'not-eligible' if plan.sales_extra_discount == 'Not Eligible' else 'eligible' }}">{{ plan.sales_extra_discount or 'Not Eligible' }}</span></td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Switch To Us</td>
+            <td class="value-cell"><span class="{{ 'not-eligible' if plan.switch_to_us == 'Not Eligible' else 'eligible' }}">{{ plan.switch_to_us or 'Not Eligible' }}</span></td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Referral Program</td>
+            <td class="value-cell"><span class="{{ 'not-eligible' if plan.referral_program == 'Not Eligible' else 'eligible' }}">{{ plan.referral_program or 'Not Eligible' }}</span></td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Payment</td>
+            <td class="value-cell">{{ plan.payment_terms or '-' }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Deposit</td>
+            <td class="value-cell">{{ plan.deposit or '-' }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Distribution</td>
+            <td class="value-cell">{{ plan.distribution_channel or '-' }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+
+        <!-- ============================================================ -->
+        <!-- Terms & Conditions -->
+        <!-- ============================================================ -->
+        {% set tc_en = plan.terms_conditions or [] %}
+        {% set tc_cn = plan.terms_conditions_cn or [] %}
+        {% set tc_count = [tc_en|length, tc_cn|length] | max %}
+        {% if tc_count > 0 %}
+        <tr>
+            <td class="dept-cell" rowspan="{{ tc_count }}">ALL</td>
+            <td class="item-cell" rowspan="{{ tc_count }}">Terms &amp; Conditions</td>
+            <td class="value-cell" style="padding: 0;">
+                <table style="width: 100%; border: none; margin: 0;">
+                {% for i in range(tc_count) %}
+                    <tr>
+                        <td style="border: none; border-bottom: 1px solid var(--esa-gray-dark); padding: 0.5rem 0.75rem; width: 50%; vertical-align: top;">
+                            {{ tc_en[i] if i < tc_en|length else '' }}
+                        </td>
+                        <td style="border: none; border-bottom: 1px solid var(--esa-gray-dark); border-left: 1px solid var(--esa-gray-dark); padding: 0.5rem 0.75rem; width: 50%; vertical-align: top; color: #555;">
+                            {{ tc_cn[i] if i < tc_cn|length else '' }}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </table>
+            </td>
+            <td class="notes-cell"></td>
+        </tr>
+        {% endif %}
+
+        <!-- ============================================================ -->
+        <!-- REV Department -->
+        <!-- ============================================================ -->
+        {% if plan.rate_rules or plan.rate_rules_sites %}
+        <tr>
+            <td class="dept-cell">REV</td>
+            <td class="item-cell">Rate Rules (General &amp; Site Specifics)</td>
+            <td class="value-cell">{{ plan.rate_rules_sites or '-' }}</td>
+            <td class="notes-cell">{{ plan.rate_rules or '' }}</td>
+        </tr>
+        {% endif %}
+
+        <!-- ============================================================ -->
+        <!-- OPS & SALES Department -->
+        <!-- ============================================================ -->
+        {% if plan.promotion_codes %}
+        <tr>
+            <td class="dept-cell">OPS &amp; SALES</td>
+            <td class="item-cell">Promotion Code</td>
+            <td class="value-cell">
+                {% for code in plan.promotion_codes %}
+                    <div>- {{ code }}</div>
+                {% endfor %}
+            </td>
+            <td class="notes-cell">{{ plan.department_notes.get('OPS', '') if plan.department_notes else '' }}</td>
+        </tr>
+        {% endif %}
+
+        <!-- ============================================================ -->
+        <!-- MKG Department -->
+        <!-- ============================================================ -->
+        {% if plan.collateral_url or plan.registration_flow %}
+        {% if plan.collateral_url %}
+        <tr>
+            <td class="dept-cell" rowspan="{{ 2 if plan.registration_flow else 1 }}">MKG</td>
+            <td class="item-cell">Collateral</td>
+            <td class="value-cell"><a href="{{ plan.collateral_url }}" target="_blank" rel="noopener">View Collateral</a></td>
+            <td class="notes-cell">{{ plan.department_notes.get('MKG', '') if plan.department_notes else '' }}</td>
+        </tr>
+        {% endif %}
+        {% if plan.registration_flow %}
+        <tr>
+            {% if not plan.collateral_url %}<td class="dept-cell">MKG</td>{% endif %}
+            <td class="item-cell">Registration Flow</td>
+            <td class="value-cell" colspan="2">{{ plan.registration_flow }}</td>
+        </tr>
+        {% endif %}
+        {% endif %}
+
+    </tbody>
+</table>
+</div>
+
+<div style="margin-top: 1rem; font-size: 0.8rem; color: #888;">
+    Last updated: {{ plan.updated_at.strftime('%Y-%m-%d %H:%M') if plan.updated_at else '-' }}
+    by {{ plan.updated_by or plan.created_by or '-' }}
+    | Plan ID: {{ plan.id }}
+    | Status: {{ 'Active' if plan.is_active else 'Inactive' }}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+clearTimeout(window.autoRefreshTimeout);
+</script>
+{% endblock %}
