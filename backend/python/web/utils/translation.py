@@ -1,6 +1,6 @@
 """
 Translation service using Azure AI Foundry (Grok 3 Mini) for discount plan T&Cs.
-Translates English terms to Korean, Chinese Simplified, Chinese Traditional, Malay, Japanese.
+Translates terms between any supported language pair.
 """
 
 import re
@@ -8,13 +8,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-TARGET_LANGUAGES = {
+ALL_LANGUAGES = {
+    'en': 'English',
     'ko': 'Korean',
     'zh_cn': 'Chinese Simplified',
     'zh_tw': 'Chinese Traditional',
     'ms': 'Malay',
     'ja': 'Japanese',
 }
+
+# Backward-compat alias
+TARGET_LANGUAGES = {k: v for k, v in ALL_LANGUAGES.items() if k != 'en'}
 
 
 def _get_client():
@@ -35,19 +39,22 @@ def _get_client():
     return OpenAI(base_url=base_url, api_key=api_key), model
 
 
-def translate_terms(terms_list: list[str], target_lang: str) -> list[str]:
+def translate_terms(terms_list: list[str], target_lang: str, source_lang: str = 'en') -> list[str]:
     """
-    Translate a list of T&C clauses to the target language.
-    Batches all clauses in one prompt for consistency.
+    Translate a list of T&C clauses from source_lang to target_lang.
 
     Args:
-        terms_list: List of English T&C strings
-        target_lang: Language code (ko, zh_cn, zh_tw, ms, ja)
+        terms_list: List of T&C strings in the source language
+        target_lang: Target language code (en, ko, zh_cn, zh_tw, ms, ja)
+        source_lang: Source language code (default 'en')
 
     Returns:
         List of translated strings in the same order
     """
-    lang_name = TARGET_LANGUAGES.get(target_lang, target_lang)
+    source_name = ALL_LANGUAGES.get(source_lang)
+    target_name = ALL_LANGUAGES.get(target_lang)
+    if not source_name or not target_name:
+        raise ValueError(f"Unknown language code: {source_lang!r} or {target_lang!r}")
     client, model = _get_client()
 
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(terms_list))
@@ -59,7 +66,7 @@ def translate_terms(terms_list: list[str], target_lang: str) -> list[str]:
                 "role": "system",
                 "content": (
                     f"You are a professional translator for a self-storage company (RedBox Storage). "
-                    f"Translate the following numbered terms and conditions from English to {lang_name}. "
+                    f"Translate the following numbered terms and conditions from {source_name} to {target_name}. "
                     f"Keep the numbering. Return ONLY the translated numbered list, nothing else. "
                     f"Maintain the same business tone and legal accuracy."
                 ),
@@ -89,7 +96,7 @@ def translate_terms(terms_list: list[str], target_lang: str) -> list[str]:
     # If parsing didn't yield the right count, pad or truncate
     if len(lines) != len(terms_list):
         logger.warning(
-            f"Translation parse mismatch for {target_lang}: "
+            f"Translation parse mismatch for {source_lang}->{target_lang}: "
             f"expected {len(terms_list)} items, got {len(lines)}. Adjusting."
         )
         while len(lines) < len(terms_list):
@@ -99,17 +106,27 @@ def translate_terms(terms_list: list[str], target_lang: str) -> list[str]:
     return lines
 
 
-def translate_terms_all_languages(terms_list: list[str]) -> dict:
+def translate_terms_all_languages(terms_list: list[str], source_lang: str = 'en', target_langs: list[str] | None = None) -> dict:
     """
-    Translate T&Cs to all target languages.
+    Translate T&Cs to multiple target languages.
+
+    Args:
+        terms_list: List of T&C strings in the source language
+        source_lang: Source language code (default 'en')
+        target_langs: List of target language codes, or None for all except source
 
     Returns:
         Dict keyed by language code: {'ko': [...], 'zh_cn': [...], ...}
     """
+    if target_langs is None:
+        target_langs = [lc for lc in ALL_LANGUAGES if lc != source_lang]
+
     translations = {}
-    for lang_code in TARGET_LANGUAGES:
+    for lang_code in target_langs:
+        if lang_code == source_lang:
+            continue
         try:
-            translations[lang_code] = translate_terms(terms_list, lang_code)
+            translations[lang_code] = translate_terms(terms_list, lang_code, source_lang)
         except Exception as e:
             logger.error(f"Translation to {lang_code} failed: {e}")
             translations[lang_code] = [f"[Translation error: {str(e)[:100]}]"]

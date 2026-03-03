@@ -53,6 +53,9 @@
     .toggle-row label { font-weight: 500; cursor: pointer; }
     .linked-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; background: #f0f4f8; border-radius: 4px; margin-bottom: 0.3rem; font-size: 0.85rem; }
     .linked-item .remove-link { color: #dc2626; cursor: pointer; font-weight: 700; }
+    .date-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .translate-langs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.3rem; }
+    .translate-langs label { display: flex; align-items: center; gap: 0.25rem; font-size: 0.85rem; font-weight: 500; cursor: pointer; }
 </style>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
@@ -97,7 +100,13 @@
             </div>
             <div class="form-group">
                 <label>Sitelink Discount Name</label>
-                <input type="text" name="sitelink_discount_name" value="{{ plan.sitelink_discount_name if plan else form_data.get('sitelink_discount_name', '') }}" placeholder="Name in Sitelink system">
+                <select name="sitelink_discount_name">
+                    <option value="">-- Select or leave blank --</option>
+                    {% for sname in sitelink_discount_names %}
+                    <option value="{{ sname }}" {{ 'selected' if (plan and plan.sitelink_discount_name == sname) or form_data.get('sitelink_discount_name') == sname }}>{{ sname }}</option>
+                    {% endfor %}
+                </select>
+                <div class="hint">Discount plan name from Sitelink</div>
             </div>
             <div class="form-group">
                 <label>Sort Order</label>
@@ -137,15 +146,27 @@
                 <label>Move-In Range</label>
                 <input type="text" name="move_in_range" value="{{ plan.move_in_range if plan else form_data.get('move_in_range', '') }}" placeholder="e.g. Maximum 14 days after the booking date">
             </div>
+        </div>
+        <div class="form-grid" style="margin-top: 0.75rem;">
             <div class="form-group">
-                <label>Period Start</label>
-                <input type="date" name="period_start" value="{{ plan.period_start.isoformat() if plan and plan.period_start else form_data.get('period_start', '') }}">
+                <label>Promotion Period</label>
+                <div class="date-pair">
+                    <input type="date" name="promo_period_start" value="{{ plan.promo_period_start.isoformat() if plan and plan.promo_period_start else form_data.get('promo_period_start', '') }}" placeholder="Start">
+                    <input type="date" name="promo_period_end" value="{{ plan.promo_period_end.isoformat() if plan and plan.promo_period_end else form_data.get('promo_period_end', '') }}" placeholder="End">
+                </div>
             </div>
             <div class="form-group">
-                <label>Period End</label>
-                <input type="date" name="period_end" value="{{ plan.period_end.isoformat() if plan and plan.period_end else form_data.get('period_end', '') }}">
+                <label>Booking Period</label>
+                <div class="date-pair">
+                    <input type="date" name="booking_period_start" value="{{ plan.booking_period_start.isoformat() if plan and plan.booking_period_start else form_data.get('booking_period_start', '') }}" placeholder="Start">
+                    <input type="date" name="booking_period_end" value="{{ plan.booking_period_end.isoformat() if plan and plan.booking_period_end else form_data.get('booking_period_end', '') }}" placeholder="End">
+                </div>
             </div>
         </div>
+        <!-- Hidden legacy fields to preserve existing data -->
+        <input type="hidden" name="period_start" value="{{ plan.period_start.isoformat() if plan and plan.period_start else '' }}">
+        <input type="hidden" name="period_end" value="{{ plan.period_end.isoformat() if plan and plan.period_end else '' }}">
+
         <div class="form-group" style="margin-top: 0.75rem;">
             <label>Applicable Sites</label>
             {% for country, country_sites in sites_by_country.items() %}
@@ -214,15 +235,30 @@
         <div class="form-grid">
             <div class="form-group">
                 <label>Deposit</label>
-                <input type="text" name="deposit" value="{{ plan.deposit if plan else form_data.get('deposit', '') }}" placeholder="e.g. 1 Month (Refundable)">
+                <select name="deposit">
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('deposit', []) %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.deposit == opt) or form_data.get('deposit') == opt }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="form-group">
                 <label>Payment Terms</label>
-                <input type="text" name="payment_terms" value="{{ plan.payment_terms if plan else form_data.get('payment_terms', '') }}" placeholder="e.g. Monthly, Prepaid (6M)">
+                <select name="payment_terms">
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('payment_terms', []) %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.payment_terms == opt) or form_data.get('payment_terms') == opt }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="form-group">
                 <label>Termination Notice</label>
-                <input type="text" name="termination_notice" value="{{ plan.termination_notice if plan else form_data.get('termination_notice', '') }}" placeholder="e.g. 1 Month">
+                <select name="termination_notice">
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('termination_notice', []) %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.termination_notice == opt) or form_data.get('termination_notice') == opt }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="form-group">
                 <label>Lock-In Period</label>
@@ -259,12 +295,42 @@
             </div>
             <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
                 <button type="button" id="add-tc-row" class="btn btn-sm btn-secondary">+ Add T&amp;C</button>
-                {% if plan and plan.id %}
-                <button type="button" id="translate-tcs-btn" class="btn btn-sm" style="background: #6366f1;">Translate T&amp;Cs</button>
-                <span id="translate-status" style="font-size: 0.8rem; color: #888; align-self: center;"></span>
-                {% endif %}
             </div>
         </div>
+
+        {% if plan and plan.id %}
+        <div style="margin-top: 1rem; padding: 0.75rem; background: #f0f4ff; border-radius: 6px;">
+            <label style="font-weight: 600; color: var(--esa-navy); font-size: 0.85rem;">AI Translation</label>
+            <div class="form-grid" style="margin-top: 0.5rem;">
+                <div class="form-group">
+                    <label>Source Language</label>
+                    <select id="translate-source">
+                        <option value="en" selected>English</option>
+                        <option value="ko">Korean</option>
+                        <option value="zh_cn">Chinese Simplified</option>
+                        <option value="zh_tw">Chinese Traditional</option>
+                        <option value="ms">Malay</option>
+                        <option value="ja">Japanese</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Target Languages</label>
+                    <div class="translate-langs" id="translate-targets">
+                        <label><input type="checkbox" value="en" data-lang="en"> English</label>
+                        <label><input type="checkbox" value="ko" data-lang="ko" checked> Korean</label>
+                        <label><input type="checkbox" value="zh_cn" data-lang="zh_cn" checked> CN (S)</label>
+                        <label><input type="checkbox" value="zh_tw" data-lang="zh_tw" checked> CN (T)</label>
+                        <label><input type="checkbox" value="ms" data-lang="ms" checked> Malay</label>
+                        <label><input type="checkbox" value="ja" data-lang="ja" checked> Japanese</label>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
+                <button type="button" id="translate-tcs-btn" class="btn btn-sm" style="background: #6366f1;">Translate T&amp;Cs</button>
+                <span id="translate-status" style="font-size: 0.8rem; color: #888;"></span>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- ================================================================= -->
@@ -292,19 +358,22 @@
             <div class="form-group">
                 <label>Sales Extra Discount</label>
                 <select name="sales_extra_discount">
-                    {% for opt in eligibility_options %}
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('sales_extra_discount', eligibility_options) %}
                     <option value="{{ opt }}" {{ 'selected' if (plan and plan.sales_extra_discount == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
                     {% endfor %}
                 </select>
                 <label style="margin-top: 0.5rem;">Switch To Us</label>
                 <select name="switch_to_us">
-                    {% for opt in eligibility_options %}
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('switch_to_us', eligibility_options) %}
                     <option value="{{ opt }}" {{ 'selected' if (plan and plan.switch_to_us == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
                     {% endfor %}
                 </select>
                 <label style="margin-top: 0.5rem;">Referral Program</label>
                 <select name="referral_program">
-                    {% for opt in eligibility_options %}
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('referral_program', eligibility_options) %}
                     <option value="{{ opt }}" {{ 'selected' if (plan and plan.referral_program == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
                     {% endfor %}
                 </select>
@@ -312,7 +381,12 @@
         </div>
         <div class="form-group" style="margin-top: 0.75rem;">
             <label>Distribution Channel</label>
-            <input type="text" name="distribution_channel" value="{{ plan.distribution_channel if plan else '' }}" placeholder="e.g. Direct Mailing, Online, WhatsApp">
+            <select name="distribution_channel">
+                <option value="">-- Select --</option>
+                {% for opt in config_options.get('distribution_channel', []) %}
+                <option value="{{ opt }}" {{ 'selected' if (plan and plan.distribution_channel == opt) or form_data.get('distribution_channel') == opt }}>{{ opt }}</option>
+                {% endfor %}
+            </select>
         </div>
     </div>
 
@@ -484,17 +558,34 @@ var linkedData = JSON.parse(document.getElementById('linked-concessions-json').v
 
 function renderLinked() {
     var display = document.getElementById('linked-concessions-display');
+    display.textContent = '';
     if (linkedData.length === 0) {
-        display.innerHTML = '<div style="color: #888; font-size: 0.85rem;">No concessions linked yet.</div>';
+        var msg = document.createElement('div');
+        msg.style.cssText = 'color: #888; font-size: 0.85rem;';
+        msg.textContent = 'No concessions linked yet.';
+        display.appendChild(msg);
         return;
     }
-    display.innerHTML = linkedData.map(function(item, idx) {
-        return '<div class="linked-item">' +
-            '<span>' + (item.site_code || 'Site ' + item.site_id) + ' - ' + (item.plan_name || 'Concession ' + item.concession_id) + '</span>' +
-            (item.discount_pct ? ' <span style="color: #059669; font-weight: 600;">(' + item.discount_pct + '%)</span>' : '') +
-            '<span class="remove-link" onclick="removeLinked(' + idx + ')" title="Remove">X</span>' +
-            '</div>';
-    }).join('');
+    linkedData.forEach(function(item, idx) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'linked-item';
+        var label = document.createElement('span');
+        label.textContent = (item.site_code || 'Site ' + item.site_id) + ' - ' + (item.plan_name || 'Concession ' + item.concession_id);
+        wrapper.appendChild(label);
+        if (item.discount_pct) {
+            var pct = document.createElement('span');
+            pct.style.cssText = 'color: #059669; font-weight: 600; margin-left: 0.3rem;';
+            pct.textContent = '(' + item.discount_pct + '%)';
+            wrapper.appendChild(pct);
+        }
+        var rm = document.createElement('span');
+        rm.className = 'remove-link';
+        rm.title = 'Remove';
+        rm.textContent = 'X';
+        rm.addEventListener('click', (function(i) { return function() { removeLinked(i); }; })(idx));
+        wrapper.appendChild(rm);
+        display.appendChild(wrapper);
+    });
     document.getElementById('linked-concessions-json').value = JSON.stringify(linkedData.map(function(item) {
         return {site_id: item.site_id, concession_id: item.concession_id};
     }));
@@ -555,40 +646,78 @@ function addConcession(item) {
 }
 
 // =========================================================================
-// AI Translation
+// AI Translation with source/target language selection
 // =========================================================================
 {% if plan and plan.id %}
-document.getElementById('translate-tcs-btn').addEventListener('click', function() {
-    var btn = this;
-    var status = document.getElementById('translate-status');
-    btn.disabled = true;
-    status.textContent = 'Translating...';
-    status.style.color = '#6366f1';
+(function() {
+    var sourceSelect = document.getElementById('translate-source');
+    var targetContainer = document.getElementById('translate-targets');
 
-    fetch('{{ url_for("discount_plans.translate_tcs", plan_id=plan.id) }}', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrf_token]').value
-        }
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.success) {
-            status.textContent = 'Translations saved! (ko, zh_cn, zh_tw, ms, ja)';
-            status.style.color = '#059669';
-        } else {
-            status.textContent = 'Error: ' + (data.error || 'Unknown');
+    // Auto-disable source language from targets
+    function updateTargets() {
+        var src = sourceSelect.value;
+        var checkboxes = targetContainer.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(function(cb) {
+            if (cb.value === src) {
+                cb.checked = false;
+                cb.disabled = true;
+                cb.parentElement.style.opacity = '0.4';
+            } else {
+                cb.disabled = false;
+                cb.parentElement.style.opacity = '1';
+            }
+        });
+    }
+
+    sourceSelect.addEventListener('change', updateTargets);
+    updateTargets(); // init
+
+    document.getElementById('translate-tcs-btn').addEventListener('click', function() {
+        var btn = this;
+        var status = document.getElementById('translate-status');
+        var sourceLang = sourceSelect.value;
+        var targetLangs = [];
+        targetContainer.querySelectorAll('input[type="checkbox"]:checked').forEach(function(cb) {
+            targetLangs.push(cb.value);
+        });
+
+        if (targetLangs.length === 0) {
+            status.textContent = 'Select at least one target language.';
             status.style.color = '#dc2626';
+            return;
         }
-        btn.disabled = false;
-    })
-    .catch(function(err) {
-        status.textContent = 'Error: ' + err.message;
-        status.style.color = '#dc2626';
-        btn.disabled = false;
+
+        btn.disabled = true;
+        status.textContent = 'Translating...';
+        status.style.color = '#6366f1';
+
+        fetch('{{ url_for("discount_plans.translate_tcs", plan_id=plan.id) }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrf_token]').value
+            },
+            body: JSON.stringify({source_lang: sourceLang, target_langs: targetLangs})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) {
+                var langs = targetLangs.join(', ');
+                status.textContent = 'Translations saved! (' + langs + ')';
+                status.style.color = '#059669';
+            } else {
+                status.textContent = 'Error: ' + (data.error || 'Unknown');
+                status.style.color = '#dc2626';
+            }
+            btn.disabled = false;
+        })
+        .catch(function(err) {
+            status.textContent = 'Error: ' + err.message;
+            status.style.color = '#dc2626';
+            btn.disabled = false;
+        });
     });
-});
+})();
 {% endif %}
 </script>
 {% endblock %}

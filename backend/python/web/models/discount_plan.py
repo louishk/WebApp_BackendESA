@@ -42,6 +42,10 @@ class DiscountPlan(Base):
     period_range = Column(String(255), comment="Offer validity, e.g. Permanent, From X till Y")
     period_start = Column(Date, comment="Offer start date (if time-limited)")
     period_end = Column(Date, comment="Offer end date (if time-limited)")
+    promo_period_start = Column(Date, comment="Promotion period start date")
+    promo_period_end = Column(Date, comment="Promotion period end date")
+    booking_period_start = Column(Date, comment="Booking period start date")
+    booking_period_end = Column(Date, comment="Booking period end date")
     move_in_range = Column(String(255), comment="Move-in date constraint")
     applicable_sites = Column(JSONB, comment="Site applicability, e.g. {L001: true, L003: false}")
 
@@ -141,6 +145,10 @@ class DiscountPlan(Base):
             'period_range': self.period_range,
             'period_start': self.period_start.isoformat() if self.period_start else None,
             'period_end': self.period_end.isoformat() if self.period_end else None,
+            'promo_period_start': self.promo_period_start.isoformat() if self.promo_period_start else None,
+            'promo_period_end': self.promo_period_end.isoformat() if self.promo_period_end else None,
+            'booking_period_start': self.booking_period_start.isoformat() if self.booking_period_start else None,
+            'booking_period_end': self.booking_period_end.isoformat() if self.booking_period_end else None,
             'move_in_range': self.move_in_range,
             'applicable_sites': self.applicable_sites or {},
             # Discount

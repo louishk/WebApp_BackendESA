@@ -115,7 +115,7 @@
         <!-- ALL Department -->
         <!-- ============================================================ -->
         <tr>
-            <td class="dept-cell" rowspan="{{ 14 + (1 if plan.lock_in_period else 0) }}">ALL</td>
+            <td class="dept-cell" rowspan="{{ 16 + (1 if plan.lock_in_period else 0) }}">ALL</td>
             <td class="item-cell">Name</td>
             <td class="value-cell">{{ plan.plan_name }}</td>
             <td class="notes-cell"></td>
@@ -133,6 +133,28 @@
                     {{ plan.period_start }} to {{ plan.period_end }}
                 {% endif %}
             </td>
+        </tr>
+        <tr>
+            <td class="item-cell">Promotion Period</td>
+            <td class="value-cell">
+                {% if plan.promo_period_start or plan.promo_period_end %}
+                    {{ plan.promo_period_start or '?' }} to {{ plan.promo_period_end or '?' }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Booking Period</td>
+            <td class="value-cell">
+                {% if plan.booking_period_start or plan.booking_period_end %}
+                    {{ plan.booking_period_start or '?' }} to {{ plan.booking_period_end or '?' }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            <td class="notes-cell"></td>
         </tr>
         <tr>
             <td class="item-cell">RedBox Location</td>
@@ -352,7 +374,7 @@
 {% if translations %}
 <div class="card translation-section" style="margin-top: 1rem;">
     <h3 style="color: var(--esa-navy); font-size: 1rem; border-bottom: 2px solid var(--esa-red); display: inline-block; padding-bottom: 0.3rem; margin-bottom: 0.75rem;">Translated T&amp;Cs</h3>
-    {% set lang_names = {'ko': 'Korean', 'zh_cn': 'Chinese (Simplified)', 'zh_tw': 'Chinese (Traditional)', 'ms': 'Malay', 'ja': 'Japanese'} %}
+    {% set lang_names = {'en': 'English', 'ko': 'Korean', 'zh_cn': 'Chinese (Simplified)', 'zh_tw': 'Chinese (Traditional)', 'ms': 'Malay', 'ja': 'Japanese'} %}
     {% for lang, terms in translations.items() %}
     <details class="lang-block">
         <summary>{{ lang_names.get(lang, lang) }}</summary>

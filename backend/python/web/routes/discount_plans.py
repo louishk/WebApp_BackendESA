@@ -1,5 +1,5 @@
 """
-Discount Plans routes - CRUD management and promotion brief view.
+Discount Plans routes - CRUD management, promotion brief view, and config.
 """
 
 import json
@@ -30,36 +30,73 @@ def _get_pbi_session():
 
 def _get_sites_by_country():
     """
-    Query Site table from PBI DB. Returns:
-    - sites_by_country: {'Hong Kong': [{'code': 'L004', 'name': 'Yau Tong'}, ...], ...}
+    Query SiteInfo table from PBI DB. Returns:
+    - sites_by_country: {'Hong Kong': [{'code': 'L004', 'name': 'Yau Tong (YT)'}, ...], ...}
     - all_site_codes: ['L001', 'L003', ...] (for backward compat)
     """
     try:
-        from common.models import Site
+        from common.models import SiteInfo
         session = _get_pbi_session()
         try:
-            sites = (session.query(Site.sLocationCode, Site.sSiteName, Site.sSiteCountry)
-                     .filter(Site.sLocationCode.isnot(None))
-                     .order_by(Site.sLocationCode)
+            sites = (session.query(SiteInfo.SiteCode, SiteInfo.Name, SiteInfo.InternalLabel, SiteInfo.Country)
+                     .filter(SiteInfo.SiteCode.isnot(None))
+                     .order_by(SiteInfo.SiteCode)
                      .all())
             by_country = {}
             all_codes = []
-            for code, name, country in sites:
+            for code, name, label, country in sites:
                 if not code:
                     continue
                 country = country or 'Unknown'
+                display = f"{name} ({label})" if label else name or code
                 if country not in by_country:
                     by_country[country] = []
-                by_country[country].append({'code': code, 'name': name or code})
+                by_country[country].append({'code': code, 'name': display})
                 all_codes.append(code)
             return by_country, all_codes
         finally:
             session.close()
     except Exception as e:
         current_app.logger.warning(f"Could not load sites from PBI DB: {e}")
-        # Fallback to hardcoded list
         fallback = ['L001', 'L003', 'L004', 'L005', 'L006', 'L007', 'L008', 'L009', 'L010']
         return {'Sites': [{'code': c, 'name': c} for c in fallback]}, fallback
+
+
+def _get_sitelink_discount_names():
+    """Get distinct Sitelink discount plan names from cc_discount (PBI DB)."""
+    try:
+        from common.models import CCDiscount
+        from sqlalchemy import distinct
+        session = _get_pbi_session()
+        try:
+            rows = (session.query(distinct(CCDiscount.sPlanName))
+                    .filter(CCDiscount.sPlanName.isnot(None))
+                    .filter(CCDiscount.dDeleted.is_(None))
+                    .order_by(CCDiscount.sPlanName)
+                    .all())
+            return [r[0] for r in rows if r[0] and r[0].strip()]
+        finally:
+            session.close()
+    except Exception as e:
+        current_app.logger.warning(f"Could not load sitelink discount names: {e}")
+        return []
+
+
+def _get_config_options():
+    """Load active config options grouped by field_name."""
+    from web.models.discount_plan_config import DiscountPlanConfig
+    db_session = get_session()
+    try:
+        options = (db_session.query(DiscountPlanConfig)
+                   .filter_by(is_active=True)
+                   .order_by(DiscountPlanConfig.field_name, DiscountPlanConfig.sort_order)
+                   .all())
+        grouped = {}
+        for opt in options:
+            grouped.setdefault(opt.field_name, []).append(opt.option_value)
+        return grouped
+    finally:
+        db_session.close()
 
 
 def _require_config_permission(f):
@@ -121,6 +158,10 @@ def _build_plan_from_form(form, plan=None):
     plan.period_range = form.get('period_range', '').strip() or None
     plan.period_start = _parse_date_field(form.get('period_start'))
     plan.period_end = _parse_date_field(form.get('period_end'))
+    plan.promo_period_start = _parse_date_field(form.get('promo_period_start'))
+    plan.promo_period_end = _parse_date_field(form.get('promo_period_end'))
+    plan.booking_period_start = _parse_date_field(form.get('booking_period_start'))
+    plan.booking_period_end = _parse_date_field(form.get('booking_period_end'))
     plan.move_in_range = form.get('move_in_range', '').strip() or None
 
     # Lock-in period
@@ -197,6 +238,18 @@ def _build_plan_from_form(form, plan=None):
     return plan
 
 
+def _edit_tpl_kwargs():
+    """Build common template kwargs for create/edit pages."""
+    sites_by_country, all_site_codes = _get_sites_by_country()
+    return dict(
+        sites_by_country=sites_by_country, site_codes=all_site_codes,
+        plan_types=PLAN_TYPES, discount_types=DISCOUNT_TYPES,
+        eligibility_options=ELIGIBILITY_OPTIONS,
+        sitelink_discount_names=_get_sitelink_discount_names(),
+        config_options=_get_config_options(),
+    )
+
+
 # =============================================================================
 # List
 # =============================================================================
@@ -232,12 +285,7 @@ def create_plan():
     """Create a new discount plan."""
     from web.models.discount_plan import DiscountPlan
 
-    sites_by_country, all_site_codes = _get_sites_by_country()
-    tpl_kwargs = dict(
-        sites_by_country=sites_by_country, site_codes=all_site_codes,
-        plan_types=PLAN_TYPES, discount_types=DISCOUNT_TYPES,
-        eligibility_options=ELIGIBILITY_OPTIONS,
-    )
+    tpl_kwargs = _edit_tpl_kwargs()
 
     if request.method == 'POST':
         db_session = get_session()
@@ -284,12 +332,7 @@ def edit_plan(plan_id):
     """Edit an existing discount plan."""
     from web.models.discount_plan import DiscountPlan
 
-    sites_by_country, all_site_codes = _get_sites_by_country()
-    tpl_kwargs = dict(
-        sites_by_country=sites_by_country, site_codes=all_site_codes,
-        plan_types=PLAN_TYPES, discount_types=DISCOUNT_TYPES,
-        eligibility_options=ELIGIBILITY_OPTIONS,
-    )
+    tpl_kwargs = _edit_tpl_kwargs()
 
     db_session = get_session()
     try:
@@ -525,7 +568,7 @@ def api_search_concessions():
 @login_required
 @_require_config_permission
 def translate_tcs(plan_id):
-    """Translate English T&Cs to multiple languages via Azure OpenAI."""
+    """Translate T&Cs between languages via Azure OpenAI."""
     from web.models.discount_plan import DiscountPlan
 
     db_session = get_session()
@@ -534,28 +577,184 @@ def translate_tcs(plan_id):
         if not plan:
             return jsonify({'error': 'Plan not found'}), 404
 
+        # Accept source/target language params from JSON body
+        from web.utils.translation import ALL_LANGUAGES
+        VALID_LANG_CODES = set(ALL_LANGUAGES.keys())
+
+        body = request.get_json(silent=True) or {}
+        source_lang = body.get('source_lang', 'en')
+        target_langs = body.get('target_langs')  # list or None for all
+
+        if source_lang not in VALID_LANG_CODES:
+            return jsonify({'error': 'Invalid source language'}), 400
+        if target_langs is not None:
+            if not isinstance(target_langs, list):
+                return jsonify({'error': 'target_langs must be a list'}), 400
+            if not all(lang in VALID_LANG_CODES for lang in target_langs):
+                return jsonify({'error': 'Invalid target language code'}), 400
+
         tcs = plan.terms_conditions
         if not tcs:
-            return jsonify({'error': 'No English T&Cs to translate'}), 400
+            return jsonify({'error': 'No T&Cs to translate'}), 400
 
         try:
             from web.utils.translation import translate_terms_all_languages
-            translations = translate_terms_all_languages(tcs)
+            new_translations = translate_terms_all_languages(tcs, source_lang=source_lang, target_langs=target_langs)
         except Exception as e:
             current_app.logger.error(f"Translation error: {e}")
             return jsonify({'error': 'Translation service unavailable'}), 500
 
-        plan.terms_conditions_translations = translations
+        # Merge new translations into existing (preserve unrelated languages)
+        existing = plan.terms_conditions_translations or {}
+        existing.update(new_translations)
+        plan.terms_conditions_translations = existing
         plan.updated_by = current_user.username
         db_session.commit()
 
         return jsonify({
             'success': True,
-            'translations': translations,
+            'translations': existing,
         })
     except Exception as e:
         db_session.rollback()
         current_app.logger.error(f"Translation save error: {e}")
         return jsonify({'error': 'Failed to save translations'}), 500
+    finally:
+        db_session.close()
+
+
+# =============================================================================
+# Config CRUD
+# =============================================================================
+
+@discount_plans_bp.route('/config')
+@login_required
+@_require_config_permission
+def config_page():
+    """Manage translatable dropdown options for discount plan fields."""
+    from web.models.discount_plan_config import DiscountPlanConfig
+
+    db_session = get_session()
+    try:
+        all_options = (db_session.query(DiscountPlanConfig)
+                       .order_by(DiscountPlanConfig.field_name, DiscountPlanConfig.sort_order)
+                       .all())
+        grouped = {}
+        for opt in all_options:
+            grouped.setdefault(opt.field_name, []).append(opt)
+        return render_template('admin/discount_plans/config.html',
+                               grouped=grouped,
+                               field_names=DiscountPlanConfig.FIELD_NAMES)
+    finally:
+        db_session.close()
+
+
+@discount_plans_bp.route('/config/save', methods=['POST'])
+@login_required
+@_require_config_permission
+def config_save():
+    """Create or update a config option."""
+    from web.models.discount_plan_config import DiscountPlanConfig
+
+    opt_id = request.form.get('id', '').strip()
+    field_name = request.form.get('field_name', '').strip()
+    option_value = request.form.get('option_value', '').strip()
+    sort_order = request.form.get('sort_order', '0').strip()
+    is_active = request.form.get('is_active') == 'on'
+
+    if not field_name or not option_value:
+        flash('Field name and option value are required.', 'error')
+        return redirect(url_for('discount_plans.config_page'))
+
+    if field_name not in DiscountPlanConfig.FIELD_NAMES:
+        flash('Invalid field name.', 'error')
+        return redirect(url_for('discount_plans.config_page'))
+
+    # Build translations dict from form
+    translations = {}
+    for lc in ('ko', 'zh_cn', 'zh_tw', 'ms', 'ja'):
+        val = request.form.get(f'trans_{lc}', '').strip()
+        if val:
+            translations[lc] = val
+
+    db_session = get_session()
+    try:
+        if opt_id:
+            opt = db_session.query(DiscountPlanConfig).get(int(opt_id))
+            if not opt:
+                flash('Config option not found.', 'error')
+                return redirect(url_for('discount_plans.config_page'))
+            opt.field_name = field_name
+            opt.option_value = option_value
+            opt.translations = translations
+            opt.sort_order = int(sort_order) if sort_order.isdigit() else 0
+            opt.is_active = is_active
+        else:
+            opt = DiscountPlanConfig(
+                field_name=field_name,
+                option_value=option_value,
+                translations=translations,
+                sort_order=int(sort_order) if sort_order.isdigit() else 0,
+                is_active=is_active,
+            )
+            db_session.add(opt)
+
+        db_session.commit()
+        audit_log(AuditEvent.CONFIG_UPDATED, f"Saved discount plan config: {field_name}={option_value}")
+        flash(f'Option "{option_value}" saved.', 'success')
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"Config save error: {e}")
+        flash('An error occurred.', 'error')
+    finally:
+        db_session.close()
+
+    return redirect(url_for('discount_plans.config_page'))
+
+
+@discount_plans_bp.route('/config/<int:opt_id>/delete', methods=['POST'])
+@login_required
+@_require_config_permission
+def config_delete(opt_id):
+    """Delete a config option."""
+    from web.models.discount_plan_config import DiscountPlanConfig
+
+    db_session = get_session()
+    try:
+        opt = db_session.query(DiscountPlanConfig).get(opt_id)
+        if opt:
+            label = f"{opt.field_name}={opt.option_value}"
+            db_session.delete(opt)
+            db_session.commit()
+            audit_log(AuditEvent.CONFIG_UPDATED, f"Deleted discount plan config: {label}")
+            flash(f'Option deleted.', 'success')
+        else:
+            flash('Config option not found.', 'error')
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"Config delete error: {e}")
+        flash('An error occurred.', 'error')
+    finally:
+        db_session.close()
+
+    return redirect(url_for('discount_plans.config_page'))
+
+
+@discount_plans_bp.route('/api/config-options/<field_name>')
+@login_required
+def api_config_options(field_name):
+    """JSON API: get active options for a specific field."""
+    from web.models.discount_plan_config import DiscountPlanConfig
+
+    if field_name not in DiscountPlanConfig.FIELD_NAMES:
+        return jsonify({'error': 'Invalid field name'}), 400
+
+    db_session = get_session()
+    try:
+        options = (db_session.query(DiscountPlanConfig)
+                   .filter_by(field_name=field_name, is_active=True)
+                   .order_by(DiscountPlanConfig.sort_order)
+                   .all())
+        return jsonify([o.to_dict() for o in options])
     finally:
         db_session.close()

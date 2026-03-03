@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Discount Plan Config - ESA Backend{% endblock %}
+
+{% block content %}
+<style>
+    .config-card { margin-bottom: 1.5rem; }
+    .config-card h3 {
+        color: var(--esa-navy);
+        font-size: 1rem;
+        padding-bottom: 0.4rem;
+        border-bottom: 2px solid var(--esa-red);
+        display: inline-block;
+        margin-bottom: 0.75rem;
+        text-transform: capitalize;
+    }
+    .config-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .config-table th { background: var(--esa-navy); color: #fff; padding: 0.4rem 0.6rem; text-align: left; font-weight: 600; font-size: 0.8rem; }
+    .config-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--esa-gray-dark); vertical-align: middle; }
+    .config-table input[type="text"],
+    .config-table input[type="number"] {
+        width: 100%; padding: 0.3rem 0.5rem; border: 1px solid var(--esa-gray-dark);
+        border-radius: 3px; font-size: 0.85rem; font-family: inherit;
+    }
+    .config-table .actions { white-space: nowrap; }
+    .new-row { background: #f0fdf4; }
+    .field-label { text-transform: capitalize; }
+</style>
+
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Discount Plan Config</h1>
+    <p style="font-size: 0.85rem; color: #555;">Manage dropdown options for discount plan fields. Translations are optional.</p>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+{% for field_name in field_names %}
+<div class="card config-card">
+    <h3 class="field-label">{{ field_name | replace('_', ' ') }}</h3>
+    <table class="config-table">
+        <thead>
+            <tr>
+                <th style="width: 180px;">EN Value</th>
+                <th>Korean</th>
+                <th>Chinese (S)</th>
+                <th>Chinese (T)</th>
+                <th>Malay</th>
+                <th>Japanese</th>
+                <th style="width: 50px;">Order</th>
+                <th style="width: 50px;">Active</th>
+                <th style="width: 120px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for opt in grouped.get(field_name, []) %}
+            <tr>
+                <form method="POST" action="{{ url_for('discount_plans.config_save') }}" style="display: contents;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="id" value="{{ opt.id }}">
+                    <input type="hidden" name="field_name" value="{{ opt.field_name }}">
+                    <td><input type="text" name="option_value" value="{{ opt.option_value }}" required></td>
+                    <td><input type="text" name="trans_ko" value="{{ (opt.translations or {}).get('ko', '') }}" placeholder="Korean"></td>
+                    <td><input type="text" name="trans_zh_cn" value="{{ (opt.translations or {}).get('zh_cn', '') }}" placeholder="Chinese (S)"></td>
+                    <td><input type="text" name="trans_zh_tw" value="{{ (opt.translations or {}).get('zh_tw', '') }}" placeholder="Chinese (T)"></td>
+                    <td><input type="text" name="trans_ms" value="{{ (opt.translations or {}).get('ms', '') }}" placeholder="Malay"></td>
+                    <td><input type="text" name="trans_ja" value="{{ (opt.translations or {}).get('ja', '') }}" placeholder="Japanese"></td>
+                    <td><input type="number" name="sort_order" value="{{ opt.sort_order }}" min="0" style="width: 50px;"></td>
+                    <td style="text-align: center;">
+                        <input type="checkbox" name="is_active" {{ 'checked' if opt.is_active }}>
+                    </td>
+                    <td class="actions">
+                        <button type="submit" class="btn btn-sm" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">Save</button>
+                </form>
+                <form method="POST" action="{{ url_for('discount_plans.config_delete', opt_id=opt.id) }}" style="display: inline;" onsubmit="return confirm('Delete this option?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm" style="background: #dc2626; padding: 0.2rem 0.5rem; font-size: 0.8rem;">Del</button>
+                </form>
+                    </td>
+            </tr>
+            {% endfor %}
+            <!-- Add new row -->
+            <tr class="new-row">
+                <form method="POST" action="{{ url_for('discount_plans.config_save') }}" style="display: contents;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="field_name" value="{{ field_name }}">
+                    <td><input type="text" name="option_value" placeholder="New option..." required></td>
+                    <td><input type="text" name="trans_ko" placeholder="Korean"></td>
+                    <td><input type="text" name="trans_zh_cn" placeholder="Chinese (S)"></td>
+                    <td><input type="text" name="trans_zh_tw" placeholder="Chinese (T)"></td>
+                    <td><input type="text" name="trans_ms" placeholder="Malay"></td>
+                    <td><input type="text" name="trans_ja" placeholder="Japanese"></td>
+                    <td><input type="number" name="sort_order" value="0" min="0" style="width: 50px;"></td>
+                    <td style="text-align: center;"><input type="checkbox" name="is_active" checked></td>
+                    <td class="actions">
+                        <button type="submit" class="btn btn-sm" style="background: #059669; padding: 0.2rem 0.5rem; font-size: 0.8rem;">+ Add</button>
+                    </td>
+                </form>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+clearTimeout(window.autoRefreshTimeout);
+</script>
+{% endblock %}

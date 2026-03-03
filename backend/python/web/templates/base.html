@@ -367,7 +367,14 @@
     </div>
     {% endif %}
 
-    {% if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint) %}
+    {% if request.endpoint and 'discount_plans' in request.endpoint %}
+    <div class="sub-navbar">
+        <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint == 'discount_plans.list_plans' or 'edit' in request.endpoint or 'create' in request.endpoint or 'brief' in request.endpoint else '' }}">Plans</a>
+        <a href="{{ url_for('discount_plans.config_page') }}" class="{{ 'active' if 'config' in request.endpoint else '' }}">Config</a>
+    </div>
+    {% endif %}
+
+    {% if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint) and 'discount_plans' not in request.endpoint %}
     <div class="sub-navbar">
         <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if 'config' in request.endpoint else '' }}">Config</a>
         <a href="{{ url_for('admin.list_secrets') }}" class="{{ 'active' if 'secret' in request.endpoint else '' }}">Secrets</a>
