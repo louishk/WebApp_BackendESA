@@ -291,7 +291,7 @@
         return headers;
     }
 
-    // Load sites dropdown
+    // Load sites dropdown (grouped by country)
     async function loadSites() {
         try {
             const response = await fetch('/api/sites', {
@@ -304,12 +304,23 @@
             const select = document.getElementById('site-select');
             select.innerHTML = '';
 
+            const grouped = {};
             data.sites.forEach(site => {
-                const option = document.createElement('option');
-                option.value = site.site_id;
-                option.dataset.code = site.site_code;
-                option.textContent = `${site.site_code} - ${site.name}`;
-                select.appendChild(option);
+                const country = site.country || 'Other';
+                if (!grouped[country]) grouped[country] = [];
+                grouped[country].push(site);
+            });
+            Object.keys(grouped).forEach(country => {
+                const group = document.createElement('optgroup');
+                group.label = country;
+                grouped[country].forEach(site => {
+                    const option = document.createElement('option');
+                    option.value = site.site_id;
+                    option.dataset.code = site.site_code;
+                    option.textContent = `${site.site_code} - ${site.name}`;
+                    group.appendChild(option);
+                });
+                select.appendChild(group);
             });
         } catch (error) {
             console.error('Failed to load sites:', error);
