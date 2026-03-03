@@ -362,6 +362,12 @@ def run_auto(
             print("  All reviews on this page already exist, stopping")
             break
 
+    # Deduplicate by review_id (API may return same review across pages)
+    seen = {}
+    for review in new_reviews:
+        seen[review['review_id']] = review
+    new_reviews = list(seen.values())
+
     if not new_reviews:
         print("\nNo new reviews to sync")
         return 0
