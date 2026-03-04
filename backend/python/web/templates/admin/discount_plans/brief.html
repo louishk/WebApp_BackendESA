@@ -115,7 +115,7 @@
         <!-- ALL Department -->
         <!-- ============================================================ -->
         <tr>
-            <td class="dept-cell" rowspan="{{ 16 + (1 if plan.lock_in_period else 0) }}">ALL</td>
+            <td class="dept-cell" rowspan="{{ 15 + (1 if plan.lock_in_period else 0) }}">ALL</td>
             <td class="item-cell">Name</td>
             <td class="value-cell">{{ plan.plan_name }}</td>
             <td class="notes-cell"></td>
@@ -157,7 +157,7 @@
             <td class="notes-cell"></td>
         </tr>
         <tr>
-            <td class="item-cell">RedBox Location</td>
+            <td class="item-cell">Location</td>
             <td class="value-cell">
                 {% if plan.applicable_sites %}
                     {% for code in site_codes %}
@@ -202,11 +202,6 @@
             <td class="item-cell">Available for ChatBot</td>
             <td class="value-cell">{{ 'Yes' if plan.available_for_chatbot else 'No' }}</td>
             <td class="notes-cell">{{ plan.chatbot_notes or '' }}</td>
-        </tr>
-        <tr>
-            <td class="item-cell">Sales Extra Discount</td>
-            <td class="value-cell"><span class="{{ 'not-eligible' if plan.sales_extra_discount == 'Not Eligible' else 'eligible' }}">{{ plan.sales_extra_discount or 'Not Eligible' }}</span></td>
-            <td class="notes-cell"></td>
         </tr>
         <tr>
             <td class="item-cell">Switch To Us</td>

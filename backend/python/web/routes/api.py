@@ -2419,7 +2419,7 @@ def _apply_plan_json(plan, data, is_create=False):
         'clawback_condition',
         'deposit', 'payment_terms', 'termination_notice', 'extra_offer',
         'chatbot_notes',
-        'sales_extra_discount', 'switch_to_us', 'referral_program',
+        'switch_to_us', 'referral_program',
         'distribution_channel',
         'rate_rules', 'rate_rules_sites',
         'collateral_url', 'registration_flow',

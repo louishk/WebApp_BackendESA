@@ -203,7 +203,6 @@ def _build_plan_from_form(form, plan=None):
     plan.hidden_rate = form.get('hidden_rate') == 'on'
     plan.available_for_chatbot = form.get('available_for_chatbot') == 'on'
     plan.chatbot_notes = form.get('chatbot_notes', '').strip() or None
-    plan.sales_extra_discount = form.get('sales_extra_discount', 'Not Eligible')
     plan.switch_to_us = form.get('switch_to_us', 'Not Eligible')
     plan.referral_program = form.get('referral_program', 'Not Eligible')
     plan.distribution_channel = form.get('distribution_channel', '').strip() or None
@@ -754,6 +753,8 @@ def api_translate_text():
     VALID_LANG_CODES = set(ALL_LANGUAGES.keys())
     if not text:
         return jsonify({'error': 'No text provided'}), 400
+    if len(text) > 500:
+        return jsonify({'error': 'Text too long (max 500 characters)'}), 400
     if source_lang not in VALID_LANG_CODES:
         return jsonify({'error': 'Invalid source language'}), 400
 

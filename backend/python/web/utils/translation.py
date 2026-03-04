@@ -65,7 +65,7 @@ def translate_terms(terms_list: list[str], target_lang: str, source_lang: str = 
             {
                 "role": "system",
                 "content": (
-                    f"You are a professional translator for a self-storage company (RedBox Storage). "
+                    f"You are a professional translator for a self-storage company (Extra Space Asia). "
                     f"Translate the following numbered terms and conditions from {source_name} to {target_name}. "
                     f"Keep the numbering. Return ONLY the translated numbered list, nothing else. "
                     f"Maintain the same business tone and legal accuracy."

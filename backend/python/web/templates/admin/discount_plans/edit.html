@@ -356,14 +356,7 @@
                 </div>
             </div>
             <div class="form-group">
-                <label>Sales Extra Discount</label>
-                <select name="sales_extra_discount">
-                    <option value="">-- Select --</option>
-                    {% for opt in config_options.get('sales_extra_discount', eligibility_options) %}
-                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.sales_extra_discount == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
-                    {% endfor %}
-                </select>
-                <label style="margin-top: 0.5rem;">Switch To Us</label>
+                <label>Switch To Us</label>
                 <select name="switch_to_us">
                     <option value="">-- Select --</option>
                     {% for opt in config_options.get('switch_to_us', eligibility_options) %}

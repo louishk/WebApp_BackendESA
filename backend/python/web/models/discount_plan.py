@@ -9,7 +9,7 @@ from web.models.base import Base
 
 class DiscountPlan(Base):
     """
-    Discount Plan definitions for RedBox Storage.
+    Discount Plan definitions for Extra Space Asia.
 
     Replaces the Excel-based discount plan tracking sheet with a proper
     database-backed system. Each row represents a distinct promotional
@@ -80,7 +80,6 @@ class DiscountPlan(Base):
     hidden_rate = Column(Boolean, default=False, comment="Whether rate is hidden from public")
     available_for_chatbot = Column(Boolean, default=False, comment="Available for chatbot promotion")
     chatbot_notes = Column(String(255), comment="ChatBot availability notes")
-    sales_extra_discount = Column(String(50), default='Not Eligible', comment="Eligible / Not Eligible")
     switch_to_us = Column(String(50), default='Not Eligible', comment="Switch-To-Us eligibility")
     referral_program = Column(String(50), default='Not Eligible', comment="Referral program eligibility")
     distribution_channel = Column(String(255), comment="Distribution channel, e.g. Direct Mailing, Online")
@@ -171,7 +170,6 @@ class DiscountPlan(Base):
             'hidden_rate': self.hidden_rate,
             'available_for_chatbot': self.available_for_chatbot,
             'chatbot_notes': self.chatbot_notes,
-            'sales_extra_discount': self.sales_extra_discount,
             'switch_to_us': self.switch_to_us,
             'referral_program': self.referral_program,
             'distribution_channel': self.distribution_channel,
