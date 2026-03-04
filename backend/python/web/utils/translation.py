@@ -131,3 +131,61 @@ def translate_terms_all_languages(terms_list: list[str], source_lang: str = 'en'
             logger.error(f"Translation to {lang_code} failed: {e}")
             translations[lang_code] = [f"[Translation error: {str(e)[:100]}]"]
     return translations
+
+
+def translate_single_text_all(text: str, source_lang: str = 'en', target_langs: list[str] | None = None) -> dict:
+    """
+    Translate a single short text to all target languages in ONE API call.
+
+    Returns:
+        Dict keyed by language code: {'ko': '...', 'zh_cn': '...', ...}
+    """
+    import json as _json
+
+    if target_langs is None:
+        target_langs = [lc for lc in ALL_LANGUAGES if lc != source_lang]
+
+    source_name = ALL_LANGUAGES.get(source_lang)
+    if not source_name:
+        raise ValueError(f"Unknown source language: {source_lang!r}")
+
+    lang_mapping = {lc: ALL_LANGUAGES[lc] for lc in target_langs if lc in ALL_LANGUAGES and lc != source_lang}
+    if not lang_mapping:
+        return {}
+
+    client, model = _get_client()
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    f"You are a professional translator for a self-storage company (Extra Space Asia). "
+                    f"Translate the given {source_name} text into these languages: "
+                    f"{', '.join(f'{name} (code: {code})' for code, name in lang_mapping.items())}. "
+                    f"Return ONLY a JSON object with language codes as keys and translations as values. "
+                    f"Example: {{\"ko\": \"...\", \"zh_cn\": \"...\"}}. No markdown, no explanation."
+                ),
+            },
+            {
+                "role": "user",
+                "content": text,
+            },
+        ],
+        temperature=0.3,
+        max_tokens=2000,
+    )
+
+    raw = response.choices[0].message.content.strip()
+    # Strip markdown code fences if present
+    if raw.startswith('```'):
+        raw = re.sub(r'^```(?:json)?\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+
+    try:
+        result = _json.loads(raw)
+        return {k: v for k, v in result.items() if k in lang_mapping}
+    except _json.JSONDecodeError:
+        logger.error(f"Failed to parse batched translation JSON: {raw[:200]}")
+        return {}

@@ -869,8 +869,8 @@ def config_delete(opt_id):
 @login_required
 @_require_config_permission
 def api_translate_text():
-    """Translate a single text string to all target languages."""
-    from web.utils.translation import ALL_LANGUAGES, translate_terms
+    """Translate a single text string to all target languages in one API call."""
+    from web.utils.translation import ALL_LANGUAGES, translate_single_text_all
 
     body = request.get_json(silent=True) or {}
     text = body.get('text', '').strip()
@@ -884,15 +884,11 @@ def api_translate_text():
     if source_lang not in VALID_LANG_CODES:
         return jsonify({'error': 'Invalid source language'}), 400
 
-    target_langs = [lc for lc in ALL_LANGUAGES if lc != source_lang]
-    translations = {}
-    for lang_code in target_langs:
-        try:
-            result = translate_terms([text], lang_code, source_lang)
-            translations[lang_code] = result[0] if result else ''
-        except Exception as e:
-            current_app.logger.error(f"Config translate to {lang_code} failed: {e}")
-            translations[lang_code] = ''
+    try:
+        translations = translate_single_text_all(text, source_lang)
+    except Exception as e:
+        current_app.logger.error(f"Config translate failed: {e}")
+        return jsonify({'error': str(e)}), 500
 
     return jsonify({'success': True, 'translations': translations})
 
