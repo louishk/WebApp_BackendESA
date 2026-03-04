@@ -108,31 +108,8 @@ class ApiKey(Base):
         return True
 
     def check_and_increment_quota(self):
-        """
-        Check daily quota and increment usage.
-        Auto-resets the counter when the date rolls over.
-
-        Returns:
-            tuple: (allowed: bool, remaining: int)
-        """
-        today = date.today()
-
-        # Reset counter if new day
-        if self.quota_reset_date != today:
-            self.daily_usage = 0
-            self.quota_reset_date = today
-
-        # 0 = unlimited
-        if self.daily_quota == 0:
-            self.daily_usage += 1
-            return True, -1  # -1 means unlimited
-
-        if self.daily_usage >= self.daily_quota:
-            return False, 0
-
-        self.daily_usage += 1
-        remaining = self.daily_quota - self.daily_usage
-        return True, remaining
+        """Deprecated: quota enforcement is now done atomically in jwt_auth._authenticate_api_key."""
+        raise NotImplementedError("Use the atomic SQL UPDATE in jwt_auth._authenticate_api_key instead.")
 
     def to_dict(self):
         """Convert to dictionary (never includes the hash)."""

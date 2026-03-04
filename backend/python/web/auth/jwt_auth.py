@@ -101,8 +101,8 @@ def decode_token(token):
         return payload
     except jwt.ExpiredSignatureError:
         raise AuthError('Token has expired')
-    except jwt.InvalidTokenError as e:
-        raise AuthError(f'Invalid token: {str(e)}')
+    except jwt.InvalidTokenError:
+        raise AuthError('Invalid token')
 
 
 def _authenticate_api_key():
@@ -328,6 +328,7 @@ def require_api_scope(scope):
 def require_role(allowed_roles):
     """
     Decorator factory to require specific roles.
+    Supports session, API key, and JWT authentication (same as require_auth).
 
     Usage:
         @app.route('/api/admin-only')
@@ -338,24 +339,64 @@ def require_role(allowed_roles):
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
+            from flask_login import current_user
+
+            # 1. Session-based authentication
+            if current_user and current_user.is_authenticated:
+                user_roles = [r.name for r in current_user.roles]
+                if not any(r in allowed_roles for r in user_roles):
+                    return jsonify({
+                        'error': 'Forbidden',
+                        'message': f'This endpoint requires one of: {", ".join(allowed_roles)}'
+                    }), 403
+                g.current_user = {
+                    'sub': current_user.username,
+                    'roles': user_roles,
+                    'role': user_roles[0] if user_roles else 'unknown',
+                    'user_id': current_user.id,
+                    'auth_method': 'session',
+                }
+                return f(*args, **kwargs)
+
+            # 2. API key authentication
+            api_key_user, api_key_error = _authenticate_api_key()
+            if api_key_error:
+                return api_key_error
+            if api_key_user:
+                user_roles = api_key_user.get('roles', [])
+                if not any(r in allowed_roles for r in user_roles):
+                    return jsonify({
+                        'error': 'Forbidden',
+                        'message': f'This endpoint requires one of: {", ".join(allowed_roles)}'
+                    }), 403
+                g.current_user = api_key_user
+                return f(*args, **kwargs)
+
+            # 3. JWT authentication
             token = get_token_from_header()
 
             if not token:
                 return jsonify({
                     'error': 'Unauthorized',
-                    'message': 'Missing authentication token'
+                    'message': 'Missing authentication. Use X-API-Key, Bearer JWT, or session cookie.'
                 }), 401
 
             try:
                 payload = decode_token(token)
-                user_role = payload.get('role', '')
 
-                if user_role not in allowed_roles:
+                # Check both 'roles' list and 'role' string (mirrors require_auth)
+                user_roles = payload.get('roles', [])
+                if not user_roles:
+                    single_role = payload.get('role', '')
+                    user_roles = [single_role] if single_role else []
+
+                if not any(r in allowed_roles for r in user_roles):
                     return jsonify({
                         'error': 'Forbidden',
                         'message': f'This endpoint requires one of: {", ".join(allowed_roles)}'
                     }), 403
 
+                payload['auth_method'] = 'jwt'
                 g.current_user = payload
 
             except AuthError as e:

@@ -80,7 +80,6 @@ def create_app(config=None, db_url=None):
     # Initialize CORS with restricted origins
     cors_origins = app.config.get('CORS_ORIGINS', [
         'https://esa-backend.extraspaceasia.com',
-        'http://localhost:*',
     ])
     CORS(app, supports_credentials=True, origins=cors_origins)
 

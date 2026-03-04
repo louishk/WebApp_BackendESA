@@ -12,6 +12,7 @@ import threading
 
 import re
 
+from functools import wraps
 from flask import Blueprint, jsonify, request, current_app, g
 from sqlalchemy import desc, func, case, text
 
@@ -43,7 +44,7 @@ import hashlib
 import tempfile
 
 _CACHE_DIR = os.path.join(tempfile.gettempdir(), 'esa-api-cache')
-os.makedirs(_CACHE_DIR, exist_ok=True)
+os.makedirs(_CACHE_DIR, mode=0o700, exist_ok=True)
 _cache_lock = threading.Lock()
 
 
@@ -62,6 +63,7 @@ def cached(ttl_seconds=30):
         ttl_seconds: Cache time-to-live in seconds (default 30s)
     """
     def decorator(func):
+        @wraps(func)
         def wrapper(*args, **kwargs):
             cache_key = f"{func.__name__}:{request.path}:{request.query_string.decode()}"
             path = _cache_path(cache_key)
@@ -80,17 +82,17 @@ def cached(ttl_seconds=30):
             # Call function and cache result
             response = func(*args, **kwargs)
 
-            # Write to file cache
+            # Write to file cache (owner-only permissions)
             try:
                 response_data = response.get_json()
                 if response_data is not None:
-                    with open(path, 'w') as f:
+                    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                    with os.fdopen(fd, 'w') as f:
                         json.dump(response_data, f)
             except (OSError, TypeError):
                 pass
 
             return response
-        wrapper.__name__ = func.__name__
         return wrapper
     return decorator
 
@@ -349,6 +351,8 @@ def api_disable_job(pipeline):
 
 
 @api_bp.route('/schedules/presets')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_schedule_presets():
     """Get available schedule presets."""
     from scheduler.utils import SCHEDULE_PRESETS
@@ -1393,6 +1397,7 @@ def api_list_modules():
 
 @api_bp.route('/billing-day/<int:site_id>')
 @require_auth
+@require_api_scope('scheduler:read')
 @cached(ttl_seconds=300)
 def api_get_billing_day_status(site_id):
     """
@@ -1489,6 +1494,7 @@ def api_get_billing_day_status(site_id):
 
 @api_bp.route('/billing-day/update', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_update_billing_day():
     """
