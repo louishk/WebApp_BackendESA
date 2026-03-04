@@ -30,6 +30,15 @@
         border: none; color: #fff; border-radius: 3px; cursor: pointer; white-space: nowrap;
     }
     .btn-translate:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-translate.translating {
+        background: #a5b4fc;
+        animation: pulse-translate 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse-translate {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+    }
+    .btn-translate.done { background: #059669; }
 </style>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
@@ -131,8 +140,9 @@ function translateRow(btn) {
     if (!text) { alert('Enter an English value first.'); return; }
 
     btn.disabled = true;
-    var origText = btn.textContent;
-    btn.textContent = '...';
+    btn.textContent = 'Translating...';
+    btn.classList.add('translating');
+    btn.classList.remove('done');
 
     var csrfToken = document.querySelector('[name=csrf_token]').value;
 
@@ -146,6 +156,7 @@ function translateRow(btn) {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
+        btn.classList.remove('translating');
         if (data.success && data.translations) {
             var t = data.translations;
             var fields = {ko: '.tr-ko', zh_cn: '.tr-zh_cn', zh_tw: '.tr-zh_tw', ms: '.tr-ms', ja: '.tr-ja'};
@@ -155,16 +166,20 @@ function translateRow(btn) {
                     if (input) input.value = t[lang];
                 }
             }
+            btn.textContent = 'Done';
+            btn.classList.add('done');
+            setTimeout(function() { btn.textContent = 'AI'; btn.classList.remove('done'); btn.disabled = false; }, 2000);
         } else {
             alert('Translation failed: ' + (data.error || 'Unknown error'));
+            btn.textContent = 'AI';
+            btn.disabled = false;
         }
-        btn.disabled = false;
-        btn.textContent = origText;
     })
     .catch(function(err) {
+        btn.classList.remove('translating');
         alert('Translation error: ' + err.message);
+        btn.textContent = 'AI';
         btn.disabled = false;
-        btn.textContent = origText;
     });
 }
 </script>
