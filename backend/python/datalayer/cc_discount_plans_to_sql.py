@@ -1,8 +1,8 @@
 """
 CC Discount Plans to SQL Pipeline
 
-Fetches discount/concession plan data from DiscountPlansRetrieve SOAP API
-(CallCenterWs) and pushes to PostgreSQL.
+Fetches discount/concession plan data from DiscountPlansRetrieveIncludingDisabled
+SOAP API (CallCenterWs) and pushes to PostgreSQL.
 
 Features:
 - Fetches all discount plans for configured locations
@@ -47,7 +47,7 @@ from common.config import get_pipeline_config
 # =============================================================================
 CALL_CENTER_WS_URL = "https://api.smdservers.net/CCWs_3.5/CallCenterWs.asmx"
 NAMESPACE = "http://tempuri.org/CallCenterWs/CallCenterWs"
-SOAP_ACTION = "http://tempuri.org/CallCenterWs/CallCenterWs/DiscountPlansRetrieve"
+SOAP_ACTION = "http://tempuri.org/CallCenterWs/CallCenterWs/DiscountPlansRetrieveIncludingDisabled"
 
 
 # =============================================================================
@@ -59,7 +59,7 @@ def transform_record(record: Dict[str, Any]) -> Dict[str, Any]:
     Transform API record to database-ready format.
 
     Args:
-        record: Raw record from DiscountPlansRetrieve API
+        record: Raw record from DiscountPlansRetrieveIncludingDisabled API
 
     Returns:
         Transformed record ready for database insertion
@@ -189,7 +189,7 @@ def fetch_discount_plans(
         for location_code in location_codes:
             try:
                 results = soap_client.call(
-                    operation="DiscountPlansRetrieve",
+                    operation="DiscountPlansRetrieveIncludingDisabled",
                     parameters={
                         "sLocationCode": location_code.strip(),
                     },
@@ -305,7 +305,7 @@ def main():
     print("=" * 70)
     print("CC Discount Plans to SQL Pipeline")
     print("=" * 70)
-    print(f"Endpoint: CallCenterWs/DiscountPlansRetrieve")
+    print(f"Endpoint: CallCenterWs/DiscountPlansRetrieveIncludingDisabled")
     print(f"Locations: {len(location_codes)} ({', '.join(location_codes[:5])}...)")
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print("=" * 70)

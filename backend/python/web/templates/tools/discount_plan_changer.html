@@ -1,0 +1,764 @@
+{% extends "base.html" %}
+
+{% block title %}Discount Plan Changer - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Discount Plan Changer</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Enable/disable and configure Sitelink discount plans</p>
+</div>
+
+<div class="card">
+    <h2>Filters</h2>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+        <div class="form-group" style="flex: 1; min-width: 250px;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Sites</label>
+            <select id="site-select" class="form-select" multiple style="height: auto; min-height: 42px;">
+            </select>
+            <p style="color: #666; font-size: 0.8rem; margin-top: 0.25rem;">Hold Ctrl/Cmd to select multiple</p>
+        </div>
+        <div class="form-group" style="min-width: 140px;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Status Filter</label>
+            <select id="status-filter" class="form-select" style="max-width: 160px;">
+                <option value="all">All Plans</option>
+                <option value="active">Active Only</option>
+                <option value="disabled">Disabled Only</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <button type="button" class="btn" onclick="loadSelectedSites()">Load Plans</button>
+        </div>
+    </div>
+</div>
+
+<div id="plans-section" style="display: none;">
+    <div class="card">
+        <h2>Plan Summary</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="total-plans">0</div>
+                <div class="label">Total Plans</div>
+            </div>
+            <div class="stat-card" style="background: #28A745;">
+                <div class="value" id="active-plans">0</div>
+                <div class="label">Active</div>
+            </div>
+            <div class="stat-card" style="background: #C41230;">
+                <div class="value" id="disabled-plans">0</div>
+                <div class="label">Disabled</div>
+            </div>
+            <div class="stat-card">
+                <div class="value" id="selected-count">0</div>
+                <div class="label">Selected</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Discount Plans</h2>
+        <div class="toolbar">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="selectAll()">Select All</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="selectNone()">Select None</button>
+            <button type="button" class="btn btn-sm" style="background: #28A745;" id="enable-btn" onclick="confirmSimple(0)" disabled>Enable Selected</button>
+            <button type="button" class="btn btn-sm" style="background: #C41230;" id="disable-btn" onclick="confirmSimple(1)" disabled>Disable Selected</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="advanced-toggle" onclick="toggleAdvanced()" disabled>Advanced Edit</button>
+        </div>
+
+        <!-- Advanced Edit Panel -->
+        <div id="advanced-panel" style="display: none; background: #f8f9fa; border: 1px solid var(--esa-gray-dark); border-radius: 4px; padding: 1.25rem; margin-bottom: 1rem;">
+            <h3 style="margin-bottom: 1rem; color: var(--esa-navy);">Advanced Update (DiscountPlanUpdate)</h3>
+            <p style="font-size: 0.85rem; color: #666; margin-bottom: 1rem;">These values will be applied to ALL selected plans at once. Leave fields as-is to keep their current values.</p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem;">
+                <div class="form-group">
+                    <label>Status (iDisabled)</label>
+                    <select id="adv-disabled" class="form-select">
+                        <option value="0">Active (0)</option>
+                        <option value="1">Disabled (1)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Show On (iShowOn)</label>
+                    <input type="number" id="adv-show-on" class="form-select" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Max Occupancy % (dcMaxOccPct)</label>
+                    <input type="number" id="adv-max-occ" class="form-select" value="0" min="0" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Available At (iAvailableAt)</label>
+                    <input type="number" id="adv-available-at" class="form-select" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Plan Start (sPlanStrt)</label>
+                    <input type="text" id="adv-plan-start" class="form-select" placeholder="MM/DD/YYYY or empty">
+                </div>
+                <div class="form-group">
+                    <label>Plan End (sPlanEnd)</label>
+                    <input type="text" id="adv-plan-end" class="form-select" placeholder="MM/DD/YYYY or empty">
+                </div>
+                <div class="form-group">
+                    <label>Exclude if &lt; units total</label>
+                    <input type="number" id="adv-exclude-less" class="form-select" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Exclude if &gt; units total</label>
+                    <input type="number" id="adv-exclude-more" class="form-select" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Max Occ % (exclude &gt; units)</label>
+                    <input type="number" id="adv-max-occ-exclude" class="form-select" value="0" min="0" step="0.01">
+                </div>
+            </div>
+            <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                <button type="button" class="btn btn-sm" onclick="confirmAdvanced()">Apply to Selected</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAdvanced()">Cancel</button>
+            </div>
+        </div>
+
+        <div id="plans-table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 40px;"><input type="checkbox" id="select-all-checkbox" onchange="toggleAll(this)"></th>
+                        <th>Site</th>
+                        <th>Plan Name</th>
+                        <th>Status</th>
+                        <th>Discount</th>
+                        <th>Max Occ %</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Never Expires</th>
+                        <th>Show On</th>
+                    </tr>
+                </thead>
+                <tbody id="plans-tbody">
+                    <tr><td colspan="10" style="text-align: center; color: #666;">Select sites and click Load Plans</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="no-plans-message" style="display: none; text-align: center; padding: 2rem; color: #666;">
+            No discount plans found for the selected sites.
+        </div>
+    </div>
+</div>
+
+<!-- Progress Modal -->
+<div id="progress-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>Processing Changes</h3>
+        <div class="progress-info">
+            <p>Processing: <span id="progress-current">0</span> / <span id="progress-total">0</span> site(s)</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+            <p id="progress-status" style="margin-top: 1rem; color: #666;">Starting...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Results Modal -->
+<div id="results-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <h3>Results</h3>
+        <div class="results-summary">
+            <div class="result-item success">
+                <span class="result-value" id="result-success">0</span>
+                <span class="result-label">Successful</span>
+            </div>
+            <div class="result-item failed">
+                <span class="result-value" id="result-failed">0</span>
+                <span class="result-label">Failed</span>
+            </div>
+        </div>
+        <div id="results-details" style="max-height: 200px; overflow-y: auto; margin-top: 1rem;"></div>
+        <div style="text-align: center; margin-top: 1.5rem;">
+            <button type="button" class="btn" onclick="closeResults()">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.form-group {
+    margin-bottom: 1rem;
+}
+.form-group label {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-weight: 500;
+    font-size: 0.85rem;
+}
+.form-select {
+    width: 100%;
+    max-width: 400px;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border: 1px solid var(--esa-gray-dark);
+    border-radius: 4px;
+    background: #fff;
+}
+.form-select:focus {
+    outline: none;
+    border-color: var(--esa-navy);
+}
+.toolbar {
+    margin-bottom: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+#plans-table-container {
+    max-height: 600px;
+    overflow-y: auto;
+}
+#plans-table-container table {
+    width: 100%;
+}
+#plans-table-container thead {
+    position: sticky;
+    top: 0;
+    background: var(--esa-gray);
+    z-index: 10;
+}
+.plan-row {
+    cursor: pointer;
+}
+.plan-row:hover {
+    background: rgba(196, 18, 48, 0.1);
+}
+.plan-row.selected {
+    background: rgba(196, 18, 48, 0.15);
+}
+.status-badge {
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+.status-badge.active {
+    background: rgba(40, 167, 69, 0.15);
+    color: #28A745;
+}
+.status-badge.disabled {
+    background: rgba(196, 18, 48, 0.15);
+    color: #C41230;
+}
+.discount-value {
+    font-weight: 600;
+}
+
+/* Modal styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: #fff;
+    padding: 2rem;
+    border-radius: 8px;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+.modal-content h3 {
+    color: var(--esa-navy);
+    margin-bottom: 1.5rem;
+    text-align: center;
+}
+.progress-bar {
+    height: 20px;
+    background: var(--esa-gray-dark);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-top: 1rem;
+}
+.progress-fill {
+    height: 100%;
+    background: var(--esa-red);
+    transition: width 0.3s ease;
+}
+.results-summary {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+}
+.result-item {
+    text-align: center;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+}
+.result-item.success {
+    background: rgba(40, 167, 69, 0.1);
+    color: #28A745;
+}
+.result-item.failed {
+    background: rgba(196, 18, 48, 0.1);
+    color: #C41230;
+}
+.result-value {
+    display: block;
+    font-size: 2rem;
+    font-weight: bold;
+}
+.result-label {
+    font-size: 0.9rem;
+}
+.error-detail {
+    padding: 0.5rem;
+    margin: 0.25rem 0;
+    background: rgba(196, 18, 48, 0.1);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Disable auto-refresh for this tool page
+    clearTimeout(window.autoRefreshTimeout);
+
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+    let plansData = [];
+    let selectedSites = [];
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(String(str)));
+        return div.innerHTML;
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrfToken = getCSRFToken();
+        if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+        return headers;
+    }
+
+    // Load sites dropdown grouped by country
+    async function loadSites() {
+        try {
+            const response = await fetch('/api/sites', { headers: apiHeaders() });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const select = document.getElementById('site-select');
+            select.innerHTML = '';
+
+            const grouped = {};
+            data.sites.forEach(site => {
+                const country = site.country || 'Other';
+                if (!grouped[country]) grouped[country] = [];
+                grouped[country].push(site);
+            });
+
+            Object.keys(grouped).forEach(country => {
+                const group = document.createElement('optgroup');
+                group.label = country;
+                grouped[country].forEach(site => {
+                    const option = document.createElement('option');
+                    option.value = site.site_id;
+                    option.dataset.code = site.site_code;
+                    option.textContent = `${site.site_code} - ${site.name}`;
+                    group.appendChild(option);
+                });
+                select.appendChild(group);
+            });
+        } catch (error) {
+            console.error('Failed to load sites:', error);
+            alert('Failed to load sites. Please check your authentication.');
+        }
+    }
+
+    // Load plans for all selected sites
+    async function loadSelectedSites() {
+        const select = document.getElementById('site-select');
+        const options = Array.from(select.selectedOptions);
+
+        if (options.length === 0) {
+            alert('Please select at least one site.');
+            return;
+        }
+
+        selectedSites = options.map(o => ({ site_id: o.value, site_code: o.dataset.code }));
+        plansData = [];
+
+        let totalPlans = 0;
+        let totalActive = 0;
+        let totalDisabled = 0;
+
+        for (const site of selectedSites) {
+            try {
+                const response = await fetch(`/api/cc-discount-plans/${site.site_id}`, {
+                    headers: apiHeaders()
+                });
+                if (!response.ok) continue;
+                const data = await response.json();
+
+                const plans = (data.plans || []).map(p => ({ ...p, _site_code: data.site_code }));
+                plansData = plansData.concat(plans);
+                totalPlans += data.total_plans;
+                totalActive += data.active_plans;
+                totalDisabled += data.disabled_plans;
+            } catch (e) {
+                console.error(`Failed to load site ${site.site_code}:`, e);
+            }
+        }
+
+        document.getElementById('total-plans').textContent = totalPlans;
+        document.getElementById('active-plans').textContent = totalActive;
+        document.getElementById('disabled-plans').textContent = totalDisabled;
+        document.getElementById('plans-section').style.display = 'block';
+        renderPlans();
+        updateSelectedCount();
+    }
+
+    // Render plans table with status filter
+    function renderPlans() {
+        const tbody = document.getElementById('plans-tbody');
+        const tableContainer = document.getElementById('plans-table-container');
+        const noPlansMsg = document.getElementById('no-plans-message');
+        const statusFilter = document.getElementById('status-filter').value;
+
+        let filtered = plansData;
+        if (statusFilter === 'active') filtered = plansData.filter(p => !p.isDisabled);
+        else if (statusFilter === 'disabled') filtered = plansData.filter(p => p.isDisabled);
+
+        if (filtered.length === 0) {
+            tableContainer.style.display = 'none';
+            noPlansMsg.style.display = 'block';
+            document.querySelector('.toolbar').style.display = 'none';
+            return;
+        }
+
+        tableContainer.style.display = 'block';
+        noPlansMsg.style.display = 'none';
+        document.querySelector('.toolbar').style.display = 'flex';
+
+        tbody.innerHTML = filtered.map(plan => {
+            const statusClass = plan.isDisabled ? 'disabled' : 'active';
+            const statusLabel = plan.isDisabled ? 'Disabled' : 'Active';
+            const discount = formatDiscount(plan);
+            const maxOcc = plan.dcMaxOccPct != null ? plan.dcMaxOccPct + '%' : '-';
+            const siteCode = escapeHtml(plan._site_code || '-');
+            const planName = escapeHtml(plan.sPlanName || plan.sDefPlanName || '-');
+
+            return `
+            <tr class="plan-row" data-concession-id="${plan.ConcessionID}" data-site-code="${escapeHtml(plan._site_code)}" onclick="toggleRow(this)">
+                <td><input type="checkbox" class="plan-checkbox" onclick="event.stopPropagation(); updateSelectedCount();"></td>
+                <td>${siteCode}</td>
+                <td><strong>${planName}</strong></td>
+                <td><span class="status-badge ${statusClass}">${statusLabel}</span></td>
+                <td class="discount-value">${discount}</td>
+                <td>${maxOcc}</td>
+                <td>${formatDate(plan.dPlanStrt)}</td>
+                <td>${formatDate(plan.dPlanEnd)}</td>
+                <td>${plan.bNeverExpires ? 'Yes' : 'No'}</td>
+                <td>${plan.iShowOn != null ? plan.iShowOn : '-'}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    function formatDiscount(plan) {
+        if (plan.dcPCDiscount && parseFloat(plan.dcPCDiscount) > 0) {
+            return parseFloat(plan.dcPCDiscount).toFixed(1) + '%';
+        }
+        if (plan.dcFixedDiscount && parseFloat(plan.dcFixedDiscount) > 0) {
+            return '$' + parseFloat(plan.dcFixedDiscount).toFixed(2);
+        }
+        return '-';
+    }
+
+    function formatDate(dateStr) {
+        if (!dateStr) return '-';
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-SG', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+
+    // Row selection
+    function toggleRow(row) {
+        const checkbox = row.querySelector('.plan-checkbox');
+        checkbox.checked = !checkbox.checked;
+        row.classList.toggle('selected', checkbox.checked);
+        updateSelectedCount();
+    }
+
+    function toggleAll(masterCheckbox) {
+        document.querySelectorAll('.plan-checkbox').forEach(cb => {
+            cb.checked = masterCheckbox.checked;
+            cb.closest('tr').classList.toggle('selected', cb.checked);
+        });
+        updateSelectedCount();
+    }
+
+    function selectAll() {
+        document.getElementById('select-all-checkbox').checked = true;
+        toggleAll(document.getElementById('select-all-checkbox'));
+    }
+
+    function selectNone() {
+        document.getElementById('select-all-checkbox').checked = false;
+        toggleAll(document.getElementById('select-all-checkbox'));
+    }
+
+    function updateSelectedCount() {
+        const checked = document.querySelectorAll('.plan-checkbox:checked').length;
+        document.getElementById('selected-count').textContent = checked;
+        document.getElementById('enable-btn').disabled = checked === 0;
+        document.getElementById('disable-btn').disabled = checked === 0;
+        document.getElementById('advanced-toggle').disabled = checked === 0;
+    }
+
+    // Advanced panel toggle
+    function toggleAdvanced() {
+        const panel = document.getElementById('advanced-panel');
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // Pre-fill advanced panel from first selected plan
+    function prefillAdvanced(plan) {
+        document.getElementById('adv-disabled').value = plan.isDisabled ? '1' : '0';
+        document.getElementById('adv-show-on').value = plan.iShowOn || 0;
+        document.getElementById('adv-max-occ').value = plan.dcMaxOccPct || 0;
+        document.getElementById('adv-available-at').value = plan.iAvailableAt || 0;
+        document.getElementById('adv-plan-start').value = plan.dPlanStrt ? new Date(plan.dPlanStrt).toLocaleDateString('en-US') : '';
+        document.getElementById('adv-plan-end').value = plan.dPlanEnd ? new Date(plan.dPlanEnd).toLocaleDateString('en-US') : '';
+        document.getElementById('adv-exclude-less').value = plan.iExcludeIfLessThanUnitsTotal || 0;
+        document.getElementById('adv-exclude-more').value = plan.iExcludeIfMoreThanUnitsTotal || 0;
+        document.getElementById('adv-max-occ-exclude').value = plan.dcMaxOccPctExcludeIfMoreThanUnitsTotal || 0;
+    }
+
+    // Get selected plan entries grouped by site_code
+    function getSelectedBySite() {
+        const selected = document.querySelectorAll('.plan-checkbox:checked');
+        const bySite = {};
+        selected.forEach(cb => {
+            const row = cb.closest('tr');
+            const siteCode = row.dataset.siteCode;
+            const concessionId = parseInt(row.dataset.concessionId);
+            if (!bySite[siteCode]) bySite[siteCode] = [];
+            bySite[siteCode].push(concessionId);
+        });
+        return bySite;
+    }
+
+    // Confirm simple enable/disable
+    function confirmSimple(disabled) {
+        const checked = document.querySelectorAll('.plan-checkbox:checked').length;
+        if (checked === 0) { alert('Please select at least one plan.'); return; }
+
+        const action = disabled === 1 ? 'DISABLE' : 'ENABLE';
+        const plural = checked === 1 ? '' : 's';
+
+        if (confirm(`Are you sure you want to ${action} ${checked} plan${plural}?\n\nThis will update the plans in Sitelink immediately.`)) {
+            executeSimple(disabled);
+        }
+    }
+
+    // Execute simple enable/disable per site
+    async function executeSimple(disabled) {
+        const bySite = getSelectedBySite();
+        const siteEntries = Object.entries(bySite);
+
+        showProgress(siteEntries.length);
+
+        let successCount = 0;
+        let failedCount = 0;
+        const errors = [];
+
+        for (let i = 0; i < siteEntries.length; i++) {
+            const [siteCode, concessionIds] = siteEntries[i];
+            updateProgress(i + 1, siteEntries.length, `${siteCode} (${concessionIds.length} plans)...`);
+
+            try {
+                const response = await fetch('/api/cc-discount-plans/update-simple', {
+                    method: 'POST',
+                    headers: apiHeaders(),
+                    body: JSON.stringify({
+                        site_code: siteCode,
+                        concession_ids: concessionIds,
+                        disabled: disabled
+                    })
+                });
+
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    successCount++;
+                    // Update local state
+                    concessionIds.forEach(cid => {
+                        const plan = plansData.find(p => p.ConcessionID === cid && p._site_code === siteCode);
+                        if (plan) plan.isDisabled = disabled === 1;
+                    });
+                } else {
+                    failedCount++;
+                    errors.push({ site: siteCode, error: result.error || result.details || 'Unknown error' });
+                }
+            } catch (error) {
+                failedCount++;
+                errors.push({ site: siteCode, error: error.message });
+            }
+
+            if (i < siteEntries.length - 1) await new Promise(r => setTimeout(r, 200));
+        }
+
+        hideProgress();
+        showResults(successCount, failedCount, errors);
+    }
+
+    // Confirm advanced update
+    function confirmAdvanced() {
+        const checked = document.querySelectorAll('.plan-checkbox:checked').length;
+        if (checked === 0) { alert('Please select at least one plan.'); return; }
+
+        if (confirm(`Apply advanced settings to ${checked} plan(s) across selected sites?\n\nThis calls DiscountPlanUpdate and will overwrite these fields for ALL selected plans.`)) {
+            executeAdvanced();
+        }
+    }
+
+    // Execute advanced update per site
+    async function executeAdvanced() {
+        const bySite = getSelectedBySite();
+        const siteEntries = Object.entries(bySite);
+
+        const advData = {
+            iShowOn: parseInt(document.getElementById('adv-show-on').value) || 0,
+            dcMaxOccPct: parseFloat(document.getElementById('adv-max-occ').value) || 0,
+            sPlanStrt: document.getElementById('adv-plan-start').value || '',
+            sPlanEnd: document.getElementById('adv-plan-end').value || '',
+            iAvailableAt: parseInt(document.getElementById('adv-available-at').value) || 0,
+            iDisabled: parseInt(document.getElementById('adv-disabled').value) || 0,
+            iExcludeIfLessThanUnitsTotal: parseInt(document.getElementById('adv-exclude-less').value) || 0,
+            iExcludeIfMoreThanUnitsTotal: parseInt(document.getElementById('adv-exclude-more').value) || 0,
+            dcMaxOccPctExcludeIfMoreThanUnitsTotal: parseFloat(document.getElementById('adv-max-occ-exclude').value) || 0,
+        };
+
+        showProgress(siteEntries.length);
+
+        let successCount = 0;
+        let failedCount = 0;
+        const errors = [];
+
+        for (let i = 0; i < siteEntries.length; i++) {
+            const [siteCode, concessionIds] = siteEntries[i];
+            updateProgress(i + 1, siteEntries.length, `${siteCode} (${concessionIds.length} plans)...`);
+
+            try {
+                const response = await fetch('/api/cc-discount-plans/update', {
+                    method: 'POST',
+                    headers: apiHeaders(),
+                    body: JSON.stringify({
+                        site_code: siteCode,
+                        concession_ids: concessionIds,
+                        ...advData
+                    })
+                });
+
+                const result = await response.json();
+                if (response.ok && result.success) {
+                    successCount++;
+                    // Update local state for disabled field
+                    concessionIds.forEach(cid => {
+                        const plan = plansData.find(p => p.ConcessionID === cid && p._site_code === siteCode);
+                        if (plan) {
+                            plan.isDisabled = advData.iDisabled === 1;
+                            plan.iShowOn = advData.iShowOn;
+                            plan.dcMaxOccPct = advData.dcMaxOccPct;
+                            plan.iAvailableAt = advData.iAvailableAt;
+                            plan.iExcludeIfLessThanUnitsTotal = advData.iExcludeIfLessThanUnitsTotal;
+                            plan.iExcludeIfMoreThanUnitsTotal = advData.iExcludeIfMoreThanUnitsTotal;
+                            plan.dcMaxOccPctExcludeIfMoreThanUnitsTotal = advData.dcMaxOccPctExcludeIfMoreThanUnitsTotal;
+                        }
+                    });
+                } else {
+                    failedCount++;
+                    errors.push({ site: siteCode, error: result.error || result.details || 'Unknown error' });
+                }
+            } catch (error) {
+                failedCount++;
+                errors.push({ site: siteCode, error: error.message });
+            }
+
+            if (i < siteEntries.length - 1) await new Promise(r => setTimeout(r, 200));
+        }
+
+        hideProgress();
+        showResults(successCount, failedCount, errors);
+    }
+
+    // Progress modal helpers
+    function showProgress(total) {
+        document.getElementById('progress-modal').style.display = 'flex';
+        document.getElementById('progress-total').textContent = total;
+        document.getElementById('progress-current').textContent = '0';
+        document.getElementById('progress-fill').style.width = '0%';
+        document.getElementById('progress-status').textContent = 'Starting...';
+    }
+
+    function updateProgress(current, total, status) {
+        document.getElementById('progress-current').textContent = current;
+        document.getElementById('progress-fill').style.width = ((current / total) * 100) + '%';
+        document.getElementById('progress-status').textContent = `Processing: ${status}`;
+    }
+
+    function hideProgress() {
+        document.getElementById('progress-modal').style.display = 'none';
+    }
+
+    // Results modal
+    function showResults(success, failed, errors) {
+        document.getElementById('result-success').textContent = success;
+        document.getElementById('result-failed').textContent = failed;
+
+        const detailsDiv = document.getElementById('results-details');
+        if (errors.length > 0) {
+            detailsDiv.innerHTML = '<p style="font-weight: 600; margin-bottom: 0.5rem;">Errors:</p>' +
+                errors.map(e => `<div class="error-detail"><strong>${escapeHtml(e.site)}:</strong> ${escapeHtml(e.error)}</div>`).join('');
+        } else {
+            detailsDiv.innerHTML = '';
+        }
+
+        document.getElementById('results-modal').style.display = 'flex';
+    }
+
+    function closeResults() {
+        document.getElementById('results-modal').style.display = 'none';
+
+        // Refresh stats
+        const active = plansData.filter(p => !p.isDisabled).length;
+        const disabled = plansData.filter(p => p.isDisabled).length;
+        document.getElementById('active-plans').textContent = active;
+        document.getElementById('disabled-plans').textContent = disabled;
+
+        // Re-render table to reflect updated statuses
+        renderPlans();
+        updateSelectedCount();
+        document.getElementById('select-all-checkbox').checked = false;
+
+        // Hide advanced panel
+        document.getElementById('advanced-panel').style.display = 'none';
+    }
+
+    // Re-render when status filter changes
+    document.getElementById('status-filter').addEventListener('change', () => {
+        renderPlans();
+        updateSelectedCount();
+        document.getElementById('select-all-checkbox').checked = false;
+    });
+
+    // Initialize
+    loadSites();
+</script>
+{% endblock %}

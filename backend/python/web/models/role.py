@@ -26,6 +26,7 @@ class Role(Base):
     can_manage_roles = Column(Boolean, default=False)
     can_manage_configs = Column(Boolean, default=False)
     can_access_inventory_tools = Column(Boolean, default=False)
+    can_access_discount_tools = Column(Boolean, default=False)
     can_access_ecri = Column(Boolean, default=False)
     can_manage_ecri = Column(Boolean, default=False)
     can_access_statistics = Column(Boolean, default=False)
@@ -41,6 +42,7 @@ class Role(Base):
             'can_access_scheduler': True,
             'can_access_billing_tools': True,
             'can_access_inventory_tools': True,
+            'can_access_discount_tools': True,
             'can_manage_users': True,
             'can_manage_pages': True,
             'can_manage_roles': True,
@@ -94,6 +96,8 @@ class Role(Base):
             permissions.append('Billing Tools')
         if self.can_access_inventory_tools:
             permissions.append('Inventory Tools')
+        if self.can_access_discount_tools:
+            permissions.append('Discount Tools')
         if self.can_manage_users:
             permissions.append('Users')
         if self.can_manage_pages:
@@ -119,6 +123,7 @@ class Role(Base):
             'can_access_scheduler': self.can_access_scheduler,
             'can_access_billing_tools': self.can_access_billing_tools,
             'can_access_inventory_tools': self.can_access_inventory_tools,
+            'can_access_discount_tools': self.can_access_discount_tools,
             'can_manage_users': self.can_manage_users,
             'can_manage_pages': self.can_manage_pages,
             'can_manage_roles': self.can_manage_roles,

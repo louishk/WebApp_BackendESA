@@ -1734,6 +1734,9 @@ def api_inventory_units():
 
         return jsonify({'units': units, 'count': len(units)})
 
+    except Exception as e:
+        current_app.logger.error(f"Inventory units query error: {e}")
+        return jsonify({'error': 'Failed to fetch units'}), 500
     finally:
         session.close()
 
@@ -2782,3 +2785,325 @@ def api_discount_plans_update(plan_id):
         return jsonify({'error': 'Server error', 'message': 'An internal error occurred'}), 500
     finally:
         session.close()
+
+
+# =============================================================================
+# Discount Plan Changer Tool — Sitelink SOAP operations
+# =============================================================================
+# Read plans from cc_discount (PBI DB) and update via CallCenterWs SOAP.
+#
+# GET  /api/cc-discount-plans/<site_id>       — list plans for a site
+# POST /api/cc-discount-plans/update-simple   — enable/disable plans (simple)
+# POST /api/cc-discount-plans/update          — full plan update
+# =============================================================================
+
+@api_bp.route('/cc-discount-plans/<int:site_id>')
+@require_auth
+@require_api_scope('scheduler:read')
+def api_cc_discount_plans(site_id):
+    """
+    Get discount/concession plans from cc_discount table for a site.
+    Excludes deleted plans. Returns key fields for the tool UI.
+    """
+    from common.models import CCDiscount, SiteInfo
+
+    session = get_pbi_session()
+    try:
+        site = session.query(SiteInfo).filter_by(SiteID=site_id).first()
+        if not site:
+            return jsonify({'error': 'Site not found'}), 404
+
+        plans = (
+            session.query(CCDiscount)
+            .filter(
+                CCDiscount.SiteID == site_id,
+                CCDiscount.dDeleted.is_(None),
+            )
+            .order_by(CCDiscount.sPlanName)
+            .all()
+        )
+
+        results = []
+        for p in plans:
+            results.append({
+                'ConcessionID': p.ConcessionID,
+                'SiteID': p.SiteID,
+                'sPlanName': p.sPlanName,
+                'sDefPlanName': p.sDefPlanName,
+                'sDescription': p.sDescription,
+                'dPlanStrt': p.dPlanStrt.isoformat() if p.dPlanStrt else None,
+                'dPlanEnd': p.dPlanEnd.isoformat() if p.dPlanEnd else None,
+                'iShowOn': p.iShowOn,
+                'bNeverExpires': p.bNeverExpires,
+                'dcMaxOccPct': float(p.dcMaxOccPct) if p.dcMaxOccPct is not None else None,
+                'dcFixedDiscount': float(p.dcFixedDiscount) if p.dcFixedDiscount is not None else None,
+                'dcPCDiscount': float(p.dcPCDiscount) if p.dcPCDiscount is not None else None,
+                'dcMaxAmountOff': float(p.dcMaxAmountOff) if p.dcMaxAmountOff is not None else None,
+                'iAvailableAt': p.iAvailableAt,
+                'bForAllUnits': p.bForAllUnits,
+                'iExcludeIfLessThanUnitsTotal': p.iExcludeIfLessThanUnitsTotal,
+                'iExcludeIfMoreThanUnitsTotal': p.iExcludeIfMoreThanUnitsTotal,
+                'dcMaxOccPctExcludeIfMoreThanUnitsTotal': float(p.dcMaxOccPctExcludeIfMoreThanUnitsTotal) if p.dcMaxOccPctExcludeIfMoreThanUnitsTotal is not None else None,
+                'isDisabled': p.dDisabled is not None,
+                'dDisabled': p.dDisabled.isoformat() if p.dDisabled else None,
+                'dCreated': p.dCreated.isoformat() if p.dCreated else None,
+                'dUpdated': p.dUpdated.isoformat() if p.dUpdated else None,
+            })
+
+        active_count = sum(1 for r in results if not r['isDisabled'])
+
+        return jsonify({
+            'site_id': site_id,
+            'site_code': site.SiteCode,
+            'site_name': site.Name,
+            'total_plans': len(results),
+            'active_plans': active_count,
+            'disabled_plans': len(results) - active_count,
+            'plans': results,
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/cc-discount-plans/update-simple', methods=['POST'])
+@require_auth
+@require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_cc_discount_plans_update_simple():
+    """
+    Enable or disable discount plans via DiscountPlanUpdateSimple SOAP.
+    Accepts a list of concession IDs for a single site.
+    """
+    from flask_login import current_user as flask_current_user
+    from common.config import DataLayerConfig
+    from common.soap_client import SOAPClient, SOAPFaultError
+    from common.models import SiteInfo
+
+    # Enforce discount tools permission for session-authenticated users
+    if flask_current_user.is_authenticated and not flask_current_user.can_access_discount_tools():
+        return jsonify({'error': 'Forbidden', 'message': 'Discount tools access required'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    site_code = data.get('site_code')
+    concession_ids = data.get('concession_ids')
+    disabled = data.get('disabled')
+
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+    if not concession_ids or not isinstance(concession_ids, list):
+        return jsonify({'error': 'concession_ids must be a non-empty array'}), 400
+    if disabled not in (0, 1):
+        return jsonify({'error': 'disabled must be 0 (active) or 1 (disabled)'}), 400
+
+    # Validate all IDs are integers
+    try:
+        concession_ids = [int(cid) for cid in concession_ids]
+    except (ValueError, TypeError):
+        return jsonify({'error': 'All concession_ids must be integers'}), 400
+
+    # Validate site_code against database
+    pbi_session = get_pbi_session()
+    try:
+        site = pbi_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
+        if not site:
+            return jsonify({'error': 'Invalid site_code'}), 400
+    finally:
+        pbi_session.close()
+
+    config = DataLayerConfig.from_env()
+    if not config.soap:
+        current_app.logger.error("SOAP configuration not available")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    cc_url = config.soap.base_url.replace('ReportingWs.asmx', 'CallCenterWs.asmx')
+    soap_client = SOAPClient(
+        base_url=cc_url,
+        corp_code=config.soap.corp_code,
+        corp_user=config.soap.corp_user,
+        api_key=config.soap.api_key,
+        corp_password=config.soap.corp_password,
+        timeout=config.soap.timeout,
+        retries=config.soap.retries
+    )
+
+    try:
+        results = soap_client.call(
+            operation="DiscountPlanUpdateSimple",
+            parameters={
+                "sLocationCode": site_code,
+                "sConcessionIDs": "|".join(str(cid) for cid in concession_ids),
+                "iDisabled": str(disabled),
+                "sConcessionUnitTypeIDs": "",
+                "iConcessionUnitTypeOverwrite": "0",
+            },
+            soap_action="http://tempuri.org/CallCenterWs/CallCenterWs/DiscountPlanUpdateSimple",
+            namespace="http://tempuri.org/CallCenterWs/CallCenterWs",
+            result_tag="RT",
+        )
+
+        ret_code = None
+        ret_msg = None
+        if results:
+            ret_code = results[0].get('Ret_Code')
+            ret_msg = results[0].get('Ret_Msg')
+
+        return jsonify({
+            'success': True,
+            'site_code': site_code,
+            'concession_ids': concession_ids,
+            'disabled': disabled,
+            'ret_code': ret_code,
+            'ret_msg': ret_msg,
+        })
+
+    except SOAPFaultError as e:
+        current_app.logger.error(f"SOAP fault during discount plan update-simple: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'SOAP API error',
+            'details': 'SOAP API error occurred',
+        }), 502
+
+    except Exception as e:
+        current_app.logger.error(f"Unexpected error during discount plan update-simple: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Unexpected error',
+            'details': 'An internal error occurred',
+        }), 500
+
+    finally:
+        soap_client.close()
+
+
+@api_bp.route('/cc-discount-plans/update', methods=['POST'])
+@require_auth
+@require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_cc_discount_plans_update():
+    """
+    Full discount plan update via DiscountPlanUpdate SOAP.
+    Updates occupancy limits, dates, show-on, exclusion thresholds, etc.
+    """
+    from flask_login import current_user as flask_current_user
+    from common.config import DataLayerConfig
+    from common.soap_client import SOAPClient, SOAPFaultError
+    from common.models import SiteInfo
+
+    # Enforce discount tools permission for session-authenticated users
+    if flask_current_user.is_authenticated and not flask_current_user.can_access_discount_tools():
+        return jsonify({'error': 'Forbidden', 'message': 'Discount tools access required'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    site_code = data.get('site_code')
+    concession_ids = data.get('concession_ids')
+
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+    if not concession_ids or not isinstance(concession_ids, list):
+        return jsonify({'error': 'concession_ids must be a non-empty array'}), 400
+
+    try:
+        concession_ids = [int(cid) for cid in concession_ids]
+    except (ValueError, TypeError):
+        return jsonify({'error': 'All concession_ids must be integers'}), 400
+
+    # Validate site_code against database
+    pbi_session = get_pbi_session()
+    try:
+        site = pbi_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
+        if not site:
+            return jsonify({'error': 'Invalid site_code'}), 400
+    finally:
+        pbi_session.close()
+
+    # Extract update fields with defaults that preserve current values
+    i_show_on = data.get('iShowOn', 0)
+    dc_max_occ_pct = data.get('dcMaxOccPct', 0)
+    s_plan_strt = data.get('sPlanStrt', '')
+    s_plan_end = data.get('sPlanEnd', '')
+    i_available_at = data.get('iAvailableAt', 0)
+    i_disabled = data.get('iDisabled', 0)
+    i_exclude_less = data.get('iExcludeIfLessThanUnitsTotal', 0)
+    i_exclude_more = data.get('iExcludeIfMoreThanUnitsTotal', 0)
+    dc_max_occ_exclude = data.get('dcMaxOccPctExcludeIfMoreThanUnitsTotal', 0)
+    s_unit_type_ids = data.get('sConcessionUnitTypeIDs', '')
+    i_unit_type_overwrite = data.get('iConcessionUnitTypeOverwrite', 0)
+
+    config = DataLayerConfig.from_env()
+    if not config.soap:
+        current_app.logger.error("SOAP configuration not available")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    cc_url = config.soap.base_url.replace('ReportingWs.asmx', 'CallCenterWs.asmx')
+    soap_client = SOAPClient(
+        base_url=cc_url,
+        corp_code=config.soap.corp_code,
+        corp_user=config.soap.corp_user,
+        api_key=config.soap.api_key,
+        corp_password=config.soap.corp_password,
+        timeout=config.soap.timeout,
+        retries=config.soap.retries
+    )
+
+    try:
+        results = soap_client.call(
+            operation="DiscountPlanUpdate",
+            parameters={
+                "sLocationCode": site_code,
+                "sConcessionIDs": "|".join(str(cid) for cid in concession_ids),
+                "iShowOn": str(i_show_on),
+                "dcMaxOccPct": str(dc_max_occ_pct),
+                "sPlanStrt": str(s_plan_strt),
+                "sPlanEnd": str(s_plan_end),
+                "iAvailableAt": str(i_available_at),
+                "iDisabled": str(i_disabled),
+                "iExcludeIfLessThanUnitsTotal": str(i_exclude_less),
+                "iExcludeIfMoreThanUnitsTotal": str(i_exclude_more),
+                "dcMaxOccPctExcludeIfMoreThanUnitsTotal": str(dc_max_occ_exclude),
+                "sConcessionUnitTypeIDs": str(s_unit_type_ids),
+                "iConcessionUnitTypeOverwrite": str(i_unit_type_overwrite),
+            },
+            soap_action="http://tempuri.org/CallCenterWs/CallCenterWs/DiscountPlanUpdate",
+            namespace="http://tempuri.org/CallCenterWs/CallCenterWs",
+            result_tag="RT",
+        )
+
+        ret_code = None
+        ret_msg = None
+        if results:
+            ret_code = results[0].get('Ret_Code')
+            ret_msg = results[0].get('Ret_Msg')
+
+        return jsonify({
+            'success': True,
+            'site_code': site_code,
+            'concession_ids': concession_ids,
+            'ret_code': ret_code,
+            'ret_msg': ret_msg,
+        })
+
+    except SOAPFaultError as e:
+        current_app.logger.error(f"SOAP fault during discount plan update: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'SOAP API error',
+            'details': 'SOAP API error occurred',
+        }), 502
+
+    except Exception as e:
+        current_app.logger.error(f"Unexpected error during discount plan update: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Unexpected error',
+            'details': 'An internal error occurred',
+        }), 500
+
+    finally:
+        soap_client.close()
