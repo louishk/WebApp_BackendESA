@@ -9,6 +9,8 @@ REPO_ROOT="/var/www/backend"
 PYTHON_DIR="$REPO_ROOT/backend/python"
 VENV="$PYTHON_DIR/venv"
 SYSTEMD_SRC="$PYTHON_DIR/systemd"
+NGINX_SRC="$PYTHON_DIR/config/nginx-esa-backend.conf"
+NGINX_DEST="/etc/nginx/sites-available/esa-backend"
 
 WEB_SERVICE="esa-backend"
 SCHEDULER_SERVICE="backend-scheduler"
@@ -23,25 +25,40 @@ echo "=== ESA Backend — Deployment Update ==="
 echo ""
 
 # --- 1. pull latest code --------------------------------------------------
-echo "[1/4] Pulling latest code..."
+echo "[1/5] Pulling latest code..."
 cd "$REPO_ROOT"
 sudo -u www-data git pull
 echo ""
 
 # --- 2. install / update Python dependencies ------------------------------
-echo "[2/4] Installing Python dependencies..."
+echo "[2/5] Installing Python dependencies..."
 "$VENV/bin/pip" install --quiet -r "$PYTHON_DIR/requirements.txt"
 echo ""
 
 # --- 3. sync systemd service files ----------------------------------------
-echo "[3/4] Syncing systemd service files..."
+echo "[3/5] Syncing systemd service files..."
 cp "$SYSTEMD_SRC/$WEB_SERVICE.service"       /etc/systemd/system/
 cp "$SYSTEMD_SRC/$SCHEDULER_SERVICE.service"  /etc/systemd/system/
 systemctl daemon-reload
 echo ""
 
-# --- 4. restart services --------------------------------------------------
-echo "[4/4] Restarting services..."
+# --- 4. sync nginx config -------------------------------------------------
+echo "[4/5] Syncing nginx config..."
+if [ -f "$NGINX_SRC" ]; then
+    cp "$NGINX_SRC" "$NGINX_DEST"
+    if nginx -t 2>&1; then
+        systemctl reload nginx
+        echo "Nginx config updated and reloaded"
+    else
+        echo "ERROR: Nginx config test failed — kept previous config"
+    fi
+else
+    echo "SKIP: $NGINX_SRC not found"
+fi
+echo ""
+
+# --- 5. restart services --------------------------------------------------
+echo "[5/5] Restarting services..."
 systemctl restart "$WEB_SERVICE"
 systemctl restart "$SCHEDULER_SERVICE"
 echo ""

@@ -53,6 +53,11 @@ from .models import RentRoll, SiteInfo, LOSRange, PriceRange, UnitsInfo  # Data 
 from .models import Discount, MoveInsAndMoveOuts  # Discount and Move-in/out models
 from .models import FXRate, FXRateMonthly  # FX rate models
 from .models import EmbedSocialReview  # EmbedSocial reviews
+# Google Ads models
+from .models import (
+    GadsAccountMap, GadsCampaign, GadsAdGroup, GadsKeyword,
+    GadsCampaignDaily, GadsCampaignConversions, GadsAdGroupDaily, GadsKeywordDaily,
+)
 from .models import Tenant, Ledger, Charge, CCDiscount  # CallCenterWs models
 # Management Summary models
 from .models import (
@@ -161,6 +166,15 @@ __all__ = [
     'MSTenantStats',
     'MSInsuranceStats',
     'EmbedSocialReview',
+    # Google Ads models
+    'GadsAccountMap',
+    'GadsCampaign',
+    'GadsAdGroup',
+    'GadsKeyword',
+    'GadsCampaignDaily',
+    'GadsCampaignConversions',
+    'GadsAdGroupDaily',
+    'GadsKeywordDaily',
 
     # Operations
     'BaseRepository',

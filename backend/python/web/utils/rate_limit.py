@@ -71,9 +71,7 @@ api_limiter = RateLimiter()
 
 
 def get_client_ip():
-    """Get client IP, handling proxies."""
-    if request.headers.get('X-Forwarded-For'):
-        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    """Get client IP (ProxyFix middleware resolves the correct IP from trusted proxy)."""
     return request.remote_addr or 'unknown'
 
 

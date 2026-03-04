@@ -1012,11 +1012,17 @@ def edit_api_key(user_id):
 
             # Update rate limit
             rl = request.form.get('rate_limit', str(DEFAULT_RATE_LIMIT)).strip()
-            api_key.rate_limit = int(rl) if rl.isdigit() else DEFAULT_RATE_LIMIT
+            try:
+                api_key.rate_limit = max(0, int(rl))
+            except (ValueError, TypeError):
+                api_key.rate_limit = DEFAULT_RATE_LIMIT
 
             # Update daily quota
             dq = request.form.get('daily_quota', str(DEFAULT_DAILY_QUOTA)).strip()
-            api_key.daily_quota = int(dq) if dq.isdigit() else DEFAULT_DAILY_QUOTA
+            try:
+                api_key.daily_quota = max(0, int(dq))
+            except (ValueError, TypeError):
+                api_key.daily_quota = DEFAULT_DAILY_QUOTA
 
             # Update active status
             api_key.is_active = request.form.get('is_active') == 'on'

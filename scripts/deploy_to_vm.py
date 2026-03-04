@@ -390,6 +390,19 @@ def step_start_services(credentials: dict, verbose: bool = True) -> bool:
         fi
         sudo systemctl daemon-reload
 
+        # Sync nginx config if it exists
+        NGINX_SRC="{VM_PYTHON_PATH}/config/nginx-esa-backend.conf"
+        NGINX_DEST="/etc/nginx/sites-available/esa-backend"
+        if [ -f "$NGINX_SRC" ]; then
+            sudo cp "$NGINX_SRC" "$NGINX_DEST"
+            if sudo nginx -t 2>&1; then
+                sudo systemctl reload nginx
+                echo "Nginx config updated and reloaded"
+            else
+                echo "WARNING: Nginx config test failed — kept previous config"
+            fi
+        fi
+
         # Create log directory if needed
         sudo mkdir -p /var/log/esa-backend
         sudo chown www-data:www-data /var/log/esa-backend

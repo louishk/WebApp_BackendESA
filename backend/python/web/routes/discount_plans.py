@@ -225,13 +225,6 @@ def _build_plan_from_form(form, plan=None):
     plan.referral_program = form.get('referral_program', 'Not Eligible')
     plan.distribution_channel = form.get('distribution_channel', '').strip() or None
 
-    # Departmental
-    plan.rate_rules = form.get('rate_rules', '').strip() or None
-    plan.rate_rules_sites = form.get('rate_rules_sites', '').strip() or None
-    plan.promotion_codes = _parse_json_field(form.get('promotion_codes_json'), [])
-    plan.collateral_url = form.get('collateral_url', '').strip() or None
-    plan.registration_flow = form.get('registration_flow', '').strip() or None
-
     # Custom fields - dynamic key/value pairs from the form
     cf_keys = form.getlist('cf_key')
     cf_vals = form.getlist('cf_value')

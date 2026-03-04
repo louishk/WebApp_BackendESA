@@ -2895,3 +2895,153 @@ class EmbedSocialReview(Base, BaseModel):
         Index('ix_es_reviews_rating', 'rating'),
     )
 
+
+# =============================================================================
+# Google Ads Models (BigQuery → PostgreSQL ETL)
+# =============================================================================
+
+class GadsAccountMap(Base, BaseModel):
+    """Static mapping of Google Ads customer accounts to country/currency."""
+    __tablename__ = 'gads_account_map'
+
+    customer_id = Column(BigInteger, primary_key=True)
+    country = Column(String(2), nullable=False)
+    currency = Column(String(3), nullable=False)
+
+
+class GadsCampaign(Base, BaseModel):
+    """Google Ads campaign dimension (daily snapshot, full overwrite)."""
+    __tablename__ = 'gads_campaigns'
+
+    campaign_id = Column(BigInteger, primary_key=True)
+    customer_id = Column(BigInteger, nullable=False, index=True)
+    campaign_name = Column(String(255))
+    campaign_status = Column(String(20), index=True)
+    channel_type = Column(String(30))
+    channel_sub_type = Column(String(30))
+    bidding_strategy_type = Column(String(50))
+    budget_amount_micros = Column(BigInteger)
+    start_date = Column(Date)
+    end_date = Column(Date)
+    _data_date = Column(Date)
+    synced_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class GadsAdGroup(Base, BaseModel):
+    """Google Ads ad group dimension (daily snapshot, full overwrite)."""
+    __tablename__ = 'gads_ad_groups'
+
+    ad_group_id = Column(BigInteger, primary_key=True)
+    campaign_id = Column(BigInteger, nullable=False, index=True)
+    customer_id = Column(BigInteger, nullable=False, index=True)
+    ad_group_name = Column(String(255))
+    ad_group_status = Column(String(20))
+    ad_group_type = Column(String(30))
+    _data_date = Column(Date)
+    synced_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class GadsKeyword(Base, BaseModel):
+    """Google Ads keyword dimension (latest snapshot)."""
+    __tablename__ = 'gads_keywords'
+
+    criterion_id = Column(BigInteger, primary_key=True)
+    ad_group_id = Column(BigInteger, primary_key=True)
+    campaign_id = Column(BigInteger, nullable=False, index=True)
+    keyword_text = Column(String(500))
+    match_type = Column(String(20))
+    is_negative = Column(Boolean, default=False)
+    status = Column(String(20))
+    quality_score = Column(Integer)
+    _data_date = Column(Date)
+    synced_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class GadsCampaignDaily(Base, BaseModel):
+    """Google Ads campaign daily stats (upsert on composite PK)."""
+    __tablename__ = 'gads_campaign_daily'
+
+    campaign_id = Column(BigInteger, primary_key=True)
+    segments_date = Column(Date, primary_key=True)
+    device = Column(String(20), primary_key=True)
+    ad_network_type = Column(String(30), primary_key=True)
+    impressions = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    cost_micros = Column(BigInteger, default=0)
+    conversions = Column(Numeric(12, 6), default=0)
+    conversions_value = Column(Numeric(14, 2), default=0)
+    interactions = Column(Integer, default=0)
+    synced_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_gads_campaign_daily_date', 'segments_date'),
+        Index('idx_gads_campaign_daily_campaign', 'campaign_id'),
+    )
+
+
+class GadsCampaignConversions(Base, BaseModel):
+    """Google Ads campaign conversions by action (upsert on composite PK)."""
+    __tablename__ = 'gads_campaign_conversions'
+
+    campaign_id = Column(BigInteger, primary_key=True)
+    segments_date = Column(Date, primary_key=True)
+    conversion_action_name = Column(String(255), primary_key=True)
+    ad_network_type = Column(String(30), primary_key=True)
+    conversion_action_category = Column(String(50))
+    conversions = Column(Numeric(12, 6), default=0)
+    conversions_value = Column(Numeric(14, 2), default=0)
+    value_per_conversion = Column(Numeric(14, 2), default=0)
+    synced_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_gads_conv_date', 'segments_date'),
+    )
+
+
+class GadsAdGroupDaily(Base, BaseModel):
+    """Google Ads ad group daily stats (upsert on composite PK)."""
+    __tablename__ = 'gads_ad_group_daily'
+
+    ad_group_id = Column(BigInteger, primary_key=True)
+    campaign_id = Column(BigInteger, nullable=False)
+    segments_date = Column(Date, primary_key=True)
+    device = Column(String(20), primary_key=True)
+    ad_network_type = Column(String(30), primary_key=True)
+    impressions = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    cost_micros = Column(BigInteger, default=0)
+    conversions = Column(Numeric(12, 6), default=0)
+    conversions_value = Column(Numeric(14, 2), default=0)
+    interactions = Column(Integer, default=0)
+    synced_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_gads_ag_daily_date', 'segments_date'),
+        Index('idx_gads_ag_daily_campaign', 'campaign_id'),
+    )
+
+
+class GadsKeywordDaily(Base, BaseModel):
+    """Google Ads keyword daily stats (upsert on composite PK)."""
+    __tablename__ = 'gads_keyword_daily'
+
+    criterion_id = Column(BigInteger, primary_key=True)
+    ad_group_id = Column(BigInteger, primary_key=True)
+    campaign_id = Column(BigInteger, nullable=False)
+    segments_date = Column(Date, primary_key=True)
+    device = Column(String(20), primary_key=True)
+    ad_network_type = Column(String(30), primary_key=True)
+    impressions = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    cost_micros = Column(BigInteger, default=0)
+    conversions = Column(Numeric(12, 6), default=0)
+    conversions_value = Column(Numeric(14, 2), default=0)
+    interactions = Column(Integer, default=0)
+    synced_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_gads_kw_daily_date', 'segments_date'),
+        Index('idx_gads_kw_daily_campaign', 'campaign_id'),
+        Index('idx_gads_kw_daily_ad_group', 'ad_group_id'),
+    )
+

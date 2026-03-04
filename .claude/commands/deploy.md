@@ -44,16 +44,16 @@ Ask the user: **"Push successful. Do you want to deploy to the VM now?"**
 SSH into the production VM using key-based authentication and run the update script.
 
 Connection details:
-- Host: `57.158.27.35`
+- Host: `20.6.132.108`
 - Port: `22`
-- User: `esa_pbi_admin`
+- User: `esa_bk_admin`
 - SSH key: `~/.ssh/id_ed25519_vm`
 - Password (for sudo only): read `VM_SSH_PASSWORD` from `.env`
 
 Execute in a **single command**:
 
 ```
-ssh -i ~/.ssh/id_ed25519_vm -o StrictHostKeyChecking=no esa_pbi_admin@57.158.27.35 'echo <VM_SSH_PASSWORD> | sudo -S sed -i "s/\r$//" /var/www/backend/update.sh && echo <VM_SSH_PASSWORD> | sudo -S bash /var/www/backend/update.sh'
+ssh -i ~/.ssh/id_ed25519_vm -o StrictHostKeyChecking=no esa_bk_admin@20.6.132.108 'echo <VM_SSH_PASSWORD> | sudo -S sed -i "s/\r$//" /var/www/backend/update.sh && echo <VM_SSH_PASSWORD> | sudo -S bash /var/www/backend/update.sh'
 ```
 
 Key details:

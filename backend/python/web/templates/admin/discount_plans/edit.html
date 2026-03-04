@@ -435,36 +435,6 @@
     </div>
 
     <!-- ================================================================= -->
-    <!-- Departmental Info -->
-    <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Departmental Info</h3>
-        <div class="form-grid">
-            <div class="form-group">
-                <label>Rate Rules (REV)</label>
-                <textarea name="rate_rules" rows="2">{{ plan.rate_rules if plan else '' }}</textarea>
-            </div>
-            <div class="form-group">
-                <label>Rate Rules - Sites</label>
-                <input type="text" name="rate_rules_sites" value="{{ plan.rate_rules_sites if plan else '' }}" placeholder="e.g. L004 Yau Tong, L005 Tuen Mun">
-            </div>
-            <div class="form-group form-full">
-                <label>Promotion Codes (JSON)</label>
-                <textarea name="promotion_codes_json" rows="2" placeholder='["Direct Mail Flexi 45% off", "Direct Mail LT12M 50% off"]'>{{ (plan.promotion_codes | tojson) if plan and plan.promotion_codes else '' }}</textarea>
-                <div class="hint">JSON array of promotion code strings for OPS &amp; SALES.</div>
-            </div>
-            <div class="form-group">
-                <label>Collateral URL (MKG)</label>
-                <input type="url" name="collateral_url" value="{{ plan.collateral_url if plan else '' }}" placeholder="Link to flyer, PDF, SharePoint...">
-            </div>
-            <div class="form-group">
-                <label>Registration Flow (MKG)</label>
-                <textarea name="registration_flow" rows="2">{{ plan.registration_flow if plan else '' }}</textarea>
-            </div>
-        </div>
-    </div>
-
-    <!-- ================================================================= -->
     <!-- Custom Fields (extensible key-value pairs) -->
     <!-- ================================================================= -->
     <div class="card form-section">
@@ -577,16 +547,19 @@ function setSiteMode(mode) {
 function toggleCountry(cb) {
     var children = document.querySelectorAll('input[name="site_code"][data-country="' + cb.dataset.country + '"]');
     children.forEach(function(c) { c.checked = cb.checked; });
+    renderComparison();
 }
 
 function selectAllSites() {
     document.querySelectorAll('input[name="site_code"]').forEach(function(c) { c.checked = true; });
     document.querySelectorAll('.country-checkbox').forEach(function(c) { c.checked = true; });
+    renderComparison();
 }
 
 function deselectAllSites() {
     document.querySelectorAll('input[name="site_code"]').forEach(function(c) { c.checked = false; });
     document.querySelectorAll('.country-checkbox').forEach(function(c) { c.checked = false; });
+    renderComparison();
 }
 
 // Auto-detect site mode on load
@@ -759,25 +732,34 @@ function renderComparison() {
         if (applicableCodes.indexOf(code) === -1) extras.push(code);
     });
 
-    function makeBadge(text, bg, color, title) {
+    function makeBadge(text, bg, color) {
         var span = document.createElement('span');
-        span.style.cssText = 'display:inline-block;background:' + bg + ';color:' + color + ';padding:0.15rem 0.5rem;border-radius:3px;font-size:0.8rem;';
-        span.title = title;
+        span.style.cssText = 'display:inline-block;background:' + bg + ';color:' + color + ';padding:0.15rem 0.5rem;border-radius:3px;font-size:0.8rem;margin:0.1rem;';
         span.textContent = text;
         return span;
     }
 
-    var wrapper = document.createElement('div');
-    wrapper.style.cssText = 'display: flex; flex-wrap: wrap; gap: 0.3rem;';
-    matched.forEach(function(c) { wrapper.appendChild(makeBadge(c, '#d1fae5', '#059669', 'Matched')); });
-    gaps.forEach(function(c) { wrapper.appendChild(makeBadge(c, '#fee2e2', '#dc2626', 'In plan but NOT in Sitelink')); });
-    extras.forEach(function(c) { wrapper.appendChild(makeBadge(c, '#fef3c7', '#d97706', 'In Sitelink but NOT in plan')); });
-    panel.appendChild(wrapper);
+    function makeSection(label, labelBg, labelColor, items, badgeBg, badgeColor) {
+        if (items.length === 0) return null;
+        var section = document.createElement('div');
+        section.style.cssText = 'margin-bottom: 0.5rem;';
+        var header = document.createElement('div');
+        header.style.cssText = 'font-size:0.75rem;font-weight:600;color:' + labelColor + ';margin-bottom:0.2rem;';
+        header.textContent = label + ' (' + items.length + ')';
+        section.appendChild(header);
+        var badges = document.createElement('div');
+        badges.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.2rem;';
+        items.forEach(function(c) { badges.appendChild(makeBadge(c, badgeBg, badgeColor)); });
+        section.appendChild(badges);
+        return section;
+    }
 
-    var legend = document.createElement('div');
-    legend.style.cssText = 'margin-top:0.4rem;font-size:0.75rem;color:#888;';
-    legend.textContent = 'Green=Matched  Red=Gap (plan only)  Orange=Extra (Sitelink only)';
-    panel.appendChild(legend);
+    var s1 = makeSection('Matched', '#d1fae5', '#059669', matched, '#d1fae5', '#059669');
+    var s2 = makeSection('Plan Only (not in Sitelink)', '#fee2e2', '#dc2626', gaps, '#fee2e2', '#dc2626');
+    var s3 = makeSection('Sitelink Only (not in Plan)', '#fef3c7', '#d97706', extras, '#fef3c7', '#d97706');
+    if (s1) panel.appendChild(s1);
+    if (s2) panel.appendChild(s2);
+    if (s3) panel.appendChild(s3);
 }
 
 renderLinked();

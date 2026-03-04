@@ -35,6 +35,10 @@ Project Documentation/
 .DS_Store
 Thumbs.db
 
+# GCP service account keys
+*.gserviceaccount.json
+planar-beach-*.json
+
 # Temp
 *.tmp
 *.bak

@@ -34,6 +34,10 @@ def create_app(config=None, db_url=None):
     """
     app = Flask(__name__)
 
+    # Trust one layer of reverse proxy (nginx) for correct client IP and scheme
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
     # Load Flask configuration from unified config
     flask_config = get_flask_config()
     app.config.update(flask_config)
@@ -73,8 +77,12 @@ def create_app(config=None, db_url=None):
 
     app.get_db_session = get_db_session
 
-    # Initialize CORS
-    CORS(app, supports_credentials=True)
+    # Initialize CORS with restricted origins
+    cors_origins = app.config.get('CORS_ORIGINS', [
+        'https://esa-backend.extraspaceasia.com',
+        'http://localhost:*',
+    ])
+    CORS(app, supports_credentials=True, origins=cors_origins)
 
     # Initialize Flask-Login
     login_manager = LoginManager()

@@ -75,8 +75,7 @@ def get_token_from_header():
     if auth_header.startswith('Bearer '):
         return auth_header[7:]
 
-    # Also check query parameter as fallback
-    return request.args.get('token')
+    return None
 
 
 def decode_token(token):
@@ -132,26 +131,42 @@ def _authenticate_api_key():
 
     try:
         from web.models.api_key import ApiKey
+        from sqlalchemy import text
         session = current_app.get_db_session()
         try:
             api_key = session.query(ApiKey).filter_by(key_id=key_id).first()
             if not api_key or not api_key.is_valid() or not api_key.verify_secret(raw_secret):
                 return None, None
 
-            # Check daily quota (auto-resets on new day)
-            allowed, remaining = api_key.check_and_increment_quota()
-            if not allowed:
-                session.commit()
+            # Atomic quota check + increment + date-reset + last_used update
+            result = session.execute(
+                text("""
+                    UPDATE api_keys
+                    SET daily_usage = CASE WHEN quota_reset_date != CURRENT_DATE
+                                          THEN 1
+                                          ELSE daily_usage + 1 END,
+                        quota_reset_date = CURRENT_DATE,
+                        last_used_at = NOW()
+                    WHERE id = :id AND is_active = true
+                      AND (daily_quota = 0 OR
+                           CASE WHEN quota_reset_date != CURRENT_DATE THEN 0 ELSE daily_usage END < daily_quota)
+                    RETURNING daily_usage, daily_quota
+                """),
+                {"id": api_key.id}
+            )
+            row = result.fetchone()
+            session.commit()
+
+            if not row:
+                # Quota exceeded (UPDATE matched no rows)
                 return None, (jsonify({
                     'error': 'Quota exceeded',
                     'message': f'Daily API quota of {api_key.daily_quota} requests exceeded. Resets at midnight.',
                     'daily_quota': api_key.daily_quota,
                 }), 429)
 
-            # Update last_used_at
-            from datetime import datetime, timezone
-            api_key.last_used_at = datetime.now(timezone.utc)
-            session.commit()
+            new_usage, daily_quota = row
+            remaining = (daily_quota - new_usage) if daily_quota > 0 else -1
 
             g.api_key_scopes = api_key.scopes or []
             g.api_key_rate_limit = api_key.rate_limit
@@ -167,7 +182,7 @@ def _authenticate_api_key():
 
             # Add quota info to response headers later
             g.api_key_quota_remaining = remaining
-            g.api_key_daily_quota = api_key.daily_quota
+            g.api_key_daily_quota = daily_quota
 
             return user_info, None
         finally:

@@ -1,9 +1,8 @@
 """API Key model for external API access with per-endpoint scopes, rate limits, and quotas."""
 
-import hashlib
-import hmac
+import bcrypt
 import secrets
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
@@ -22,6 +21,7 @@ API_SCOPES = {
     'ecri:read': 'Read ECRI batches and eligibility',
     'statistics:read': 'Read API usage statistics',
     'inventory:read': 'Read unit inventory data',
+    'inventory:write': 'Update inventory mappings and overrides',
 }
 
 # Defaults
@@ -46,8 +46,8 @@ def generate_api_key():
 
 
 def hash_api_secret(raw_secret):
-    """Hash the secret portion of an API key for safe storage."""
-    return hashlib.sha256(raw_secret.encode('utf-8')).hexdigest()
+    """Hash the secret portion of an API key using bcrypt."""
+    return bcrypt.hashpw(raw_secret.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 
 class ApiKey(Base):
@@ -65,7 +65,7 @@ class ApiKey(Base):
                      comment="One key per user")
     name = Column(String(255), nullable=False, default='Default', comment="Label for this key")
     key_id = Column(String(16), unique=True, nullable=False, comment="Public prefix for identification")
-    key_hash = Column(String(64), nullable=False, comment="SHA-256 hash of the secret")
+    key_hash = Column(String(255), nullable=False, comment="bcrypt hash of the secret")
 
     # Scopes: managed by admins via User Management
     scopes = Column(JSONB, nullable=False, default=list, comment="Allowed API scopes")
@@ -90,8 +90,8 @@ class ApiKey(Base):
     user = relationship('User', backref='api_key', uselist=False)
 
     def verify_secret(self, raw_secret):
-        """Check a raw secret against the stored hash (timing-safe)."""
-        return hmac.compare_digest(hash_api_secret(raw_secret), self.key_hash)
+        """Check a raw secret against the stored bcrypt hash."""
+        return bcrypt.checkpw(raw_secret.encode('utf-8'), self.key_hash.encode('utf-8'))
 
     def has_scope(self, scope):
         """Check if this key has the given scope."""
@@ -103,7 +103,7 @@ class ApiKey(Base):
         """Check if the key is active and not expired."""
         if not self.is_active:
             return False
-        if self.expires_at and datetime.utcnow() > self.expires_at.replace(tzinfo=None):
+        if self.expires_at and datetime.now(timezone.utc) > self.expires_at.replace(tzinfo=timezone.utc):
             return False
         return True
 

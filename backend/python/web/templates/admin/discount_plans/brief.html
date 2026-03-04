@@ -160,7 +160,7 @@
                     -
                 {% endif %}
             </td>
-            <td class="notes-cell">{{ plan.rate_rules_sites or '' }}</td>
+            <td class="notes-cell"></td>
         </tr>
         <tr>
             <td class="item-cell">Offers</td>
@@ -301,61 +301,6 @@
                 </div>
             </td>
         </tr>
-        {% endif %}
-
-        <!-- ============================================================ -->
-        <!-- REV Department -->
-        <!-- ============================================================ -->
-        {% if plan.rate_rules or plan.rate_rules_sites %}
-        <tr>
-            <td class="dept-cell">REV</td>
-            <td class="item-cell">Rate Rules (General &amp; Site Specifics)</td>
-            <td class="value-cell">{{ plan.rate_rules_sites or '-' }}</td>
-            <td class="notes-cell">{{ plan.rate_rules or '' }}</td>
-        </tr>
-        {% endif %}
-
-        <!-- ============================================================ -->
-        <!-- OPS & SALES Department -->
-        <!-- ============================================================ -->
-        {% if plan.promotion_codes %}
-        <tr>
-            <td class="dept-cell">OPS &amp; SALES</td>
-            <td class="item-cell">Promotion Code</td>
-            <td class="value-cell">
-                {% for code in plan.promotion_codes %}
-                    <div>- {{ code }}</div>
-                {% endfor %}
-            </td>
-            <td class="notes-cell"></td>
-        </tr>
-        {% endif %}
-
-        <!-- ============================================================ -->
-        <!-- MKG Department -->
-        <!-- ============================================================ -->
-        {% if plan.collateral_url or plan.registration_flow %}
-        {% if plan.collateral_url %}
-        <tr>
-            <td class="dept-cell" rowspan="{{ 2 if plan.registration_flow else 1 }}">MKG</td>
-            <td class="item-cell">Collateral</td>
-            <td class="value-cell">
-                {% if plan.collateral_url and plan.collateral_url.startswith(('http://', 'https://')) %}
-                    <a href="{{ plan.collateral_url }}" target="_blank" rel="noopener noreferrer">View Collateral</a>
-                {% else %}
-                    {{ plan.collateral_url or '-' }}
-                {% endif %}
-            </td>
-            <td class="notes-cell"></td>
-        </tr>
-        {% endif %}
-        {% if plan.registration_flow %}
-        <tr>
-            {% if not plan.collateral_url %}<td class="dept-cell">MKG</td>{% endif %}
-            <td class="item-cell">Registration Flow</td>
-            <td class="value-cell" colspan="2">{{ plan.registration_flow }}</td>
-        </tr>
-        {% endif %}
         {% endif %}
 
         <!-- ============================================================ -->

@@ -4,7 +4,7 @@ Each user can have one API key. Scopes are managed by admins under User Manageme
 Users can generate, view, and regenerate their key here.
 """
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app
+from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, make_response
 from flask_login import login_required, current_user
 
 from web.utils.audit import audit_log, AuditEvent
@@ -61,10 +61,12 @@ def generate_key():
 
         audit_log(AuditEvent.CONFIG_UPDATED, f"Generated API key (key_id={key_id})")
 
-        return render_template('api_keys/created.html',
+        response = make_response(render_template('api_keys/created.html',
                                full_key=full_key,
                                key_name='Default',
-                               scopes=[])
+                               scopes=[]))
+        response.headers['Cache-Control'] = 'no-store'
+        return response
     except Exception as e:
         db.rollback()
         current_app.logger.error(f"Error generating API key: {e}")
@@ -110,10 +112,12 @@ def regenerate_key():
 
         audit_log(AuditEvent.CONFIG_UPDATED, f"Regenerated API key (new key_id={key_id})")
 
-        return render_template('api_keys/created.html',
+        response = make_response(render_template('api_keys/created.html',
                                full_key=full_key,
                                key_name='Default',
-                               scopes=old_scopes)
+                               scopes=old_scopes))
+        response.headers['Cache-Control'] = 'no-store'
+        return response
     except Exception as e:
         db.rollback()
         current_app.logger.error(f"Error regenerating API key: {e}")

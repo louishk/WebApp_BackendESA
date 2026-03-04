@@ -133,6 +133,8 @@ def get_pbi_session():
 # =============================================================================
 
 @api_bp.route('/status')
+@require_auth
+@require_api_scope('scheduler:read')
 @cached(ttl_seconds=10)
 def api_status():
     """Get scheduler status."""
@@ -195,6 +197,8 @@ def health():
 # =============================================================================
 
 @api_bp.route('/jobs')
+@require_auth
+@require_api_scope('scheduler:read')
 @cached(ttl_seconds=30)
 def api_list_jobs():
     """List all scheduled jobs."""
@@ -224,6 +228,8 @@ def api_list_jobs():
 
 
 @api_bp.route('/jobs/<pipeline>')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_get_job(pipeline):
     """Get job details."""
     from scheduler.config import SchedulerConfig
@@ -257,6 +263,7 @@ def api_get_job(pipeline):
 
 @api_bp.route('/jobs/<pipeline>', methods=['PUT'])
 @require_auth
+@require_api_scope('scheduler:write')
 def api_update_job(pipeline):
     """Update pipeline schedule/settings."""
     from scheduler.config import SchedulerConfig
@@ -313,6 +320,7 @@ def api_update_job(pipeline):
 
 @api_bp.route('/jobs/<pipeline>/enable', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 def api_enable_job(pipeline):
     """Enable a pipeline."""
     from scheduler.config import SchedulerConfig
@@ -327,6 +335,7 @@ def api_enable_job(pipeline):
 
 @api_bp.route('/jobs/<pipeline>/disable', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 def api_disable_job(pipeline):
     """Disable a pipeline."""
     from scheduler.config import SchedulerConfig
@@ -347,6 +356,8 @@ def api_schedule_presets():
 
 
 @api_bp.route('/jobs/upcoming')
+@require_auth
+@require_api_scope('scheduler:read')
 @cached(ttl_seconds=15)
 def api_upcoming_jobs():
     """Get upcoming scheduled executions."""
@@ -411,6 +422,8 @@ def _validate_module_path(module_path):
 
 
 @api_bp.route('/data-freshness')
+@require_auth
+@require_api_scope('scheduler:read')
 @cached(ttl_seconds=60)
 def api_data_freshness():
     """Get latest data dates for all pipelines."""
@@ -422,7 +435,7 @@ def api_data_freshness():
     try:
         pbi_engine = get_pbi_engine(config)
     except Exception as e:
-        return jsonify({'error': f'Could not connect to PBI database: {str(e)[:100]}'})
+        return jsonify({'error': 'Could not connect to PBI database'}), 503
 
     # Build queries for all pipelines
     queries_to_run = []
@@ -466,6 +479,7 @@ def api_data_freshness():
 
 @api_bp.route('/jobs/<pipeline>/run-async', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_run_job_async(pipeline):
     """Trigger job execution asynchronously."""
@@ -565,6 +579,8 @@ def api_run_job_async(pipeline):
 
 
 @api_bp.route('/executions/<execution_id>/output')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_get_execution_output(execution_id):
     """Get current output for a running execution."""
     from scheduler.executor import get_execution_output
@@ -577,6 +593,8 @@ def api_get_execution_output(execution_id):
 
 
 @api_bp.route('/executions/<execution_id>/stream')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_stream_execution(execution_id):
     """Server-Sent Events stream of execution output."""
     from scheduler.executor import get_execution_output
@@ -622,6 +640,7 @@ def api_stream_execution(execution_id):
 
 @api_bp.route('/jobs/<pipeline>/run', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_run_job(pipeline):
     """Trigger job execution (synchronous)."""
@@ -666,6 +685,8 @@ def api_run_job(pipeline):
 # =============================================================================
 
 @api_bp.route('/history')
+@require_auth
+@require_api_scope('scheduler:read')
 @cached(ttl_seconds=15)
 def api_list_history():
     """List execution history with pagination."""
@@ -707,6 +728,7 @@ def api_list_history():
 
 @api_bp.route('/history/<execution_id>')
 @require_auth
+@require_api_scope('scheduler:read')
 def api_get_execution(execution_id):
     """Get execution details by execution ID."""
     from scheduler.models import JobHistory
@@ -728,6 +750,8 @@ def api_get_execution(execution_id):
 
 
 @api_bp.route('/history/stats')
+@require_auth
+@require_api_scope('scheduler:read')
 @cached(ttl_seconds=30)
 def api_history_stats():
     """Get execution statistics."""
@@ -773,6 +797,8 @@ def api_history_stats():
 
 
 @api_bp.route('/history/<int:history_id>')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_get_history_detail(history_id):
     """Get detailed execution record."""
     from scheduler.models import JobHistory
@@ -806,6 +832,7 @@ def api_get_history_detail(history_id):
 
 @api_bp.route('/history/cleanup-stale', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 def api_cleanup_stale():
     """Mark stale running jobs as failed."""
     from scheduler.models import JobHistory
@@ -838,6 +865,8 @@ def api_cleanup_stale():
 # =============================================================================
 
 @api_bp.route('/resources')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_resources():
     """Get current resource usage."""
     from scheduler.resource_manager import get_resource_manager
@@ -851,6 +880,8 @@ def api_resources():
 # =============================================================================
 
 @api_bp.route('/config')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_config():
     """Get scheduler configuration."""
     from scheduler.config import SchedulerConfig
@@ -882,6 +913,8 @@ _scheduler_process = None
 
 
 @api_bp.route('/services/status')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_services_status():
     """Get status of scheduler services."""
     from scheduler.models import SchedulerState
@@ -948,6 +981,7 @@ def api_services_status():
 
 @api_bp.route('/services/scheduler/start', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=5, window_seconds=60)
 def api_start_scheduler():
     """Start the scheduler daemon as a background process."""
@@ -1006,6 +1040,7 @@ def api_start_scheduler():
 
 @api_bp.route('/services/scheduler/stop', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=5, window_seconds=60)
 def api_stop_scheduler():
     """Stop the scheduler daemon."""
@@ -1061,6 +1096,7 @@ def api_stop_scheduler():
 
 @api_bp.route('/services/<service>/restart', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 def api_restart_service(service):
     """Restart a scheduler service."""
     if service == 'scheduler':
@@ -1088,6 +1124,8 @@ def api_restart_service(service):
 # =============================================================================
 
 @api_bp.route('/pipelines')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_list_pipelines():
     """List all pipeline configurations."""
     from scheduler.config import SchedulerConfig
@@ -1125,6 +1163,8 @@ def api_list_pipelines():
 
 
 @api_bp.route('/pipelines/<name>')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_get_pipeline(name):
     """Get a specific pipeline configuration."""
     from scheduler.config import SchedulerConfig
@@ -1163,6 +1203,7 @@ def api_get_pipeline(name):
 
 @api_bp.route('/pipelines', methods=['POST'])
 @require_auth
+@require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_create_pipeline():
     """Create a new pipeline."""
@@ -1234,6 +1275,7 @@ def api_create_pipeline():
 
 @api_bp.route('/pipelines/<name>', methods=['PUT'])
 @require_auth
+@require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_update_pipeline(name):
     """Update a pipeline configuration."""
@@ -1297,6 +1339,7 @@ def api_update_pipeline(name):
 
 @api_bp.route('/pipelines/<name>', methods=['DELETE'])
 @require_auth
+@require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_delete_pipeline(name):
     """Delete a pipeline."""
@@ -1323,6 +1366,8 @@ def api_delete_pipeline(name):
 
 
 @api_bp.route('/modules')
+@require_auth
+@require_api_scope('scheduler:read')
 def api_list_modules():
     """List available Python modules in datalayer."""
     datalayer_path = Path(__file__).parent.parent.parent / 'datalayer'
@@ -1576,7 +1621,7 @@ def api_update_billing_day():
         return jsonify({
             'success': False,
             'error': 'SOAP API error',
-            'details': str(e)
+            'details': 'SOAP API error occurred'
         }), 502
 
     except Exception as e:
@@ -1584,7 +1629,7 @@ def api_update_billing_day():
         return jsonify({
             'success': False,
             'error': 'Unexpected error',
-            'details': str(e)
+            'details': 'An internal error occurred'
         }), 500
 
     finally:
@@ -1597,6 +1642,7 @@ def api_update_billing_day():
 
 @api_bp.route('/sites')
 @require_auth
+@require_api_scope('inventory:read')
 @cached(ttl_seconds=300)
 def api_list_sites():
     """List all sites for dropdown selection."""
@@ -1626,6 +1672,7 @@ def api_list_sites():
 
 @api_bp.route('/inventory/units')
 @require_auth
+@require_api_scope('inventory:read')
 def api_inventory_units():
     """Get raw unit data from units_info for selected sites."""
     site_ids_param = request.args.get('site_ids', '')
@@ -1685,6 +1732,7 @@ def api_inventory_units():
 
 @api_bp.route('/inventory/distinct-types')
 @require_auth
+@require_api_scope('inventory:read')
 @cached(ttl_seconds=300)
 def api_inventory_distinct_types():
     """Get all distinct sTypeName values from units_info.
@@ -1729,6 +1777,7 @@ def api_inventory_distinct_types():
 
 @api_bp.route('/inventory/type-mappings')
 @require_auth
+@require_api_scope('inventory:read')
 def api_inventory_get_type_mappings():
     """Get all saved type mappings from backend DB."""
     from web.models.inventory import InventoryTypeMapping
@@ -1747,6 +1796,7 @@ def api_inventory_get_type_mappings():
 
 @api_bp.route('/inventory/type-mappings', methods=['PUT'])
 @require_auth
+@require_api_scope('inventory:write')
 def api_inventory_upsert_type_mappings():
     """Bulk upsert type mappings. Requires config management permission."""
     from flask_login import current_user as session_user
@@ -1762,7 +1812,7 @@ def api_inventory_upsert_type_mappings():
         return jsonify({'error': 'mappings array is required'}), 400
 
     mappings_data = data['mappings']
-    username = data.get('username', 'unknown')
+    username = g.current_user.get('sub', 'unknown') if hasattr(g, 'current_user') and g.current_user else 'unknown'
 
     session = get_session()
     try:
@@ -1806,6 +1856,7 @@ def api_inventory_upsert_type_mappings():
 
 @api_bp.route('/inventory/overrides')
 @require_auth
+@require_api_scope('inventory:read')
 def api_inventory_get_overrides():
     """Get saved per-unit overrides for selected sites."""
     from web.models.inventory import InventoryUnitOverride
@@ -1833,6 +1884,7 @@ def api_inventory_get_overrides():
 
 @api_bp.route('/inventory/overrides', methods=['PUT'])
 @require_auth
+@require_api_scope('inventory:write')
 def api_inventory_upsert_overrides():
     """Bulk upsert per-unit overrides."""
     from web.models.inventory import InventoryUnitOverride
@@ -1842,7 +1894,7 @@ def api_inventory_upsert_overrides():
         return jsonify({'error': 'overrides array is required'}), 400
 
     overrides_data = data['overrides']
-    username = data.get('username', 'unknown')
+    username = g.current_user.get('sub', 'unknown') if hasattr(g, 'current_user') and g.current_user else 'unknown'
 
     session = get_session()
     try:
@@ -1961,6 +2013,7 @@ def _build_volume_timeline(period, db_rows):
 
 @api_bp.route('/statistics/summary')
 @require_auth
+@require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=30)
 def api_statistics_summary():
@@ -2015,6 +2068,7 @@ def api_statistics_summary():
 
 @api_bp.route('/statistics/endpoints')
 @require_auth
+@require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=30)
 def api_statistics_endpoints():
@@ -2080,6 +2134,7 @@ def api_statistics_endpoints():
 
 @api_bp.route('/statistics/timeline')
 @require_auth
+@require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=30)
 def api_statistics_timeline():
@@ -2137,6 +2192,7 @@ def api_statistics_timeline():
 
 @api_bp.route('/statistics/top-consumers')
 @require_auth
+@require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=60)
 def api_statistics_top_consumers():
@@ -2190,6 +2246,7 @@ def api_statistics_top_consumers():
 
 @api_bp.route('/statistics/slow-endpoints')
 @require_auth
+@require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=60)
 def api_statistics_slow_endpoints():
@@ -2256,6 +2313,7 @@ def api_statistics_slow_endpoints():
 
 @api_bp.route('/statistics/external/summary')
 @require_auth
+@require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=30)
 def api_ext_statistics_summary():
@@ -2325,6 +2383,7 @@ def api_ext_statistics_summary():
 
 @api_bp.route('/statistics/external/services')
 @require_auth
+@require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 @cached(ttl_seconds=30)
 def api_ext_statistics_services():
@@ -2453,7 +2512,8 @@ def _apply_plan_json(plan, data, is_create=False):
 
     # Date fields
     from datetime import date as date_cls
-    for field in ('period_start', 'period_end'):
+    for field in ('period_start', 'period_end', 'promo_period_start', 'promo_period_end',
+                  'booking_period_start', 'booking_period_end'):
         if field in data:
             val = data[field]
             if val and isinstance(val, str):
@@ -2667,7 +2727,7 @@ def api_discount_plans_create():
     except Exception as e:
         session.rollback()
         current_app.logger.error(f"API create discount plan error: {e}")
-        return jsonify({'error': 'Server error', 'message': str(e)}), 500
+        return jsonify({'error': 'Server error', 'message': 'An internal error occurred'}), 500
     finally:
         session.close()
 
@@ -2710,6 +2770,6 @@ def api_discount_plans_update(plan_id):
     except Exception as e:
         session.rollback()
         current_app.logger.error(f"API update discount plan error: {e}")
-        return jsonify({'error': 'Server error', 'message': str(e)}), 500
+        return jsonify({'error': 'Server error', 'message': 'An internal error occurred'}), 500
     finally:
         session.close()

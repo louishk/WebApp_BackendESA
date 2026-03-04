@@ -208,6 +208,28 @@ pipelines:
     data_freshness:
       table: embedsocial_reviews
       date_column: synced_at
+  google_ads:
+    display_name: Google Ads
+    description: Extract Google Ads data from BigQuery (esa_google_ads) into PostgreSQL for PBI reporting
+    module_path: datalayer.google_ads_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 8 * * *
+    default_args:
+      mode: auto
+    priority: 5
+    resource_group: http_api
+    max_db_connections: 2
+    estimated_duration_seconds: 300
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 1800
+    data_freshness:
+      table: gads_campaign_daily
+      date_column: segments_date
   ecri_outcome_tracking:
     display_name: ECRI Outcome Tracking
     description: Track churn/stay outcomes for executed ECRI batches within attribution window
