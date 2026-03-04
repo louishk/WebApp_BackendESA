@@ -6,7 +6,12 @@ SELECT
     d::date                            AS date,
     COUNT(*) FILTER (WHERE e.type = 'review')   AS review_count,
     COUNT(*) FILTER (WHERE e.type = 'reply')    AS reply_count,
-    ROUND(AVG(e.rating) FILTER (WHERE e.type = 'review'), 2) AS avg_rating
+    ROUND(AVG(e.rating) FILTER (WHERE e.type = 'review'), 2) AS avg_rating,
+    COUNT(*) FILTER (WHERE e.type = 'review' AND e.rating = 1) AS rating_1,
+    COUNT(*) FILTER (WHERE e.type = 'review' AND e.rating = 2) AS rating_2,
+    COUNT(*) FILTER (WHERE e.type = 'review' AND e.rating = 3) AS rating_3,
+    COUNT(*) FILTER (WHERE e.type = 'review' AND e.rating = 4) AS rating_4,
+    COUNT(*) FILTER (WHERE e.type = 'review' AND e.rating = 5) AS rating_5
 FROM siteinfo s
 JOIN (
     -- Reviews: one row per review on its creation date
