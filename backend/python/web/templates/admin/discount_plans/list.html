@@ -59,7 +59,13 @@
                 </td>
                 <td><strong>{{ plan.plan_name }}</strong></td>
                 <td>{{ plan.sitelink_discount_name or '-' }}</td>
-                <td>{{ plan.period_range or '-' }}</td>
+                <td>
+                    {% if plan.promo_period_start or plan.promo_period_end %}
+                        {{ plan.promo_period_start or '?' }} — {{ plan.promo_period_end or '?' }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
                 <td>
                     {% if plan.applicable_sites %}
                         {% for code in site_codes %}

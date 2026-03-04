@@ -20,6 +20,7 @@ class DiscountPlanConfig(Base):
     FIELD_NAMES = [
         'deposit', 'payment_terms', 'termination_notice',
         'switch_to_us', 'referral_program', 'distribution_channel',
+        'move_in_range', 'lock_in_period',
     ]
 
     id = Column(Integer, primary_key=True, autoincrement=True)

@@ -139,43 +139,61 @@
         <h3>Availability</h3>
         <div class="form-grid">
             <div class="form-group">
-                <label>Period Range</label>
-                <input type="text" name="period_range" value="{{ plan.period_range if plan else form_data.get('period_range', '') }}" placeholder="e.g. Permanent, From X till Y">
-            </div>
-            <div class="form-group">
-                <label>Move-In Range</label>
-                <input type="text" name="move_in_range" value="{{ plan.move_in_range if plan else form_data.get('move_in_range', '') }}" placeholder="e.g. Maximum 14 days after the booking date">
-            </div>
-        </div>
-        <div class="form-grid" style="margin-top: 0.75rem;">
-            <div class="form-group">
                 <label>Promotion Period</label>
                 <div class="date-pair">
                     <input type="date" name="promo_period_start" value="{{ plan.promo_period_start.isoformat() if plan and plan.promo_period_start else form_data.get('promo_period_start', '') }}" placeholder="Start">
                     <input type="date" name="promo_period_end" value="{{ plan.promo_period_end.isoformat() if plan and plan.promo_period_end else form_data.get('promo_period_end', '') }}" placeholder="End">
                 </div>
             </div>
-            <div class="form-group">
-                <label>Booking Period</label>
-                <div class="date-pair">
-                    <input type="date" name="booking_period_start" value="{{ plan.booking_period_start.isoformat() if plan and plan.booking_period_start else form_data.get('booking_period_start', '') }}" placeholder="Start">
-                    <input type="date" name="booking_period_end" value="{{ plan.booking_period_end.isoformat() if plan and plan.booking_period_end else form_data.get('booking_period_end', '') }}" placeholder="End">
+            <div class="form-group" id="booking-period-group">
+                <label>
+                    Booking Period
+                    <label style="display: inline; font-weight: 400; font-size: 0.8rem; margin-left: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" id="booking-same-as-promo"> Same as Promo
+                    </label>
+                </label>
+                <div class="date-pair" id="booking-date-inputs">
+                    <input type="date" name="booking_period_start" id="booking_period_start" value="{{ plan.booking_period_start.isoformat() if plan and plan.booking_period_start else form_data.get('booking_period_start', '') }}" placeholder="Start">
+                    <input type="date" name="booking_period_end" id="booking_period_end" value="{{ plan.booking_period_end.isoformat() if plan and plan.booking_period_end else form_data.get('booking_period_end', '') }}" placeholder="End">
                 </div>
             </div>
         </div>
-        <!-- Hidden legacy fields to preserve existing data -->
-        <input type="hidden" name="period_start" value="{{ plan.period_start.isoformat() if plan and plan.period_start else '' }}">
-        <input type="hidden" name="period_end" value="{{ plan.period_end.isoformat() if plan and plan.period_end else '' }}">
-
+        <div class="form-grid" style="margin-top: 0.75rem;">
+            <div class="form-group">
+                <label>Move-In Range</label>
+                <select name="move_in_range">
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('move_in_range', []) %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.move_in_range == opt) or form_data.get('move_in_range') == opt }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
         <div class="form-group" style="margin-top: 0.75rem;">
             <label>Applicable Sites</label>
+            <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.85rem;">
+                <label style="cursor: pointer; font-weight: 500;">
+                    <input type="radio" name="site_mode" value="country" id="site-mode-country" onchange="setSiteMode('country')"> By Country
+                </label>
+                <label style="cursor: pointer; font-weight: 500;">
+                    <input type="radio" name="site_mode" value="site" id="site-mode-site" onchange="setSiteMode('site')"> By Site
+                </label>
+                <a href="javascript:void(0)" onclick="selectAllSites()" style="font-size: 0.8rem; color: var(--esa-navy);">Select All</a>
+                <a href="javascript:void(0)" onclick="deselectAllSites()" style="font-size: 0.8rem; color: #dc2626;">Clear All</a>
+            </div>
+            <div id="site-selection-container">
             {% for country, country_sites in sites_by_country.items() %}
-            <div class="site-country-group">
-                <h4>{{ country }}</h4>
-                <div class="site-checkboxes">
+            <div class="site-country-group" data-country="{{ country }}">
+                <h4>
+                    <label style="cursor: pointer; font-weight: 700; font-size: 0.85rem;">
+                        <input type="checkbox" class="country-checkbox" data-country="{{ country }}" onchange="toggleCountry(this)">
+                        {{ country }}
+                    </label>
+                </h4>
+                <div class="site-checkboxes site-individual-checkboxes">
                     {% for site in country_sites %}
                     <label>
-                        <input type="checkbox" name="site_code" value="{{ site.code }}"
+                        <input type="checkbox" name="site_code" value="{{ site.code }}" data-country="{{ country }}"
                                {{ 'checked' if plan and plan.applicable_sites and plan.applicable_sites.get(site.code) }}>
                         {{ site.code }} - {{ site.name }}
                     </label>
@@ -183,6 +201,7 @@
                 </div>
             </div>
             {% endfor %}
+            </div>
         </div>
     </div>
 
@@ -262,7 +281,12 @@
             </div>
             <div class="form-group">
                 <label>Lock-In Period</label>
-                <input type="text" name="lock_in_period" value="{{ plan.lock_in_period if plan else form_data.get('lock_in_period', '') }}" placeholder="e.g. Minimum 6 months">
+                <select name="lock_in_period">
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('lock_in_period', []) %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.lock_in_period == opt) or form_data.get('lock_in_period') == opt }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="form-group">
                 <label>Extra Offer</label>
@@ -384,24 +408,24 @@
     </div>
 
     <!-- ================================================================= -->
-    <!-- Linked Sitelink Plans -->
+    <!-- Linked Sitelink Plans + Comparison -->
     <!-- ================================================================= -->
     <div class="card form-section">
-        <h3>Linked Sitelink Plans</h3>
+        <h3>Sitelink Linkage &amp; Comparison</h3>
         <p style="font-size: 0.8rem; color: #888; margin-bottom: 0.75rem;">
-            Link this marketing plan to actual Sitelink concession entries (optional).
+            Selecting a Sitelink Discount Name above auto-fetches all matching concessions. The comparison below shows coverage vs applicable sites.
         </p>
-        <div class="form-grid">
-            <div class="form-group">
-                <label>Search Concessions</label>
-                <input type="text" id="concession-search" placeholder="Type plan name to search..." style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">
-                <div id="concession-results" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; display: none; margin-top: 0.25rem;"></div>
+        <div id="sitelink-loading" style="display: none; font-size: 0.85rem; color: #6366f1; margin-bottom: 0.5rem;">Loading concessions...</div>
+        <div class="form-group">
+            <label>Linked Entries (<span id="linked-count">0</span>)</label>
+            <div id="linked-concessions-display" style="max-height: 250px; overflow-y: auto;">
+                <!-- Populated by JS -->
             </div>
-            <div class="form-group">
-                <label>Linked Entries</label>
-                <div id="linked-concessions-display">
-                    <!-- Populated by JS -->
-                </div>
+        </div>
+        <div class="form-group" style="margin-top: 0.75rem;">
+            <label>Site Comparison</label>
+            <div id="site-comparison" style="font-size: 0.85rem;">
+                <span style="color: #888;">Select a Sitelink Discount Name to see comparison.</span>
             </div>
         </div>
         <input type="hidden" name="linked_concessions_json" id="linked-concessions-json"
@@ -434,11 +458,6 @@
             <div class="form-group">
                 <label>Registration Flow (MKG)</label>
                 <textarea name="registration_flow" rows="2">{{ plan.registration_flow if plan else '' }}</textarea>
-            </div>
-            <div class="form-group form-full">
-                <label>Department Notes (JSON)</label>
-                <textarea name="department_notes_json" rows="2" placeholder='{"REV": "...", "OPS": "...", "MKG": "..."}'>{{ (plan.department_notes | tojson) if plan and plan.department_notes else '' }}</textarea>
-                <div class="hint">Per-department remarks as JSON object.</div>
             </div>
         </div>
     </div>
@@ -495,6 +514,117 @@
 clearTimeout(window.autoRefreshTimeout);
 
 // =========================================================================
+// Booking Period "Same as Promo" checkbox
+// =========================================================================
+(function() {
+    var cb = document.getElementById('booking-same-as-promo');
+    var inputs = document.getElementById('booking-date-inputs');
+    var bStart = document.getElementById('booking_period_start');
+    var bEnd = document.getElementById('booking_period_end');
+    var pStart = document.querySelector('[name="promo_period_start"]');
+    var pEnd = document.querySelector('[name="promo_period_end"]');
+
+    function toggle(checked) {
+        inputs.style.display = checked ? 'none' : '';
+        bStart.disabled = checked;
+        bEnd.disabled = checked;
+    }
+
+    cb.addEventListener('change', function() { toggle(this.checked); });
+
+    // Auto-detect on load: check if booking matches promo or is empty
+    var bsv = bStart.value, bev = bEnd.value;
+    var psv = pStart.value, pev = pEnd.value;
+    if ((!bsv && !bev) || (bsv === psv && bev === pev)) {
+        cb.checked = true;
+        toggle(true);
+    }
+
+    // On submit: copy promo to booking if checked, re-enable
+    document.getElementById('discount-plan-form').addEventListener('submit', function() {
+        if (cb.checked) {
+            bStart.value = pStart.value;
+            bEnd.value = pEnd.value;
+            bStart.disabled = false;
+            bEnd.disabled = false;
+        }
+    });
+})();
+
+// =========================================================================
+// Site selection: Country vs Site mode
+// =========================================================================
+function setSiteMode(mode) {
+    var individualBoxes = document.querySelectorAll('.site-individual-checkboxes');
+    var countryBoxes = document.querySelectorAll('.country-checkbox');
+    if (mode === 'country') {
+        document.getElementById('site-mode-country').checked = true;
+        individualBoxes.forEach(function(el) { el.style.display = 'none'; });
+        // Sync country checkboxes from child states
+        countryBoxes.forEach(function(cb) {
+            var children = document.querySelectorAll('input[name="site_code"][data-country="' + cb.dataset.country + '"]');
+            var allChecked = children.length > 0 && Array.prototype.every.call(children, function(c) { return c.checked; });
+            cb.checked = allChecked;
+        });
+    } else {
+        document.getElementById('site-mode-site').checked = true;
+        individualBoxes.forEach(function(el) { el.style.display = ''; });
+    }
+}
+
+function toggleCountry(cb) {
+    var children = document.querySelectorAll('input[name="site_code"][data-country="' + cb.dataset.country + '"]');
+    children.forEach(function(c) { c.checked = cb.checked; });
+}
+
+function selectAllSites() {
+    document.querySelectorAll('input[name="site_code"]').forEach(function(c) { c.checked = true; });
+    document.querySelectorAll('.country-checkbox').forEach(function(c) { c.checked = true; });
+}
+
+function deselectAllSites() {
+    document.querySelectorAll('input[name="site_code"]').forEach(function(c) { c.checked = false; });
+    document.querySelectorAll('.country-checkbox').forEach(function(c) { c.checked = false; });
+}
+
+// Auto-detect site mode on load
+(function() {
+    var countryGroups = document.querySelectorAll('.site-country-group[data-country]');
+    var allByCountry = true;
+    countryGroups.forEach(function(group) {
+        var country = group.dataset.country;
+        var children = group.querySelectorAll('input[name="site_code"]');
+        var checkedCount = Array.prototype.filter.call(children, function(c) { return c.checked; }).length;
+        if (checkedCount > 0 && checkedCount < children.length) {
+            allByCountry = false; // partial selection = site mode
+        }
+    });
+    // Check if any sites are checked at all
+    var anyChecked = document.querySelectorAll('input[name="site_code"]:checked').length > 0;
+    if (anyChecked && allByCountry) {
+        setSiteMode('country');
+    } else {
+        setSiteMode('site');
+    }
+
+    // Also sync country checkboxes when individual sites change
+    document.querySelectorAll('input[name="site_code"]').forEach(function(cb) {
+        cb.addEventListener('change', function() {
+            var countryCb = document.querySelector('.country-checkbox[data-country="' + this.dataset.country + '"]');
+            if (countryCb) {
+                var siblings = document.querySelectorAll('input[name="site_code"][data-country="' + this.dataset.country + '"]');
+                countryCb.checked = Array.prototype.every.call(siblings, function(c) { return c.checked; });
+            }
+        });
+    });
+
+    // On submit, ensure country checkboxes don't get submitted (they're just UI)
+    document.getElementById('discount-plan-form').addEventListener('submit', function() {
+        document.querySelectorAll('.country-checkbox').forEach(function(cb) { cb.disabled = true; });
+    });
+})();
+
+// =========================================================================
 // Dynamic T&C rows
 // =========================================================================
 var tcContainer = document.getElementById('tc-container');
@@ -545,98 +675,131 @@ document.getElementById('add-custom-field').addEventListener('click', function()
 });
 
 // =========================================================================
-// Linked Sitelink Concessions
+// Sitelink Linkage & Comparison
 // =========================================================================
 var linkedData = JSON.parse(document.getElementById('linked-concessions-json').value || '[]');
 
 function renderLinked() {
     var display = document.getElementById('linked-concessions-display');
     display.textContent = '';
+    document.getElementById('linked-count').textContent = linkedData.length;
     if (linkedData.length === 0) {
         var msg = document.createElement('div');
         msg.style.cssText = 'color: #888; font-size: 0.85rem;';
-        msg.textContent = 'No concessions linked yet.';
+        msg.textContent = 'No concessions linked. Select a Sitelink Discount Name above to auto-populate.';
         display.appendChild(msg);
-        return;
+    } else {
+        linkedData.forEach(function(item) {
+            var wrapper = document.createElement('div');
+            wrapper.className = 'linked-item';
+            var label = document.createElement('span');
+            label.textContent = (item.site_code || 'Site ' + item.site_id) + ' - ' + (item.plan_name || 'Concession ' + item.concession_id);
+            wrapper.appendChild(label);
+            if (item.discount_pct) {
+                var pct = document.createElement('span');
+                pct.style.cssText = 'color: #059669; font-weight: 600; margin-left: 0.3rem;';
+                pct.textContent = '(' + item.discount_pct + '%)';
+                wrapper.appendChild(pct);
+            }
+            if (item.start || item.end) {
+                var dates = document.createElement('span');
+                dates.style.cssText = 'color: #888; font-size: 0.8rem; margin-left: 0.3rem;';
+                dates.textContent = (item.start || '?') + ' to ' + (item.end || '?');
+                wrapper.appendChild(dates);
+            }
+            display.appendChild(wrapper);
+        });
     }
-    linkedData.forEach(function(item, idx) {
-        var wrapper = document.createElement('div');
-        wrapper.className = 'linked-item';
-        var label = document.createElement('span');
-        label.textContent = (item.site_code || 'Site ' + item.site_id) + ' - ' + (item.plan_name || 'Concession ' + item.concession_id);
-        wrapper.appendChild(label);
-        if (item.discount_pct) {
-            var pct = document.createElement('span');
-            pct.style.cssText = 'color: #059669; font-weight: 600; margin-left: 0.3rem;';
-            pct.textContent = '(' + item.discount_pct + '%)';
-            wrapper.appendChild(pct);
-        }
-        var rm = document.createElement('span');
-        rm.className = 'remove-link';
-        rm.title = 'Remove';
-        rm.textContent = 'X';
-        rm.addEventListener('click', (function(i) { return function() { removeLinked(i); }; })(idx));
-        wrapper.appendChild(rm);
-        display.appendChild(wrapper);
-    });
     document.getElementById('linked-concessions-json').value = JSON.stringify(linkedData.map(function(item) {
-        return {site_id: item.site_id, concession_id: item.concession_id};
+        return {site_id: item.site_id, concession_id: item.concession_id, site_code: item.site_code};
     }));
+    renderComparison();
 }
 
-function removeLinked(idx) {
-    linkedData.splice(idx, 1);
-    renderLinked();
+function getApplicableSiteCodes() {
+    var codes = [];
+    document.querySelectorAll('input[name="site_code"]:checked').forEach(function(cb) {
+        codes.push(cb.value);
+    });
+    return codes;
+}
+
+function renderComparison() {
+    var panel = document.getElementById('site-comparison');
+    panel.textContent = '';
+    var applicableCodes = getApplicableSiteCodes();
+    var sitelinkCodes = {};
+    linkedData.forEach(function(item) {
+        if (item.site_code) sitelinkCodes[item.site_code] = true;
+    });
+
+    if (applicableCodes.length === 0 && linkedData.length === 0) {
+        var noData = document.createElement('span');
+        noData.style.color = '#888';
+        noData.textContent = 'No sites or concessions to compare.';
+        panel.appendChild(noData);
+        return;
+    }
+
+    var matched = [], gaps = [], extras = [];
+    applicableCodes.forEach(function(code) {
+        if (sitelinkCodes[code]) matched.push(code);
+        else gaps.push(code);
+    });
+    Object.keys(sitelinkCodes).forEach(function(code) {
+        if (applicableCodes.indexOf(code) === -1) extras.push(code);
+    });
+
+    function makeBadge(text, bg, color, title) {
+        var span = document.createElement('span');
+        span.style.cssText = 'display:inline-block;background:' + bg + ';color:' + color + ';padding:0.15rem 0.5rem;border-radius:3px;font-size:0.8rem;';
+        span.title = title;
+        span.textContent = text;
+        return span;
+    }
+
+    var wrapper = document.createElement('div');
+    wrapper.style.cssText = 'display: flex; flex-wrap: wrap; gap: 0.3rem;';
+    matched.forEach(function(c) { wrapper.appendChild(makeBadge(c, '#d1fae5', '#059669', 'Matched')); });
+    gaps.forEach(function(c) { wrapper.appendChild(makeBadge(c, '#fee2e2', '#dc2626', 'In plan but NOT in Sitelink')); });
+    extras.forEach(function(c) { wrapper.appendChild(makeBadge(c, '#fef3c7', '#d97706', 'In Sitelink but NOT in plan')); });
+    panel.appendChild(wrapper);
+
+    var legend = document.createElement('div');
+    legend.style.cssText = 'margin-top:0.4rem;font-size:0.75rem;color:#888;';
+    legend.textContent = 'Green=Matched  Red=Gap (plan only)  Orange=Extra (Sitelink only)';
+    panel.appendChild(legend);
 }
 
 renderLinked();
 
-var searchInput = document.getElementById('concession-search');
-var resultsDiv = document.getElementById('concession-results');
-var searchTimeout = null;
-
-searchInput.addEventListener('input', function() {
-    clearTimeout(searchTimeout);
-    var q = this.value.trim();
-    if (q.length < 2) { resultsDiv.style.display = 'none'; return; }
-    searchTimeout = setTimeout(function() {
-        fetch('{{ url_for("discount_plans.api_search_concessions") }}?q=' + encodeURIComponent(q))
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                resultsDiv.textContent = '';
-                if (!Array.isArray(data) || data.length === 0) {
-                    var noResult = document.createElement('div');
-                    noResult.style.cssText = 'padding: 0.5rem; color: #888; font-size: 0.85rem;';
-                    noResult.textContent = 'No results';
-                    resultsDiv.appendChild(noResult);
-                } else {
-                    data.forEach(function(r) {
-                        var row = document.createElement('div');
-                        row.style.cssText = 'padding: 0.4rem 0.6rem; cursor: pointer; font-size: 0.85rem; border-bottom: 1px solid #eee;';
-                        row.onmouseover = function() { this.style.background = '#f0f4f8'; };
-                        row.onmouseout = function() { this.style.background = '#fff'; };
-                        row.onclick = function() { addConcession(r); };
-                        var label = (r.site_code || '') + ' ' + (r.site_name || '') + ' - ' + (r.plan_name || '');
-                        if (r.discount_pct) label += ' (' + r.discount_pct + '%)';
-                        row.textContent = label;
-                        resultsDiv.appendChild(row);
-                    });
-                }
-                resultsDiv.style.display = 'block';
-            });
-    }, 300);
+// Auto-fetch concessions when sitelink_discount_name changes
+var sitelinkSelect = document.querySelector('[name="sitelink_discount_name"]');
+sitelinkSelect.addEventListener('change', function() {
+    var name = this.value;
+    if (!name) {
+        linkedData = [];
+        renderLinked();
+        return;
+    }
+    var loading = document.getElementById('sitelink-loading');
+    loading.style.display = 'block';
+    fetch('{{ url_for("discount_plans.api_concessions_by_plan_name") }}?name=' + encodeURIComponent(name))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            loading.style.display = 'none';
+            if (Array.isArray(data)) {
+                linkedData = data;
+                renderLinked();
+            }
+        })
+        .catch(function() { loading.style.display = 'none'; });
 });
 
-function addConcession(item) {
-    // Check for duplicates
-    for (var i = 0; i < linkedData.length; i++) {
-        if (linkedData[i].site_id === item.site_id && linkedData[i].concession_id === item.concession_id) return;
-    }
-    linkedData.push(item);
-    renderLinked();
-    resultsDiv.style.display = 'none';
-    searchInput.value = '';
-}
+// Re-render comparison when site checkboxes change
+document.querySelectorAll('input[name="site_code"]').forEach(function(cb) {
+    cb.addEventListener('change', function() { renderComparison(); });
+});
 
 // =========================================================================
 // AI Translation with source/target language selection

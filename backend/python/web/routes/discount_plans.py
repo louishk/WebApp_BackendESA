@@ -155,9 +155,6 @@ def _build_plan_from_form(form, plan=None):
     plan.objective = form.get('objective', '').strip() or None
 
     # Availability
-    plan.period_range = form.get('period_range', '').strip() or None
-    plan.period_start = _parse_date_field(form.get('period_start'))
-    plan.period_end = _parse_date_field(form.get('period_end'))
     plan.promo_period_start = _parse_date_field(form.get('promo_period_start'))
     plan.promo_period_end = _parse_date_field(form.get('promo_period_end'))
     plan.booking_period_start = _parse_date_field(form.get('booking_period_start'))
@@ -213,7 +210,6 @@ def _build_plan_from_form(form, plan=None):
     plan.promotion_codes = _parse_json_field(form.get('promotion_codes_json'), [])
     plan.collateral_url = form.get('collateral_url', '').strip() or None
     plan.registration_flow = form.get('registration_flow', '').strip() or None
-    plan.department_notes = _parse_json_field(form.get('department_notes_json'), {})
 
     # Custom fields - dynamic key/value pairs from the form
     cf_keys = form.getlist('cf_key')
@@ -434,17 +430,32 @@ def view_brief(plan_id):
         linked_details = []
         if plan.linked_concessions:
             try:
-                from common.models import CCDiscount
+                from common.models import CCDiscount, Site, SiteInfo
                 pbi_session = _get_pbi_session()
                 try:
+                    # Collect all site IDs for batch lookup
+                    link_site_ids = list({link.get('site_id') for link in plan.linked_concessions if link.get('site_id')})
+                    # Build SiteID -> SiteCode map
+                    sid_to_code = {}
+                    if link_site_ids:
+                        site_rows = pbi_session.query(Site.SiteID, Site.sLocationCode).filter(Site.SiteID.in_(link_site_ids)).all()
+                        sid_to_code = {s.SiteID: s.sLocationCode for s in site_rows if s.sLocationCode}
+                        missing = [sid for sid in link_site_ids if sid not in sid_to_code]
+                        if missing:
+                            info_rows = pbi_session.query(SiteInfo.SiteID, SiteInfo.SiteCode).filter(SiteInfo.SiteID.in_(missing)).all()
+                            for si in info_rows:
+                                sid_to_code[si.SiteID] = si.SiteCode
+
                     for link in plan.linked_concessions:
                         cc = (pbi_session.query(CCDiscount)
                               .filter_by(SiteID=link.get('site_id'), ConcessionID=link.get('concession_id'))
                               .first())
                         if cc:
+                            sc = link.get('site_code') or sid_to_code.get(cc.SiteID, f'L{str(cc.SiteID).zfill(3)}')
                             linked_details.append({
                                 'site_id': cc.SiteID,
-                                'site_name': site_name_map.get(f'L{str(cc.SiteID).zfill(3)}', f'Site {cc.SiteID}'),
+                                'site_code': sc,
+                                'site_name': site_name_map.get(sc, f'Site {cc.SiteID}'),
                                 'concession_id': cc.ConcessionID,
                                 'plan_name': cc.sPlanName or cc.sDefPlanName or '-',
                                 'discount_pct': float(cc.dcPCDiscount) if cc.dcPCDiscount else None,
@@ -456,12 +467,22 @@ def view_brief(plan_id):
             except Exception as e:
                 current_app.logger.warning(f"Could not resolve linked concessions: {e}")
 
+        # Build comparison: applicable sites vs sitelink sites
+        applicable_codes = set((plan.applicable_sites or {}).keys())
+        sitelink_codes = {ld['site_code'] for ld in linked_details if ld.get('site_code')}
+        comparison = {
+            'matched': sorted(applicable_codes & sitelink_codes),
+            'gaps': sorted(applicable_codes - sitelink_codes),
+            'extras': sorted(sitelink_codes - applicable_codes),
+        }
+
         return render_template('admin/discount_plans/brief.html',
                                plan=plan,
                                sites_by_country=sites_by_country,
                                site_codes=all_site_codes,
                                site_name_map=site_name_map,
-                               linked_details=linked_details)
+                               linked_details=linked_details,
+                               comparison=comparison)
     finally:
         db_session.close()
 
@@ -531,6 +552,8 @@ def api_search_concessions():
             if q:
                 query = query.filter(CCDiscount.sPlanName.ilike(f'%{q}%'))
             if site_id:
+                if not site_id.isdigit():
+                    return jsonify({'error': 'Invalid site_id'}), 400
                 query = query.filter(CCDiscount.SiteID == int(site_id))
             query = query.filter(CCDiscount.dDeleted.is_(None))
             results = query.order_by(CCDiscount.SiteID, CCDiscount.sPlanName).limit(50).all()
@@ -557,6 +580,65 @@ def api_search_concessions():
     except Exception as e:
         current_app.logger.error(f"Concession search error: {e}")
         return jsonify({'error': 'Concession search failed'}), 500
+
+
+@discount_plans_bp.route('/api/concessions/by-plan-name')
+@login_required
+def api_concessions_by_plan_name():
+    """
+    Get all concessions matching an exact Sitelink plan name.
+    Query params: name (exact plan name).
+    """
+    name = request.args.get('name', '').strip()
+    if not name:
+        return jsonify([])
+
+    try:
+        from common.models import CCDiscount, Site
+        pbi_session = _get_pbi_session()
+        try:
+            results = (pbi_session.query(
+                CCDiscount.ConcessionID, CCDiscount.SiteID,
+                CCDiscount.sPlanName, CCDiscount.sDefPlanName,
+                CCDiscount.dcPCDiscount, CCDiscount.dPlanStrt, CCDiscount.dPlanEnd,
+            )
+            .filter(CCDiscount.sPlanName == name)
+            .filter(CCDiscount.dDeleted.is_(None))
+            .order_by(CCDiscount.SiteID)
+            .all())
+
+            # Get site names + site codes via Site and SiteInfo
+            site_ids = list({r.SiteID for r in results})
+            site_map = {}
+            if site_ids:
+                from common.models import SiteInfo
+                sites = pbi_session.query(Site.SiteID, Site.sSiteName, Site.sLocationCode).filter(Site.SiteID.in_(site_ids)).all()
+                site_map = {s.SiteID: {'name': s.sSiteName, 'code': s.sLocationCode} for s in sites}
+                # Fallback: if sLocationCode is missing, try SiteInfo.SiteCode
+                missing = [sid for sid in site_ids if not site_map.get(sid, {}).get('code')]
+                if missing:
+                    infos = pbi_session.query(SiteInfo.SiteID, SiteInfo.SiteCode).filter(SiteInfo.SiteID.in_(missing)).all()
+                    for si in infos:
+                        if si.SiteID in site_map:
+                            site_map[si.SiteID]['code'] = si.SiteCode
+                        else:
+                            site_map[si.SiteID] = {'name': f'Site {si.SiteID}', 'code': si.SiteCode}
+
+            return jsonify([{
+                'concession_id': r.ConcessionID,
+                'site_id': r.SiteID,
+                'site_name': site_map.get(r.SiteID, {}).get('name', f'Site {r.SiteID}'),
+                'site_code': site_map.get(r.SiteID, {}).get('code', ''),
+                'plan_name': r.sPlanName or r.sDefPlanName or '-',
+                'discount_pct': float(r.dcPCDiscount) if r.dcPCDiscount else None,
+                'start': r.dPlanStrt.strftime('%Y-%m-%d') if r.dPlanStrt else None,
+                'end': r.dPlanEnd.strftime('%Y-%m-%d') if r.dPlanEnd else None,
+            } for r in results])
+        finally:
+            pbi_session.close()
+    except Exception as e:
+        current_app.logger.error(f"Concessions by plan name error: {e}")
+        return jsonify({'error': 'Failed to fetch concessions'}), 500
 
 
 # =============================================================================

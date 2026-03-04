@@ -115,7 +115,7 @@
         <!-- ALL Department -->
         <!-- ============================================================ -->
         <tr>
-            <td class="dept-cell" rowspan="{{ 15 + (1 if plan.lock_in_period else 0) }}">ALL</td>
+            <td class="dept-cell" rowspan="{{ 13 + (1 if plan.lock_in_period else 0) }}">ALL</td>
             <td class="item-cell">Name</td>
             <td class="value-cell">{{ plan.plan_name }}</td>
             <td class="notes-cell"></td>
@@ -124,15 +124,6 @@
             <td class="item-cell">Objective</td>
             <td class="value-cell">{{ plan.objective or '-' }}</td>
             <td class="notes-cell"></td>
-        </tr>
-        <tr>
-            <td class="item-cell">Period Range</td>
-            <td class="value-cell">{{ plan.period_range or '-' }}</td>
-            <td class="notes-cell">
-                {% if plan.period_start or plan.period_end %}
-                    {{ plan.period_start }} to {{ plan.period_end }}
-                {% endif %}
-            </td>
         </tr>
         <tr>
             <td class="item-cell">Promotion Period</td>
@@ -287,6 +278,32 @@
         {% endif %}
 
         <!-- ============================================================ -->
+        <!-- Site Coverage Comparison -->
+        <!-- ============================================================ -->
+        {% if comparison and (comparison.matched or comparison.gaps or comparison.extras) %}
+        <tr>
+            <td class="dept-cell">LINK</td>
+            <td class="item-cell">Coverage</td>
+            <td class="value-cell" colspan="2">
+                {% for code in comparison.matched %}
+                    <span style="display:inline-block;background:#d1fae5;color:#059669;padding:0.15rem 0.5rem;border-radius:3px;font-size:0.8rem;margin:2px;" title="Matched">{{ code }}</span>
+                {% endfor %}
+                {% for code in comparison.gaps %}
+                    <span style="display:inline-block;background:#fee2e2;color:#dc2626;padding:0.15rem 0.5rem;border-radius:3px;font-size:0.8rem;margin:2px;" title="In plan but NOT in Sitelink (gap)">{{ code }}</span>
+                {% endfor %}
+                {% for code in comparison.extras %}
+                    <span style="display:inline-block;background:#fef3c7;color:#d97706;padding:0.15rem 0.5rem;border-radius:3px;font-size:0.8rem;margin:2px;" title="In Sitelink but NOT in plan (extra)">{{ code }}</span>
+                {% endfor %}
+                <div style="margin-top:0.3rem;font-size:0.75rem;color:#888;">
+                    <span style="color:#059669;">Green</span>=Matched &nbsp;
+                    <span style="color:#dc2626;">Red</span>=Gap (plan only) &nbsp;
+                    <span style="color:#d97706;">Orange</span>=Extra (Sitelink only)
+                </div>
+            </td>
+        </tr>
+        {% endif %}
+
+        <!-- ============================================================ -->
         <!-- REV Department -->
         <!-- ============================================================ -->
         {% if plan.rate_rules or plan.rate_rules_sites %}
@@ -310,7 +327,7 @@
                     <div>- {{ code }}</div>
                 {% endfor %}
             </td>
-            <td class="notes-cell">{{ plan.department_notes.get('OPS', '') if plan.department_notes else '' }}</td>
+            <td class="notes-cell"></td>
         </tr>
         {% endif %}
 
@@ -329,7 +346,7 @@
                     {{ plan.collateral_url or '-' }}
                 {% endif %}
             </td>
-            <td class="notes-cell">{{ plan.department_notes.get('MKG', '') if plan.department_notes else '' }}</td>
+            <td class="notes-cell"></td>
         </tr>
         {% endif %}
         {% if plan.registration_flow %}
