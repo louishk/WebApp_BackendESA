@@ -48,6 +48,7 @@ SITE_DATA = [
     {"SiteID": 52421, "SiteCode": "L028", "Name": "Extra Space Commonwealth Pte Ltd", "InternalLabel": "CW", "Country": "Singapore", "CityDistrict": "Commonwealth", "Street": "115A & 115B Commonwealth Drive", "Longitude": Decimal("103.7981889"), "Latitude": Decimal("1.304547"), "google_place_id": "ChIJWxA0eucb2jERa-gjIbx-Nv4", "embedsocial_source_id": "40cf59fd1e2831d0a5ee06ef4eafd5bf"},
     {"SiteID": 54219, "SiteCode": "L029", "Name": "Extra Space Commonwealth Pte Ltd", "InternalLabel": "CW", "Country": "Singapore", "CityDistrict": "Commonwealth", "Street": "115A & 115B Commonwealth Drive", "Longitude": Decimal("103.7981889"), "Latitude": Decimal("1.304547"), "google_place_id": None, "embedsocial_source_id": None},
     {"SiteID": 57451, "SiteCode": "L030", "Name": "Extra Space Tai Seng Pte Ltd", "InternalLabel": "TS", "Country": "Singapore", "CityDistrict": "Tai Seng", "Street": "14 Little Road", "Longitude": Decimal("103.8847211"), "Latitude": Decimal("1.3384956"), "google_place_id": "ChIJqyALTVYX2jERxmybLU6Edws", "embedsocial_source_id": "49abc3e1141c3dba8f56eddacf87129a"},
+    {"SiteID": 27525, "SiteCode": "LSETUP", "Name": "Extra Space Setup/Test Site", "InternalLabel": "SETUP", "Country": "Singapore", "CityDistrict": None, "Street": None, "Longitude": None, "Latitude": None, "google_place_id": None, "embedsocial_source_id": None},
 ]
 
 

@@ -311,25 +311,6 @@
                 grouped[country].push(site);
             });
 
-            // Ensure LSETUP is included - add it if not present
-            const hasLSETUP = data.sites.some(site => site.site_code === 'LSETUP');
-            if (!hasLSETUP) {
-                // Add LSETUP manually (site ID 27525 is the test/setup site)
-                const lsetupSite = {
-                    site_id: 27525,
-                    site_code: 'LSETUP',
-                    name: 'Test/Setup Site',
-                    country: 'Singapore'  // or appropriate country
-                };
-                data.sites.push(lsetupSite);
-
-                // Add to grouped structure
-                const country = lsetupSite.country || 'Other';
-                if (!grouped[country]) grouped[country] = [];
-                grouped[country].push(lsetupSite);
-
-                console.info('LSETUP manually added to sites list');
-            }
             Object.keys(grouped).forEach(country => {
                 const group = document.createElement('optgroup');
                 group.label = country;

@@ -75,8 +75,9 @@ RSYNC_EXCLUDES = [
 
 # Required vault secrets for the application
 REQUIRED_VAULT_SECRETS = [
-    'SCHEDULER_DB_PASSWORD',
+    'DB_PASSWORD',
     'MS_OAUTH_CLIENT_SECRET',
+    'JWT_SECRET',
 ]
 
 
