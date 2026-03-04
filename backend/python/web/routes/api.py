@@ -472,11 +472,13 @@ def api_data_freshness():
                         else:
                             freshness[name] = {'latest_date': None}
                     except Exception as e:
-                        freshness[name] = {'latest_date': None, 'error': str(e)[:100]}
+                        current_app.logger.error(f"Data freshness query error for {name}: {e}")
+                        freshness[name] = {'latest_date': None, 'error': 'Query failed'}
         except Exception as e:
             # Connection failed - mark all as error
+            current_app.logger.error(f"Data freshness connection error: {e}")
             for name, _, _ in queries_to_run:
-                freshness[name] = {'latest_date': None, 'error': str(e)[:100]}
+                freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
 
     return jsonify(freshness)
 
@@ -2671,8 +2673,9 @@ def api_discount_plans_get(plan_id):
                 finally:
                     pbi_session.close()
             except Exception as e:
+                current_app.logger.error(f"Error resolving linked concessions for plan {plan_id}: {e}")
                 result['linked_concession_details'] = []
-                result['_concession_error'] = str(e)[:200]
+                result['_concession_error'] = 'Failed to resolve linked concessions'
 
         return jsonify(result)
     finally:

@@ -881,7 +881,7 @@ def api_translate_text():
         translations = translate_single_text_all(text, source_lang)
     except Exception as e:
         current_app.logger.error(f"Config translate failed: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Translation service error'}), 500
 
     return jsonify({'success': True, 'translations': translations})
 

@@ -111,7 +111,8 @@ def api_data_freshness():
                     'stale': (date.today() - result).days > 7 if result else True
                 }
             except Exception as e:
-                freshness[table] = {'latest_date': None, 'stale': True, 'error': str(e)[:100]}
+                current_app.logger.error(f"ECRI freshness query error for {table}: {e}")
+                freshness[table] = {'latest_date': None, 'stale': True, 'error': 'Query failed'}
 
         return jsonify({'freshness': freshness})
     finally:
@@ -328,7 +329,7 @@ def api_eligible_tenants():
 
     except Exception as e:
         current_app.logger.error(f"ECRI eligibility error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An internal error occurred'}), 500
     finally:
         session.close()
 
@@ -466,7 +467,7 @@ def api_create_batch():
     except Exception as e:
         session.rollback()
         current_app.logger.error(f"ECRI batch creation error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An internal error occurred'}), 500
     finally:
         session.close()
 
@@ -546,7 +547,8 @@ def api_cancel_batch(batch_id):
         return jsonify({'success': True, 'status': 'cancelled'})
     except Exception as e:
         session.rollback()
-        return jsonify({'error': str(e)}), 500
+        current_app.logger.error(f"ECRI batch cancel error: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
     finally:
         session.close()
 
@@ -650,25 +652,27 @@ def api_execute_batch(batch_id):
                     results['success'] += 1
 
                 except SOAPFaultError as e:
+                    current_app.logger.error(f"SOAP fault for ledger {led.ledger_id} at site {led.site_id}: {e}")
                     led.api_status = 'failed'
-                    led.api_response = {'error': str(e)}
+                    led.api_response = {'error': 'SOAP API error occurred'}
                     led.api_executed_at = datetime.utcnow()
                     results['failed'] += 1
                     results['errors'].append({
                         'ledger_id': led.ledger_id,
                         'site_id': led.site_id,
-                        'error': str(e)
+                        'error': 'SOAP API error occurred'
                     })
 
                 except Exception as e:
+                    current_app.logger.error(f"Unexpected error for ledger {led.ledger_id} at site {led.site_id}: {e}")
                     led.api_status = 'failed'
-                    led.api_response = {'error': str(e)}
+                    led.api_response = {'error': 'An internal error occurred'}
                     led.api_executed_at = datetime.utcnow()
                     results['failed'] += 1
                     results['errors'].append({
                         'ledger_id': led.ledger_id,
                         'site_id': led.site_id,
-                        'error': str(e)
+                        'error': 'An internal error occurred'
                     })
 
             # Update batch status
@@ -688,7 +692,7 @@ def api_execute_batch(batch_id):
     except Exception as e:
         session.rollback()
         current_app.logger.error(f"ECRI batch execution error: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An internal error occurred'}), 500
     finally:
         session.close()
 
