@@ -740,6 +740,36 @@ def config_delete(opt_id):
     return redirect(url_for('discount_plans.config_page'))
 
 
+@discount_plans_bp.route('/api/translate-text', methods=['POST'])
+@login_required
+@_require_config_permission
+def api_translate_text():
+    """Translate a single text string to all target languages."""
+    from web.utils.translation import ALL_LANGUAGES, translate_terms
+
+    body = request.get_json(silent=True) or {}
+    text = body.get('text', '').strip()
+    source_lang = body.get('source_lang', 'en')
+
+    VALID_LANG_CODES = set(ALL_LANGUAGES.keys())
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+    if source_lang not in VALID_LANG_CODES:
+        return jsonify({'error': 'Invalid source language'}), 400
+
+    target_langs = [lc for lc in ALL_LANGUAGES if lc != source_lang]
+    translations = {}
+    for lang_code in target_langs:
+        try:
+            result = translate_terms([text], lang_code, source_lang)
+            translations[lang_code] = result[0] if result else ''
+        except Exception as e:
+            current_app.logger.error(f"Config translate to {lang_code} failed: {e}")
+            translations[lang_code] = ''
+
+    return jsonify({'success': True, 'translations': translations})
+
+
 @discount_plans_bp.route('/api/config-options/<field_name>')
 @login_required
 def api_config_options(field_name):

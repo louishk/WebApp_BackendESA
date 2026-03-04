@@ -25,11 +25,16 @@
     .config-table .actions { white-space: nowrap; }
     .new-row { background: #f0fdf4; }
     .field-label { text-transform: capitalize; }
+    .btn-translate {
+        background: #6366f1; padding: 0.2rem 0.5rem; font-size: 0.75rem;
+        border: none; color: #fff; border-radius: 3px; cursor: pointer; white-space: nowrap;
+    }
+    .btn-translate:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
     <h1>Discount Plan Config</h1>
-    <p style="font-size: 0.85rem; color: #555;">Manage dropdown options for discount plan fields. Translations are optional.</p>
+    <p style="font-size: 0.85rem; color: #555;">Manage dropdown options for discount plan fields. Use AI Translate to auto-fill translations.</p>
 </div>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -59,27 +64,28 @@
                 <th>Japanese</th>
                 <th style="width: 50px;">Order</th>
                 <th style="width: 50px;">Active</th>
-                <th style="width: 120px;">Actions</th>
+                <th style="width: 160px;">Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for opt in grouped.get(field_name, []) %}
-            <tr>
+            <tr data-row-id="{{ opt.id }}">
                 <form method="POST" action="{{ url_for('discount_plans.config_save') }}" style="display: contents;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="id" value="{{ opt.id }}">
                     <input type="hidden" name="field_name" value="{{ opt.field_name }}">
-                    <td><input type="text" name="option_value" value="{{ opt.option_value }}" required></td>
-                    <td><input type="text" name="trans_ko" value="{{ (opt.translations or {}).get('ko', '') }}" placeholder="Korean"></td>
-                    <td><input type="text" name="trans_zh_cn" value="{{ (opt.translations or {}).get('zh_cn', '') }}" placeholder="Chinese (S)"></td>
-                    <td><input type="text" name="trans_zh_tw" value="{{ (opt.translations or {}).get('zh_tw', '') }}" placeholder="Chinese (T)"></td>
-                    <td><input type="text" name="trans_ms" value="{{ (opt.translations or {}).get('ms', '') }}" placeholder="Malay"></td>
-                    <td><input type="text" name="trans_ja" value="{{ (opt.translations or {}).get('ja', '') }}" placeholder="Japanese"></td>
+                    <td><input type="text" name="option_value" value="{{ opt.option_value }}" required class="en-value"></td>
+                    <td><input type="text" name="trans_ko" value="{{ (opt.translations or {}).get('ko', '') }}" placeholder="Korean" class="tr-ko"></td>
+                    <td><input type="text" name="trans_zh_cn" value="{{ (opt.translations or {}).get('zh_cn', '') }}" placeholder="Chinese (S)" class="tr-zh_cn"></td>
+                    <td><input type="text" name="trans_zh_tw" value="{{ (opt.translations or {}).get('zh_tw', '') }}" placeholder="Chinese (T)" class="tr-zh_tw"></td>
+                    <td><input type="text" name="trans_ms" value="{{ (opt.translations or {}).get('ms', '') }}" placeholder="Malay" class="tr-ms"></td>
+                    <td><input type="text" name="trans_ja" value="{{ (opt.translations or {}).get('ja', '') }}" placeholder="Japanese" class="tr-ja"></td>
                     <td><input type="number" name="sort_order" value="{{ opt.sort_order }}" min="0" style="width: 50px;"></td>
                     <td style="text-align: center;">
                         <input type="checkbox" name="is_active" {{ 'checked' if opt.is_active }}>
                     </td>
                     <td class="actions">
+                        <button type="button" class="btn-translate" onclick="translateRow(this)">AI</button>
                         <button type="submit" class="btn btn-sm" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">Save</button>
                 </form>
                 <form method="POST" action="{{ url_for('discount_plans.config_delete', opt_id=opt.id) }}" style="display: inline;" onsubmit="return confirm('Delete this option?');">
@@ -94,15 +100,16 @@
                 <form method="POST" action="{{ url_for('discount_plans.config_save') }}" style="display: contents;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="field_name" value="{{ field_name }}">
-                    <td><input type="text" name="option_value" placeholder="New option..." required></td>
-                    <td><input type="text" name="trans_ko" placeholder="Korean"></td>
-                    <td><input type="text" name="trans_zh_cn" placeholder="Chinese (S)"></td>
-                    <td><input type="text" name="trans_zh_tw" placeholder="Chinese (T)"></td>
-                    <td><input type="text" name="trans_ms" placeholder="Malay"></td>
-                    <td><input type="text" name="trans_ja" placeholder="Japanese"></td>
+                    <td><input type="text" name="option_value" placeholder="New option..." required class="en-value"></td>
+                    <td><input type="text" name="trans_ko" placeholder="Korean" class="tr-ko"></td>
+                    <td><input type="text" name="trans_zh_cn" placeholder="Chinese (S)" class="tr-zh_cn"></td>
+                    <td><input type="text" name="trans_zh_tw" placeholder="Chinese (T)" class="tr-zh_tw"></td>
+                    <td><input type="text" name="trans_ms" placeholder="Malay" class="tr-ms"></td>
+                    <td><input type="text" name="trans_ja" placeholder="Japanese" class="tr-ja"></td>
                     <td><input type="number" name="sort_order" value="0" min="0" style="width: 50px;"></td>
                     <td style="text-align: center;"><input type="checkbox" name="is_active" checked></td>
                     <td class="actions">
+                        <button type="button" class="btn-translate" onclick="translateRow(this)">AI</button>
                         <button type="submit" class="btn btn-sm" style="background: #059669; padding: 0.2rem 0.5rem; font-size: 0.8rem;">+ Add</button>
                     </td>
                 </form>
@@ -116,5 +123,49 @@
 {% block scripts %}
 <script>
 clearTimeout(window.autoRefreshTimeout);
+
+function translateRow(btn) {
+    var row = btn.closest('tr');
+    var enInput = row.querySelector('.en-value');
+    var text = enInput.value.trim();
+    if (!text) { alert('Enter an English value first.'); return; }
+
+    btn.disabled = true;
+    var origText = btn.textContent;
+    btn.textContent = '...';
+
+    var csrfToken = document.querySelector('[name=csrf_token]').value;
+
+    fetch('{{ url_for("discount_plans.api_translate_text") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': csrfToken
+        },
+        body: JSON.stringify({text: text, source_lang: 'en'})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success && data.translations) {
+            var t = data.translations;
+            var fields = {ko: '.tr-ko', zh_cn: '.tr-zh_cn', zh_tw: '.tr-zh_tw', ms: '.tr-ms', ja: '.tr-ja'};
+            for (var lang in fields) {
+                if (t[lang]) {
+                    var input = row.querySelector(fields[lang]);
+                    if (input) input.value = t[lang];
+                }
+            }
+        } else {
+            alert('Translation failed: ' + (data.error || 'Unknown error'));
+        }
+        btn.disabled = false;
+        btn.textContent = origText;
+    })
+    .catch(function(err) {
+        alert('Translation error: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = origText;
+    });
+}
 </script>
 {% endblock %}
