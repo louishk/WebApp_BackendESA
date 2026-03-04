@@ -2895,6 +2895,8 @@ def api_cc_discount_plans_update_simple():
         return jsonify({'error': 'site_code is required'}), 400
     if not concession_ids or not isinstance(concession_ids, list):
         return jsonify({'error': 'concession_ids must be a non-empty array'}), 400
+    if len(concession_ids) > 500:
+        return jsonify({'error': 'Maximum 500 concession IDs per request'}), 400
     if disabled not in (0, 1):
         return jsonify({'error': 'disabled must be 0 (active) or 1 (disabled)'}), 400
 
@@ -2945,10 +2947,10 @@ def api_cc_discount_plans_update_simple():
         )
 
         ret_code = None
-        ret_msg = None
         if results:
             ret_code = results[0].get('Ret_Code')
-            ret_msg = results[0].get('Ret_Msg')
+            if results[0].get('Ret_Msg'):
+                current_app.logger.info(f"SOAP DiscountPlanUpdateSimple ret_msg: {results[0].get('Ret_Msg')}")
 
         return jsonify({
             'success': True,
@@ -2956,7 +2958,6 @@ def api_cc_discount_plans_update_simple():
             'concession_ids': concession_ids,
             'disabled': disabled,
             'ret_code': ret_code,
-            'ret_msg': ret_msg,
         })
 
     except SOAPFaultError as e:
@@ -3008,6 +3009,8 @@ def api_cc_discount_plans_update():
         return jsonify({'error': 'site_code is required'}), 400
     if not concession_ids or not isinstance(concession_ids, list):
         return jsonify({'error': 'concession_ids must be a non-empty array'}), 400
+    if len(concession_ids) > 500:
+        return jsonify({'error': 'Maximum 500 concession IDs per request'}), 400
 
     try:
         concession_ids = [int(cid) for cid in concession_ids]
@@ -3023,18 +3026,32 @@ def api_cc_discount_plans_update():
     finally:
         pbi_session.close()
 
-    # Extract update fields with defaults that preserve current values
-    i_show_on = data.get('iShowOn', 0)
-    dc_max_occ_pct = data.get('dcMaxOccPct', 0)
-    s_plan_strt = data.get('sPlanStrt', '')
-    s_plan_end = data.get('sPlanEnd', '')
-    i_available_at = data.get('iAvailableAt', 0)
-    i_disabled = data.get('iDisabled', 0)
-    i_exclude_less = data.get('iExcludeIfLessThanUnitsTotal', 0)
-    i_exclude_more = data.get('iExcludeIfMoreThanUnitsTotal', 0)
-    dc_max_occ_exclude = data.get('dcMaxOccPctExcludeIfMoreThanUnitsTotal', 0)
-    s_unit_type_ids = data.get('sConcessionUnitTypeIDs', '')
-    i_unit_type_overwrite = data.get('iConcessionUnitTypeOverwrite', 0)
+    # Extract and validate update fields
+    import re
+    DATE_RE = re.compile(r'^\d{2}/\d{2}/\d{4}$')
+
+    try:
+        i_show_on = int(data.get('iShowOn', 0))
+        dc_max_occ_pct = float(data.get('dcMaxOccPct', 0))
+        i_available_at = int(data.get('iAvailableAt', 0))
+        i_disabled = int(data.get('iDisabled', 0))
+        i_exclude_less = int(data.get('iExcludeIfLessThanUnitsTotal', 0))
+        i_exclude_more = int(data.get('iExcludeIfMoreThanUnitsTotal', 0))
+        dc_max_occ_exclude = float(data.get('dcMaxOccPctExcludeIfMoreThanUnitsTotal', 0))
+        i_unit_type_overwrite = int(data.get('iConcessionUnitTypeOverwrite', 0))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Numeric fields must be valid numbers'}), 400
+
+    s_plan_strt = data.get('sPlanStrt', '') or ''
+    s_plan_end = data.get('sPlanEnd', '') or ''
+    if s_plan_strt and not DATE_RE.match(s_plan_strt):
+        return jsonify({'error': 'sPlanStrt must be in MM/DD/YYYY format'}), 400
+    if s_plan_end and not DATE_RE.match(s_plan_end):
+        return jsonify({'error': 'sPlanEnd must be in MM/DD/YYYY format'}), 400
+
+    s_unit_type_ids = data.get('sConcessionUnitTypeIDs', '') or ''
+    if s_unit_type_ids and not re.match(r'^[\d|]+$', s_unit_type_ids):
+        return jsonify({'error': 'sConcessionUnitTypeIDs must be pipe-separated integers'}), 400
 
     config = DataLayerConfig.from_env()
     if not config.soap:
@@ -3076,17 +3093,16 @@ def api_cc_discount_plans_update():
         )
 
         ret_code = None
-        ret_msg = None
         if results:
             ret_code = results[0].get('Ret_Code')
-            ret_msg = results[0].get('Ret_Msg')
+            if results[0].get('Ret_Msg'):
+                current_app.logger.info(f"SOAP DiscountPlanUpdate ret_msg: {results[0].get('Ret_Msg')}")
 
         return jsonify({
             'success': True,
             'site_code': site_code,
             'concession_ids': concession_ids,
             'ret_code': ret_code,
-            'ret_msg': ret_msg,
         })
 
     except SOAPFaultError as e:

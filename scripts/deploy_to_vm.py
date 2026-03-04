@@ -18,8 +18,9 @@ Deployment Steps:
     3. Update code (rsync / git pull / git reset --hard)
     4. Check/create Python venv
     5. Check/install requirements
-    6. Verify vault system and credentials
-    7. Start services
+    6. Backup vault (secrets.enc, metadata.json, rotation.log)
+    7. Verify vault system and credentials
+    8. Start services
 
 Configuration (from .env and vault):
     - VM_SSH_HOST: VM IP address
@@ -155,7 +156,7 @@ def run_ssh_command(credentials: dict, command: str, verbose: bool = True, timeo
 
 def step_stop_services(credentials: dict, verbose: bool = True) -> bool:
     """Step 1: Stop all running services and kill stray processes."""
-    print("\n[1/7] Stopping services...")
+    print("\n[1/8] Stopping services...")
 
     stop_cmd = """
         sudo systemctl stop esa-backend 2>/dev/null || true
@@ -183,7 +184,7 @@ def step_stop_services(credentials: dict, verbose: bool = True) -> bool:
 
 def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bool = True) -> bool:
     """Step 2a: Update code via rsync."""
-    print("\n[2/7] Syncing code via rsync...")
+    print("\n[2/8] Syncing code via rsync...")
 
     excludes = ' '.join(f"--exclude='{e}'" for e in RSYNC_EXCLUDES)
     dry_run_flag = '-n' if dry_run else ''
@@ -241,7 +242,7 @@ def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bo
 def step_update_code_git(credentials: dict, hard_reset: bool = False, verbose: bool = True) -> bool:
     """Step 2b: Update code via git pull (or hard reset)."""
     action = "hard reset + pull" if hard_reset else "git pull"
-    print(f"\n[2/7] Updating code via {action}...")
+    print(f"\n[2/8] Updating code via {action}...")
 
     if hard_reset:
         git_cmd = f"""
@@ -266,7 +267,7 @@ def step_update_code_git(credentials: dict, hard_reset: bool = False, verbose: b
 
 def step_check_venv(credentials: dict, verbose: bool = True) -> bool:
     """Step 3: Check/create Python virtual environment."""
-    print("\n[3/7] Checking Python virtual environment...")
+    print("\n[3/8] Checking Python virtual environment...")
 
     venv_cmd = f"""
         if [ -d "{VM_VENV_PATH}" ] && [ -f "{VM_VENV_PATH}/bin/python" ]; then
@@ -288,7 +289,7 @@ def step_check_venv(credentials: dict, verbose: bool = True) -> bool:
 
 def step_check_requirements(credentials: dict, verbose: bool = True) -> bool:
     """Step 4: Check/install Python requirements."""
-    print("\n[4/7] Checking Python requirements...")
+    print("\n[4/8] Checking Python requirements...")
 
     req_cmd = f"""
         cd {VM_PYTHON_PATH}
@@ -310,7 +311,7 @@ def step_check_requirements(credentials: dict, verbose: bool = True) -> bool:
 
 def step_check_env(credentials: dict, verbose: bool = True) -> bool:
     """Step 5: Check .env file exists and has required vars."""
-    print("\n[5/7] Checking .env configuration...")
+    print("\n[5/8] Checking .env configuration...")
 
     env_cmd = f"""
         if [ -f "{VM_PYTHON_PATH}/.env" ]; then
@@ -333,9 +334,38 @@ def step_check_env(credentials: dict, verbose: bool = True) -> bool:
     return exit_code == 0
 
 
+def step_backup_vault(credentials: dict, verbose: bool = True) -> bool:
+    """Step 6: Backup vault files before checking/modifying anything."""
+    print("\n[6/8] Backing up vault...")
+
+    vault_dir = VM_VAULT_PATH
+    backup_cmd = (
+        f'sudo -u www-data bash -c \''
+        f'VAULT_DIR="{vault_dir}" && '
+        f'if [ ! -d "$VAULT_DIR" ]; then echo "No vault directory found — skipping backup"; exit 0; fi && '
+        f'TIMESTAMP=$(date +%Y%m%d_%H%M%S) && '
+        f'for f in secrets.enc metadata.json rotation.log; do '
+        f'if [ -f "$VAULT_DIR/$f" ]; then '
+        f'cp "$VAULT_DIR/$f" "$VAULT_DIR/$f.$TIMESTAMP" && '
+        f'echo "Backed up $f -> $f.$TIMESTAMP"; '
+        f'fi; done && '
+        f'for f in secrets.enc metadata.json rotation.log; do '
+        f'ls -t "$VAULT_DIR/$f".* 2>/dev/null | tail -n +6 | xargs -r rm --; '
+        f'done && '
+        f'echo "Vault backup complete"\''
+    )
+
+    stdout, stderr, exit_code = run_ssh_command(credentials, backup_cmd, verbose)
+
+    if exit_code != 0:
+        print("    WARNING: Vault backup failed — continuing deployment")
+
+    return True  # Non-blocking: always continue
+
+
 def step_check_vault(credentials: dict, verbose: bool = True) -> bool:
-    """Step 6: Check vault system and required secrets."""
-    print("\n[6/7] Checking vault system...")
+    """Step 7: Check vault system and required secrets."""
+    print("\n[7/8] Checking vault system...")
 
     # Build the check for required secrets
     secrets_check = " && ".join([
@@ -375,8 +405,8 @@ def step_check_vault(credentials: dict, verbose: bool = True) -> bool:
 
 
 def step_start_services(credentials: dict, verbose: bool = True) -> bool:
-    """Step 7: Start services."""
-    print("\n[7/7] Starting services...")
+    """Step 8: Start services."""
+    print("\n[8/8] Starting services...")
 
     start_cmd = f"""
         # Reload systemd in case service files changed
@@ -470,13 +500,13 @@ def deploy(mode: str = 'rsync', dry_run: bool = False, verbose: bool = True) -> 
         success = step_update_code_rsync(credentials, dry_run, verbose)
     elif mode == 'pull':
         if dry_run:
-            print("\n[2/7] Would run: git pull")
+            print("\n[2/8] Would run: git pull")
             success = True
         else:
             success = step_update_code_git(credentials, hard_reset=False, verbose=verbose)
     elif mode == 'hard-reset':
         if dry_run:
-            print("\n[2/7] Would run: git reset --hard + git pull")
+            print("\n[2/8] Would run: git reset --hard + pull")
             success = True
         else:
             success = step_update_code_git(credentials, hard_reset=True, verbose=verbose)
@@ -506,11 +536,14 @@ def deploy(mode: str = 'rsync', dry_run: bool = False, verbose: bool = True) -> 
     if not step_check_env(credentials, verbose):
         print("WARNING: .env check failed - service may not start correctly")
 
-    # Step 6: Check vault
+    # Step 6: Backup vault
+    step_backup_vault(credentials, verbose)
+
+    # Step 7: Check vault
     if not step_check_vault(credentials, verbose):
         print("WARNING: Vault check failed - some features may not work")
 
-    # Step 7: Start services
+    # Step 8: Start services
     if not step_start_services(credentials, verbose):
         print("ERROR: Failed to start services!")
         return False
