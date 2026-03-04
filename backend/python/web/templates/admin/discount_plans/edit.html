@@ -117,6 +117,29 @@
                 <input type="number" name="sort_order" value="{{ plan.sort_order if plan else form_data.get('sort_order', '0') }}" min="0">
             </div>
         </div>
+        <details id="sitelink-details" style="margin-top: 0.75rem; border-top: 1px solid var(--esa-gray-dark); padding-top: 0.5rem;">
+            <summary style="cursor: pointer; font-weight: 600; font-size: 0.85rem; color: var(--esa-navy);">
+                Sitelink Linkage &amp; Comparison
+                <span id="linked-count-badge" style="display: none; background: #6366f1; color: #fff; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 10px; margin-left: 0.3rem;">0</span>
+            </summary>
+            <div style="margin-top: 0.5rem;">
+                <div id="sitelink-loading" style="display: none; font-size: 0.85rem; color: #6366f1; margin-bottom: 0.5rem;">Loading concessions...</div>
+                <div class="form-group">
+                    <label>Linked Entries (<span id="linked-count">0</span>)</label>
+                    <div id="linked-concessions-display" style="max-height: 250px; overflow-y: auto;">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 0.5rem;">
+                    <label>Site Comparison</label>
+                    <div id="site-comparison" style="font-size: 0.85rem;">
+                        <span style="color: #888;">Select a Sitelink Discount Name to see comparison.</span>
+                    </div>
+                </div>
+                <input type="hidden" name="linked_concessions_json" id="linked-concessions-json"
+                       value="{{ (plan.linked_concessions | tojson) if plan and plan.linked_concessions else '[]' }}">
+            </div>
+        </details>
     </div>
 
     <!-- ================================================================= -->
@@ -412,31 +435,6 @@
     </div>
 
     <!-- ================================================================= -->
-    <!-- Linked Sitelink Plans + Comparison -->
-    <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Sitelink Linkage &amp; Comparison</h3>
-        <p style="font-size: 0.8rem; color: #888; margin-bottom: 0.75rem;">
-            Selecting a Sitelink Discount Name above auto-fetches all matching concessions. The comparison below shows coverage vs applicable sites.
-        </p>
-        <div id="sitelink-loading" style="display: none; font-size: 0.85rem; color: #6366f1; margin-bottom: 0.5rem;">Loading concessions...</div>
-        <div class="form-group">
-            <label>Linked Entries (<span id="linked-count">0</span>)</label>
-            <div id="linked-concessions-display" style="max-height: 250px; overflow-y: auto;">
-                <!-- Populated by JS -->
-            </div>
-        </div>
-        <div class="form-group" style="margin-top: 0.75rem;">
-            <label>Site Comparison</label>
-            <div id="site-comparison" style="font-size: 0.85rem;">
-                <span style="color: #888;">Select a Sitelink Discount Name to see comparison.</span>
-            </div>
-        </div>
-        <input type="hidden" name="linked_concessions_json" id="linked-concessions-json"
-               value="{{ (plan.linked_concessions | tojson) if plan and plan.linked_concessions else '[]' }}">
-    </div>
-
-    <!-- ================================================================= -->
     <!-- Departmental Info -->
     <!-- ================================================================= -->
     <div class="card form-section">
@@ -687,6 +685,13 @@ function renderLinked() {
     var display = document.getElementById('linked-concessions-display');
     display.textContent = '';
     document.getElementById('linked-count').textContent = linkedData.length;
+    var badge = document.getElementById('linked-count-badge');
+    if (linkedData.length > 0) {
+        badge.textContent = linkedData.length;
+        badge.style.display = 'inline';
+    } else {
+        badge.style.display = 'none';
+    }
     if (linkedData.length === 0) {
         var msg = document.createElement('div');
         msg.style.cssText = 'color: #888; font-size: 0.85rem;';
@@ -776,6 +781,7 @@ function renderComparison() {
 }
 
 renderLinked();
+if (linkedData.length > 0) document.getElementById('sitelink-details').open = true;
 
 // Auto-fetch concessions when sitelink_discount_name changes
 var sitelinkSelect = document.querySelector('[name="sitelink_discount_name"]');

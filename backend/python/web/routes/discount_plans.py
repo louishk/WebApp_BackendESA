@@ -8,6 +8,7 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 from sqlalchemy import asc, desc
 from web.utils.audit import audit_log, AuditEvent
+from web.utils.rate_limit import rate_limit_api
 
 discount_plans_bp = Blueprint('discount_plans', __name__, url_prefix='/discount-plans')
 
@@ -17,14 +18,23 @@ def get_session():
     return current_app.get_db_session()
 
 
+_pbi_engine = None
+
+
+def _get_pbi_engine():
+    global _pbi_engine
+    if _pbi_engine is None:
+        from common.config_loader import get_database_url
+        from sqlalchemy import create_engine
+        pbi_url = get_database_url('pbi')
+        _pbi_engine = create_engine(pbi_url, pool_size=5, max_overflow=10)
+    return _pbi_engine
+
+
 def _get_pbi_session():
     """Get PBI database session for Site queries."""
-    from common.config_loader import get_database_url
-    from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
-    pbi_url = get_database_url('pbi')
-    engine = create_engine(pbi_url)
-    Session = sessionmaker(bind=engine)
+    Session = sessionmaker(bind=_get_pbi_engine())
     return Session()
 
 
@@ -63,15 +73,26 @@ def _get_sites_by_country():
 
 
 def _get_sitelink_discount_names():
-    """Get distinct Sitelink discount plan names from cc_discount (PBI DB)."""
+    """Get distinct Sitelink discount plan names from cc_discount (PBI DB).
+    Only returns active plans (not deleted/disabled/archived) with valid periods.
+    """
     try:
         from common.models import CCDiscount
-        from sqlalchemy import distinct
+        from sqlalchemy import distinct, or_
+        from datetime import datetime
         session = _get_pbi_session()
         try:
+            now = datetime.utcnow()
             rows = (session.query(distinct(CCDiscount.sPlanName))
                     .filter(CCDiscount.sPlanName.isnot(None))
                     .filter(CCDiscount.dDeleted.is_(None))
+                    .filter(CCDiscount.dDisabled.is_(None))
+                    .filter(CCDiscount.dArchived.is_(None))
+                    .filter(or_(
+                        CCDiscount.dPlanEnd.is_(None),
+                        CCDiscount.bNeverExpires.is_(True),
+                        CCDiscount.dPlanEnd >= now,
+                    ))
                     .order_by(CCDiscount.sPlanName)
                     .all())
             return [r[0] for r in rows if r[0] and r[0].strip()]
@@ -529,6 +550,7 @@ def api_get(plan_id):
 
 @discount_plans_bp.route('/api/concessions/search')
 @login_required
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_search_concessions():
     """
     Search cc_discount entries by plan name.
@@ -555,7 +577,18 @@ def api_search_concessions():
                 if not site_id.isdigit():
                     return jsonify({'error': 'Invalid site_id'}), 400
                 query = query.filter(CCDiscount.SiteID == int(site_id))
-            query = query.filter(CCDiscount.dDeleted.is_(None))
+            from sqlalchemy import or_
+            from datetime import datetime
+            now = datetime.utcnow()
+            query = (query
+                .filter(CCDiscount.dDeleted.is_(None))
+                .filter(CCDiscount.dDisabled.is_(None))
+                .filter(CCDiscount.dArchived.is_(None))
+                .filter(or_(
+                    CCDiscount.dPlanEnd.is_(None),
+                    CCDiscount.bNeverExpires.is_(True),
+                    CCDiscount.dPlanEnd >= now,
+                )))
             results = query.order_by(CCDiscount.SiteID, CCDiscount.sPlanName).limit(50).all()
 
             # Get site names
@@ -584,6 +617,7 @@ def api_search_concessions():
 
 @discount_plans_bp.route('/api/concessions/by-plan-name')
 @login_required
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_concessions_by_plan_name():
     """
     Get all concessions matching an exact Sitelink plan name.
@@ -597,6 +631,9 @@ def api_concessions_by_plan_name():
         from common.models import CCDiscount, Site
         pbi_session = _get_pbi_session()
         try:
+            from sqlalchemy import or_
+            from datetime import datetime
+            now = datetime.utcnow()
             results = (pbi_session.query(
                 CCDiscount.ConcessionID, CCDiscount.SiteID,
                 CCDiscount.sPlanName, CCDiscount.sDefPlanName,
@@ -604,6 +641,13 @@ def api_concessions_by_plan_name():
             )
             .filter(CCDiscount.sPlanName == name)
             .filter(CCDiscount.dDeleted.is_(None))
+            .filter(CCDiscount.dDisabled.is_(None))
+            .filter(CCDiscount.dArchived.is_(None))
+            .filter(or_(
+                CCDiscount.dPlanEnd.is_(None),
+                CCDiscount.bNeverExpires.is_(True),
+                CCDiscount.dPlanEnd >= now,
+            ))
             .order_by(CCDiscount.SiteID)
             .all())
 
