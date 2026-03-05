@@ -62,6 +62,7 @@
             <button type="button" class="btn btn-sm" style="background: #28A745;" id="enable-btn" onclick="confirmSimple(0)" disabled>Enable Selected</button>
             <button type="button" class="btn btn-sm" style="background: #C41230;" id="disable-btn" onclick="confirmSimple(1)" disabled>Disable Selected</button>
             <button type="button" class="btn btn-secondary btn-sm" id="advanced-toggle" onclick="toggleAdvanced()" disabled>Advanced Edit</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="refresh-btn" onclick="refreshFromSitelink()">&#x21bb; Sync from Sitelink</button>
         </div>
 
         <!-- Advanced Edit Panel -->
@@ -736,19 +737,62 @@
     function closeResults() {
         document.getElementById('results-modal').style.display = 'none';
 
-        // Refresh stats
+        // Hide advanced panel
+        document.getElementById('advanced-panel').style.display = 'none';
+        document.getElementById('select-all-checkbox').checked = false;
+
+        // Refresh stats from local state
         const active = plansData.filter(p => !p.isDisabled).length;
         const disabled = plansData.filter(p => p.isDisabled).length;
         document.getElementById('active-plans').textContent = active;
         document.getElementById('disabled-plans').textContent = disabled;
 
-        // Re-render table to reflect updated statuses
         renderPlans();
         updateSelectedCount();
-        document.getElementById('select-all-checkbox').checked = false;
+    }
 
-        // Hide advanced panel
-        document.getElementById('advanced-panel').style.display = 'none';
+    // Trigger cc_discount_plans pipeline sync, poll for completion, then reload from DB
+    async function refreshFromSitelink() {
+        const btn = document.getElementById('refresh-btn');
+        btn.disabled = true;
+        btn.textContent = '⟳ Syncing...';
+
+        try {
+            const resp = await fetch('/api/jobs/cc_discount_plans/run-async', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify({ mode: 'full' })
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const { execution_id } = await resp.json();
+
+            // Poll execution status (max 60s)
+            let elapsed = 0;
+            while (elapsed < 60) {
+                await new Promise(r => setTimeout(r, 2000));
+                elapsed += 2;
+                btn.textContent = `⟳ Syncing (${elapsed}s)...`;
+
+                try {
+                    const poll = await fetch(`/api/executions/${execution_id}/output`, { headers: apiHeaders() });
+                    if (poll.ok) {
+                        const data = await poll.json();
+                        if (data.status === 'completed' || data.status === 'failed') break;
+                    }
+                } catch (_) {}
+            }
+
+            await loadSelectedSites();
+            btn.textContent = '✓ Synced';
+        } catch (e) {
+            console.error('Sync failed:', e);
+            btn.textContent = '✗ Sync failed';
+        }
+
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = '&#x21bb; Sync from Sitelink';
+        }, 2000);
     }
 
     // Re-render when status filter changes
