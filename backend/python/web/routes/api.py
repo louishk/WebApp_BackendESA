@@ -1985,8 +1985,8 @@ def api_inventory_publish_labels():
     labels = data['labels']
     if not labels:
         return jsonify({'error': 'labels array is empty'}), 400
-    if len(labels) > 5000:
-        return jsonify({'error': 'labels array exceeds maximum of 5000'}), 400
+    if len(labels) > 10000:
+        return jsonify({'error': 'labels array exceeds maximum of 10000'}), 400
 
     # Field length limits matching DB schema
     field_limits = {
