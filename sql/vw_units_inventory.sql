@@ -64,10 +64,23 @@ SELECT DISTINCT ON (up."UnitID")
 
     -- Raw fields for reference
     up."sUnitDesc"         AS unit_desc,
-    up."sUnitNote"         AS unit_note
+    up."sUnitNote"         AS unit_note,
+
+    -- Published category labels from Inventory Checker
+    cl.size_category       AS label_size_category,
+    cl.size_range          AS label_size_range,
+    cl.unit_type_code      AS label_type_code,
+    cl.climate_code        AS label_climate_code,
+    cl.shape               AS label_shape,
+    cl.pillar              AS label_pillar,
+    cl.final_label         AS category_label,
+    cl.published_at        AS label_published_at
 
 FROM unit_parsed up
 JOIN siteinfo s ON s."SiteID" = up."SiteID"
+LEFT JOIN unit_category_labels cl
+    ON cl.site_id = up."SiteID"
+    AND cl.unit_id = up."UnitID"
 LEFT JOIN unit_range_mappings rm
     ON rm.site_code = s."SiteCode"
     AND rm.unit_prefix = up.unit_prefix
