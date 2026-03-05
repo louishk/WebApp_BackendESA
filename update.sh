@@ -1,7 +1,14 @@
 #!/bin/bash
-# ESA Backend — routine deployment update
-# Run after git pull (or let this script pull for you).
-# Usage: sudo ./update.sh
+# ESA Backend — VM-side utility for common operations
+# Full deploys should use: python scripts/deploy_to_vm.py (from local machine)
+#
+# Usage:
+#   sudo ./update.sh              # default: restart services
+#   sudo ./update.sh restart      # restart esa-backend + backend-scheduler
+#   sudo ./update.sh deps         # pip install requirements, then restart
+#   sudo ./update.sh status       # show service status + recent logs
+#   sudo ./update.sh nginx        # sync nginx config, test, reload
+#   sudo ./update.sh full         # deps + nginx + systemd sync + restart
 
 set -e
 
@@ -15,61 +22,84 @@ NGINX_DEST="/etc/nginx/sites-available/esa-backend"
 WEB_SERVICE="esa-backend"
 SCHEDULER_SERVICE="backend-scheduler"
 
-# --- preflight -----------------------------------------------------------
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root: sudo $0"
     exit 1
 fi
 
-echo "=== ESA Backend — Deployment Update ==="
-echo ""
+CMD="${1:-restart}"
 
-# --- 1. pull latest code --------------------------------------------------
-echo "[1/5] Pulling latest code..."
-cd "$REPO_ROOT"
-sudo -u www-data git pull
-echo ""
+do_restart() {
+    echo "Restarting services..."
+    systemctl restart "$WEB_SERVICE"
+    systemctl restart "$SCHEDULER_SERVICE"
+    echo "Done"
+}
 
-# --- 2. install / update Python dependencies ------------------------------
-echo "[2/5] Installing Python dependencies..."
-"$VENV/bin/pip" install --quiet -r "$PYTHON_DIR/requirements.txt"
-echo ""
+do_deps() {
+    echo "Installing Python dependencies..."
+    sudo -u www-data "$VENV/bin/pip" install --quiet -r "$PYTHON_DIR/requirements.txt"
+    echo "Dependencies installed"
+}
 
-# --- 3. sync systemd service files ----------------------------------------
-echo "[3/5] Syncing systemd service files..."
-cp "$SYSTEMD_SRC/$WEB_SERVICE.service"       /etc/systemd/system/
-cp "$SYSTEMD_SRC/$SCHEDULER_SERVICE.service"  /etc/systemd/system/
-systemctl daemon-reload
-echo ""
+do_status() {
+    echo "=== $WEB_SERVICE ==="
+    systemctl status "$WEB_SERVICE" --no-pager --lines=5 2>/dev/null || echo "not running"
+    echo ""
+    echo "=== $SCHEDULER_SERVICE ==="
+    systemctl status "$SCHEDULER_SERVICE" --no-pager --lines=5 2>/dev/null || echo "not running"
+    echo ""
+    echo "=== Recent logs ($WEB_SERVICE) ==="
+    journalctl -u "$WEB_SERVICE" --no-pager -n 10 2>/dev/null || echo "no logs"
+}
 
-# --- 4. sync nginx config -------------------------------------------------
-echo "[4/5] Syncing nginx config..."
-if [ -f "$NGINX_SRC" ]; then
-    cp "$NGINX_SRC" "$NGINX_DEST"
-    if nginx -t 2>&1; then
-        systemctl reload nginx
-        echo "Nginx config updated and reloaded"
+do_nginx() {
+    echo "Syncing nginx config..."
+    if [ -f "$NGINX_SRC" ]; then
+        cp "$NGINX_SRC" "$NGINX_DEST"
+        if nginx -t 2>&1; then
+            systemctl reload nginx
+            echo "Nginx config updated and reloaded"
+        else
+            echo "ERROR: Nginx config test failed — kept previous config"
+            exit 1
+        fi
     else
-        echo "ERROR: Nginx config test failed — kept previous config"
+        echo "SKIP: $NGINX_SRC not found"
     fi
-else
-    echo "SKIP: $NGINX_SRC not found"
-fi
-echo ""
+}
 
-# --- 5. restart services --------------------------------------------------
-echo "[5/5] Restarting services..."
-systemctl restart "$WEB_SERVICE"
-systemctl restart "$SCHEDULER_SERVICE"
-echo ""
+do_systemd() {
+    echo "Syncing systemd service files..."
+    cp "$SYSTEMD_SRC/$WEB_SERVICE.service"       /etc/systemd/system/
+    cp "$SYSTEMD_SRC/$SCHEDULER_SERVICE.service"  /etc/systemd/system/
+    systemctl daemon-reload
+    echo "Systemd units reloaded"
+}
 
-# --- status ---------------------------------------------------------------
-echo "=== Service Status ==="
-echo ""
-echo "--- $WEB_SERVICE ---"
-systemctl status "$WEB_SERVICE" --no-pager --lines=3
-echo ""
-echo "--- $SCHEDULER_SERVICE ---"
-systemctl status "$SCHEDULER_SERVICE" --no-pager --lines=3
-echo ""
-echo "=== Update complete ==="
+case "$CMD" in
+    restart)
+        do_restart
+        ;;
+    deps)
+        do_deps
+        do_restart
+        ;;
+    status)
+        do_status
+        ;;
+    nginx)
+        do_nginx
+        ;;
+    full)
+        do_deps
+        do_nginx
+        do_systemd
+        do_restart
+        ;;
+    *)
+        echo "Unknown command: $CMD"
+        echo "Usage: sudo $0 {restart|deps|status|nginx|full}"
+        exit 1
+        ;;
+esac

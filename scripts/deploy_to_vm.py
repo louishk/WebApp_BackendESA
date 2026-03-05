@@ -2,12 +2,10 @@
 """
 Deploy to VM Script
 
-Deploys ESA Backend to Azure VM with full environment setup.
+Deploys ESA Backend to Azure VM with full environment setup via rsync.
 
 Usage:
     python scripts/deploy_to_vm.py                  # Full deploy (rsync)
-    python scripts/deploy_to_vm.py --pull           # Deploy via git pull
-    python scripts/deploy_to_vm.py --hard-reset     # Deploy via git reset --hard + pull
     python scripts/deploy_to_vm.py --status         # Check service status
     python scripts/deploy_to_vm.py --cmd "ls"       # Run custom command
     python scripts/deploy_to_vm.py --dry-run        # Show what would happen
@@ -15,7 +13,7 @@ Usage:
 Deployment Steps:
     1. Stop all services (esa-backend, scheduler)
     2. Kill any stray Python processes
-    3. Update code (rsync / git pull / git reset --hard)
+    3. Update code via rsync
     4. Check/create Python venv
     5. Check/install requirements
     6. Backup vault (secrets.enc, metadata.json, rotation.log)
@@ -239,31 +237,6 @@ def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bo
         return False
 
 
-def step_update_code_git(credentials: dict, hard_reset: bool = False, verbose: bool = True) -> bool:
-    """Step 2b: Update code via git pull (or hard reset)."""
-    action = "hard reset + pull" if hard_reset else "git pull"
-    print(f"\n[2/8] Updating code via {action}...")
-
-    if hard_reset:
-        git_cmd = f"""
-            cd {VM_BACKEND_PATH}
-            sudo -u www-data git fetch origin
-            sudo -u www-data git reset --hard origin/master
-            sudo -u www-data git clean -fd
-            echo "Git reset complete"
-            sudo -u www-data git log --oneline -1
-        """
-    else:
-        git_cmd = f"""
-            cd {VM_BACKEND_PATH}
-            sudo -u www-data git pull origin master
-            echo "Git pull complete"
-            sudo -u www-data git log --oneline -1
-        """
-
-    stdout, stderr, exit_code = run_ssh_command(credentials, git_cmd, verbose)
-    return exit_code == 0
-
 
 def step_check_venv(credentials: dict, verbose: bool = True) -> bool:
     """Step 3: Check/create Python virtual environment."""
@@ -473,18 +446,17 @@ def step_start_services(credentials: dict, verbose: bool = True) -> bool:
     return exit_code == 0
 
 
-def deploy(mode: str = 'rsync', dry_run: bool = False, verbose: bool = True) -> bool:
+def deploy(dry_run: bool = False, verbose: bool = True) -> bool:
     """
-    Full deployment to VM.
+    Full deployment to VM via rsync.
 
     Args:
-        mode: 'rsync', 'pull', or 'hard-reset'
         dry_run: Show what would happen without doing it
         verbose: Print output
     """
     credentials = get_ssh_credentials()
 
-    print(f"\nDeploying to {credentials['host']} (mode: {mode})")
+    print(f"\nDeploying to {credentials['host']} (mode: rsync)")
     print("=" * 50)
 
     if dry_run:
@@ -496,23 +468,7 @@ def deploy(mode: str = 'rsync', dry_run: bool = False, verbose: bool = True) -> 
             print("WARNING: Could not stop all services")
 
     # Step 2: Update code
-    if mode == 'rsync':
-        success = step_update_code_rsync(credentials, dry_run, verbose)
-    elif mode == 'pull':
-        if dry_run:
-            print("\n[2/8] Would run: git pull")
-            success = True
-        else:
-            success = step_update_code_git(credentials, hard_reset=False, verbose=verbose)
-    elif mode == 'hard-reset':
-        if dry_run:
-            print("\n[2/8] Would run: git reset --hard + pull")
-            success = True
-        else:
-            success = step_update_code_git(credentials, hard_reset=True, verbose=verbose)
-    else:
-        print(f"ERROR: Unknown mode: {mode}")
-        return False
+    success = step_update_code_rsync(credentials, dry_run, verbose)
 
     if not success:
         print("ERROR: Code update failed!")
@@ -603,24 +559,10 @@ def main():
         epilog="""
 Examples:
   python scripts/deploy_to_vm.py                  # Full deploy via rsync
-  python scripts/deploy_to_vm.py --pull           # Deploy via git pull
-  python scripts/deploy_to_vm.py --hard-reset     # Wipe and deploy via git reset --hard
   python scripts/deploy_to_vm.py --status         # Check service status
   python scripts/deploy_to_vm.py --cmd "ls -la"   # Run custom command
   python scripts/deploy_to_vm.py --dry-run        # Preview deployment
         """
-    )
-
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        '--pull',
-        action='store_true',
-        help='Update code via git pull (instead of rsync)'
-    )
-    mode_group.add_argument(
-        '--hard-reset',
-        action='store_true',
-        help='Wipe local changes and update via git reset --hard + pull'
     )
 
     parser.add_argument(
@@ -660,15 +602,7 @@ Examples:
         elif args.cmd:
             success = run_custom_command(args.cmd, verbose)
         else:
-            # Determine mode
-            if args.hard_reset:
-                mode = 'hard-reset'
-            elif args.pull:
-                mode = 'pull'
-            else:
-                mode = 'rsync'
-
-            success = deploy(mode=mode, dry_run=args.dry_run, verbose=verbose)
+            success = deploy(dry_run=args.dry_run, verbose=verbose)
 
         if not success:
             sys.exit(1)
