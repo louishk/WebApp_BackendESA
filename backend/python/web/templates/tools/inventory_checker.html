@@ -143,6 +143,7 @@
                     <option value="reviewed">Reviewed</option>
                 </select>
                 <button type="button" class="btn btn-sm" onclick="saveOverrides()">Save Overrides</button>
+                <button type="button" class="btn btn-sm" style="background: #17a2b8; color: #fff;" onclick="publishLabels()">Publish Labels</button>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="exportToExcel()">Export to Excel</button>
             </div>
         </div>
@@ -1166,6 +1167,46 @@
             }
         } catch (error) {
             alert('Failed to save overrides: ' + error.message);
+        }
+    }
+
+    // --- Publish Labels to esa_pbi ---
+    async function publishLabels() {
+        if (processedUnits.length === 0) {
+            alert('No units loaded to publish.');
+            return;
+        }
+
+        if (!confirm(`Publish labels for ${processedUnits.length} unit(s) to the reporting database?\n\nThis will update the unit_category_labels table used by Power BI.`)) {
+            return;
+        }
+
+        const labels = processedUnits.map(u => ({
+            site_id: u.SiteID,
+            unit_id: u.UnitID,
+            size_category: u._sizeCat || null,
+            size_range: u._sizeRange || null,
+            unit_type_code: u._unitType || null,
+            climate_code: u._climate || null,
+            shape: u._shape || null,
+            pillar: u._pillar || null,
+            final_label: u._finalLabel,
+        }));
+
+        try {
+            const response = await fetch('/api/inventory/publish-labels', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify({ labels }),
+            });
+            const result = await response.json();
+            if (response.ok && result.success) {
+                alert(`Published ${result.published} label(s) to reporting database.`);
+            } else {
+                alert('Failed to publish labels: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Failed to publish labels: ' + error.message);
         }
     }
 

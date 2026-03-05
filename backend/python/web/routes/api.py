@@ -1965,6 +1965,101 @@ def api_inventory_upsert_overrides():
         session.close()
 
 
+@api_bp.route('/inventory/publish-labels', methods=['POST'])
+@require_auth
+@require_api_scope('inventory:write')
+@rate_limit_api(max_per_minute=10)
+def api_inventory_publish_labels():
+    """Publish computed final labels to unit_category_labels on esa_pbi."""
+    from flask_login import current_user as session_user
+
+    # Defense-in-depth: session users must have inventory tools access
+    if session_user and session_user.is_authenticated:
+        if not session_user.can_access_inventory_tools():
+            return jsonify({'error': 'Forbidden'}), 403
+
+    data = request.get_json()
+    if not data or 'labels' not in data:
+        return jsonify({'error': 'labels array is required'}), 400
+
+    labels = data['labels']
+    if not labels:
+        return jsonify({'error': 'labels array is empty'}), 400
+    if len(labels) > 5000:
+        return jsonify({'error': 'labels array exceeds maximum of 5000'}), 400
+
+    # Field length limits matching DB schema
+    field_limits = {
+        'size_category': 5, 'size_range': 10, 'unit_type_code': 10,
+        'climate_code': 5, 'shape': 5, 'pillar': 5, 'final_label': 30,
+    }
+
+    username = g.current_user.get('sub', 'unknown') if hasattr(g, 'current_user') and g.current_user else 'unknown'
+
+    session = get_pbi_session()
+    try:
+        published = 0
+        for item in labels:
+            try:
+                site_id = int(item['site_id'])
+                unit_id = int(item['unit_id'])
+            except (TypeError, ValueError, KeyError):
+                continue
+
+            final_label = item.get('final_label')
+            if not isinstance(final_label, str) or not final_label.strip():
+                continue
+
+            # Truncate string fields to schema limits
+            def _trunc(key):
+                val = item.get(key) or None
+                if val and len(str(val)) > field_limits.get(key, 30):
+                    val = str(val)[:field_limits[key]]
+                return val
+
+            session.execute(text("""
+                INSERT INTO unit_category_labels
+                    (site_id, unit_id, size_category, size_range, unit_type_code,
+                     climate_code, shape, pillar, final_label, published_by, published_at)
+                VALUES
+                    (:site_id, :unit_id, :size_category, :size_range, :unit_type_code,
+                     :climate_code, :shape, :pillar, :final_label, :published_by, NOW())
+                ON CONFLICT (site_id, unit_id) DO UPDATE SET
+                    size_category = EXCLUDED.size_category,
+                    size_range = EXCLUDED.size_range,
+                    unit_type_code = EXCLUDED.unit_type_code,
+                    climate_code = EXCLUDED.climate_code,
+                    shape = EXCLUDED.shape,
+                    pillar = EXCLUDED.pillar,
+                    final_label = EXCLUDED.final_label,
+                    published_by = EXCLUDED.published_by,
+                    published_at = NOW()
+            """), {
+                'site_id': site_id,
+                'unit_id': unit_id,
+                'size_category': _trunc('size_category'),
+                'size_range': _trunc('size_range'),
+                'unit_type_code': _trunc('unit_type_code'),
+                'climate_code': _trunc('climate_code'),
+                'shape': _trunc('shape'),
+                'pillar': _trunc('pillar'),
+                'final_label': final_label[:30],
+                'published_by': username,
+            })
+            published += 1
+
+        session.commit()
+        current_app.logger.info(f"Published {published} category labels by {username}")
+        return jsonify({'success': True, 'published': published})
+
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Error publishing category labels: {e}")
+        return jsonify({'error': 'Failed to publish labels'}), 500
+    finally:
+        session.close()
+
+
 # =============================================================================
 # API Statistics - Consumption Monitoring
 # =============================================================================
