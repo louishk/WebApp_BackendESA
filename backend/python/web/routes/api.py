@@ -1968,7 +1968,7 @@ def api_inventory_upsert_overrides():
 @api_bp.route('/inventory/publish-labels', methods=['POST'])
 @require_auth
 @require_api_scope('inventory:write')
-@rate_limit_api(max_per_minute=10)
+@rate_limit_api(max_requests=10)
 def api_inventory_publish_labels():
     """Publish computed final labels to unit_category_labels on esa_pbi."""
     from flask_login import current_user as session_user
