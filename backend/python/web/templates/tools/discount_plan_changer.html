@@ -116,6 +116,10 @@
             </div>
         </div>
 
+        <div style="margin-bottom: 0.75rem;">
+            <input type="text" id="plan-search" class="form-select" placeholder="Search plans by name, site, discount..." oninput="renderPlans(); updateSelectedCount();" style="max-width: 100%;">
+        </div>
+
         <div id="plans-table-container">
             <table>
                 <thead>
@@ -434,9 +438,20 @@
         const noPlansMsg = document.getElementById('no-plans-message');
         const statusFilter = document.getElementById('status-filter').value;
 
+        const searchTerm = (document.getElementById('plan-search').value || '').toLowerCase();
+
         let filtered = plansData;
-        if (statusFilter === 'active') filtered = plansData.filter(p => !p.isDisabled);
-        else if (statusFilter === 'disabled') filtered = plansData.filter(p => p.isDisabled);
+        if (statusFilter === 'active') filtered = filtered.filter(p => !p.isDisabled);
+        else if (statusFilter === 'disabled') filtered = filtered.filter(p => p.isDisabled);
+
+        if (searchTerm) {
+            filtered = filtered.filter(p => {
+                const name = (p.sPlanName || p.sDefPlanName || '').toLowerCase();
+                const site = (p._site_code || '').toLowerCase();
+                const discount = formatDiscount(p).toLowerCase();
+                return name.includes(searchTerm) || site.includes(searchTerm) || discount.includes(searchTerm);
+            });
+        }
 
         if (filtered.length === 0) {
             tableContainer.style.display = 'none';
