@@ -66,24 +66,17 @@ def main():
     # Create engine
     engine = create_engine_from_config(db_config)
 
-    # Drop and recreate table to apply schema changes
-    # Use CASCADE to drop dependent views (they will be recreated by their own scripts)
-    print("Recreating siteinfo table...")
-    with engine.connect() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS siteinfo CASCADE"))
-        conn.commit()
+    # Ensure table exists (first run), then truncate + re-insert atomically.
+    # Using TRUNCATE instead of DROP CASCADE preserves dependent views
+    # (vw_units_inventory, vw_reviews, etc.).
     Base.metadata.create_all(engine, tables=[SiteInfo.__table__])
-    print("  ✓ Table 'siteinfo' ready")
 
-    # Initialize session
     session_manager = SessionManager(engine)
 
     with session_manager.session_scope() as session:
-        # Insert site data
+        session.execute(text("TRUNCATE TABLE siteinfo"))
         for site in SITE_DATA:
-            site_record = SiteInfo(**site)
-            session.add(site_record)
-
+            session.add(SiteInfo(**site))
         print(f"  ✓ Inserted {len(SITE_DATA)} site records")
 
     print("\nSiteInfo table populated successfully!")
