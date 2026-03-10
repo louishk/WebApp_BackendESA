@@ -1007,6 +1007,10 @@ class SiteInfo(Base, BaseModel):
     Longitude = Column(Numeric(11, 8), nullable=True, comment="Longitude coordinate")
     Latitude = Column(Numeric(10, 8), nullable=True, comment="Latitude coordinate")
 
+    # Contact / Postal
+    PostalCode = Column(String(20), nullable=True, comment="Postal/ZIP code")
+    PrimaryEmail = Column(String(255), nullable=True, comment="Primary site email address")
+
     # EmbedSocial / Google Reviews
     google_place_id = Column(String(50), nullable=True, comment="Google Maps Place ID")
     embedsocial_source_id = Column(String(50), nullable=True, comment="EmbedSocial source identifier")
