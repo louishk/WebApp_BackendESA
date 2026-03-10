@@ -25,6 +25,11 @@ SELECT
     organizer,
     start_time,
     end_time,
+    start_time::time AS time_of_day,
+    CASE
+        WHEN is_all_day THEN NULL
+        ELSE EXTRACT(EPOCH FROM (end_time - start_time)) / 60
+    END AS duration_minutes,
     location,
     is_all_day,
     is_cancelled,
