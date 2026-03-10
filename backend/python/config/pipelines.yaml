@@ -1,24 +1,4 @@
 pipelines:
-  siteinfo:
-    display_name: Site Information
-    description: Populate site dimension table with location metadata
-    module_path: datalayer.populate_siteinfo
-    enabled: true
-    schedule:
-      type: cron
-      cron: 0 4 * * 0
-    priority: 10
-    resource_group: soap_api
-    max_db_connections: 2
-    estimated_duration_seconds: 60
-    retry:
-      max_attempts: 3
-      delay_seconds: 300
-      backoff_multiplier: 2
-    timeout_seconds: 600
-    data_freshness:
-      table: ''
-      date_column: ''
   unitsinfo:
     display_name: Units Information
     description: Fetch unit information (types, sizes, pricing) from SOAP API

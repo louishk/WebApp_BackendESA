@@ -305,6 +305,7 @@
                 {% endif %}
                 {% if current_user.can_manage_configs() %}
                     <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint) else '' }}">Settings</a>
+                    <a href="{{ url_for('admin_siteinfo.list_sites') }}" class="{{ 'active' if request.endpoint and 'admin_siteinfo' in request.endpoint else '' }}">Site Info</a>
                 {% endif %}
                 <a href="{{ url_for('auth.logout') }}" style="margin-left: 1rem;">Logout ({{ current_user.username }})</a>
             {% else %}

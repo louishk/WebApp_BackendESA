@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit Site' if site else 'Create Site' }} - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ 'Edit Site: ' + site['SiteID']|string if site else 'Create New Site' }}</h1>
+    <a href="{{ url_for('admin_siteinfo.list_sites') }}" style="color: var(--esa-red); text-decoration: none; font-size: 0.9rem;">
+        <i class="fa fa-arrow-left" style="margin-right: 0.4rem;"></i>Back to Sites
+    </a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div class="flash flash-{{ category }}" style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+<style>
+    .field-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+    @media (max-width: 768px) {
+        .field-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    .field-wrap {
+        margin-bottom: 0.25rem;
+    }
+    .field-label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+    }
+    .field-input {
+        width: 100%;
+        padding: 0.75rem;
+        border: 2px solid #e5e7eb;
+        border-radius: 6px;
+        font-size: 1rem;
+        box-sizing: border-box;
+    }
+    .field-input:focus {
+        outline: none;
+        border-color: var(--esa-red);
+    }
+    .field-input[readonly] {
+        background: #f9fafb;
+        color: #6b7280;
+        cursor: not-allowed;
+    }
+    .checkbox-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 0;
+    }
+    .checkbox-wrap input[type="checkbox"] {
+        width: 1.1rem;
+        height: 1.1rem;
+        cursor: pointer;
+    }
+    .required-star {
+        color: var(--esa-red);
+        margin-left: 0.2rem;
+    }
+    .form-actions {
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid #e5e7eb;
+    }
+</style>
+
+<div class="card">
+    <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="field-grid">
+            {% for col in columns %}
+            {% set col_name = col['column_name'] %}
+            {% set is_required = col['is_nullable'] == 'NO' and not col['column_default'] %}
+            {% set input_type = input_types[col_name] %}
+
+            <div class="field-wrap">
+                {% if input_type == 'checkbox' %}
+                    <label class="field-label">{{ col_name }}{% if is_required %}<span class="required-star">*</span>{% endif %}</label>
+                    <div class="checkbox-wrap">
+                        <input type="checkbox" name="{{ col_name }}" id="field_{{ col_name }}"
+                               {% if site and site[col_name] %}checked{% endif %}>
+                        <label for="field_{{ col_name }}" style="cursor: pointer; font-size: 0.95rem; color: #374151;">Enabled</label>
+                    </div>
+                {% elif col_name == 'SiteID' %}
+                    <label class="field-label">{{ col_name }}{% if not site %}<span class="required-star">*</span>{% endif %}</label>
+                    {% if site %}
+                        <input type="number" name="{{ col_name }}" value="{{ site[col_name] }}"
+                               class="field-input" readonly>
+                    {% else %}
+                        <input type="number" name="{{ col_name }}" required
+                               class="field-input"
+                               {% if col_name in step_attrs %}step="{{ step_attrs[col_name] }}"{% endif %}>
+                    {% endif %}
+                {% else %}
+                    <label class="field-label">{{ col_name }}{% if is_required %}<span class="required-star">*</span>{% endif %}</label>
+                    <input type="{{ input_type }}"
+                           name="{{ col_name }}"
+                           value="{{ site[col_name] if site and site[col_name] is not none else '' }}"
+                           class="field-input"
+                           {% if is_required %}required{% endif %}
+                           {% if col_name in step_attrs %}step="{{ step_attrs[col_name] }}"{% endif %}>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn">{{ 'Save Changes' if site else 'Create Site' }}</button>
+            <a href="{{ url_for('admin_siteinfo.list_sites') }}" class="btn btn-secondary" style="margin-left: 0.5rem;">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
