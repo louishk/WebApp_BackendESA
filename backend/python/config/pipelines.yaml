@@ -250,3 +250,24 @@ pipelines:
     data_freshness:
       table: ecri_outcomes
       date_column: created_at
+  calendar:
+    display_name: Outlook Calendar
+    description: Extract calendar events from configured Outlook mailboxes via Microsoft Graph
+    module_path: datalayer.calendar_to_sql
+    enabled: true
+    schedule:
+      type: manual
+    default_args:
+      mode: auto
+    priority: 8
+    resource_group: http_api
+    max_db_connections: 2
+    estimated_duration_seconds: 300
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 1200
+    data_freshness:
+      table: calendar_events
+      date_column: synced_at
