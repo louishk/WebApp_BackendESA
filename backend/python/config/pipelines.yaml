@@ -8,8 +8,6 @@ pipelines:
       type: cron
       cron: 30 4 * * 0
     priority: 9
-    depends_on:
-    - siteinfo
     resource_group: soap_api
     max_db_connections: 2
     estimated_duration_seconds: 300
@@ -54,8 +52,6 @@ pipelines:
     default_args:
       mode: auto
     priority: 1
-    depends_on:
-    - siteinfo
     conflicts_with:
     - discount
     - mimo
@@ -81,8 +77,6 @@ pipelines:
     default_args:
       mode: auto
     priority: 2
-    depends_on:
-    - siteinfo
     conflicts_with:
     - rentroll
     - mimo
@@ -107,8 +101,6 @@ pipelines:
     default_args:
       mode: auto
     priority: 2
-    depends_on:
-    - siteinfo
     conflicts_with:
     - rentroll
     - discount
@@ -131,8 +123,6 @@ pipelines:
       type: cron
       cron: 0 5 * * 0
     priority: 8
-    depends_on:
-    - siteinfo
     resource_group: soap_api
     max_db_connections: 2
     estimated_duration_seconds: 300
