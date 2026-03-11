@@ -5,7 +5,10 @@ Tools routes - utility tools for site management.
 from flask import Blueprint, render_template
 from flask_login import login_required
 
-from web.auth.decorators import billing_tools_access_required, inventory_tools_access_required, discount_tools_access_required
+from web.auth.decorators import (
+    billing_tools_access_required, inventory_tools_access_required,
+    discount_tools_access_required,
+)
 
 tools_bp = Blueprint('tools', __name__, url_prefix='/tools')
 
@@ -32,3 +35,11 @@ def discount_plan_changer():
 def inventory_checker():
     """Inventory naming convention checker tool page."""
     return render_template('tools/inventory_checker.html')
+
+
+@tools_bp.route('/unit-availability')
+@login_required
+@inventory_tools_access_required
+def unit_availability():
+    """Unit availability and reservation tool page."""
+    return render_template('tools/unit_availability.html')

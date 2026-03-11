@@ -1,0 +1,691 @@
+{% extends "base.html" %}
+
+{% block title %}Unit Availability - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Unit Availability</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Browse available units, view indicative pricing with active discount plans, and make reservations</p>
+</div>
+
+<!-- Filters -->
+<div class="card">
+    <h2>Filters</h2>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+        <div class="form-group" style="flex: 1; min-width: 250px;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Sites</label>
+            <select id="site-select" class="form-select" multiple style="height: auto; min-height: 42px;">
+            </select>
+            <p style="color: #666; font-size: 0.8rem; margin-top: 0.25rem;">Hold Ctrl/Cmd to select multiple</p>
+        </div>
+        <div class="form-group">
+            <button type="button" class="btn" onclick="loadUnits()">Load Units</button>
+        </div>
+    </div>
+</div>
+
+<!-- Results Section (hidden until loaded) -->
+<div id="results-section" style="display: none;">
+
+    <!-- Summary Cards -->
+    <div class="card">
+        <h2>Availability Summary</h2>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="stat-total">0</div>
+                <div class="label">Available Units</div>
+            </div>
+            <div class="stat-card" style="background: #28A745;">
+                <div class="value" id="stat-categories">0</div>
+                <div class="label">Unit Categories</div>
+            </div>
+            <div class="stat-card" style="background: #17a2b8;">
+                <div class="value" id="stat-climate">0</div>
+                <div class="label">Climate Controlled</div>
+            </div>
+            <div class="stat-card" style="background: #6f42c1;">
+                <div class="value" id="stat-plans">0</div>
+                <div class="label">Active Discount Plans</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inline Filters -->
+    <div class="card" id="inline-filters-card">
+        <h2>Refine Results</h2>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+            <div class="form-group" style="min-width: 160px;">
+                <label>Category</label>
+                <select id="filter-category" class="form-select" onchange="applyFilters()">
+                    <option value="">All Categories</option>
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 130px;">
+                <label>Climate</label>
+                <select id="filter-climate" class="form-select" onchange="applyFilters()">
+                    <option value="">All</option>
+                    <option value="true">Climate Controlled</option>
+                    <option value="false">Non-Climate</option>
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 110px;">
+                <label>Floor</label>
+                <select id="filter-floor" class="form-select" onchange="applyFilters()">
+                    <option value="">All Floors</option>
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 100px;">
+                <label>Min Size (sqft)</label>
+                <input type="number" id="filter-min-size" class="form-select" placeholder="0" onchange="applyFilters()" step="1" min="0">
+            </div>
+            <div class="form-group" style="min-width: 100px;">
+                <label>Max Size (sqft)</label>
+                <input type="number" id="filter-max-size" class="form-select" placeholder="Any" onchange="applyFilters()" step="1" min="0">
+            </div>
+            <div class="form-group" style="min-width: 200px; flex: 1;">
+                <label>Search</label>
+                <input type="text" id="filter-search" class="form-select" placeholder="Search unit name, notes..." oninput="applyFilters()">
+            </div>
+            <div class="form-group">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="resetFilters()">Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Discount Plan Selector -->
+    <div class="card">
+        <h2>Discount Plan (Indicative Pricing)</h2>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+            <div class="form-group" style="flex: 1; min-width: 300px;">
+                <label>Active Discount Plan</label>
+                <select id="discount-plan-select" class="form-select" onchange="onDiscountPlanChange()">
+                    <option value="">No discount (Standard Rate)</option>
+                </select>
+            </div>
+            <div id="plan-details" style="flex: 1; min-width: 300px; display: none;">
+                <div style="background: #f8f9fa; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.85rem; line-height: 1.6;">
+                    <div><strong>Type:</strong> <span id="plan-type-label"></span></div>
+                    <div><strong>Discount:</strong> <span id="plan-discount-label"></span></div>
+                    <div><strong>Period:</strong> <span id="plan-period-label"></span></div>
+                    <div id="plan-deposit-row"><strong>Deposit:</strong> <span id="plan-deposit-label"></span></div>
+                    <div id="plan-lock-row"><strong>Lock-in:</strong> <span id="plan-lock-label"></span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Units Table -->
+    <div class="card">
+        <h2>Available Units <span id="filtered-count" style="font-size: 0.85rem; color: #666; font-weight: normal;"></span></h2>
+        <div id="units-table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="min-width: 70px;">Site</th>
+                        <th style="min-width: 80px;">Unit</th>
+                        <th style="min-width: 120px;">Category</th>
+                        <th style="min-width: 80px;">Size</th>
+                        <th style="min-width: 50px;">Floor</th>
+                        <th style="min-width: 50px; text-align: center;">AC</th>
+                        <th style="min-width: 50px; text-align: center;">Power</th>
+                        <th style="min-width: 100px; text-align: right;">Std Rate</th>
+                        <th style="min-width: 100px; text-align: right;">Promo Rate</th>
+                        <th style="min-width: 100px; text-align: right;">Indicative</th>
+                        <th style="min-width: 60px;">Vacant</th>
+                        <th style="min-width: 80px; text-align: center;">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="units-tbody">
+                    <tr><td colspan="12" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="no-units-message" style="display: none; text-align: center; padding: 2rem; color: #666;">
+            No available units match the current filters.
+        </div>
+    </div>
+</div>
+
+<!-- Reservation Modal -->
+<div id="reserve-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 520px;">
+        <h3>Reserve Unit</h3>
+        <div id="reserve-unit-info" style="background: #f0f4ff; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.9rem;">
+        </div>
+        <form id="reserve-form" onsubmit="submitReservation(event)">
+            <input type="hidden" id="res-site-code">
+            <input type="hidden" id="res-unit-id">
+            <div class="form-group">
+                <label>First Name <span style="color: var(--esa-red);">*</span></label>
+                <input type="text" id="res-first-name" class="form-select" required maxlength="100" style="max-width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Last Name <span style="color: var(--esa-red);">*</span></label>
+                <input type="text" id="res-last-name" class="form-select" required maxlength="100" style="max-width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Phone <span style="color: var(--esa-red);">*</span></label>
+                <input type="tel" id="res-phone" class="form-select" required maxlength="30" style="max-width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="res-email" class="form-select" maxlength="255" style="max-width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea id="res-notes" class="form-select" rows="2" maxlength="500" style="max-width: 100%; resize: vertical;"></textarea>
+            </div>
+            <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.25rem;">
+                <button type="button" class="btn btn-secondary" onclick="closeReserveModal()">Cancel</button>
+                <button type="submit" class="btn" id="res-submit-btn">Submit Reservation</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Result Modal -->
+<div id="result-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 420px;">
+        <h3 id="result-modal-title">Result</h3>
+        <p id="result-modal-message" style="text-align: center; font-size: 1rem; margin: 1rem 0;"></p>
+        <div style="text-align: center; margin-top: 1.5rem;">
+            <button type="button" class="btn" onclick="document.getElementById('result-modal').style.display='none'">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.form-group {
+    margin-bottom: 1rem;
+}
+.form-group label {
+    display: block;
+    margin-bottom: 0.35rem;
+    font-weight: 500;
+    font-size: 0.85rem;
+}
+.form-select {
+    width: 100%;
+    max-width: 400px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.9rem;
+    border: 1px solid var(--esa-gray-dark);
+    border-radius: 4px;
+    background: #fff;
+}
+.form-select:focus {
+    outline: none;
+    border-color: var(--esa-navy);
+}
+#units-table-container {
+    max-height: 600px;
+    overflow: auto;
+}
+#units-table-container table {
+    width: 100%;
+    font-size: 0.85rem;
+}
+#units-table-container thead {
+    position: sticky;
+    top: 0;
+    background: var(--esa-gray);
+    z-index: 10;
+}
+#units-table-container th {
+    white-space: nowrap;
+    padding: 0.5rem 0.6rem;
+}
+#units-table-container td {
+    padding: 0.45rem 0.6rem;
+    white-space: nowrap;
+}
+.unit-row:hover {
+    background: rgba(26, 58, 92, 0.06);
+}
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.45rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.badge-ac { background: #d4edda; color: #155724; }
+.badge-no { background: #f8d7da; color: #721c24; }
+.badge-power { background: #cce5ff; color: #004085; }
+.badge-reserved { background: #fff3cd; color: #856404; }
+.promo-rate { color: var(--esa-red); font-weight: 600; }
+.indicative-rate { color: #28A745; font-weight: 700; }
+.btn-reserve {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.78rem;
+    background: var(--esa-navy, #1a3a5c);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.btn-reserve:hover { opacity: 0.85; }
+.btn-reserve:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Modal styles */
+.modal {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: #fff;
+    padding: 2rem;
+    border-radius: 8px;
+    width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+.modal-content h3 {
+    color: var(--esa-navy);
+    margin-bottom: 1rem;
+    text-align: center;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    clearTimeout(window.autoRefreshTimeout);
+
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+    let allUnits = [];
+    let filteredUnits = [];
+    let discountPlans = [];
+    let selectedPlan = null;
+    let siteMap = {}; // site_id -> {site_code, name, country}
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function fmt(val, decimals) {
+        if (val == null) return '-';
+        return Number(val).toLocaleString('en-US', { minimumFractionDigits: decimals || 0, maximumFractionDigits: decimals || 0 });
+    }
+
+    function fmtRate(val) {
+        if (val == null || val === 0) return '-';
+        return Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // Load sites dropdown
+    async function loadSites() {
+        try {
+            const res = await fetch('/api/sites', { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const select = document.getElementById('site-select');
+            select.innerHTML = '';
+
+            const grouped = {};
+            data.sites.forEach(s => {
+                const c = s.country || 'Other';
+                if (!grouped[c]) grouped[c] = [];
+                grouped[c].push(s);
+                siteMap[s.site_id] = s;
+            });
+
+            Object.keys(grouped).forEach(country => {
+                const group = document.createElement('optgroup');
+                group.label = country;
+                grouped[country].forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.site_id;
+                    opt.dataset.code = s.site_code;
+                    opt.textContent = `${s.site_code} - ${s.name}`;
+                    group.appendChild(opt);
+                });
+                select.appendChild(group);
+            });
+        } catch (e) {
+            console.error('Failed to load sites:', e);
+        }
+    }
+
+    // Load discount plans
+    async function loadDiscountPlans() {
+        try {
+            const res = await fetch('/api/discount-plans?active_only=true', { headers: apiHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+            discountPlans = data.plans || [];
+
+            const select = document.getElementById('discount-plan-select');
+            // Keep the first "no discount" option
+            select.innerHTML = '<option value="">No discount (Standard Rate)</option>';
+
+            discountPlans.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                const discountLabel = p.discount_value ? ` (${p.discount_value})` : '';
+                opt.textContent = `${p.plan_name}${discountLabel}`;
+                select.appendChild(opt);
+            });
+
+            document.getElementById('stat-plans').textContent = discountPlans.length;
+        } catch (e) {
+            console.error('Failed to load discount plans:', e);
+        }
+    }
+
+    // Load available units
+    async function loadUnits() {
+        const select = document.getElementById('site-select');
+        const options = Array.from(select.selectedOptions);
+        if (options.length === 0) {
+            alert('Please select at least one site.');
+            return;
+        }
+
+        const siteIds = options.map(o => o.value).join(',');
+
+        try {
+            const res = await fetch(`/api/unit-availability?site_ids=${siteIds}`, { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            allUnits = data.units || [];
+            const filters = data.filters || {};
+
+            // Populate filter dropdowns
+            const catSelect = document.getElementById('filter-category');
+            catSelect.innerHTML = '<option value="">All Categories</option>';
+            (filters.categories || []).forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c;
+                opt.textContent = c;
+                catSelect.appendChild(opt);
+            });
+
+            const floorSelect = document.getElementById('filter-floor');
+            floorSelect.innerHTML = '<option value="">All Floors</option>';
+            (filters.floors || []).forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f;
+                opt.textContent = `Floor ${f}`;
+                floorSelect.appendChild(opt);
+            });
+
+            // Update summary
+            document.getElementById('stat-total').textContent = allUnits.length;
+            document.getElementById('stat-categories').textContent = (filters.categories || []).length;
+            document.getElementById('stat-climate').textContent = allUnits.filter(u => u.bClimate).length;
+
+            document.getElementById('results-section').style.display = 'block';
+            applyFilters();
+        } catch (e) {
+            console.error('Failed to load units:', e);
+            alert('Failed to load units. Please check your authentication.');
+        }
+    }
+
+    // Apply client-side filters
+    function applyFilters() {
+        const category = document.getElementById('filter-category').value;
+        const climate = document.getElementById('filter-climate').value;
+        const floor = document.getElementById('filter-floor').value;
+        const minSize = parseFloat(document.getElementById('filter-min-size').value) || 0;
+        const maxSize = parseFloat(document.getElementById('filter-max-size').value) || Infinity;
+        const search = document.getElementById('filter-search').value.toLowerCase().trim();
+
+        filteredUnits = allUnits.filter(u => {
+            if (category && u.sTypeName !== category) return false;
+            if (climate === 'true' && !u.bClimate) return false;
+            if (climate === 'false' && u.bClimate) return false;
+            if (floor && u.iFloor !== parseInt(floor)) return false;
+            if (u.area && u.area < minSize) return false;
+            if (u.area && u.area > maxSize) return false;
+            if (search) {
+                const haystack = [u.sUnitName, u.sTypeName, u.sUnitNote, u.sUnitDesc, u.sLocationCode]
+                    .filter(Boolean).join(' ').toLowerCase();
+                if (!haystack.includes(search)) return false;
+            }
+            return true;
+        });
+
+        renderTable();
+    }
+
+    function resetFilters() {
+        document.getElementById('filter-category').value = '';
+        document.getElementById('filter-climate').value = '';
+        document.getElementById('filter-floor').value = '';
+        document.getElementById('filter-min-size').value = '';
+        document.getElementById('filter-max-size').value = '';
+        document.getElementById('filter-search').value = '';
+        applyFilters();
+    }
+
+    // Discount plan change handler
+    function onDiscountPlanChange() {
+        const planId = document.getElementById('discount-plan-select').value;
+        const detailsDiv = document.getElementById('plan-details');
+
+        if (!planId) {
+            selectedPlan = null;
+            detailsDiv.style.display = 'none';
+        } else {
+            selectedPlan = discountPlans.find(p => p.id === parseInt(planId)) || null;
+            if (selectedPlan) {
+                detailsDiv.style.display = 'block';
+                document.getElementById('plan-type-label').textContent = selectedPlan.plan_type || '-';
+                document.getElementById('plan-discount-label').textContent = selectedPlan.discount_value || '-';
+                document.getElementById('plan-period-label').textContent = selectedPlan.period_range || (
+                    selectedPlan.period_start && selectedPlan.period_end
+                        ? `${selectedPlan.period_start} to ${selectedPlan.period_end}`
+                        : 'Ongoing'
+                );
+
+                const depositRow = document.getElementById('plan-deposit-row');
+                const lockRow = document.getElementById('plan-lock-row');
+                if (selectedPlan.deposit) {
+                    depositRow.style.display = '';
+                    document.getElementById('plan-deposit-label').textContent = selectedPlan.deposit;
+                } else {
+                    depositRow.style.display = 'none';
+                }
+                if (selectedPlan.lock_in_period) {
+                    lockRow.style.display = '';
+                    document.getElementById('plan-lock-label').textContent = selectedPlan.lock_in_period;
+                } else {
+                    lockRow.style.display = 'none';
+                }
+            }
+        }
+
+        renderTable();
+    }
+
+    // Calculate indicative price
+    function calcIndicative(stdRate) {
+        if (!selectedPlan || !stdRate) return null;
+
+        const discType = selectedPlan.discount_type;
+        const discNum = selectedPlan.discount_numeric;
+
+        if (!discType || discNum == null) return null;
+
+        if (discType === 'percentage') {
+            return stdRate * (1 - discNum / 100);
+        } else if (discType === 'fixed_amount') {
+            return Math.max(0, stdRate - discNum);
+        }
+        // free_period or none — just show std rate
+        return null;
+    }
+
+    // Check if plan is applicable to a site
+    function isPlanApplicableToSite(siteId) {
+        if (!selectedPlan || !selectedPlan.applicable_sites) return true;
+        const sites = selectedPlan.applicable_sites;
+        if (Object.keys(sites).length === 0) return true;
+
+        // Check by site code
+        const siteInfo = siteMap[siteId];
+        if (siteInfo && siteInfo.site_code) {
+            const val = sites[siteInfo.site_code];
+            if (val === false) return false;
+            if (val === true) return true;
+        }
+        return true;
+    }
+
+    // Render table
+    function renderTable() {
+        const tbody = document.getElementById('units-tbody');
+        const container = document.getElementById('units-table-container');
+        const noMsg = document.getElementById('no-units-message');
+        const countSpan = document.getElementById('filtered-count');
+
+        countSpan.textContent = `(${filteredUnits.length} of ${allUnits.length})`;
+
+        if (filteredUnits.length === 0) {
+            container.style.display = 'none';
+            noMsg.style.display = 'block';
+            return;
+        }
+
+        container.style.display = 'block';
+        noMsg.style.display = 'none';
+
+        tbody.innerHTML = filteredUnits.map(u => {
+            const site = siteMap[u.SiteID];
+            const siteCode = site ? site.site_code : (u.sLocationCode || u.SiteID);
+            const area = u.area ? fmt(u.area, 1) : '-';
+            const stdRate = fmtRate(u.dcStdRate);
+            const promoRate = u.dcPushRate ? fmtRate(u.dcPushRate) : (u.dcWebRate ? fmtRate(u.dcWebRate) : '-');
+
+            let indicativeHtml = '-';
+            if (selectedPlan && isPlanApplicableToSite(u.SiteID)) {
+                const indic = calcIndicative(u.dcStdRate);
+                if (indic != null) {
+                    indicativeHtml = `<span class="indicative-rate">${fmtRate(indic)}</span>`;
+                }
+            }
+
+            const acBadge = u.bClimate ? '<span class="badge badge-ac">AC</span>' : '<span class="badge badge-no">No</span>';
+            const powerBadge = u.bPower ? '<span class="badge badge-power">Yes</span>' : '-';
+            const reservedFlag = u.bWaitingListReserved ? ' <span class="badge badge-reserved">Reserved</span>' : '';
+            const reserveDisabled = u.bWaitingListReserved ? 'disabled title="Already reserved"' : '';
+
+            return `<tr class="unit-row">
+                <td>${siteCode}</td>
+                <td><strong>${u.sUnitName || '-'}</strong>${reservedFlag}</td>
+                <td>${u.sTypeName || '-'}</td>
+                <td>${area} sqft</td>
+                <td>${u.iFloor != null ? u.iFloor : '-'}</td>
+                <td style="text-align:center;">${acBadge}</td>
+                <td style="text-align:center;">${powerBadge}</td>
+                <td style="text-align:right;">${stdRate}</td>
+                <td style="text-align:right;">${promoRate !== '-' ? '<span class="promo-rate">' + promoRate + '</span>' : '-'}</td>
+                <td style="text-align:right;">${indicativeHtml}</td>
+                <td>${u.iDaysVacant != null ? u.iDaysVacant + 'd' : '-'}</td>
+                <td style="text-align:center;">
+                    <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal('${siteCode}', ${u.UnitID}, '${(u.sUnitName || '').replace(/'/g, "\\'")}', '${(u.sTypeName || '').replace(/'/g, "\\'")}', '${area}', '${stdRate}')">Reserve</button>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    // Reservation modal
+    function openReserveModal(siteCode, unitId, unitName, typeName, area, rate) {
+        document.getElementById('res-site-code').value = siteCode;
+        document.getElementById('res-unit-id').value = unitId;
+        document.getElementById('reserve-unit-info').innerHTML = `
+            <strong>${unitName}</strong> at <strong>${siteCode}</strong><br>
+            Category: ${typeName} &middot; Size: ${area} sqft &middot; Std Rate: ${rate}
+        `;
+        document.getElementById('res-first-name').value = '';
+        document.getElementById('res-last-name').value = '';
+        document.getElementById('res-phone').value = '';
+        document.getElementById('res-email').value = '';
+        document.getElementById('res-notes').value = '';
+        document.getElementById('res-submit-btn').disabled = false;
+        document.getElementById('reserve-modal').style.display = 'flex';
+    }
+
+    function closeReserveModal() {
+        document.getElementById('reserve-modal').style.display = 'none';
+    }
+
+    async function submitReservation(e) {
+        e.preventDefault();
+
+        const btn = document.getElementById('res-submit-btn');
+        btn.disabled = true;
+        btn.textContent = 'Submitting...';
+
+        const payload = {
+            site_code: document.getElementById('res-site-code').value,
+            unit_id: parseInt(document.getElementById('res-unit-id').value),
+            tenant_name: document.getElementById('res-first-name').value.trim(),
+            tenant_last: document.getElementById('res-last-name').value.trim(),
+            phone: document.getElementById('res-phone').value.trim(),
+            email: document.getElementById('res-email').value.trim(),
+            notes: document.getElementById('res-notes').value.trim(),
+        };
+
+        try {
+            const res = await fetch('/api/unit-availability/reserve', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+
+            closeReserveModal();
+
+            const title = document.getElementById('result-modal-title');
+            const msg = document.getElementById('result-modal-message');
+
+            if (res.ok && data.success) {
+                title.textContent = 'Reservation Submitted';
+                title.style.color = '#28A745';
+                msg.textContent = data.message || 'Reservation was successfully submitted.';
+
+                // Mark the unit as reserved in local data
+                const unit = allUnits.find(u => u.UnitID === payload.unit_id && u.sLocationCode === payload.site_code);
+                if (unit) unit.bWaitingListReserved = true;
+                applyFilters();
+            } else {
+                title.textContent = 'Reservation Failed';
+                title.style.color = 'var(--esa-red)';
+                msg.textContent = data.details || data.error || 'An error occurred.';
+            }
+
+            document.getElementById('result-modal').style.display = 'flex';
+        } catch (err) {
+            closeReserveModal();
+            document.getElementById('result-modal-title').textContent = 'Error';
+            document.getElementById('result-modal-title').style.color = 'var(--esa-red)';
+            document.getElementById('result-modal-message').textContent = 'Network error: ' + err.message;
+            document.getElementById('result-modal').style.display = 'flex';
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Submit Reservation';
+        }
+    }
+
+    // Initialize
+    loadSites();
+    loadDiscountPlans();
+</script>
+{% endblock %}

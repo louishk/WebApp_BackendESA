@@ -3218,3 +3218,294 @@ def api_cc_discount_plans_update():
 
     finally:
         soap_client.close()
+
+
+# =============================================================================
+# Unit Availability
+# =============================================================================
+# GET  /api/unit-availability   — available units with pricing & discount plans
+# POST /api/unit-availability/reserve — reserve a unit via SOAP MakeReservation
+# =============================================================================
+
+@api_bp.route('/unit-availability')
+@require_auth
+@require_api_scope('inventory:read')
+def api_unit_availability():
+    """
+    Get available (vacant, rentable) units with pricing data.
+
+    Query parameters:
+        site_ids     — comma-separated site IDs (required)
+        category     — filter by sTypeName
+        climate      — filter by bClimate (true/false)
+        floor        — filter by iFloor
+        min_size     — minimum area (width * length)
+        max_size     — maximum area (width * length)
+    """
+    site_ids_param = request.args.get('site_ids', '')
+    if not site_ids_param:
+        return jsonify({'error': 'site_ids parameter is required'}), 400
+
+    try:
+        site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
+    except ValueError:
+        return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
+
+    if not site_ids:
+        return jsonify({'error': 'At least one site_id is required'}), 400
+
+    # Optional filters
+    category = request.args.get('category', '').strip()
+    climate = request.args.get('climate', '').strip().lower()
+    floor_param = request.args.get('floor', '').strip()
+    min_size = request.args.get('min_size', '').strip()
+    max_size = request.args.get('max_size', '').strip()
+
+    pbi_session = get_pbi_session()
+    try:
+        placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids))])
+        params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
+
+        where_clauses = [
+            f'"SiteID" IN ({placeholders})',
+            '"bRentable" = true',
+            '"bRented" = false',
+            '"bExcludeFromWebsite" = false',
+        ]
+
+        if category:
+            params['category'] = category
+            where_clauses.append('"sTypeName" = :category')
+
+        if climate in ('true', 'false'):
+            params['climate'] = climate == 'true'
+            where_clauses.append('"bClimate" = :climate')
+
+        if floor_param:
+            try:
+                params['floor_val'] = int(floor_param)
+                where_clauses.append('"iFloor" = :floor_val')
+            except ValueError:
+                pass
+
+        where_sql = ' AND '.join(where_clauses)
+
+        query = text(f"""
+            SELECT "SiteID", "UnitID", "sLocationCode", "sUnitName", "sTypeName",
+                   "dcWidth", "dcLength", "bClimate", "bInside", "bPower", "bAlarm",
+                   "iFloor", "UnitTypeID",
+                   "dcStdRate", "dcWebRate", "dcPushRate", "dcBoardRate",
+                   "dcPreferredRate", "dcStdWeeklyRate", "dcStdSecDep",
+                   "dcTax1Rate", "dcTax2Rate",
+                   "sUnitNote", "sUnitDesc",
+                   "iDaysVacant", "bWaitingListReserved", "bCorporate",
+                   "bServiceRequired", "bMobile",
+                   ("dcWidth" * "dcLength") AS area
+            FROM units_info
+            WHERE {where_sql}
+            ORDER BY "SiteID", "sTypeName", "dcStdRate"
+        """)
+
+        result = pbi_session.execute(query, params)
+        rows = result.fetchall()
+        columns = result.keys()
+
+        units = []
+        for row in rows:
+            unit = {}
+            for col, val in zip(columns, row):
+                if hasattr(val, 'isoformat'):
+                    unit[col] = val.isoformat()
+                elif isinstance(val, (int, float, bool, str)) or val is None:
+                    unit[col] = val
+                else:
+                    unit[col] = float(val) if val is not None else None
+            units.append(unit)
+
+        # Apply size filters in Python (computed column)
+        if min_size:
+            try:
+                min_val = float(min_size)
+                units = [u for u in units if u.get('area') and u['area'] >= min_val]
+            except ValueError:
+                pass
+        if max_size:
+            try:
+                max_val = float(max_size)
+                units = [u for u in units if u.get('area') and u['area'] <= max_val]
+            except ValueError:
+                pass
+
+        # Fetch distinct categories for the selected sites (for filter dropdown)
+        cat_query = text(f"""
+            SELECT DISTINCT "sTypeName"
+            FROM units_info
+            WHERE "SiteID" IN ({placeholders})
+              AND "sTypeName" IS NOT NULL
+              AND "bRentable" = true
+              AND "bRented" = false
+            ORDER BY "sTypeName"
+        """)
+        cat_result = pbi_session.execute(cat_query, params)
+        categories = [r[0] for r in cat_result.fetchall()]
+
+        # Fetch distinct floors
+        floor_query = text(f"""
+            SELECT DISTINCT "iFloor"
+            FROM units_info
+            WHERE "SiteID" IN ({placeholders})
+              AND "iFloor" IS NOT NULL
+              AND "bRentable" = true
+              AND "bRented" = false
+            ORDER BY "iFloor"
+        """)
+        floor_result = pbi_session.execute(floor_query, params)
+        floors = [r[0] for r in floor_result.fetchall()]
+
+        return jsonify({
+            'units': units,
+            'count': len(units),
+            'filters': {
+                'categories': categories,
+                'floors': floors,
+            }
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Unit availability query error: {e}")
+        return jsonify({'error': 'Failed to fetch available units'}), 500
+    finally:
+        pbi_session.close()
+
+
+@api_bp.route('/unit-availability/reserve', methods=['POST'])
+@require_auth
+@require_api_scope('inventory:write')
+@rate_limit_api(max_requests=10, window_seconds=60)
+def api_unit_reserve():
+    """
+    Reserve a unit via SOAP MakeReservation endpoint.
+
+    JSON body:
+        site_code    — location code (e.g. "LSETUP")
+        unit_id      — unit ID to reserve
+        tenant_name  — tenant first name
+        tenant_last  — tenant last name
+        phone        — contact phone
+        email        — contact email (optional)
+        notes        — reservation notes (optional)
+    """
+    from flask_login import current_user as flask_current_user
+    from common.config import DataLayerConfig
+    from common.soap_client import SOAPClient, SOAPFaultError
+
+    if flask_current_user.is_authenticated and not flask_current_user.can_access_inventory_tools():
+        return jsonify({'error': 'Forbidden', 'message': 'Inventory tools access required'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    site_code = data.get('site_code', '').strip()
+    unit_id = data.get('unit_id')
+    tenant_name = data.get('tenant_name', '').strip()
+    tenant_last = data.get('tenant_last', '').strip()
+    phone = data.get('phone', '').strip()
+    email = data.get('email', '').strip()
+    notes = data.get('notes', '').strip()
+
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+    if not unit_id:
+        return jsonify({'error': 'unit_id is required'}), 400
+    if not tenant_name:
+        return jsonify({'error': 'tenant_name is required'}), 400
+    if not tenant_last:
+        return jsonify({'error': 'tenant_last is required'}), 400
+    if not phone:
+        return jsonify({'error': 'phone is required'}), 400
+
+    try:
+        unit_id = int(unit_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'unit_id must be an integer'}), 400
+
+    # Validate site_code
+    from common.models import SiteInfo
+    pbi_session = get_pbi_session()
+    try:
+        site = pbi_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
+        if not site:
+            return jsonify({'error': 'Invalid site_code'}), 400
+    finally:
+        pbi_session.close()
+
+    config = DataLayerConfig.from_env()
+    if not config.soap:
+        current_app.logger.error("SOAP configuration not available")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    cc_url = config.soap.base_url.replace('ReportingWs.asmx', 'CallCenterWs.asmx')
+    soap_client = SOAPClient(
+        base_url=cc_url,
+        corp_code=config.soap.corp_code,
+        corp_user=config.soap.corp_user,
+        api_key=config.soap.api_key,
+        corp_password=config.soap.corp_password,
+        timeout=config.soap.timeout,
+        retries=config.soap.retries
+    )
+
+    try:
+        results = soap_client.call(
+            operation="MakeReservation",
+            parameters={
+                "sLocationCode": site_code,
+                "iUnitID": str(unit_id),
+                "sFirstName": tenant_name,
+                "sLastName": tenant_last,
+                "sPhone": phone,
+                "sEmail": email or "",
+                "sNote": notes or "",
+            },
+            soap_action="http://tempuri.org/CallCenterWs/CallCenterWs/MakeReservation",
+            namespace="http://tempuri.org/CallCenterWs/CallCenterWs",
+            result_tag="RT",
+        )
+
+        ret_code = None
+        ret_msg = None
+        if results:
+            ret_code = results[0].get('Ret_Code')
+            ret_msg = results[0].get('Ret_Msg')
+            current_app.logger.info(
+                f"SOAP MakeReservation for unit {unit_id} at {site_code}: "
+                f"code={ret_code}, msg={ret_msg}"
+            )
+
+        return jsonify({
+            'success': True,
+            'site_code': site_code,
+            'unit_id': unit_id,
+            'ret_code': ret_code,
+            'message': ret_msg or 'Reservation submitted',
+        })
+
+    except SOAPFaultError as e:
+        current_app.logger.error(f"SOAP fault during MakeReservation: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'SOAP API error',
+            'details': 'SOAP API error occurred',
+        }), 502
+
+    except Exception as e:
+        current_app.logger.error(f"Unexpected error during MakeReservation: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Unexpected error',
+            'details': 'An internal error occurred',
+        }), 500
+
+    finally:
+        soap_client.close()
