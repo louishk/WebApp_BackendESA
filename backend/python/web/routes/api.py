@@ -3232,15 +3232,19 @@ def api_cc_discount_plans_update():
 @require_api_scope('inventory:read')
 def api_unit_availability():
     """
-    Get available (vacant, rentable) units with pricing data.
+    Get available (vacant, rentable) units with enriched label data from
+    vw_units_inventory joined back to units_info for full pricing.
 
     Query parameters:
-        site_ids     — comma-separated site IDs (required)
-        category     — filter by sTypeName
-        climate      — filter by bClimate (true/false)
-        floor        — filter by iFloor
-        min_size     — minimum area (width * length)
-        max_size     — maximum area (width * length)
+        site_ids       — comma-separated site IDs (required)
+        category       — filter by category_label (enriched) or sTypeName fallback
+        type_code      — filter by label_type_code
+        climate_code   — filter by label_climate_code
+        climate        — filter by bClimate (true/false)
+        floor          — filter by iFloor
+        shape          — filter by label_shape
+        min_size       — minimum area (width * length)
+        max_size       — maximum area (width * length)
     """
     site_ids_param = request.args.get('site_ids', '')
     if not site_ids_param:
@@ -3256,8 +3260,11 @@ def api_unit_availability():
 
     # Optional filters
     category = request.args.get('category', '').strip()
+    type_code = request.args.get('type_code', '').strip()
+    climate_code = request.args.get('climate_code', '').strip()
     climate = request.args.get('climate', '').strip().lower()
     floor_param = request.args.get('floor', '').strip()
+    shape = request.args.get('shape', '').strip()
     min_size = request.args.get('min_size', '').strip()
     max_size = request.args.get('max_size', '').strip()
 
@@ -3267,43 +3274,79 @@ def api_unit_availability():
         params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
 
         where_clauses = [
-            f'"SiteID" IN ({placeholders})',
-            '"bRentable" = true',
-            '"bRented" = false',
-            '"bExcludeFromWebsite" = false',
+            f'u."SiteID" IN ({placeholders})',
+            'u."bRentable" = true',
+            'u."bRented" = false',
+            'u."bExcludeFromWebsite" = false',
         ]
 
         if category:
             params['category'] = category
-            where_clauses.append('"sTypeName" = :category')
+            where_clauses.append(
+                '(v.category_label = :category OR '
+                '(v.category_label IS NULL AND u."sTypeName" = :category))'
+            )
+
+        if type_code:
+            params['type_code'] = type_code
+            where_clauses.append('v.label_type_code = :type_code')
+
+        if climate_code:
+            params['climate_code'] = climate_code
+            where_clauses.append('v.label_climate_code = :climate_code')
 
         if climate in ('true', 'false'):
             params['climate'] = climate == 'true'
-            where_clauses.append('"bClimate" = :climate')
+            where_clauses.append('u."bClimate" = :climate')
 
         if floor_param:
             try:
                 params['floor_val'] = int(floor_param)
-                where_clauses.append('"iFloor" = :floor_val')
+                where_clauses.append('u."iFloor" = :floor_val')
             except ValueError:
                 pass
+
+        if shape:
+            params['shape'] = shape
+            where_clauses.append('v.label_shape = :shape')
 
         where_sql = ' AND '.join(where_clauses)
 
         query = text(f"""
-            SELECT "SiteID", "UnitID", "sLocationCode", "sUnitName", "sTypeName",
-                   "dcWidth", "dcLength", "bClimate", "bInside", "bPower", "bAlarm",
-                   "iFloor", "UnitTypeID",
-                   "dcStdRate", "dcWebRate", "dcPushRate", "dcBoardRate",
-                   "dcPreferredRate", "dcStdWeeklyRate", "dcStdSecDep",
-                   "dcTax1Rate", "dcTax2Rate",
-                   "sUnitNote", "sUnitDesc",
-                   "iDaysVacant", "bWaitingListReserved", "bCorporate",
-                   "bServiceRequired", "bMobile",
-                   ("dcWidth" * "dcLength") AS area
-            FROM units_info
+            SELECT
+                u."SiteID", u."UnitID", u."sLocationCode", u."sUnitName", u."sTypeName",
+                u."dcWidth", u."dcLength", u."bClimate", u."bInside", u."bPower", u."bAlarm",
+                u."iFloor", u."UnitTypeID",
+                u."dcStdRate", u."dcWebRate", u."dcPushRate", u."dcBoardRate",
+                u."dcPreferredRate", u."dcStdWeeklyRate", u."dcStdSecDep",
+                u."dcTax1Rate", u."dcTax2Rate",
+                u."sUnitNote", u."sUnitDesc",
+                u."iDaysVacant", u."bWaitingListReserved", u."bCorporate",
+                u."bServiceRequired", u."bMobile",
+                (u."dcWidth" * u."dcLength") AS area,
+                -- Enriched label fields from vw_units_inventory
+                v.site_code,
+                v.internal_label,
+                v.country,
+                v.category_label,
+                v.label_type_code,
+                v.label_climate_code,
+                v.label_size_category,
+                v.label_size_range,
+                v.label_shape,
+                v.label_pillar,
+                v.label_published_at,
+                v.has_pillar,
+                v.pillar_size,
+                v.is_odd_shape,
+                v.deck_position
+            FROM units_info u
+            LEFT JOIN vw_units_inventory v
+                ON v.site_id = u."SiteID" AND v.unit_id = u."UnitID"
             WHERE {where_sql}
-            ORDER BY "SiteID", "sTypeName", "dcStdRate"
+            ORDER BY u."SiteID",
+                     COALESCE(v.category_label, u."sTypeName"),
+                     u."dcStdRate"
         """)
 
         result = pbi_session.execute(query, params)
@@ -3336,38 +3379,45 @@ def api_unit_availability():
             except ValueError:
                 pass
 
-        # Fetch distinct categories for the selected sites (for filter dropdown)
-        cat_query = text(f"""
-            SELECT DISTINCT "sTypeName"
-            FROM units_info
-            WHERE "SiteID" IN ({placeholders})
-              AND "sTypeName" IS NOT NULL
-              AND "bRentable" = true
-              AND "bRented" = false
-            ORDER BY "sTypeName"
+        # Fetch distinct filter values from enriched view for dropdowns
+        filter_query = text(f"""
+            SELECT
+                COALESCE(v.category_label, u."sTypeName") AS cat,
+                v.label_type_code,
+                v.label_climate_code,
+                v.label_shape,
+                u."iFloor"
+            FROM units_info u
+            LEFT JOIN vw_units_inventory v
+                ON v.site_id = u."SiteID" AND v.unit_id = u."UnitID"
+            WHERE u."SiteID" IN ({placeholders})
+              AND u."bRentable" = true
+              AND u."bRented" = false
         """)
-        cat_result = pbi_session.execute(cat_query, params)
-        categories = [r[0] for r in cat_result.fetchall()]
+        filter_result = pbi_session.execute(filter_query, params)
+        filter_rows = filter_result.fetchall()
 
-        # Fetch distinct floors
-        floor_query = text(f"""
-            SELECT DISTINCT "iFloor"
-            FROM units_info
-            WHERE "SiteID" IN ({placeholders})
-              AND "iFloor" IS NOT NULL
-              AND "bRentable" = true
-              AND "bRented" = false
-            ORDER BY "iFloor"
-        """)
-        floor_result = pbi_session.execute(floor_query, params)
-        floors = [r[0] for r in floor_result.fetchall()]
+        categories_set = set()
+        type_codes_set = set()
+        climate_codes_set = set()
+        shapes_set = set()
+        floors_set = set()
+        for r in filter_rows:
+            if r[0]: categories_set.add(r[0])
+            if r[1]: type_codes_set.add(r[1])
+            if r[2]: climate_codes_set.add(r[2])
+            if r[3]: shapes_set.add(r[3])
+            if r[4] is not None: floors_set.add(r[4])
 
         return jsonify({
             'units': units,
             'count': len(units),
             'filters': {
-                'categories': categories,
-                'floors': floors,
+                'categories': sorted(categories_set),
+                'type_codes': sorted(type_codes_set),
+                'climate_codes': sorted(climate_codes_set),
+                'shapes': sorted(shapes_set),
+                'floors': sorted(floors_set),
             }
         })
 

@@ -61,9 +61,33 @@
         <div class="ua-refine-body">
             <div class="ua-filter-grid">
                 <div class="form-group">
-                    <label>Category</label>
+                    <label>Category Label</label>
                     <select id="filter-category" class="form-select" onchange="applyFilters()">
                         <option value="">All Categories</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Type Code</label>
+                    <select id="filter-type-code" class="form-select" onchange="applyFilters()">
+                        <option value="">All Types</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Climate Code</label>
+                    <select id="filter-climate-code" class="form-select" onchange="applyFilters()">
+                        <option value="">All Climate</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Shape</label>
+                    <select id="filter-shape" class="form-select" onchange="applyFilters()">
+                        <option value="">All Shapes</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Floor</label>
+                    <select id="filter-floor" class="form-select" onchange="applyFilters()">
+                        <option value="">All Floors</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -72,12 +96,6 @@
                         <option value="">All</option>
                         <option value="true">Climate Controlled</option>
                         <option value="false">Non-Climate</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Floor</label>
-                    <select id="filter-floor" class="form-select" onchange="applyFilters()">
-                        <option value="">All Floors</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -90,7 +108,7 @@
                 </div>
                 <div class="form-group" style="grid-column: 1 / -1;">
                     <label>Search</label>
-                    <input type="text" id="filter-search" class="form-select" placeholder="Search unit name, notes..." oninput="applyFilters()" style="max-width: 100%;">
+                    <input type="text" id="filter-search" class="form-select" placeholder="Search unit name, category, notes..." oninput="applyFilters()" style="max-width: 100%;">
                 </div>
             </div>
             <div style="margin-top: 0.5rem;">
@@ -136,11 +154,11 @@
                     <tr>
                         <th>Site</th>
                         <th>Unit</th>
-                        <th>Category</th>
+                        <th>Category Label</th>
+                        <th>Type</th>
                         <th>Size</th>
                         <th>Flr</th>
                         <th style="text-align: center;">AC</th>
-                        <th style="text-align: center;">Pwr</th>
                         <th style="text-align: right;">Std Rate</th>
                         <th style="text-align: right;">Promo</th>
                         <th style="text-align: right;">Indicative</th>
@@ -695,23 +713,22 @@ select.form-select {
             allUnits = data.units || [];
             const filters = data.filters || {};
 
-            const catSelect = document.getElementById('filter-category');
-            catSelect.innerHTML = '<option value="">All Categories</option>';
-            (filters.categories || []).forEach(c => {
-                const opt = document.createElement('option');
-                opt.value = c;
-                opt.textContent = c;
-                catSelect.appendChild(opt);
-            });
+            const populateSelect = (id, items, defaultLabel, labelFn) => {
+                const sel = document.getElementById(id);
+                sel.innerHTML = `<option value="">${defaultLabel}</option>`;
+                (items || []).forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item;
+                    opt.textContent = labelFn ? labelFn(item) : item;
+                    sel.appendChild(opt);
+                });
+            };
 
-            const floorSelect = document.getElementById('filter-floor');
-            floorSelect.innerHTML = '<option value="">All Floors</option>';
-            (filters.floors || []).forEach(f => {
-                const opt = document.createElement('option');
-                opt.value = f;
-                opt.textContent = `Floor ${f}`;
-                floorSelect.appendChild(opt);
-            });
+            populateSelect('filter-category', filters.categories, 'All Categories');
+            populateSelect('filter-type-code', filters.type_codes, 'All Types');
+            populateSelect('filter-climate-code', filters.climate_codes, 'All Climate');
+            populateSelect('filter-shape', filters.shapes, 'All Shapes');
+            populateSelect('filter-floor', filters.floors, 'All Floors', f => `Floor ${f}`);
 
             document.getElementById('stat-total').textContent = allUnits.length;
             document.getElementById('stat-categories').textContent = (filters.categories || []).length;
@@ -725,8 +742,15 @@ select.form-select {
         }
     }
 
+    function getDisplayCategory(u) {
+        return u.category_label || u.sTypeName || '-';
+    }
+
     function applyFilters() {
         const category = document.getElementById('filter-category').value;
+        const typeCode = document.getElementById('filter-type-code').value;
+        const climateCode = document.getElementById('filter-climate-code').value;
+        const shape = document.getElementById('filter-shape').value;
         const climate = document.getElementById('filter-climate').value;
         const floor = document.getElementById('filter-floor').value;
         const minSize = parseFloat(document.getElementById('filter-min-size').value) || 0;
@@ -734,14 +758,19 @@ select.form-select {
         const search = document.getElementById('filter-search').value.toLowerCase().trim();
 
         filteredUnits = allUnits.filter(u => {
-            if (category && u.sTypeName !== category) return false;
+            if (category && getDisplayCategory(u) !== category) return false;
+            if (typeCode && u.label_type_code !== typeCode) return false;
+            if (climateCode && u.label_climate_code !== climateCode) return false;
+            if (shape && u.label_shape !== shape) return false;
             if (climate === 'true' && !u.bClimate) return false;
             if (climate === 'false' && u.bClimate) return false;
             if (floor && u.iFloor !== parseInt(floor)) return false;
             if (u.area && u.area < minSize) return false;
             if (u.area && u.area > maxSize) return false;
             if (search) {
-                const haystack = [u.sUnitName, u.sTypeName, u.sUnitNote, u.sUnitDesc, u.sLocationCode]
+                const haystack = [u.sUnitName, u.sTypeName, u.category_label,
+                    u.label_type_code, u.label_climate_code, u.label_shape,
+                    u.sUnitNote, u.sUnitDesc, u.sLocationCode]
                     .filter(Boolean).join(' ').toLowerCase();
                 if (!haystack.includes(search)) return false;
             }
@@ -752,9 +781,10 @@ select.form-select {
     }
 
     function resetFilters() {
-        document.getElementById('filter-category').value = '';
-        document.getElementById('filter-climate').value = '';
-        document.getElementById('filter-floor').value = '';
+        ['filter-category', 'filter-type-code', 'filter-climate-code',
+         'filter-shape', 'filter-climate', 'filter-floor'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
         document.getElementById('filter-min-size').value = '';
         document.getElementById('filter-max-size').value = '';
         document.getElementById('filter-search').value = '';
@@ -850,9 +880,10 @@ select.form-select {
     function renderTableView() {
         const tbody = document.getElementById('units-tbody');
         tbody.innerHTML = filteredUnits.map(u => {
-            const site = siteMap[u.SiteID];
-            const siteCode = site ? site.site_code : (u.sLocationCode || u.SiteID);
+            const siteCode = u.site_code || (siteMap[u.SiteID] ? siteMap[u.SiteID].site_code : u.sLocationCode) || u.SiteID;
             const area = u.area ? fmt(u.area, 1) : '-';
+            const catLabel = getDisplayCategory(u);
+            const typeCode = u.label_type_code || '';
             const stdRate = fmtRate(u.dcStdRate);
             const promoRate = u.dcPushRate ? fmtRate(u.dcPushRate) : (u.dcWebRate ? fmtRate(u.dcWebRate) : '-');
 
@@ -863,24 +894,28 @@ select.form-select {
             }
 
             const acBadge = u.bClimate ? '<span class="badge badge-ac">AC</span>' : '<span class="badge badge-no">No</span>';
-            const powerBadge = u.bPower ? '<span class="badge badge-power">Yes</span>' : '-';
             const reservedFlag = u.bWaitingListReserved ? ' <span class="badge badge-reserved">Rsvd</span>' : '';
             const reserveDisabled = u.bWaitingListReserved ? 'disabled title="Already reserved"' : '';
 
+            // Build extra info badges for shape/pillar
+            let extras = '';
+            if (u.label_shape && u.label_shape !== 'Regular') extras += ` <span class="badge" style="background:#e2e3e5;color:#383d41;">${escHtml(u.label_shape)}</span>`;
+            if (u.label_pillar) extras += ` <span class="badge" style="background:#fce4ec;color:#880e4f;">${escHtml(u.label_pillar)}</span>`;
+
             return `<tr class="unit-row">
                 <td>${escHtml(siteCode)}</td>
-                <td><strong>${escHtml(u.sUnitName) || '-'}</strong>${reservedFlag}</td>
-                <td>${escHtml(u.sTypeName) || '-'}</td>
+                <td><strong>${escHtml(u.sUnitName) || '-'}</strong>${reservedFlag}${extras}</td>
+                <td>${escHtml(catLabel)}</td>
+                <td>${escHtml(typeCode) || '<span style="color:#bbb">-</span>'}</td>
                 <td>${area}</td>
                 <td>${u.iFloor != null ? u.iFloor : '-'}</td>
                 <td style="text-align:center;">${acBadge}</td>
-                <td style="text-align:center;">${powerBadge}</td>
                 <td style="text-align:right;">${stdRate}</td>
                 <td style="text-align:right;">${promoRate !== '-' ? '<span class="promo-rate">' + promoRate + '</span>' : '-'}</td>
                 <td style="text-align:right;">${indicativeHtml}</td>
                 <td>${u.iDaysVacant != null ? u.iDaysVacant + 'd' : '-'}</td>
                 <td style="text-align:center;">
-                    <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal(this)" data-site="${escHtml(siteCode)}" data-uid="${u.UnitID}" data-name="${escHtml(u.sUnitName)}" data-type="${escHtml(u.sTypeName)}" data-area="${area}" data-rate="${stdRate}">Reserve</button>
+                    <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal(this)" data-site="${escHtml(siteCode)}" data-uid="${u.UnitID}" data-name="${escHtml(u.sUnitName)}" data-type="${escHtml(catLabel)}" data-area="${area}" data-rate="${stdRate}">Reserve</button>
                 </td>
             </tr>`;
         }).join('');
@@ -889,9 +924,9 @@ select.form-select {
     function renderCardView() {
         const container = document.getElementById('units-card-container');
         container.innerHTML = filteredUnits.map(u => {
-            const site = siteMap[u.SiteID];
-            const siteCode = site ? site.site_code : (u.sLocationCode || u.SiteID);
+            const siteCode = u.site_code || (siteMap[u.SiteID] ? siteMap[u.SiteID].site_code : u.sLocationCode) || u.SiteID;
             const area = u.area ? fmt(u.area, 1) : '-';
+            const catLabel = getDisplayCategory(u);
             const stdRate = fmtRate(u.dcStdRate);
             const promoRate = u.dcPushRate ? fmtRate(u.dcPushRate) : (u.dcWebRate ? fmtRate(u.dcWebRate) : '-');
 
@@ -904,9 +939,16 @@ select.form-select {
             const badges = [];
             badges.push(u.bClimate ? '<span class="badge badge-ac">AC</span>' : '');
             badges.push(u.bPower ? '<span class="badge badge-power">Power</span>' : '');
+            if (u.label_shape && u.label_shape !== 'Regular') badges.push(`<span class="badge" style="background:#e2e3e5;color:#383d41;">${escHtml(u.label_shape)}</span>`);
+            if (u.label_pillar) badges.push(`<span class="badge" style="background:#fce4ec;color:#880e4f;">${escHtml(u.label_pillar)}</span>`);
             if (u.bWaitingListReserved) badges.push('<span class="badge badge-reserved">Reserved</span>');
 
             const reserveDisabled = u.bWaitingListReserved ? 'disabled' : '';
+
+            // Build subtitle: type code + climate code if available
+            const subtitleParts = [catLabel];
+            if (u.label_type_code) subtitleParts.push(u.label_type_code);
+            if (u.label_climate_code) subtitleParts.push(u.label_climate_code);
 
             return `<div class="ua-unit-card">
                 <div class="ua-unit-card-header">
@@ -914,7 +956,7 @@ select.form-select {
                     <span class="ua-site-tag">${escHtml(siteCode)}</span>
                 </div>
                 <div class="ua-unit-card-meta">
-                    <span>${escHtml(u.sTypeName) || '-'}</span>
+                    <span><strong>${escHtml(subtitleParts.join(' / '))}</strong></span>
                     <span>${area} sqft</span>
                     <span>Floor ${u.iFloor != null ? u.iFloor : '-'}</span>
                     ${u.iDaysVacant != null ? `<span>Vacant ${u.iDaysVacant}d</span>` : ''}
@@ -935,7 +977,7 @@ select.form-select {
                     </div>
                 </div>
                 <div class="ua-unit-card-actions">
-                    <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal(this)" data-site="${escHtml(siteCode)}" data-uid="${u.UnitID}" data-name="${escHtml(u.sUnitName)}" data-type="${escHtml(u.sTypeName)}" data-area="${area}" data-rate="${stdRate}">Reserve</button>
+                    <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal(this)" data-site="${escHtml(siteCode)}" data-uid="${u.UnitID}" data-name="${escHtml(u.sUnitName)}" data-type="${escHtml(catLabel)}" data-area="${area}" data-rate="${stdRate}">Reserve</button>
                 </div>
             </div>`;
         }).join('');
