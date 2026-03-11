@@ -2,30 +2,22 @@
 -- Customer-facing calendar events only: bookings, viewings, move-ins, move-outs,
 -- reservations, tenant appointments, and storage unit appointments.
 -- Excludes: holidays, staff schedules, admin tasks, training, cleaning, maintenance, etc.
+-- Times converted to local timezone per country (SG/MY = UTC+8, KR = UTC+9).
 
 CREATE OR REPLACE VIEW vw_calendar_events AS
 SELECT
     id,
     event_id,
     mailbox,
-    -- Derive country from mailbox
-    CASE
-        WHEN mailbox IN ('section51a@extraspaceasia.com','chansowlin@extraspaceasia.com',
-                         'segambut@extraspaceasia.com','kotadamansara@extraspaceasia.com')
-            THEN 'MY'
-        WHEN mailbox IN ('yangjae@extraspaceasia.com','bundang@extraspaceasia.com',
-                         'apgujeong@extraspaceasia.com','gasan@extraspaceasia.com',
-                         'yeongdeungpo@extraspaceasia.com','yongsan@extraspaceasia.com',
-                         'banpo@extraspaceasia.com')
-            THEN 'KR'
-        ELSE 'SG'
-    END AS country,
+    country,
     subject,
     categories,
     organizer,
-    start_time,
-    end_time,
-    start_time::time AS time_of_day,
+    -- Convert to local time
+    start_time AT TIME ZONE local_tz AS start_time,
+    end_time AT TIME ZONE local_tz AS end_time,
+    (start_time AT TIME ZONE local_tz)::time AS time_of_day,
+    make_time(EXTRACT(HOUR FROM start_time AT TIME ZONE local_tz)::int, 0, 0) AS hour_bucket,
     CASE
         WHEN is_all_day THEN NULL
         ELSE EXTRACT(EPOCH FROM (end_time - start_time)) / 60
@@ -43,11 +35,32 @@ SELECT
     created_at,
     updated_at,
     synced_at,
-    -- Event type classification
     event_type
 FROM (
     SELECT
         *,
+        -- Derive country from mailbox
+        CASE
+            WHEN mailbox IN ('section51a@extraspaceasia.com','chansowlin@extraspaceasia.com',
+                             'segambut@extraspaceasia.com','kotadamansara@extraspaceasia.com')
+                THEN 'MY'
+            WHEN mailbox IN ('yangjae@extraspaceasia.com','bundang@extraspaceasia.com',
+                             'apgujeong@extraspaceasia.com','gasan@extraspaceasia.com',
+                             'yeongdeungpo@extraspaceasia.com','yongsan@extraspaceasia.com',
+                             'banpo@extraspaceasia.com')
+                THEN 'KR'
+            ELSE 'SG'
+        END AS country,
+        -- Local timezone per country
+        CASE
+            WHEN mailbox IN ('yangjae@extraspaceasia.com','bundang@extraspaceasia.com',
+                             'apgujeong@extraspaceasia.com','gasan@extraspaceasia.com',
+                             'yeongdeungpo@extraspaceasia.com','yongsan@extraspaceasia.com',
+                             'banpo@extraspaceasia.com')
+                THEN 'Asia/Seoul'
+            ELSE 'Asia/Singapore'  -- SG and MY are both UTC+8
+        END AS local_tz,
+        -- Event type classification
         CASE
             WHEN subject ILIKE '[BOOKING]%'
               OR subject ILIKE '[SIGN UP]%' THEN 'booking'
