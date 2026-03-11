@@ -3,6 +3,8 @@
 {% block title %}Unit Availability - ESA Backend{% endblock %}
 
 {% block content %}
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
 <div class="page-header">
     <h1>Unit Availability</h1>
     <p style="color: #666; margin-top: 0.5rem;">Browse available units, view indicative pricing with active discount plans, and make reservations</p>
@@ -11,15 +13,15 @@
 <!-- Filters -->
 <div class="card">
     <h2>Filters</h2>
-    <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
-        <div class="form-group" style="flex: 1; min-width: 250px;">
-            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Sites</label>
-            <select id="site-select" class="form-select" multiple style="height: auto; min-height: 42px;">
+    <div class="ua-filter-bar">
+        <div class="form-group" style="flex: 1; min-width: 0;">
+            <label>Sites</label>
+            <select id="site-select" class="form-select" multiple style="height: auto; min-height: 48px;">
             </select>
             <p style="color: #666; font-size: 0.8rem; margin-top: 0.25rem;">Hold Ctrl/Cmd to select multiple</p>
         </div>
-        <div class="form-group">
-            <button type="button" class="btn" onclick="loadUnits()">Load Units</button>
+        <div class="form-group" style="align-self: end;">
+            <button type="button" class="btn ua-btn-load" onclick="loadUnits()">Load Units</button>
         </div>
     </div>
 </div>
@@ -30,64 +32,69 @@
     <!-- Summary Cards -->
     <div class="card">
         <h2>Availability Summary</h2>
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="value" id="stat-total">0</div>
-                <div class="label">Available Units</div>
+        <div class="ua-stats-grid">
+            <div class="ua-stat-card" style="background: var(--esa-navy, #1a3a5c);">
+                <div class="ua-stat-value" id="stat-total">0</div>
+                <div class="ua-stat-label">Available</div>
             </div>
-            <div class="stat-card" style="background: #28A745;">
-                <div class="value" id="stat-categories">0</div>
-                <div class="label">Unit Categories</div>
+            <div class="ua-stat-card" style="background: #28A745;">
+                <div class="ua-stat-value" id="stat-categories">0</div>
+                <div class="ua-stat-label">Categories</div>
             </div>
-            <div class="stat-card" style="background: #17a2b8;">
-                <div class="value" id="stat-climate">0</div>
-                <div class="label">Climate Controlled</div>
+            <div class="ua-stat-card" style="background: #17a2b8;">
+                <div class="ua-stat-value" id="stat-climate">0</div>
+                <div class="ua-stat-label">Climate Ctrl</div>
             </div>
-            <div class="stat-card" style="background: #6f42c1;">
-                <div class="value" id="stat-plans">0</div>
-                <div class="label">Active Discount Plans</div>
+            <div class="ua-stat-card" style="background: #6f42c1;">
+                <div class="ua-stat-value" id="stat-plans">0</div>
+                <div class="ua-stat-label">Discounts</div>
             </div>
         </div>
     </div>
 
     <!-- Inline Filters -->
     <div class="card" id="inline-filters-card">
-        <h2>Refine Results</h2>
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
-            <div class="form-group" style="min-width: 160px;">
-                <label>Category</label>
-                <select id="filter-category" class="form-select" onchange="applyFilters()">
-                    <option value="">All Categories</option>
-                </select>
+        <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="this.parentElement.querySelector('.ua-refine-body').classList.toggle('ua-collapsed')">
+            <h2 style="margin: 0;">Refine Results</h2>
+            <span style="font-size: 0.85rem; color: #666;">tap to toggle</span>
+        </div>
+        <div class="ua-refine-body">
+            <div class="ua-filter-grid">
+                <div class="form-group">
+                    <label>Category</label>
+                    <select id="filter-category" class="form-select" onchange="applyFilters()">
+                        <option value="">All Categories</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Climate</label>
+                    <select id="filter-climate" class="form-select" onchange="applyFilters()">
+                        <option value="">All</option>
+                        <option value="true">Climate Controlled</option>
+                        <option value="false">Non-Climate</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Floor</label>
+                    <select id="filter-floor" class="form-select" onchange="applyFilters()">
+                        <option value="">All Floors</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Min Size (sqft)</label>
+                    <input type="number" id="filter-min-size" class="form-select" placeholder="0" onchange="applyFilters()" step="1" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Max Size (sqft)</label>
+                    <input type="number" id="filter-max-size" class="form-select" placeholder="Any" onchange="applyFilters()" step="1" min="0">
+                </div>
+                <div class="form-group" style="grid-column: 1 / -1;">
+                    <label>Search</label>
+                    <input type="text" id="filter-search" class="form-select" placeholder="Search unit name, notes..." oninput="applyFilters()" style="max-width: 100%;">
+                </div>
             </div>
-            <div class="form-group" style="min-width: 130px;">
-                <label>Climate</label>
-                <select id="filter-climate" class="form-select" onchange="applyFilters()">
-                    <option value="">All</option>
-                    <option value="true">Climate Controlled</option>
-                    <option value="false">Non-Climate</option>
-                </select>
-            </div>
-            <div class="form-group" style="min-width: 110px;">
-                <label>Floor</label>
-                <select id="filter-floor" class="form-select" onchange="applyFilters()">
-                    <option value="">All Floors</option>
-                </select>
-            </div>
-            <div class="form-group" style="min-width: 100px;">
-                <label>Min Size (sqft)</label>
-                <input type="number" id="filter-min-size" class="form-select" placeholder="0" onchange="applyFilters()" step="1" min="0">
-            </div>
-            <div class="form-group" style="min-width: 100px;">
-                <label>Max Size (sqft)</label>
-                <input type="number" id="filter-max-size" class="form-select" placeholder="Any" onchange="applyFilters()" step="1" min="0">
-            </div>
-            <div class="form-group" style="min-width: 200px; flex: 1;">
-                <label>Search</label>
-                <input type="text" id="filter-search" class="form-select" placeholder="Search unit name, notes..." oninput="applyFilters()">
-            </div>
-            <div class="form-group">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="resetFilters()">Reset</button>
+            <div style="margin-top: 0.5rem;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="resetFilters()">Reset Filters</button>
             </div>
         </div>
     </div>
@@ -95,44 +102,50 @@
     <!-- Discount Plan Selector -->
     <div class="card">
         <h2>Discount Plan (Indicative Pricing)</h2>
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
-            <div class="form-group" style="flex: 1; min-width: 300px;">
-                <label>Active Discount Plan</label>
-                <select id="discount-plan-select" class="form-select" onchange="onDiscountPlanChange()">
-                    <option value="">No discount (Standard Rate)</option>
-                </select>
-            </div>
-            <div id="plan-details" style="flex: 1; min-width: 300px; display: none;">
-                <div style="background: #f8f9fa; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.85rem; line-height: 1.6;">
-                    <div><strong>Type:</strong> <span id="plan-type-label"></span></div>
-                    <div><strong>Discount:</strong> <span id="plan-discount-label"></span></div>
-                    <div><strong>Period:</strong> <span id="plan-period-label"></span></div>
-                    <div id="plan-deposit-row"><strong>Deposit:</strong> <span id="plan-deposit-label"></span></div>
-                    <div id="plan-lock-row"><strong>Lock-in:</strong> <span id="plan-lock-label"></span></div>
-                </div>
+        <div class="form-group">
+            <label>Active Discount Plan</label>
+            <select id="discount-plan-select" class="form-select" onchange="onDiscountPlanChange()" style="max-width: 100%;">
+                <option value="">No discount (Standard Rate)</option>
+            </select>
+        </div>
+        <div id="plan-details" style="display: none; margin-top: 0.75rem;">
+            <div style="background: #f8f9fa; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.85rem; line-height: 1.6;">
+                <div><strong>Type:</strong> <span id="plan-type-label"></span></div>
+                <div><strong>Discount:</strong> <span id="plan-discount-label"></span></div>
+                <div><strong>Period:</strong> <span id="plan-period-label"></span></div>
+                <div id="plan-deposit-row"><strong>Deposit:</strong> <span id="plan-deposit-label"></span></div>
+                <div id="plan-lock-row"><strong>Lock-in:</strong> <span id="plan-lock-label"></span></div>
             </div>
         </div>
     </div>
 
-    <!-- Units Table -->
+    <!-- View toggle + count -->
     <div class="card">
-        <h2>Available Units <span id="filtered-count" style="font-size: 0.85rem; color: #666; font-weight: normal;"></span></h2>
-        <div id="units-table-container">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <h2 style="margin: 0;">Available Units <span id="filtered-count" style="font-size: 0.85rem; color: #666; font-weight: normal;"></span></h2>
+            <div class="ua-view-toggle">
+                <button type="button" id="view-table-btn" class="ua-toggle-btn ua-toggle-active" onclick="setView('table')">Table</button>
+                <button type="button" id="view-card-btn" class="ua-toggle-btn" onclick="setView('card')">Cards</button>
+            </div>
+        </div>
+
+        <!-- TABLE VIEW -->
+        <div id="units-table-container" style="margin-top: 1rem;">
             <table>
                 <thead>
                     <tr>
-                        <th style="min-width: 70px;">Site</th>
-                        <th style="min-width: 80px;">Unit</th>
-                        <th style="min-width: 120px;">Category</th>
-                        <th style="min-width: 80px;">Size</th>
-                        <th style="min-width: 50px;">Floor</th>
-                        <th style="min-width: 50px; text-align: center;">AC</th>
-                        <th style="min-width: 50px; text-align: center;">Power</th>
-                        <th style="min-width: 100px; text-align: right;">Std Rate</th>
-                        <th style="min-width: 100px; text-align: right;">Promo Rate</th>
-                        <th style="min-width: 100px; text-align: right;">Indicative</th>
-                        <th style="min-width: 60px;">Vacant</th>
-                        <th style="min-width: 80px; text-align: center;">Action</th>
+                        <th>Site</th>
+                        <th>Unit</th>
+                        <th>Category</th>
+                        <th>Size</th>
+                        <th>Flr</th>
+                        <th style="text-align: center;">AC</th>
+                        <th style="text-align: center;">Pwr</th>
+                        <th style="text-align: right;">Std Rate</th>
+                        <th style="text-align: right;">Promo</th>
+                        <th style="text-align: right;">Indicative</th>
+                        <th>Vacant</th>
+                        <th style="text-align: center;">Action</th>
                     </tr>
                 </thead>
                 <tbody id="units-tbody">
@@ -140,6 +153,11 @@
                 </tbody>
             </table>
         </div>
+
+        <!-- CARD VIEW (mobile-first) -->
+        <div id="units-card-container" style="display: none; margin-top: 1rem;">
+        </div>
+
         <div id="no-units-message" style="display: none; text-align: center; padding: 2rem; color: #666;">
             No available units match the current filters.
         </div>
@@ -147,9 +165,12 @@
 </div>
 
 <!-- Reservation Modal -->
-<div id="reserve-modal" class="modal" style="display: none;">
-    <div class="modal-content" style="max-width: 520px;">
-        <h3>Reserve Unit</h3>
+<div id="reserve-modal" class="ua-modal" style="display: none;">
+    <div class="ua-modal-content">
+        <div class="ua-modal-header">
+            <h3>Reserve Unit</h3>
+            <button type="button" class="ua-modal-close" onclick="closeReserveModal()">&times;</button>
+        </div>
         <div id="reserve-unit-info" style="background: #f0f4ff; border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.9rem;">
         </div>
         <form id="reserve-form" onsubmit="submitReservation(event)">
@@ -157,25 +178,25 @@
             <input type="hidden" id="res-unit-id">
             <div class="form-group">
                 <label>First Name <span style="color: var(--esa-red);">*</span></label>
-                <input type="text" id="res-first-name" class="form-select" required maxlength="100" style="max-width: 100%;">
+                <input type="text" id="res-first-name" class="form-select" required maxlength="100" autocomplete="given-name" style="max-width: 100%;">
             </div>
             <div class="form-group">
                 <label>Last Name <span style="color: var(--esa-red);">*</span></label>
-                <input type="text" id="res-last-name" class="form-select" required maxlength="100" style="max-width: 100%;">
+                <input type="text" id="res-last-name" class="form-select" required maxlength="100" autocomplete="family-name" style="max-width: 100%;">
             </div>
             <div class="form-group">
                 <label>Phone <span style="color: var(--esa-red);">*</span></label>
-                <input type="tel" id="res-phone" class="form-select" required maxlength="30" style="max-width: 100%;">
+                <input type="tel" id="res-phone" class="form-select" required maxlength="30" autocomplete="tel" style="max-width: 100%;">
             </div>
             <div class="form-group">
                 <label>Email</label>
-                <input type="email" id="res-email" class="form-select" maxlength="255" style="max-width: 100%;">
+                <input type="email" id="res-email" class="form-select" maxlength="255" autocomplete="email" style="max-width: 100%;">
             </div>
             <div class="form-group">
                 <label>Notes</label>
                 <textarea id="res-notes" class="form-select" rows="2" maxlength="500" style="max-width: 100%; resize: vertical;"></textarea>
             </div>
-            <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.25rem;">
+            <div class="ua-modal-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeReserveModal()">Cancel</button>
                 <button type="submit" class="btn" id="res-submit-btn">Submit Reservation</button>
             </div>
@@ -184,9 +205,12 @@
 </div>
 
 <!-- Result Modal -->
-<div id="result-modal" class="modal" style="display: none;">
-    <div class="modal-content" style="max-width: 420px;">
-        <h3 id="result-modal-title">Result</h3>
+<div id="result-modal" class="ua-modal" style="display: none;">
+    <div class="ua-modal-content" style="max-width: 420px;">
+        <div class="ua-modal-header">
+            <h3 id="result-modal-title">Result</h3>
+            <button type="button" class="ua-modal-close" onclick="document.getElementById('result-modal').style.display='none'">&times;</button>
+        </div>
         <p id="result-modal-message" style="text-align: center; font-size: 1rem; margin: 1rem 0;"></p>
         <div style="text-align: center; margin-top: 1.5rem;">
             <button type="button" class="btn" onclick="document.getElementById('result-modal').style.display='none'">Close</button>
@@ -195,6 +219,7 @@
 </div>
 
 <style>
+/* ========== BASE FORM STYLES ========== */
 .form-group {
     margin-bottom: 1rem;
 }
@@ -207,46 +232,200 @@
 .form-select {
     width: 100%;
     max-width: 400px;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.9rem;
+    padding: 0.55rem 0.75rem;
+    font-size: 16px; /* prevents iOS zoom on focus */
     border: 1px solid var(--esa-gray-dark);
-    border-radius: 4px;
+    border-radius: 6px;
     background: #fff;
+    -webkit-appearance: none;
+    appearance: none;
+}
+select.form-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
 }
 .form-select:focus {
     outline: none;
     border-color: var(--esa-navy);
+    box-shadow: 0 0 0 2px rgba(26, 58, 92, 0.15);
 }
+
+/* ========== TOP FILTER BAR ========== */
+.ua-filter-bar {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: end;
+}
+.ua-btn-load {
+    min-height: 48px;
+    min-width: 120px;
+    font-size: 1rem;
+}
+
+/* ========== STATS GRID ========== */
+.ua-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+}
+.ua-stat-card {
+    border-radius: 8px;
+    padding: 1rem 0.75rem;
+    color: #fff;
+    text-align: center;
+}
+.ua-stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.ua-stat-label {
+    font-size: 0.75rem;
+    opacity: 0.9;
+    margin-top: 0.25rem;
+}
+
+/* ========== REFINE FILTERS GRID ========== */
+.ua-refine-body {
+    margin-top: 1rem;
+    overflow: hidden;
+    max-height: 500px;
+    transition: max-height 0.3s ease;
+}
+.ua-refine-body.ua-collapsed {
+    max-height: 0;
+    margin-top: 0;
+}
+.ua-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+}
+.ua-filter-grid .form-select {
+    max-width: 100%;
+}
+
+/* ========== VIEW TOGGLE ========== */
+.ua-view-toggle {
+    display: flex;
+    border: 1px solid var(--esa-gray-dark);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.ua-toggle-btn {
+    padding: 0.4rem 0.9rem;
+    border: none;
+    background: #fff;
+    font-size: 0.82rem;
+    cursor: pointer;
+    color: #555;
+    min-height: 36px;
+}
+.ua-toggle-btn + .ua-toggle-btn { border-left: 1px solid var(--esa-gray-dark); }
+.ua-toggle-active {
+    background: var(--esa-navy, #1a3a5c);
+    color: #fff;
+}
+
+/* ========== TABLE VIEW ========== */
 #units-table-container {
     max-height: 600px;
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
 }
 #units-table-container table {
     width: 100%;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
+    border-collapse: collapse;
 }
 #units-table-container thead {
     position: sticky;
     top: 0;
-    background: var(--esa-gray);
+    background: var(--esa-gray, #e8e8e8);
     z-index: 10;
 }
 #units-table-container th {
     white-space: nowrap;
-    padding: 0.5rem 0.6rem;
+    padding: 0.55rem 0.5rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
 }
 #units-table-container td {
-    padding: 0.45rem 0.6rem;
+    padding: 0.5rem 0.5rem;
     white-space: nowrap;
+    border-bottom: 1px solid #eee;
 }
-.unit-row:hover {
-    background: rgba(26, 58, 92, 0.06);
+.unit-row:hover { background: rgba(26, 58, 92, 0.06); }
+.unit-row:active { background: rgba(26, 58, 92, 0.12); }
+
+/* ========== CARD VIEW (mobile-first) ========== */
+.ua-unit-card {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
 }
+.ua-unit-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.ua-unit-card-header h4 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--esa-navy, #1a3a5c);
+}
+.ua-unit-card-header .ua-site-tag {
+    font-size: 0.72rem;
+    background: var(--esa-navy, #1a3a5c);
+    color: #fff;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.ua-unit-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    font-size: 0.82rem;
+    color: #555;
+    margin-bottom: 0.65rem;
+}
+.ua-unit-card-meta span { white-space: nowrap; }
+.ua-unit-card-prices {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 0.5rem;
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 0.65rem 0.75rem;
+    margin-bottom: 0.65rem;
+    font-size: 0.82rem;
+}
+.ua-price-item { text-align: center; }
+.ua-price-item .ua-price-label { font-size: 0.72rem; color: #888; text-transform: uppercase; }
+.ua-price-item .ua-price-val { font-weight: 600; font-size: 0.95rem; margin-top: 0.15rem; }
+.ua-unit-card-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+/* ========== BADGES ========== */
 .badge {
     display: inline-block;
-    padding: 0.15rem 0.45rem;
-    border-radius: 3px;
-    font-size: 0.75rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
     font-weight: 600;
 }
 .badge-ac { background: #d4edda; color: #155724; }
@@ -255,39 +434,133 @@
 .badge-reserved { background: #fff3cd; color: #856404; }
 .promo-rate { color: var(--esa-red); font-weight: 600; }
 .indicative-rate { color: #28A745; font-weight: 700; }
+
+/* ========== RESERVE BUTTON ========== */
 .btn-reserve {
-    padding: 0.25rem 0.6rem;
-    font-size: 0.78rem;
+    padding: 0.45rem 0.85rem;
+    font-size: 0.82rem;
     background: var(--esa-navy, #1a3a5c);
     color: #fff;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
+    min-height: 36px;
+    touch-action: manipulation;
 }
 .btn-reserve:hover { opacity: 0.85; }
+.btn-reserve:active { transform: scale(0.97); }
 .btn-reserve:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Modal styles */
-.modal {
+/* ========== MODAL ========== */
+.ua-modal {
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
     background: rgba(0,0,0,0.5);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     z-index: 1000;
+    padding: 1rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
-.modal-content {
+.ua-modal-content {
     background: #fff;
-    padding: 2rem;
-    border-radius: 8px;
-    width: 90%;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    padding: 1.5rem;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 520px;
+    margin: auto;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+    position: relative;
 }
-.modal-content h3 {
-    color: var(--esa-navy);
+.ua-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 1rem;
-    text-align: center;
+}
+.ua-modal-header h3 {
+    margin: 0;
+    color: var(--esa-navy);
+    font-size: 1.1rem;
+}
+.ua-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.6rem;
+    color: #999;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.ua-modal-close:hover { color: #333; }
+.ua-modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+    margin-top: 1.25rem;
+}
+.ua-modal-actions .btn {
+    min-height: 44px;
+    min-width: 100px;
+}
+
+/* ========== RESPONSIVE: iPad Mini portrait (~744px) and below ========== */
+@media (max-width: 820px) {
+    .ua-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .ua-filter-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    /* Auto-switch to card view on narrow screens */
+    #units-table-container { display: none !important; }
+    #units-card-container { display: block !important; }
+    .ua-view-toggle { display: none; }
+}
+
+/* ========== RESPONSIVE: Phone (<500px) ========== */
+@media (max-width: 500px) {
+    .ua-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+    }
+    .ua-stat-card {
+        padding: 0.75rem 0.5rem;
+    }
+    .ua-stat-value { font-size: 1.4rem; }
+    .ua-filter-grid {
+        grid-template-columns: 1fr;
+    }
+    .ua-modal-content {
+        padding: 1.25rem 1rem;
+    }
+    .ua-modal-actions {
+        flex-direction: column-reverse;
+    }
+    .ua-modal-actions .btn {
+        width: 100%;
+    }
+    .ua-unit-card-prices {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ========== RESPONSIVE: Landscape iPad Mini / small tablets ========== */
+@media (min-width: 821px) and (max-width: 1100px) {
+    #units-table-container table {
+        font-size: 0.78rem;
+    }
+    #units-table-container th,
+    #units-table-container td {
+        padding: 0.45rem 0.35rem;
+    }
 }
 </style>
 {% endblock %}
@@ -301,7 +574,8 @@
     let filteredUnits = [];
     let discountPlans = [];
     let selectedPlan = null;
-    let siteMap = {}; // site_id -> {site_code, name, country}
+    let siteMap = {};
+    let currentView = window.innerWidth <= 820 ? 'card' : 'table';
 
     function getCSRFToken() {
         const meta = document.querySelector('meta[name="csrf-token"]');
@@ -324,6 +598,23 @@
     function fmtRate(val) {
         if (val == null || val === 0) return '-';
         return Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function escHtml(str) {
+        if (!str) return '';
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    // View toggle
+    function setView(view) {
+        currentView = view;
+        document.getElementById('view-table-btn').classList.toggle('ua-toggle-active', view === 'table');
+        document.getElementById('view-card-btn').classList.toggle('ua-toggle-active', view === 'card');
+        document.getElementById('units-table-container').style.display = view === 'table' ? '' : 'none';
+        document.getElementById('units-card-container').style.display = view === 'card' ? 'block' : 'none';
+        renderTable();
     }
 
     // Load sites dropdown
@@ -369,7 +660,6 @@
             discountPlans = data.plans || [];
 
             const select = document.getElementById('discount-plan-select');
-            // Keep the first "no discount" option
             select.innerHTML = '<option value="">No discount (Standard Rate)</option>';
 
             discountPlans.forEach(p => {
@@ -405,7 +695,6 @@
             allUnits = data.units || [];
             const filters = data.filters || {};
 
-            // Populate filter dropdowns
             const catSelect = document.getElementById('filter-category');
             catSelect.innerHTML = '<option value="">All Categories</option>';
             (filters.categories || []).forEach(c => {
@@ -424,7 +713,6 @@
                 floorSelect.appendChild(opt);
             });
 
-            // Update summary
             document.getElementById('stat-total').textContent = allUnits.length;
             document.getElementById('stat-categories').textContent = (filters.categories || []).length;
             document.getElementById('stat-climate').textContent = allUnits.filter(u => u.bClimate).length;
@@ -437,7 +725,6 @@
         }
     }
 
-    // Apply client-side filters
     function applyFilters() {
         const category = document.getElementById('filter-category').value;
         const climate = document.getElementById('filter-climate').value;
@@ -474,7 +761,6 @@
         applyFilters();
     }
 
-    // Discount plan change handler
     function onDiscountPlanChange() {
         const planId = document.getElementById('discount-plan-select').value;
         const detailsDiv = document.getElementById('plan-details');
@@ -496,25 +782,16 @@
 
                 const depositRow = document.getElementById('plan-deposit-row');
                 const lockRow = document.getElementById('plan-lock-row');
-                if (selectedPlan.deposit) {
-                    depositRow.style.display = '';
-                    document.getElementById('plan-deposit-label').textContent = selectedPlan.deposit;
-                } else {
-                    depositRow.style.display = 'none';
-                }
-                if (selectedPlan.lock_in_period) {
-                    lockRow.style.display = '';
-                    document.getElementById('plan-lock-label').textContent = selectedPlan.lock_in_period;
-                } else {
-                    lockRow.style.display = 'none';
-                }
+                depositRow.style.display = selectedPlan.deposit ? '' : 'none';
+                if (selectedPlan.deposit) document.getElementById('plan-deposit-label').textContent = selectedPlan.deposit;
+                lockRow.style.display = selectedPlan.lock_in_period ? '' : 'none';
+                if (selectedPlan.lock_in_period) document.getElementById('plan-lock-label').textContent = selectedPlan.lock_in_period;
             }
         }
 
         renderTable();
     }
 
-    // Calculate indicative price
     function calcIndicative(stdRate) {
         if (!selectedPlan || !stdRate) return null;
 
@@ -523,22 +800,15 @@
 
         if (!discType || discNum == null) return null;
 
-        if (discType === 'percentage') {
-            return stdRate * (1 - discNum / 100);
-        } else if (discType === 'fixed_amount') {
-            return Math.max(0, stdRate - discNum);
-        }
-        // free_period or none — just show std rate
+        if (discType === 'percentage') return stdRate * (1 - discNum / 100);
+        if (discType === 'fixed_amount') return Math.max(0, stdRate - discNum);
         return null;
     }
 
-    // Check if plan is applicable to a site
     function isPlanApplicableToSite(siteId) {
         if (!selectedPlan || !selectedPlan.applicable_sites) return true;
         const sites = selectedPlan.applicable_sites;
         if (Object.keys(sites).length === 0) return true;
-
-        // Check by site code
         const siteInfo = siteMap[siteId];
         if (siteInfo && siteInfo.site_code) {
             const val = sites[siteInfo.site_code];
@@ -548,24 +818,37 @@
         return true;
     }
 
-    // Render table
     function renderTable() {
-        const tbody = document.getElementById('units-tbody');
-        const container = document.getElementById('units-table-container');
-        const noMsg = document.getElementById('no-units-message');
         const countSpan = document.getElementById('filtered-count');
+        const noMsg = document.getElementById('no-units-message');
 
         countSpan.textContent = `(${filteredUnits.length} of ${allUnits.length})`;
 
         if (filteredUnits.length === 0) {
-            container.style.display = 'none';
+            document.getElementById('units-table-container').style.display = 'none';
+            document.getElementById('units-card-container').style.display = 'none';
             noMsg.style.display = 'block';
             return;
         }
 
-        container.style.display = 'block';
         noMsg.style.display = 'none';
 
+        // Determine effective view (CSS may override for mobile)
+        const isMobile = window.innerWidth <= 820;
+
+        if (!isMobile && currentView === 'table') {
+            renderTableView();
+            document.getElementById('units-table-container').style.display = '';
+            document.getElementById('units-card-container').style.display = 'none';
+        } else {
+            renderCardView();
+            document.getElementById('units-card-container').style.display = 'block';
+            if (!isMobile) document.getElementById('units-table-container').style.display = 'none';
+        }
+    }
+
+    function renderTableView() {
+        const tbody = document.getElementById('units-tbody');
         tbody.innerHTML = filteredUnits.map(u => {
             const site = siteMap[u.SiteID];
             const siteCode = site ? site.site_code : (u.sLocationCode || u.SiteID);
@@ -576,21 +859,19 @@
             let indicativeHtml = '-';
             if (selectedPlan && isPlanApplicableToSite(u.SiteID)) {
                 const indic = calcIndicative(u.dcStdRate);
-                if (indic != null) {
-                    indicativeHtml = `<span class="indicative-rate">${fmtRate(indic)}</span>`;
-                }
+                if (indic != null) indicativeHtml = `<span class="indicative-rate">${fmtRate(indic)}</span>`;
             }
 
             const acBadge = u.bClimate ? '<span class="badge badge-ac">AC</span>' : '<span class="badge badge-no">No</span>';
             const powerBadge = u.bPower ? '<span class="badge badge-power">Yes</span>' : '-';
-            const reservedFlag = u.bWaitingListReserved ? ' <span class="badge badge-reserved">Reserved</span>' : '';
+            const reservedFlag = u.bWaitingListReserved ? ' <span class="badge badge-reserved">Rsvd</span>' : '';
             const reserveDisabled = u.bWaitingListReserved ? 'disabled title="Already reserved"' : '';
 
             return `<tr class="unit-row">
-                <td>${siteCode}</td>
-                <td><strong>${u.sUnitName || '-'}</strong>${reservedFlag}</td>
-                <td>${u.sTypeName || '-'}</td>
-                <td>${area} sqft</td>
+                <td>${escHtml(siteCode)}</td>
+                <td><strong>${escHtml(u.sUnitName) || '-'}</strong>${reservedFlag}</td>
+                <td>${escHtml(u.sTypeName) || '-'}</td>
+                <td>${area}</td>
                 <td>${u.iFloor != null ? u.iFloor : '-'}</td>
                 <td style="text-align:center;">${acBadge}</td>
                 <td style="text-align:center;">${powerBadge}</td>
@@ -599,19 +880,81 @@
                 <td style="text-align:right;">${indicativeHtml}</td>
                 <td>${u.iDaysVacant != null ? u.iDaysVacant + 'd' : '-'}</td>
                 <td style="text-align:center;">
-                    <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal('${siteCode}', ${u.UnitID}, '${(u.sUnitName || '').replace(/'/g, "\\'")}', '${(u.sTypeName || '').replace(/'/g, "\\'")}', '${area}', '${stdRate}')">Reserve</button>
+                    <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal(this)" data-site="${escHtml(siteCode)}" data-uid="${u.UnitID}" data-name="${escHtml(u.sUnitName)}" data-type="${escHtml(u.sTypeName)}" data-area="${area}" data-rate="${stdRate}">Reserve</button>
                 </td>
             </tr>`;
         }).join('');
     }
 
-    // Reservation modal
-    function openReserveModal(siteCode, unitId, unitName, typeName, area, rate) {
+    function renderCardView() {
+        const container = document.getElementById('units-card-container');
+        container.innerHTML = filteredUnits.map(u => {
+            const site = siteMap[u.SiteID];
+            const siteCode = site ? site.site_code : (u.sLocationCode || u.SiteID);
+            const area = u.area ? fmt(u.area, 1) : '-';
+            const stdRate = fmtRate(u.dcStdRate);
+            const promoRate = u.dcPushRate ? fmtRate(u.dcPushRate) : (u.dcWebRate ? fmtRate(u.dcWebRate) : '-');
+
+            let indicativeHtml = '-';
+            if (selectedPlan && isPlanApplicableToSite(u.SiteID)) {
+                const indic = calcIndicative(u.dcStdRate);
+                if (indic != null) indicativeHtml = `<span class="indicative-rate">${fmtRate(indic)}</span>`;
+            }
+
+            const badges = [];
+            badges.push(u.bClimate ? '<span class="badge badge-ac">AC</span>' : '');
+            badges.push(u.bPower ? '<span class="badge badge-power">Power</span>' : '');
+            if (u.bWaitingListReserved) badges.push('<span class="badge badge-reserved">Reserved</span>');
+
+            const reserveDisabled = u.bWaitingListReserved ? 'disabled' : '';
+
+            return `<div class="ua-unit-card">
+                <div class="ua-unit-card-header">
+                    <h4>${escHtml(u.sUnitName) || '-'}</h4>
+                    <span class="ua-site-tag">${escHtml(siteCode)}</span>
+                </div>
+                <div class="ua-unit-card-meta">
+                    <span>${escHtml(u.sTypeName) || '-'}</span>
+                    <span>${area} sqft</span>
+                    <span>Floor ${u.iFloor != null ? u.iFloor : '-'}</span>
+                    ${u.iDaysVacant != null ? `<span>Vacant ${u.iDaysVacant}d</span>` : ''}
+                    ${badges.filter(Boolean).join(' ')}
+                </div>
+                <div class="ua-unit-card-prices">
+                    <div class="ua-price-item">
+                        <div class="ua-price-label">Std Rate</div>
+                        <div class="ua-price-val">${stdRate}</div>
+                    </div>
+                    <div class="ua-price-item">
+                        <div class="ua-price-label">Promo</div>
+                        <div class="ua-price-val">${promoRate !== '-' ? '<span class="promo-rate">' + promoRate + '</span>' : '-'}</div>
+                    </div>
+                    <div class="ua-price-item">
+                        <div class="ua-price-label">Indicative</div>
+                        <div class="ua-price-val">${indicativeHtml}</div>
+                    </div>
+                </div>
+                <div class="ua-unit-card-actions">
+                    <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal(this)" data-site="${escHtml(siteCode)}" data-uid="${u.UnitID}" data-name="${escHtml(u.sUnitName)}" data-type="${escHtml(u.sTypeName)}" data-area="${area}" data-rate="${stdRate}">Reserve</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // Reservation modal — reads data attributes from the button
+    function openReserveModal(btn) {
+        const siteCode = btn.dataset.site;
+        const unitId = btn.dataset.uid;
+        const unitName = btn.dataset.name;
+        const typeName = btn.dataset.type;
+        const area = btn.dataset.area;
+        const rate = btn.dataset.rate;
+
         document.getElementById('res-site-code').value = siteCode;
         document.getElementById('res-unit-id').value = unitId;
         document.getElementById('reserve-unit-info').innerHTML = `
-            <strong>${unitName}</strong> at <strong>${siteCode}</strong><br>
-            Category: ${typeName} &middot; Size: ${area} sqft &middot; Std Rate: ${rate}
+            <strong>${escHtml(unitName)}</strong> at <strong>${escHtml(siteCode)}</strong><br>
+            Category: ${escHtml(typeName)} &middot; Size: ${area} sqft &middot; Std Rate: ${rate}
         `;
         document.getElementById('res-first-name').value = '';
         document.getElementById('res-last-name').value = '';
@@ -619,6 +962,7 @@
         document.getElementById('res-email').value = '';
         document.getElementById('res-notes').value = '';
         document.getElementById('res-submit-btn').disabled = false;
+        document.getElementById('res-submit-btn').textContent = 'Submit Reservation';
         document.getElementById('reserve-modal').style.display = 'flex';
     }
 
@@ -661,7 +1005,6 @@
                 title.style.color = '#28A745';
                 msg.textContent = data.message || 'Reservation was successfully submitted.';
 
-                // Mark the unit as reserved in local data
                 const unit = allUnits.find(u => u.UnitID === payload.unit_id && u.sLocationCode === payload.site_code);
                 if (unit) unit.bWaitingListReserved = true;
                 applyFilters();
@@ -683,6 +1026,22 @@
             btn.textContent = 'Submit Reservation';
         }
     }
+
+    // Close modals on backdrop tap
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('ua-modal')) {
+            e.target.style.display = 'none';
+        }
+    });
+
+    // Re-check view on resize
+    window.addEventListener('resize', function() {
+        const isMobile = window.innerWidth <= 820;
+        if (isMobile && currentView === 'table') {
+            currentView = 'card';
+        }
+        if (filteredUnits.length > 0) renderTable();
+    });
 
     // Initialize
     loadSites();
