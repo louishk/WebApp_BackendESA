@@ -67,20 +67,26 @@ class ConfigSection:
         return getattr(self, key)
 
     def _resolve_vault(self, vault_key: str) -> Optional[str]:
-        """Resolve a vault reference to its actual value."""
+        """Resolve a vault reference to its actual value. Falls back to env vars."""
         if vault_key in self._resolved_cache:
             return self._resolved_cache[vault_key]
 
-        if self._vault is None:
-            return None
+        value = None
 
-        try:
-            value = self._vault.get(vault_key)
+        # Try vault first
+        if self._vault is not None:
+            try:
+                value = self._vault.get(vault_key)
+            except Exception as e:
+                logger.warning(f"Failed to resolve vault key {vault_key}: {type(e).__name__}")
+
+        # Fall back to environment variable (needed for bootstrap secrets like DB_PASSWORD)
+        if value is None:
+            value = os.environ.get(vault_key)
+
+        if value is not None:
             self._resolved_cache[vault_key] = value
-            return value
-        except Exception as e:
-            logger.warning(f"Failed to resolve vault key {vault_key}: {e}")
-            return None
+        return value
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a value with optional default."""
@@ -204,15 +210,15 @@ class AppConfig:
         except Exception:
             return default
 
-    def set_secret(self, key: str, value: str) -> bool:
-        """Set a secret in vault."""
+    def set_secret(self, key: str, value: str, **kwargs) -> bool:
+        """Set a secret in vault. Extra kwargs (environment, description, updated_by) passed through."""
         if self._vault is None:
             return False
         try:
-            self._vault.set(key, value)
+            self._vault.set(key, value, **kwargs)
             return True
         except Exception as e:
-            logger.error(f"Failed to set secret {key}: {e}")
+            logger.error(f"Failed to set secret {key}: {type(e).__name__}")
             return False
 
     def delete_secret(self, key: str) -> bool:
@@ -222,8 +228,17 @@ class AppConfig:
         try:
             return self._vault.delete(key)
         except Exception as e:
-            logger.error(f"Failed to delete secret {key}: {e}")
+            logger.error(f"Failed to delete secret {key}: {type(e).__name__}")
             return False
+
+    def has_secret(self, key: str) -> bool:
+        """Check if a secret exists without decrypting it."""
+        if self._vault is None:
+            return False
+        if hasattr(self._vault, 'has_key'):
+            return self._vault.has_key(key)
+        # Fallback for file vault: decrypt to check (legacy behavior)
+        return self.get_secret(key) is not None
 
     def list_secrets(self) -> list:
         """List all secret keys in vault."""
@@ -233,6 +248,15 @@ class AppConfig:
             return self._vault.list_keys()
         except Exception:
             return []
+
+    def list_secrets_detail(self) -> list:
+        """List secrets with metadata (environment, timestamps). For admin UI."""
+        if self._vault is None:
+            return []
+        if hasattr(self._vault, 'list_all'):
+            return self._vault.list_all()
+        # Fallback for file vault: return simple key list as dicts
+        return [{'key': k, 'environment': 'all'} for k in self.list_secrets()]
 
     @property
     def vault_available(self) -> bool:
@@ -341,10 +365,15 @@ def get_database_url(db_name: str = 'backend') -> str:
         vault_key = raw_data.get(db_name, {}).get('password_vault', 'unknown')
         raise ValueError(f"Database password not found in vault for key: {vault_key}")
 
-    return (
-        f"postgresql://{db.username}:{password}"
-        f"@{db.host}:{db.port}/{db.name}"
-        f"?sslmode={db.sslmode}"
+    from sqlalchemy.engine import URL
+    return URL.create(
+        drivername='postgresql',
+        username=db.username,
+        password=password,
+        host=db.host,
+        port=int(db.port),
+        database=db.name,
+        query={'sslmode': db.sslmode},
     )
 
 

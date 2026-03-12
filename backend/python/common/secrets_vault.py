@@ -410,26 +410,31 @@ class LocalSecretsVault:
 _vault_instance = None
 
 
-def get_vault(vault_dir: str = None) -> LocalSecretsVault:
+def get_vault(vault_dir: str = None):
     """
-    Get or create vault singleton instance
+    Get or create vault singleton instance.
 
-    Args:
-        vault_dir: Path to vault directory. If None, searches for .vault
-                   in current directory or parent directories.
+    Tries DB-backed vault first (app_secrets table in esa_backend).
+    Falls back to file-based vault (.vault/) if DB is unavailable.
     """
     global _vault_instance
 
     if _vault_instance is None:
-        # Auto-discover vault directory if not specified
-        if vault_dir is None:
-            vault_dir = _find_vault_dir()
-
+        # Try DB vault first
         try:
-            _vault_instance = LocalSecretsVault(vault_dir=vault_dir)
-        except ValueError as e:
-            logger.warning(f"Vault not available: {e}")
-            raise
+            from common.db_secrets_vault import DatabaseSecretsVault
+            _vault_instance = DatabaseSecretsVault()
+            logger.info("Using database-backed secrets vault")
+        except Exception as e:
+            logger.warning(f"DB vault unavailable ({type(e).__name__}), falling back to file vault")
+            # Fall back to file vault
+            if vault_dir is None:
+                vault_dir = _find_vault_dir()
+            try:
+                _vault_instance = LocalSecretsVault(vault_dir=vault_dir)
+            except ValueError as e2:
+                logger.warning(f"File vault also unavailable: {type(e2).__name__}")
+                raise
 
     return _vault_instance
 

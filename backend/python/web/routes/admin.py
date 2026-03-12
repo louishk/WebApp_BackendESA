@@ -2,6 +2,7 @@
 Admin routes - user, role, and page management.
 """
 
+import re
 import bcrypt
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, current_app
 from flask_login import login_required, current_user
@@ -356,7 +357,7 @@ def sync_o365_profiles():
             params = None
     except Exception as e:
         current_app.logger.error(f"O365 sync: Graph API error: {e}")
-        flash(f'Graph API error: {e}', 'error')
+        flash('Graph API error. Check server logs for details.', 'error')
         return redirect(url_for('admin.list_users'))
 
     # Build lookup by email
@@ -398,7 +399,7 @@ def sync_o365_profiles():
     except Exception as e:
         db_session.rollback()
         current_app.logger.error(f"O365 sync DB error: {e}")
-        flash(f'Database error during sync: {e}', 'error')
+        flash('Database error during sync. Check server logs.', 'error')
     finally:
         db_session.close()
 
@@ -851,7 +852,7 @@ def edit_config(name):
 @login_required
 @config_required
 def list_secrets():
-    """List all secrets in vault (keys only, not values)."""
+    """List all secrets in vault with environment metadata."""
     from common.config_loader import get_config
 
     config = get_config()
@@ -860,8 +861,12 @@ def list_secrets():
         flash('Vault is not available.', 'error')
         return render_template('admin/secrets/list.html', secrets=[], vault_available=False)
 
-    secrets = config.list_secrets()
+    secrets = config.list_secrets_detail()
     return render_template('admin/secrets/list.html', secrets=secrets, vault_available=True)
+
+
+_SECRET_KEY_PATTERN = re.compile(r'^[A-Z0-9_]{1,100}$')
+_VALID_SECRET_ENVS = {'all', 'production', 'development'}
 
 
 @admin_bp.route('/secrets/add', methods=['GET', 'POST'])
@@ -880,12 +885,20 @@ def add_secret():
     if request.method == 'POST':
         key = request.form.get('key', '').strip().upper()
         value = request.form.get('value', '')
+        environment = request.form.get('environment', 'all').strip().lower()
+        description = request.form.get('description', '').strip() or None
 
-        if not key:
-            flash('Secret key is required.', 'error')
+        if not key or not _SECRET_KEY_PATTERN.match(key):
+            flash('Invalid secret key. Use UPPERCASE letters, digits, and underscores (max 100 chars).', 'error')
             return render_template('admin/secrets/edit.html', secret=None)
 
-        if config.set_secret(key, value):
+        if environment not in _VALID_SECRET_ENVS:
+            flash('Invalid environment. Must be: all, production, or development.', 'error')
+            return render_template('admin/secrets/edit.html', secret=None)
+
+        if config.set_secret(key, value, environment=environment,
+                             description=description, updated_by=current_user.username):
+            audit_log(AuditEvent.CONFIG_UPDATED, f"Secret '{key}' added (env={environment})")
             flash(f'Secret "{key}" added successfully.', 'success')
             return redirect(url_for('admin.list_secrets'))
         else:
@@ -907,18 +920,29 @@ def edit_secret(key):
         flash('Vault is not available.', 'error')
         return redirect(url_for('admin.list_secrets'))
 
+    if not _SECRET_KEY_PATTERN.match(key):
+        flash('Invalid secret key format.', 'error')
+        return redirect(url_for('admin.list_secrets'))
+
     if request.method == 'POST':
         value = request.form.get('value', '')
+        environment = request.form.get('environment', 'all').strip().lower()
+        description = request.form.get('description', '').strip() or None
 
-        if config.set_secret(key, value):
+        if environment not in _VALID_SECRET_ENVS:
+            flash('Invalid environment.', 'error')
+            return render_template('admin/secrets/edit.html', secret={'key': key, 'has_value': True})
+
+        if config.set_secret(key, value, environment=environment,
+                             description=description, updated_by=current_user.username):
+            audit_log(AuditEvent.CONFIG_UPDATED, f"Secret '{key}' updated (env={environment})")
             flash(f'Secret "{key}" updated successfully.', 'success')
             return redirect(url_for('admin.list_secrets'))
         else:
             flash('Failed to update secret.', 'error')
 
-    # Don't show actual value for security
-    current_value = config.get_secret(key)
-    has_value = current_value is not None and current_value != ''
+    # Check existence without decrypting
+    has_value = config.has_secret(key)
 
     return render_template('admin/secrets/edit.html', secret={'key': key, 'has_value': has_value})
 
@@ -936,7 +960,12 @@ def delete_secret(key):
         flash('Vault is not available.', 'error')
         return redirect(url_for('admin.list_secrets'))
 
+    if not _SECRET_KEY_PATTERN.match(key):
+        flash('Invalid secret key format.', 'error')
+        return redirect(url_for('admin.list_secrets'))
+
     if config.delete_secret(key):
+        audit_log(AuditEvent.CONFIG_UPDATED, f"Secret '{key}' deleted")
         flash(f'Secret "{key}" deleted.', 'success')
     else:
         flash('Failed to delete secret.', 'error')
