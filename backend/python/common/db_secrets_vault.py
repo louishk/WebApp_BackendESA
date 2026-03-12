@@ -141,15 +141,7 @@ class DatabaseSecretsVault:
 
     @staticmethod
     def _find_key_file() -> Optional[Path]:
-        """Search for .vault/.key file (backward compat with file vault)."""
-        current = Path.cwd()
-        for _ in range(5):
-            key_path = current / '.vault' / '.key'
-            if key_path.exists():
-                return key_path
-            if current.parent == current:
-                break
-            current = current.parent
+        """Search for .vault_master_key file (legacy fallback)."""
         return None
 
     def _create_fernet(self, master_key: str, salt: bytes) -> Fernet:

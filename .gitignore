@@ -44,6 +44,5 @@ planar-beach-*.json
 *.bak
 /Temp/
 
-# Vault (keep metadata.json for reference)
+# Legacy vault (decommissioned — secrets now in DB app_secrets table)
 .vault/
-!.vault/metadata.json

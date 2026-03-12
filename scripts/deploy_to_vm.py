@@ -12,19 +12,17 @@ Usage:
 
 Deployment Steps:
     1. Stop all services (esa-backend, scheduler)
-    2. Kill any stray Python processes
-    3. Update code via rsync
-    4. Check/create Python venv
-    5. Check/install requirements
-    6. Backup vault (secrets.enc, metadata.json, rotation.log)
-    7. Verify vault system and credentials
-    8. Start services
+    2. Update code via rsync
+    3. Check/create Python venv
+    4. Check/install requirements
+    5. Check .env (DB_PASSWORD, VAULT_MASTER_KEY)
+    6. Start services
 
-Configuration (from .env and vault):
+Configuration (from .env):
     - VM_SSH_HOST: VM IP address
     - VM_SSH_PORT: SSH port (default: 22)
     - VM_SSH_ROOT_USERNAME: SSH username
-    - VM_SSH_PASSWORD: SSH password (from vault)
+    - VM_SSH_PASSWORD: SSH password (from DB vault or env)
 """
 
 import argparse
@@ -54,7 +52,6 @@ load_dotenv(project_root / '.env')
 VM_BACKEND_PATH = "/var/www/backend"
 VM_PYTHON_PATH = f"{VM_BACKEND_PATH}/backend/python"
 VM_VENV_PATH = f"{VM_PYTHON_PATH}/venv"
-VM_VAULT_PATH = f"{VM_PYTHON_PATH}/.vault"
 VM_ENV_PATH = f"{VM_PYTHON_PATH}/.env"
 
 # Rsync exclude patterns (files that should NOT be synced)
@@ -64,30 +61,21 @@ RSYNC_EXCLUDES = [
     '__pycache__',
     '*.pyc',
     '.env',           # VM has its own .env
-    '.vault',         # VM has its own vault
     'venv',           # VM has its own venv
     'node_modules',
     '.DS_Store',
     '*.log',
-    'secrets.enc',
-]
-
-# Required vault secrets for the application
-REQUIRED_VAULT_SECRETS = [
-    'DB_PASSWORD',
-    'MS_OAUTH_CLIENT_SECRET',
-    'JWT_SECRET',
 ]
 
 
 def get_ssh_credentials():
     """Get SSH credentials from .env and vault."""
-    from common.secrets_vault import secure_config
+    from common.secrets_vault import vault_config
 
     host = env_config('VM_SSH_HOST', default=None)
     port = env_config('VM_SSH_PORT', default=22, cast=int)
     username = env_config('VM_SSH_ROOT_USERNAME', default=None)
-    password = secure_config('VM_SSH_PASSWORD', default=None)
+    password = vault_config('VM_SSH_PASSWORD', default=None)
 
     if not all([host, username, password]):
         missing = []
@@ -154,7 +142,7 @@ def run_ssh_command(credentials: dict, command: str, verbose: bool = True, timeo
 
 def step_stop_services(credentials: dict, verbose: bool = True) -> bool:
     """Step 1: Stop all running services and kill stray processes."""
-    print("\n[1/8] Stopping services...")
+    print("\n[1/6] Stopping services...")
 
     stop_cmd = """
         sudo systemctl stop esa-backend 2>/dev/null || true
@@ -181,8 +169,8 @@ def step_stop_services(credentials: dict, verbose: bool = True) -> bool:
 
 
 def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bool = True) -> bool:
-    """Step 2a: Update code via rsync."""
-    print("\n[2/8] Syncing code via rsync...")
+    """Step 2: Update code via rsync."""
+    print("\n[2/6] Syncing code via rsync...")
 
     excludes = ' '.join(f"--exclude='{e}'" for e in RSYNC_EXCLUDES)
     dry_run_flag = '-n' if dry_run else ''
@@ -218,10 +206,8 @@ def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bo
         move_cmd = f"""
             sudo rsync -a --delete \
                 --exclude='.env' \
-                --exclude='.vault' \
                 --exclude='backend/python/.env' \
                 --exclude='backend/python/venv' \
-                --exclude='backend/python/.vault' \
                 {temp_dir}/ {VM_BACKEND_PATH}/
 
             sudo chown -R www-data:www-data {VM_BACKEND_PATH}
@@ -240,7 +226,7 @@ def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bo
 
 def step_check_venv(credentials: dict, verbose: bool = True) -> bool:
     """Step 3: Check/create Python virtual environment."""
-    print("\n[3/8] Checking Python virtual environment...")
+    print("\n[3/6] Checking Python virtual environment...")
 
     venv_cmd = f"""
         if [ -d "{VM_VENV_PATH}" ] && [ -f "{VM_VENV_PATH}/bin/python" ]; then
@@ -262,7 +248,7 @@ def step_check_venv(credentials: dict, verbose: bool = True) -> bool:
 
 def step_check_requirements(credentials: dict, verbose: bool = True) -> bool:
     """Step 4: Check/install Python requirements."""
-    print("\n[4/8] Checking Python requirements...")
+    print("\n[4/6] Checking Python requirements...")
 
     req_cmd = f"""
         cd {VM_PYTHON_PATH}
@@ -283,18 +269,25 @@ def step_check_requirements(credentials: dict, verbose: bool = True) -> bool:
 
 
 def step_check_env(credentials: dict, verbose: bool = True) -> bool:
-    """Step 5: Check .env file exists and has required vars."""
-    print("\n[5/8] Checking .env configuration...")
+    """Step 5: Check .env file exists and has required bootstrap vars."""
+    print("\n[5/6] Checking .env configuration...")
 
     env_cmd = f"""
         if [ -f "{VM_PYTHON_PATH}/.env" ]; then
             echo ".env exists"
 
-            # Check for required variable (only VAULT_MASTER_KEY needed - other config is in YAML)
-            if grep -q "^VAULT_MASTER_KEY=" {VM_PYTHON_PATH}/.env; then
-                echo "VAULT_MASTER_KEY: SET"
-            else
-                echo "ERROR: VAULT_MASTER_KEY not found in .env"
+            # Check for required bootstrap variables
+            MISSING=""
+            for VAR in DB_PASSWORD VAULT_MASTER_KEY; do
+                if grep -q "^$VAR=" {VM_PYTHON_PATH}/.env; then
+                    echo "$VAR: SET"
+                else
+                    echo "ERROR: $VAR not found in .env"
+                    MISSING="$MISSING $VAR"
+                fi
+            done
+
+            if [ -n "$MISSING" ]; then
                 exit 1
             fi
         else
@@ -307,79 +300,9 @@ def step_check_env(credentials: dict, verbose: bool = True) -> bool:
     return exit_code == 0
 
 
-def step_backup_vault(credentials: dict, verbose: bool = True) -> bool:
-    """Step 6: Backup vault files before checking/modifying anything."""
-    print("\n[6/8] Backing up vault...")
-
-    vault_dir = VM_VAULT_PATH
-    backup_cmd = (
-        f'sudo -u www-data bash -c \''
-        f'VAULT_DIR="{vault_dir}" && '
-        f'if [ ! -d "$VAULT_DIR" ]; then echo "No vault directory found — skipping backup"; exit 0; fi && '
-        f'TIMESTAMP=$(date +%Y%m%d_%H%M%S) && '
-        f'for f in secrets.enc metadata.json rotation.log; do '
-        f'if [ -f "$VAULT_DIR/$f" ]; then '
-        f'cp "$VAULT_DIR/$f" "$VAULT_DIR/$f.$TIMESTAMP" && '
-        f'echo "Backed up $f -> $f.$TIMESTAMP"; '
-        f'fi; done && '
-        f'for f in secrets.enc metadata.json rotation.log; do '
-        f'ls -t "$VAULT_DIR/$f".* 2>/dev/null | tail -n +6 | xargs -r rm --; '
-        f'done && '
-        f'echo "Vault backup complete"\''
-    )
-
-    stdout, stderr, exit_code = run_ssh_command(credentials, backup_cmd, verbose)
-
-    if exit_code != 0:
-        print("    WARNING: Vault backup failed — continuing deployment")
-
-    return True  # Non-blocking: always continue
-
-
-def step_check_vault(credentials: dict, verbose: bool = True) -> bool:
-    """Step 7: Check vault system and required secrets."""
-    print("\n[7/8] Checking vault system...")
-
-    # Build the check for required secrets
-    secrets_check = " && ".join([
-        f'python -c "from common.secrets_vault import secure_config; '
-        f"v = secure_config('{s}'); "
-        f"print('{s}:', 'SET' if v else 'MISSING')\""
-        for s in REQUIRED_VAULT_SECRETS
-    ])
-
-    vault_cmd = f"""
-        cd {VM_PYTHON_PATH}
-
-        if [ -d "{VM_VAULT_PATH}" ]; then
-            echo "Vault directory exists"
-            ls -la {VM_VAULT_PATH}/
-        else
-            echo "ERROR: Vault directory not found at {VM_VAULT_PATH}"
-            echo "Run vault setup on VM first"
-            exit 1
-        fi
-
-        # Check if we can load secrets
-        export PYTHONPATH="{VM_PYTHON_PATH}"
-        source {VM_VENV_PATH}/bin/activate
-
-        {secrets_check}
-    """
-
-    stdout, stderr, exit_code = run_ssh_command(credentials, vault_cmd, verbose)
-
-    # Check if any secrets are missing
-    if 'MISSING' in stdout:
-        print("    WARNING: Some vault secrets are missing!")
-        return False
-
-    return exit_code == 0
-
-
 def step_start_services(credentials: dict, verbose: bool = True) -> bool:
-    """Step 8: Start services."""
-    print("\n[8/8] Starting services...")
+    """Step 6: Start services."""
+    print("\n[6/6] Starting services...")
 
     start_cmd = f"""
         # Reload systemd in case service files changed
@@ -492,14 +415,7 @@ def deploy(dry_run: bool = False, verbose: bool = True) -> bool:
     if not step_check_env(credentials, verbose):
         print("WARNING: .env check failed - service may not start correctly")
 
-    # Step 6: Backup vault
-    step_backup_vault(credentials, verbose)
-
-    # Step 7: Check vault
-    if not step_check_vault(credentials, verbose):
-        print("WARNING: Vault check failed - some features may not work")
-
-    # Step 8: Start services
+    # Step 6: Start services
     if not step_start_services(credentials, verbose):
         print("ERROR: Failed to start services!")
         return False

@@ -112,20 +112,19 @@ class AppConfig:
     Loads from YAML files and integrates with vault for secrets.
     """
 
-    def __init__(self, config_dir: str = None, vault_dir: str = None):
+    def __init__(self, config_dir: str = None):
         """
         Initialize configuration.
 
         Args:
             config_dir: Path to config directory containing YAML files
-            vault_dir: Path to vault directory for secrets
         """
         self._config_dir = Path(config_dir) if config_dir else self._find_config_dir()
         self._vault = None
         self._sections: Dict[str, ConfigSection] = {}
 
         # Initialize vault
-        self._init_vault(vault_dir)
+        self._init_vault()
 
         # Load all config files
         self._load_configs()
@@ -158,11 +157,11 @@ class AppConfig:
 
         raise FileNotFoundError("Could not find config directory")
 
-    def _init_vault(self, vault_dir: str = None):
+    def _init_vault(self):
         """Initialize the vault connection."""
         try:
             from common.secrets_vault import get_vault
-            self._vault = get_vault(vault_dir)
+            self._vault = get_vault()
             logger.info("Vault initialized successfully")
         except Exception as e:
             logger.warning(f"Vault not available: {e}. Secrets will not be resolved.")
@@ -235,10 +234,7 @@ class AppConfig:
         """Check if a secret exists without decrypting it."""
         if self._vault is None:
             return False
-        if hasattr(self._vault, 'has_key'):
-            return self._vault.has_key(key)
-        # Fallback for file vault: decrypt to check (legacy behavior)
-        return self.get_secret(key) is not None
+        return self._vault.has_key(key)
 
     def list_secrets(self) -> list:
         """List all secret keys in vault."""
@@ -253,10 +249,7 @@ class AppConfig:
         """List secrets with metadata (environment, timestamps). For admin UI."""
         if self._vault is None:
             return []
-        if hasattr(self._vault, 'list_all'):
-            return self._vault.list_all()
-        # Fallback for file vault: return simple key list as dicts
-        return [{'key': k, 'environment': 'all'} for k in self.list_secrets()]
+        return self._vault.list_all()
 
     @property
     def vault_available(self) -> bool:
@@ -311,13 +304,12 @@ class AppConfig:
 _config_instance: Optional[AppConfig] = None
 
 
-def get_config(config_dir: str = None, vault_dir: str = None) -> AppConfig:
+def get_config(config_dir: str = None) -> AppConfig:
     """
     Get or create the global config instance.
 
     Args:
         config_dir: Path to config directory (only used on first call)
-        vault_dir: Path to vault directory (only used on first call)
 
     Returns:
         AppConfig instance
@@ -325,7 +317,7 @@ def get_config(config_dir: str = None, vault_dir: str = None) -> AppConfig:
     global _config_instance
 
     if _config_instance is None:
-        _config_instance = AppConfig(config_dir, vault_dir)
+        _config_instance = AppConfig(config_dir)
 
     return _config_instance
 

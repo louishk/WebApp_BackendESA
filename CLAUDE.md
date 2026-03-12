@@ -10,7 +10,7 @@ Self-storage management platform for Extra Space Asia. Flask web app + APSchedul
   - `esa_pbi` — analytics/reporting data (rent rolls, site info, units, ECRI, ledger charges)
 - **External APIs**: SOAP (StorageMaker/SMD CallCenterWs), SugarCRM REST, EmbedSocial, Azure AI Foundry, Google BigQuery
 - **Auth**: Flask-Login (session) for web UI, JWT (HS256) for API endpoints, Microsoft OAuth SSO
-- **Config**: YAML files in `backend/python/config/` resolved through `common/config_loader.py`, secrets from encrypted vault (`.vault/`)
+- **Config**: YAML files in `backend/python/config/` resolved through `common/config_loader.py`, secrets from DB vault (`app_secrets` table in esa_backend)
 - **Scheduler**: APScheduler with PostgreSQL job store, pipelines defined in `config/pipelines.yaml`
 
 ## Project Structure
@@ -26,7 +26,7 @@ backend/python/
   datalayer/        # ETL pipeline modules (one per pipeline)
   config/           # YAML: scheduler.yaml, pipelines.yaml, alerts.yaml, llm.yaml
   migrations/       # SQL migration files
-scripts/            # deploy_to_vm.py, secrets_vault.py, setup_vault.py
+scripts/            # deploy_to_vm.py
 sql/                # Raw SQL scripts
 pages/              # CMS-style page content
 ```
@@ -85,7 +85,7 @@ session = Session()
 ```
 
 ## Deploy
-- Script: `scripts/deploy_to_vm.py` (paramiko-based, 8-step pipeline with vault backup)
+- Script: `scripts/deploy_to_vm.py` (paramiko-based, 6-step rsync pipeline)
 - VM: `20.6.132.108`, user `esa_bk_admin`, SSH key `~/.ssh/id_ed25519_vm`
 - Services: `esa-backend` (gunicorn), `backend-scheduler` (APScheduler daemon)
 - No git on VM — uses rsync
