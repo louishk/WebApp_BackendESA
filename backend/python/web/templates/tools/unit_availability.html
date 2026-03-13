@@ -1030,7 +1030,7 @@ select.form-select {
         };
 
         try {
-            const res = await fetch('/api/unit-availability/reserve', {
+            const res = await fetch('/api/reservations/quick', {
                 method: 'POST',
                 headers: apiHeaders(),
                 body: JSON.stringify(payload),

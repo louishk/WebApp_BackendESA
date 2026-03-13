@@ -47,11 +47,23 @@ def create_mcp_server(settings: Optional[Settings] = None) -> MCPServerApp:
     register_health_tools(server, app)
     logger.info("Health tools registered")
 
-    # ---- Future tool registration goes here ----
-    # Example pattern:
-    #   from mcp_esa.tools.inventory_tools import register_inventory_tools
-    #   register_inventory_tools(server, app)
-    # ---- End future tools ----
+    # Register database tools
+    if settings.database_enabled:
+        try:
+            from mcp_esa.tools.database_tools import register_database_tools
+            register_database_tools(server, app)
+            logger.info("Database tools registered")
+        except Exception as e:
+            logger.warning(f"Failed to register database tools: {e}")
+
+    # Register Google Ads tools
+    if settings.google_ads_enabled:
+        try:
+            from mcp_esa.tools.google_ads_tools import register_google_ads_tools
+            register_google_ads_tools(server, app)
+            logger.info("Google Ads tools registered")
+        except Exception as e:
+            logger.warning(f"Failed to register Google Ads tools: {e}")
 
     tool_count = len(server._tool_handlers) if hasattr(server, '_tool_handlers') else 0
     logger.info(f"MCP Server '{settings.mcp_server_name}' created with {tool_count} tools")

@@ -82,10 +82,10 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        # Rate limiting by IP
+        # Rate limiting by IP (with cleanup to prevent memory leak)
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
-        hits = [t for t in _rate_limit_window[client_ip] if now - t < _RATE_LIMIT_WINDOW]
+        hits = [t for t in _rate_limit_window.get(client_ip, []) if now - t < _RATE_LIMIT_WINDOW]
         if len(hits) >= _RATE_LIMIT_MAX:
             logger.warning(f"Rate limit exceeded for {client_ip}")
             return JSONResponse(
@@ -98,6 +98,12 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
             )
         hits.append(now)
         _rate_limit_window[client_ip] = hits
+
+        # Periodic cleanup: evict IPs with no recent hits (every ~100 requests)
+        if len(_rate_limit_window) > 100:
+            stale_ips = [ip for ip, ts in _rate_limit_window.items() if not ts or now - ts[-1] > _RATE_LIMIT_WINDOW]
+            for ip in stale_ips:
+                del _rate_limit_window[ip]
 
         # Try X-API-Key first, then Bearer token (OAuth)
         api_key_header = request.headers.get("X-API-Key", "")
@@ -325,10 +331,29 @@ def _authenticate_bearer_token(token: str) -> Tuple[Optional[dict], Optional[str
     if payload.get("type") != "access":
         return None, "Not an access token"
 
+    # Look up the API key's mcp_tools restriction from DB
+    client_id = payload.get("client_id")
+    mcp_tools = None  # None = no restriction (all tools)
+    if client_id:
+        session = _get_session()
+        try:
+            row = session.execute(
+                text("SELECT mcp_tools FROM api_keys WHERE key_id = :key_id AND is_active = true AND mcp_enabled = true"),
+                {"key_id": client_id},
+            ).fetchone()
+            if not row:
+                return None, "API key no longer active"
+            mcp_tools = row.mcp_tools or None
+        except Exception as e:
+            logger.error(f"OAuth token key lookup error: {e}")
+            return None, "Authentication error"
+        finally:
+            session.close()
+
     return {
         "username": payload.get("sub", "oauth_client"),
         "user_id": None,
-        "key_id": f"oauth_{payload.get('client_id', 'unknown')}",
+        "key_id": client_id or "unknown",
         "scopes": payload.get("scope", "mcp:*").split(),
-        "mcp_tools": [],  # OAuth clients get access to all tools
+        "mcp_tools": mcp_tools,
     }, None

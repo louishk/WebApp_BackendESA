@@ -5,3 +5,14 @@ uvicorn>=0.27.0
 pydantic-settings>=2.1.0
 bcrypt>=4.0.0
 PyJWT>=2.8.0
+
+# Database tools
+asyncpg>=0.29.0
+aiomysql>=0.2.0
+
+# Google Ads tools
+google-ads>=25.0.0
+
+# BigQuery
+google-cloud-bigquery>=3.0.0
+google-auth>=2.0.0

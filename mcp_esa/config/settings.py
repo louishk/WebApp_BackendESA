@@ -1,16 +1,13 @@
 """
 MCP Server Settings for ESA Backend
 
-Loads configuration from the backend's config_loader and vault system.
-Reuses the same database URLs and secrets as the main Flask app.
+Loads configuration from backend/python/config/mcp.yaml via config_loader.
+Secrets resolved from vault (app_secrets table).
 """
 
 import logging
 from functools import lru_cache
 from pathlib import Path
-
-from pydantic_settings import BaseSettings
-from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +21,8 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
-def load_environment():
-    """Load .env from repo root (same as Flask app)."""
+def _load_environment():
+    """Load .env from repo root (bootstrap secrets: VAULT_MASTER_KEY, DB_PASSWORD)."""
     try:
         from dotenv import load_dotenv
         env_path = REPO_ROOT / '.env'
@@ -36,40 +33,84 @@ def load_environment():
         pass
 
 
-def _get_database_url(db_name: str) -> str:
-    """Build database URL using the backend's config_loader."""
-    from common.config_loader import get_database_url
-    return get_database_url(db_name)
+class Settings:
+    """MCP Server configuration loaded from mcp.yaml."""
 
-
-class Settings(BaseSettings):
-    """MCP Server configuration."""
+    def __init__(self):
+        from common.config_loader import get_config
+        self._config = get_config()
+        self._mcp = self._config.get_raw_config('mcp')
+        self._server = self._mcp.get('server', {})
+        self._features = self._mcp.get('features', {})
+        self._gads = self._mcp.get('google_ads', {})
 
     # Server
-    mcp_server_name: str = Field(default="ESA Backend MCP", alias="MCP_SERVER_NAME")
-    mcp_server_host: str = Field(default="127.0.0.1", alias="MCP_SERVER_HOST")
-    mcp_server_port: int = Field(default=8002, alias="MCP_SERVER_PORT")
-    mcp_debug: bool = Field(default=False, alias="MCP_DEBUG")
+    @property
+    def mcp_server_name(self) -> str:
+        return self._server.get('name', 'ESA Backend MCP')
 
-    # Paths
-    project_root: str = Field(default=str(REPO_ROOT))
+    @property
+    def mcp_server_host(self) -> str:
+        return self._server.get('host', '127.0.0.1')
 
-    class Config:
-        env_file = str(REPO_ROOT / '.env')
-        env_file_encoding = 'utf-8'
-        extra = 'ignore'
+    @property
+    def mcp_server_port(self) -> int:
+        return int(self._server.get('port', 8002))
 
+    @property
+    def mcp_debug(self) -> bool:
+        return self._server.get('debug', False)
+
+    @property
+    def project_root(self) -> str:
+        return str(REPO_ROOT)
+
+    # Feature flags
+    @property
+    def database_enabled(self) -> bool:
+        return self._features.get('database', True)
+
+    @property
+    def google_ads_enabled(self) -> bool:
+        return self._features.get('google_ads', True)
+
+    # Google Ads (non-secret fields)
+    @property
+    def google_ads_client_id(self) -> str:
+        return self._gads.get('client_id', '')
+
+    @property
+    def google_ads_login_customer_id(self) -> str:
+        return self._gads.get('login_customer_id', '')
+
+    # Google Ads secrets (resolved from vault)
+    @property
+    def google_ads_client_secret(self) -> str:
+        vault_key = self._gads.get('client_secret_vault', 'GOOGLE_ADS_CLIENT_SECRET')
+        return self._config.get_secret(vault_key) or ''
+
+    @property
+    def google_ads_developer_token(self) -> str:
+        vault_key = self._gads.get('developer_token_vault', 'GOOGLE_ADS_DEVELOPER_TOKEN')
+        return self._config.get_secret(vault_key) or ''
+
+    @property
+    def google_ads_refresh_token(self) -> str:
+        vault_key = self._gads.get('refresh_token_vault', 'GOOGLE_ADS_REFRESH_TOKEN')
+        return self._config.get_secret(vault_key) or ''
+
+    # Database URLs (for auth middleware)
     def get_backend_db_url(self) -> str:
-        """Get esa_backend database URL (for API key auth)."""
-        return _get_database_url('backend')
+        from common.config_loader import get_database_url
+        return get_database_url('backend')
 
     def get_pbi_db_url(self) -> str:
-        """Get esa_pbi database URL (for analytics tools)."""
-        return _get_database_url('pbi')
+        from common.config_loader import get_database_url
+        return get_database_url('pbi')
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    load_environment()
+    _load_environment()
     return Settings()

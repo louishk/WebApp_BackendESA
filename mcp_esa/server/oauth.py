@@ -378,6 +378,17 @@ async def _handle_refresh_grant(body: dict) -> Response:
         )
 
     client_id = payload.get("client_id")
+
+    # Re-validate the API key is still active and MCP-enabled
+    if client_id:
+        from mcp_esa.server.auth import _validate_client_id
+        if not _validate_client_id(client_id):
+            logger.warning(f"OAuth refresh denied: API key {client_id} no longer valid")
+            return JSONResponse(
+                {"error": "invalid_grant", "error_description": "API key is no longer active"},
+                status_code=400,
+            )
+
     # Use the scope from the original grant, not from the request
     original_scope = payload.get("scope", "mcp:*")
     return _generate_token_response(original_scope, client_id)

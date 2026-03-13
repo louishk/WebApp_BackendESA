@@ -16,12 +16,12 @@ Self-storage management platform for Extra Space Asia. Flask web app + APSchedul
 ## Project Structure
 ```
 backend/python/
-  common/           # Shared: models, config_loader, soap_client, session, secrets_vault, http_client
+  common/           # Shared: models, config_loader, soap_client, sugarcrm_client, db_secrets_vault, secrets_vault, http_client, cache_manager
   web/
-    routes/         # Flask blueprints: api.py, auth.py, admin.py, tools.py, discount_plans.py, ecri.py, api_keys.py, scheduler.py, statistics.py
+    routes/         # Flask blueprints: api.py, auth.py, admin.py, admin_siteinfo.py, main.py, tools.py, discount_plans.py, ecri.py, api_keys.py, reservations.py, scheduler.py, statistics.py
     auth/           # jwt_auth.py, decorators.py, oauth.py, session_auth.py
     utils/          # audit.py, rate_limit.py, validators.py, translation.py, api_stats.py
-    models/         # SQLAlchemy models: user.py, role.py, page.py, api_key.py, discount_plan.py, inventory.py
+    models/         # SQLAlchemy models: user.py, role.py, page.py, api_key.py, api_statistic.py, discount_plan.py, discount_plan_config.py, inventory.py
     templates/      # Jinja2: base.html, tools/, admin/, ecri/, scheduler/, statistics/, pages/
   datalayer/        # ETL pipeline modules (one per pipeline)
   config/           # YAML: scheduler.yaml, pipelines.yaml, alerts.yaml, llm.yaml
@@ -29,6 +29,7 @@ backend/python/
 scripts/            # deploy_to_vm.py
 sql/                # Raw SQL scripts
 pages/              # CMS-style page content
+mcp_esa/            # Independent MCP server (Streamable HTTP transport)
 ```
 
 ## Code Conventions

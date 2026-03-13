@@ -59,6 +59,7 @@ from .models import (
     GadsCampaignDaily, GadsCampaignConversions, GadsAdGroupDaily, GadsKeywordDaily,
 )
 from .models import Tenant, Ledger, Charge, CCDiscount  # CallCenterWs models
+from .models import CcwsTenant, CcwsLedger, CcwsCharge  # CallCenterWs API-only models
 # Management Summary models
 from .models import (
     MSDeposits, MSReceipts, MSConcessions, MSDiscounts, MSLiabilities,
@@ -149,6 +150,10 @@ __all__ = [
     'Ledger',
     'Charge',
     'CCDiscount',
+    # CallCenterWs API-only models
+    'CcwsTenant',
+    'CcwsLedger',
+    'CcwsCharge',
     # Management Summary models
     'MSDeposits',
     'MSReceipts',

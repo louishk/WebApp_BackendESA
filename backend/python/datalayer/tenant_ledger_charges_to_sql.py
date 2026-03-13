@@ -30,11 +30,14 @@ Configuration (in .env):
 
 import argparse
 import concurrent.futures
+import logging
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 from decimal import Decimal
 from decouple import config as env_config, Csv
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 from common import (
     DataLayerConfig,
@@ -47,6 +50,9 @@ from common import (
     Tenant,
     Ledger,
     Charge,
+    CcwsTenant,
+    CcwsLedger,
+    CcwsCharge,
     # Data utilities
     convert_to_bool,
     convert_to_int,
@@ -221,6 +227,249 @@ def transform_charge(record: Dict[str, Any], ledger_id: int, site_id: int, extra
 
 
 # =============================================================================
+# CCWS (API-only) Transform Functions — map ALL fields from each endpoint
+# =============================================================================
+
+def transform_ccws_tenant(record: Dict[str, Any], location_code: str, extract_date: date) -> Dict[str, Any]:
+    """Transform TenantList API record for ccws_tenants (all 17 API fields)."""
+    return {
+        'SiteID': convert_to_int(record.get('SiteID')),
+        'TenantID': convert_to_int(record.get('TenantID')),
+        'sAccessCode': record.get('sAccessCode'),
+        'sFName': record.get('sFName'),
+        'sMI': record.get('sMI'),
+        'sLName': record.get('sLName'),
+        'sCompany': record.get('sCompany'),
+        'sAddr1': record.get('sAddr1'),
+        'sAddr2': record.get('sAddr2'),
+        'sCity': record.get('sCity'),
+        'sRegion': record.get('sRegion'),
+        'sPostalCode': record.get('sPostalCode'),
+        'sEmail': record.get('sEmail'),
+        'sPhone': record.get('sPhone'),
+        'sMobile': record.get('sMobile'),
+        'sLicense': record.get('sLicense'),
+        'sLocationCode': location_code,
+        'extract_date': extract_date,
+    }
+
+
+def transform_ccws_ledger(record: Dict[str, Any], tenant_id: int, extract_date: date) -> Dict[str, Any]:
+    """Transform LedgersByTenantID_v3 API record for ccws_ledgers (all 141 API fields)."""
+    return {
+        # Primary Keys
+        'SiteID': convert_to_int(record.get('SiteID')),
+        'LedgerID': convert_to_int(record.get('LedgerID')),
+
+        # Foreign Keys / IDs
+        'TenantID': tenant_id,
+        'EmployeeID': convert_to_int(record.get('EmployeeID')),
+        'UnitID': convert_to_int(record.get('UnitID')),
+        'MarketingID': convert_to_int(record.get('MarketingID')),
+        'MktgDistanceID': convert_to_int(record.get('MktgDistanceID')),
+        'MktgReasonID': convert_to_int(record.get('MktgReasonID')),
+        'MktgTypeID': convert_to_int(record.get('MktgTypeID')),
+        'MktgWhatID': convert_to_int(record.get('MktgWhatID')),
+        'MktgWhyID': convert_to_int(record.get('MktgWhyID')),
+        'TimeZoneID': convert_to_int(record.get('TimeZoneID')),
+
+        # Tenant Name
+        'TenantName': record.get('TenantName'),
+        'sUnitName': record.get('sUnitName'),
+
+        # Primary Contact
+        'sMrMrs': record.get('sMrMrs'),
+        'sFName': record.get('sFName'),
+        'sMI': record.get('sMI'),
+        'sLName': record.get('sLName'),
+        'sCompany': record.get('sCompany'),
+        'sAddr1': record.get('sAddr1'),
+        'sAddr2': record.get('sAddr2'),
+        'sCity': record.get('sCity'),
+        'sRegion': record.get('sRegion'),
+        'sPostalCode': record.get('sPostalCode'),
+        'sCountry': record.get('sCountry'),
+        'sPhone': record.get('sPhone'),
+        'sFax': record.get('sFax'),
+        'sEmail': record.get('sEmail'),
+        'sPager': record.get('sPager'),
+        'sMobile': record.get('sMobile'),
+        'sCountryCodeMobile': record.get('sCountryCodeMobile'),
+
+        # Alternate Contact
+        'sMrMrsAlt': record.get('sMrMrsAlt'),
+        'sFNameAlt': record.get('sFNameAlt'),
+        'sMIAlt': record.get('sMIAlt'),
+        'sLNameAlt': record.get('sLNameAlt'),
+        'sAddr1Alt': record.get('sAddr1Alt'),
+        'sAddr2Alt': record.get('sAddr2Alt'),
+        'sCityAlt': record.get('sCityAlt'),
+        'sRegionAlt': record.get('sRegionAlt'),
+        'sPostalCodeAlt': record.get('sPostalCodeAlt'),
+        'sCountryAlt': record.get('sCountryAlt'),
+        'sPhoneAlt': record.get('sPhoneAlt'),
+        'sEmailAlt': record.get('sEmailAlt'),
+        'sRelationshipAlt': record.get('sRelationshipAlt'),
+
+        # Business Contact
+        'sMrMrsBus': record.get('sMrMrsBus'),
+        'sFNameBus': record.get('sFNameBus'),
+        'sMIBus': record.get('sMIBus'),
+        'sLNameBus': record.get('sLNameBus'),
+        'sCompanyBus': record.get('sCompanyBus'),
+        'sAddr1Bus': record.get('sAddr1Bus'),
+        'sAddr2Bus': record.get('sAddr2Bus'),
+        'sCityBus': record.get('sCityBus'),
+        'sRegionBus': record.get('sRegionBus'),
+        'sPostalCodeBus': record.get('sPostalCodeBus'),
+        'sCountryBus': record.get('sCountryBus'),
+        'sPhoneBus': record.get('sPhoneBus'),
+        'sEmailBus': record.get('sEmailBus'),
+
+        # Additional Contact
+        'sMrMrsAdd': record.get('sMrMrsAdd'),
+        'sFNameAdd': record.get('sFNameAdd'),
+        'sMIAdd': record.get('sMIAdd'),
+        'sLNameAdd': record.get('sLNameAdd'),
+        'sAddr1Add': record.get('sAddr1Add'),
+        'sAddr2Add': record.get('sAddr2Add'),
+        'sCityAdd': record.get('sCityAdd'),
+        'sRegionAdd': record.get('sRegionAdd'),
+        'sPostalCodeAdd': record.get('sPostalCodeAdd'),
+        'sCountryAdd': record.get('sCountryAdd'),
+        'sPhoneAdd': record.get('sPhoneAdd'),
+        'sEmailAdd': record.get('sEmailAdd'),
+
+        # Access & Security
+        'sAccessCode': record.get('sAccessCode'),
+        'sAccessCode2': record.get('sAccessCode2'),
+        'iAccessCode2Type': convert_to_int(record.get('iAccessCode2Type')),
+
+        # Identification
+        'sLicense': record.get('sLicense'),
+        'sLicRegion': record.get('sLicRegion'),
+        'sSSN': record.get('sSSN'),
+        'sTaxID': record.get('sTaxID'),
+        'sTaxExemptCode': record.get('sTaxExemptCode'),
+        'dDOB': convert_to_datetime(record.get('dDOB')),
+        'iGender': convert_to_int(record.get('iGender')),
+
+        # Status Flags
+        'bCommercial': convert_to_bool(record.get('bCommercial')),
+        'bCompanyIsTenant': convert_to_bool(record.get('bCompanyIsTenant')),
+        'bDisabledWebAccess': convert_to_bool(record.get('bDisabledWebAccess')),
+        'bExcludeFromInsurance': convert_to_bool(record.get('bExcludeFromInsurance')),
+        'bInvoice': convert_to_bool(record.get('bInvoice')),
+        'bNeverLockOut': convert_to_bool(record.get('bNeverLockOut')),
+        'bNoChecks': convert_to_bool(record.get('bNoChecks')),
+        'bOnWaitingList': convert_to_bool(record.get('bOnWaitingList')),
+        'bOverlocked': convert_to_bool(record.get('bOverlocked')),
+        'bPermanent': convert_to_bool(record.get('bPermanent')),
+        'bPermanentGateLockout': convert_to_bool(record.get('bPermanentGateLockout')),
+        'bSMSOptIn': convert_to_bool(record.get('bSMSOptIn')),
+        'bSpecial': convert_to_bool(record.get('bSpecial')),
+        'bSpecialAlert': convert_to_bool(record.get('bSpecialAlert')),
+        'bTaxExempt': convert_to_bool(record.get('bTaxExempt')),
+        'bWalkInPOS': convert_to_bool(record.get('bWalkInPOS')),
+
+        # Lease & Dates
+        'iLeaseNum': convert_to_int(record.get('iLeaseNum')),
+        'iDefLeaseNum': convert_to_int(record.get('iDefLeaseNum')),
+        'dMovedIn': convert_to_datetime(record.get('dMovedIn')),
+        'dPaidThru': convert_to_datetime(record.get('dPaidThru')),
+        'dSchedOut': convert_to_datetime(record.get('dSchedOut')),
+        'dAnniv': convert_to_datetime(record.get('dAnniv')),
+        'dCreated': convert_to_datetime(record.get('dCreated')),
+        'dUpdated': convert_to_datetime(record.get('dUpdated')),
+
+        # Financial
+        'dcRent': convert_to_decimal(record.get('dcRent')),
+        'dcInsurPremium': convert_to_decimal(record.get('dcInsurPremium')),
+        'dcChargeBalance': convert_to_decimal(record.get('dcChargeBalance')),
+        'dcTotalDue': convert_to_decimal(record.get('dcTotalDue')),
+        'dcTaxRateRent': convert_to_decimal(record.get('dcTaxRateRent')),
+        'dcTaxRateInsurance': convert_to_decimal(record.get('dcTaxRateInsurance')),
+        'sBillingFrequency': record.get('sBillingFrequency'),
+
+        # Billing
+        'iAutoBillType': convert_to_int(record.get('iAutoBillType')),
+        'iInvoiceDeliveryType': convert_to_int(record.get('iInvoiceDeliveryType')),
+
+        # Marketing
+        'iHowManyOtherStorageCosDidYouContact': convert_to_int(record.get('iHowManyOtherStorageCosDidYouContact')),
+        'iUsedSelfStorageInThePast': convert_to_int(record.get('iUsedSelfStorageInThePast')),
+        'iMktg_DidYouVisitWebSite': convert_to_int(record.get('iMktg_DidYouVisitWebSite')),
+
+        # Exit Survey
+        'bExit_OnEmailOfferList': convert_to_bool(record.get('bExit_OnEmailOfferList')),
+        'iExitSat_Cleanliness': convert_to_int(record.get('iExitSat_Cleanliness')),
+        'iExitSat_Price': convert_to_int(record.get('iExitSat_Price')),
+        'iExitSat_Safety': convert_to_int(record.get('iExitSat_Safety')),
+        'iExitSat_Services': convert_to_int(record.get('iExitSat_Services')),
+        'iExitSat_Staff': convert_to_int(record.get('iExitSat_Staff')),
+
+        # Blacklist / Events
+        'iBlackListRating': convert_to_int(record.get('iBlackListRating')),
+        'iTenEvents_OptOut': convert_to_int(record.get('iTenEvents_OptOut')),
+
+        # Geographic
+        'dcLatitude': convert_to_decimal(record.get('dcLatitude')),
+        'dcLongitude': convert_to_decimal(record.get('dcLongitude')),
+
+        # Notes & Icons
+        'sTenNote': record.get('sTenNote'),
+        'sIconList': record.get('sIconList'),
+
+        # Pictures
+        'iPrimaryPic': convert_to_int(record.get('iPrimaryPic')),
+        'sPicFileN1': record.get('sPicFileN1'),
+        'sPicFileN2': record.get('sPicFileN2'),
+        'sPicFileN3': record.get('sPicFileN3'),
+        'sPicFileN4': record.get('sPicFileN4'),
+        'sPicFileN5': record.get('sPicFileN5'),
+        'sPicFileN6': record.get('sPicFileN6'),
+        'sPicFileN7': record.get('sPicFileN7'),
+        'sPicFileN8': record.get('sPicFileN8'),
+        'sPicFileN9': record.get('sPicFileN9'),
+
+        # Source Timestamps
+        'uTS': record.get('uTS'),
+        'uTSbigint': convert_to_int(record.get('uTSbigint')),
+
+        # Tracking
+        'extract_date': extract_date,
+    }
+
+
+def transform_ccws_charge(record: Dict[str, Any], ledger_id: int, site_id: int, extract_date: date) -> Dict[str, Any]:
+    """Transform ChargesAllByLedgerID API record for ccws_charges (all 16 API fields)."""
+    pmt_amt = convert_to_decimal(record.get('dcPmtAmt'))
+    if pmt_amt is None:
+        pmt_amt = Decimal('0')
+
+    return {
+        'SiteID': site_id,
+        'ChargeID': convert_to_int(record.get('ChargeID')),
+        'dcPmtAmt': pmt_amt,
+        'LedgerID': ledger_id,
+        'ChargeDescID': convert_to_int(record.get('ChargeDescID')),
+        'dcAmt': convert_to_decimal(record.get('dcAmt')),
+        'dcPrice': convert_to_decimal(record.get('dcPrice')),
+        'dcQty': convert_to_decimal(record.get('dcQty')),
+        'dcTax1': convert_to_decimal(record.get('dcTax1')),
+        'dcTax2': convert_to_decimal(record.get('dcTax2')),
+        'dChgStrt': convert_to_datetime(record.get('dChgStrt')),
+        'dChgEnd': convert_to_datetime(record.get('dChgEnd')),
+        'bMoveIn': convert_to_bool(record.get('bMoveIn')),
+        'bMoveOut': convert_to_bool(record.get('bMoveOut')),
+        'sChgCategory': record.get('sChgCategory'),
+        'sChgDesc': record.get('sChgDesc'),
+        'sDefChgDesc': record.get('sDefChgDesc'),
+        'extract_date': extract_date,
+    }
+
+
+# =============================================================================
 # API Call Functions
 # =============================================================================
 
@@ -298,7 +547,7 @@ def process_location(
     extract_date: date,
     incremental_since: Optional[datetime] = None,
     max_workers: int = 10
-) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+) -> Dict[str, List[Dict]]:
     """
     Process a single location through the 3-step workflow.
 
@@ -310,110 +559,112 @@ def process_location(
         max_workers: Max concurrent workers (not used yet)
 
     Returns:
-        Tuple of (tenant_records, ledger_records, charge_records)
+        Dict with keys: tenants, ledgers, charges (legacy cc_*)
+                        ccws_tenants, ccws_ledgers, ccws_charges (API-only)
     """
-    all_tenants = []
-    all_ledgers = []
-    all_charges = []
+    result = {
+        'tenants': [], 'ledgers': [], 'charges': [],
+        'ccws_tenants': [], 'ccws_ledgers': [], 'ccws_charges': [],
+    }
 
     mode_label = "INCREMENTAL" if incremental_since else "FULL"
 
     # Step 1: Fetch all tenants (always full refresh - fast)
-    print(f"  Step 1: Fetching tenants...")
+    logger.info("  Step 1: Fetching tenants...")
     try:
         raw_tenants = fetch_tenants(soap_client, location_code)
         tenant_ids = []
         for t in raw_tenants:
             transformed = transform_tenant(t, location_code)
-            if transformed['TenantID']:  # Skip if no TenantID
-                all_tenants.append(transformed)
+            if transformed['TenantID']:
+                result['tenants'].append(transformed)
                 tenant_ids.append(transformed['TenantID'])
-        print(f"    Found {len(tenant_ids)} tenants")
+            # CCWS: all API fields
+            ccws_t = transform_ccws_tenant(t, location_code, extract_date)
+            if ccws_t['TenantID']:
+                result['ccws_tenants'].append(ccws_t)
+        logger.info(f"    Found {len(tenant_ids)} tenants")
     except Exception as e:
-        print(f"    ERROR fetching tenants: {e}")
-        return all_tenants, all_ledgers, all_charges
+        logger.error(f"    ERROR fetching tenants: {e}")
+        return result
 
     if not tenant_ids:
-        print("    No tenants found, skipping...")
-        return all_tenants, all_ledgers, all_charges
+        logger.info("    No tenants found, skipping...")
+        return result
 
     # Step 2: Fetch ledgers for all tenants (always full - catches new ledgers)
-    print(f"  Step 2: Fetching ledgers for {len(tenant_ids)} tenants...")
+    logger.info(f"  Step 2: Fetching ledgers for {len(tenant_ids)} tenants...")
     ledger_to_site = {}  # Map ledger_id -> site_id for charge fetching
-    ledgers_for_charges = []  # Ledgers that need charge refresh
+    ledgers_for_charges = []  # Ledgers that need charge refresh (raw records)
 
-    def fetch_tenant_ledgers(tenant_id: int) -> List[Dict]:
-        """Fetch ledgers for a single tenant."""
-        try:
-            raw_ledgers = fetch_ledgers_for_tenant(soap_client, location_code, tenant_id)
-            ledgers = []
-            for l in raw_ledgers:
-                transformed = transform_ledger(l, tenant_id, extract_date)
-                if transformed['LedgerID']:
-                    ledgers.append(transformed)
-            return ledgers
-        except Exception as e:
-            return []
-
-    # Sequential processing for ledgers
     with tqdm(total=len(tenant_ids), desc="    Tenants", unit="t") as pbar:
         for tenant_id in tenant_ids:
-            ledgers = fetch_tenant_ledgers(tenant_id)
-            for l in ledgers:
-                all_ledgers.append(l)
-                ledger_to_site[l['LedgerID']] = l['SiteID']
+            try:
+                raw_ledgers = fetch_ledgers_for_tenant(soap_client, location_code, tenant_id)
+            except Exception as e:
+                logger.warning(f"Failed to fetch ledgers for tenant {tenant_id} at {location_code}: {e}")
+                pbar.update(1)
+                continue
 
-                # For incremental mode, only include ledgers created/updated since threshold
+            for raw_l in raw_ledgers:
+                # Legacy cc_ledgers transform
+                transformed = transform_ledger(raw_l, tenant_id, extract_date)
+                if not transformed['LedgerID']:
+                    continue
+                result['ledgers'].append(transformed)
+                ledger_to_site[transformed['LedgerID']] = transformed['SiteID']
+
+                # CCWS: all 141 API fields
+                ccws_l = transform_ccws_ledger(raw_l, tenant_id, extract_date)
+                result['ccws_ledgers'].append(ccws_l)
+
+                # Determine if charges need refresh
                 if incremental_since:
-                    ledger_created = l.get('dCreated')
-                    ledger_updated = l.get('dUpdated')
-                    # Include if either dCreated or dUpdated is after threshold
+                    ledger_created = transformed.get('dCreated')
+                    ledger_updated = transformed.get('dUpdated')
                     is_new = ledger_created and ledger_created > incremental_since
                     is_modified = ledger_updated and ledger_updated > incremental_since
                     if is_new or is_modified:
-                        ledgers_for_charges.append(l)
+                        ledgers_for_charges.append(transformed)
                 else:
-                    ledgers_for_charges.append(l)
+                    ledgers_for_charges.append(transformed)
 
             pbar.update(1)
 
-    print(f"    Found {len(all_ledgers)} ledgers total")
+    logger.info(f"    Found {len(result['ledgers'])} ledgers total")
 
     if incremental_since:
-        print(f"    Ledgers created/updated since {incremental_since.date()}: {len(ledgers_for_charges)}")
+        logger.info(f"    Ledgers created/updated since {incremental_since.date()}: {len(ledgers_for_charges)}")
 
     if not ledgers_for_charges:
-        print("    No ledgers need charge refresh, skipping...")
-        return all_tenants, all_ledgers, all_charges
+        logger.info("    No ledgers need charge refresh, skipping...")
+        return result
 
     # Step 3: Fetch charges for selected ledgers
     ledger_ids_for_charges = [l['LedgerID'] for l in ledgers_for_charges]
-    print(f"  Step 3: Fetching charges for {len(ledger_ids_for_charges)} ledgers...")
+    logger.info(f"  Step 3: Fetching charges for {len(ledger_ids_for_charges)} ledgers...")
 
-    def fetch_ledger_charges(ledger_id: int) -> List[Dict]:
-        """Fetch charges for a single ledger."""
-        try:
-            site_id = ledger_to_site.get(ledger_id)
-            raw_charges = fetch_charges_for_ledger(soap_client, location_code, ledger_id)
-            charges = []
-            for c in raw_charges:
-                transformed = transform_charge(c, ledger_id, site_id, extract_date)
-                if transformed['ChargeID']:
-                    charges.append(transformed)
-            return charges
-        except Exception as e:
-            return []
-
-    # Sequential processing for charges
     with tqdm(total=len(ledger_ids_for_charges), desc="    Ledgers", unit="l") as pbar:
         for ledger_id in ledger_ids_for_charges:
-            charges = fetch_ledger_charges(ledger_id)
-            all_charges.extend(charges)
+            try:
+                site_id = ledger_to_site.get(ledger_id)
+                raw_charges = fetch_charges_for_ledger(soap_client, location_code, ledger_id)
+                for c in raw_charges:
+                    # Legacy cc_charges
+                    transformed = transform_charge(c, ledger_id, site_id, extract_date)
+                    if transformed['ChargeID']:
+                        result['charges'].append(transformed)
+                    # CCWS: all 16 API fields
+                    ccws_c = transform_ccws_charge(c, ledger_id, site_id, extract_date)
+                    if ccws_c['ChargeID']:
+                        result['ccws_charges'].append(ccws_c)
+            except Exception as e:
+                logger.warning(f"Failed to fetch charges for ledger {ledger_id}: {e}")
             pbar.update(1)
 
-    print(f"    Found {len(all_charges)} charges")
+    logger.info(f"    Found {len(result['charges'])} charges")
 
-    return all_tenants, all_ledgers, all_charges
+    return result
 
 
 # =============================================================================
@@ -421,13 +672,11 @@ def process_location(
 # =============================================================================
 
 def push_to_database(
-    tenants: List[Dict],
-    ledgers: List[Dict],
-    charges: List[Dict],
+    data: Dict[str, List[Dict]],
     config: DataLayerConfig,
     chunk_size: int = 500
 ) -> None:
-    """Push all data to PostgreSQL database."""
+    """Push all data to PostgreSQL database (legacy cc_* and new ccws_* tables)."""
     db_config = config.databases.get('postgresql')
     if not db_config:
         raise ValueError("PostgreSQL configuration not found in .env")
@@ -435,60 +684,46 @@ def push_to_database(
     engine = create_engine_from_config(db_config)
 
     # Create tables if not exist
-    print("  Preparing database tables...")
+    logger.info("  Preparing database tables...")
     Base.metadata.create_all(engine, tables=[
         Tenant.__table__,
         Ledger.__table__,
-        Charge.__table__
+        Charge.__table__,
+        CcwsTenant.__table__,
+        CcwsLedger.__table__,
+        CcwsCharge.__table__,
     ])
-    print("    Tables ready")
+    logger.info("    Tables ready")
 
     session_manager = SessionManager(engine)
+
+    # Define upsert jobs: (label, records_key, model, constraint_columns)
+    upsert_jobs = [
+        ('cc_tenants', 'tenants', Tenant, ['SiteID', 'TenantID']),
+        ('cc_ledgers', 'ledgers', Ledger, ['SiteID', 'LedgerID']),
+        ('cc_charges', 'charges', Charge, ['SiteID', 'ChargeID', 'dcPmtAmt']),
+        ('ccws_tenants', 'ccws_tenants', CcwsTenant, ['SiteID', 'TenantID']),
+        ('ccws_ledgers', 'ccws_ledgers', CcwsLedger, ['SiteID', 'LedgerID']),
+        ('ccws_charges', 'ccws_charges', CcwsCharge, ['SiteID', 'ChargeID', 'dcPmtAmt']),
+    ]
 
     with session_manager.session_scope() as session:
         upsert_ops = UpsertOperations(session, db_config.db_type)
 
-        # Upsert tenants
-        if tenants:
-            print(f"  Upserting {len(tenants)} tenants...")
-            tenants = deduplicate_records(tenants, ['SiteID', 'TenantID'])
-            with tqdm(total=len(tenants), desc="    Tenants", unit="rec") as pbar:
-                for i in range(0, len(tenants), chunk_size):
-                    chunk = tenants[i:i + chunk_size]
-                    upsert_ops.upsert_batch(
-                        model=Tenant,
-                        records=chunk,
-                        constraint_columns=['SiteID', 'TenantID'],
-                        chunk_size=chunk_size
-                    )
-                    pbar.update(len(chunk))
+        for label, key, model, constraints in upsert_jobs:
+            records = data.get(key, [])
+            if not records:
+                continue
 
-        # Upsert ledgers
-        if ledgers:
-            print(f"  Upserting {len(ledgers)} ledgers...")
-            ledgers = deduplicate_records(ledgers, ['SiteID', 'LedgerID'])
-            with tqdm(total=len(ledgers), desc="    Ledgers", unit="rec") as pbar:
-                for i in range(0, len(ledgers), chunk_size):
-                    chunk = ledgers[i:i + chunk_size]
+            records = deduplicate_records(records, constraints)
+            logger.info(f"  Upserting {len(records)} {label}...")
+            with tqdm(total=len(records), desc=f"    {label}", unit="rec") as pbar:
+                for i in range(0, len(records), chunk_size):
+                    chunk = records[i:i + chunk_size]
                     upsert_ops.upsert_batch(
-                        model=Ledger,
+                        model=model,
                         records=chunk,
-                        constraint_columns=['SiteID', 'LedgerID'],
-                        chunk_size=chunk_size
-                    )
-                    pbar.update(len(chunk))
-
-        # Upsert charges
-        if charges:
-            print(f"  Upserting {len(charges)} charges...")
-            charges = deduplicate_records(charges, ['SiteID', 'ChargeID', 'dcPmtAmt'])
-            with tqdm(total=len(charges), desc="    Charges", unit="rec") as pbar:
-                for i in range(0, len(charges), chunk_size):
-                    chunk = charges[i:i + chunk_size]
-                    upsert_ops.upsert_batch(
-                        model=Charge,
-                        records=chunk,
-                        constraint_columns=['SiteID', 'ChargeID', 'dcPmtAmt'],
+                        constraint_columns=constraints,
                         chunk_size=chunk_size
                     )
                     pbar.update(len(chunk))
@@ -563,6 +798,7 @@ Examples:
 
 def main():
     """Main function to run the tenant-ledger-charges pipeline."""
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     args = parse_args()
 
     # Load configuration
@@ -605,55 +841,56 @@ def main():
         retries=config.soap.retries
     )
 
-    # Print header
-    print("=" * 70)
-    print("Tenant-Ledger-Charges to SQL Pipeline")
-    print("=" * 70)
-    print(f"Mode: {args.mode.upper()}")
+    # Log header
+    logger.info("=" * 70)
+    logger.info("Tenant-Ledger-Charges to SQL Pipeline")
+    logger.info("=" * 70)
+    logger.info(f"Mode: {args.mode.upper()}")
     if incremental_since:
-        print(f"Incremental Since: {incremental_since.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Extract Date: {extract_date}")
-    print(f"Locations: {', '.join(location_codes)}")
-    print(f"Service URL: {cc_url}")
-    print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
-    print("=" * 70)
+        logger.info(f"Incremental Since: {incremental_since.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"Extract Date: {extract_date}")
+    logger.info(f"Locations: {', '.join(location_codes)}")
+    logger.info(f"Service URL: {cc_url}")
+    logger.info(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
+    logger.info("=" * 70)
 
-    # Collect all data
-    all_tenants = []
-    all_ledgers = []
-    all_charges = []
+    # Collect all data across locations
+    all_data = {
+        'tenants': [], 'ledgers': [], 'charges': [],
+        'ccws_tenants': [], 'ccws_ledgers': [], 'ccws_charges': [],
+    }
 
     for location_code in location_codes:
-        print(f"\n[{location_code}] Processing...")
+        logger.info(f"\n[{location_code}] Processing...")
 
-        tenants, ledgers, charges = process_location(
+        loc_data = process_location(
             soap_client=soap_client,
             location_code=location_code,
             extract_date=extract_date,
             incremental_since=incremental_since
         )
 
-        all_tenants.extend(tenants)
-        all_ledgers.extend(ledgers)
-        all_charges.extend(charges)
+        for key in all_data:
+            all_data[key].extend(loc_data.get(key, []))
 
-        print(f"  Summary: {len(tenants)} tenants, {len(ledgers)} ledgers, {len(charges)} charges")
+        logger.info(f"  Summary: {len(loc_data['tenants'])} tenants, "
+                    f"{len(loc_data['ledgers'])} ledgers, {len(loc_data['charges'])} charges")
 
     # Push to database
-    print("\n" + "-" * 70)
-    print("Pushing data to database...")
-    push_to_database(all_tenants, all_ledgers, all_charges, config, chunk_size)
+    logger.info("-" * 70)
+    logger.info("Pushing data to database...")
+    push_to_database(all_data, config, chunk_size)
 
     # Close SOAP client
     soap_client.close()
 
     # Final summary
-    print("\n" + "=" * 70)
-    print("Pipeline completed!")
-    print(f"  Total tenants: {len(all_tenants)}")
-    print(f"  Total ledgers: {len(all_ledgers)}")
-    print(f"  Total charges: {len(all_charges)}")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("Pipeline completed!")
+    logger.info(f"  cc_tenants:  {len(all_data['tenants'])}  |  ccws_tenants:  {len(all_data['ccws_tenants'])}")
+    logger.info(f"  cc_ledgers:  {len(all_data['ledgers'])}  |  ccws_ledgers:  {len(all_data['ccws_ledgers'])}")
+    logger.info(f"  cc_charges:  {len(all_data['charges'])}  |  ccws_charges:  {len(all_data['ccws_charges'])}")
+    logger.info("=" * 70)
 
 
 if __name__ == "__main__":

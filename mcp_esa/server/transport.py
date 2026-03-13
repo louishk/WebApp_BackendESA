@@ -38,7 +38,8 @@ class StreamableHTTPTransport:
 
     async def handle_mcp_request(self, request: Request) -> Response:
         # Extract per-request allowed tools from auth middleware (NOT stored on self)
-        allowed_tools = getattr(request.state, 'mcp_tools', []) if hasattr(request, 'state') else []
+        # None = no restriction (all tools), list = only those tools
+        allowed_tools = getattr(request.state, 'mcp_tools', None) if hasattr(request, 'state') else None
 
         if request.method == "POST":
             return await self._handle_post(request, allowed_tools)
@@ -168,7 +169,7 @@ class StreamableHTTPTransport:
         tools = []
         if hasattr(self.server, '_tool_handlers'):
             for name, handler in self.server._tool_handlers.items():
-                if allowed_tools and name not in allowed_tools:
+                if allowed_tools is not None and name not in allowed_tools:
                     continue
                 tools.append({
                     "name": name,
@@ -184,8 +185,8 @@ class StreamableHTTPTransport:
         if not tool_name:
             raise ValueError("Tool name is required")
 
-        # Check per-key tool access
-        if allowed_tools and tool_name not in allowed_tools:
+        # Check per-key tool access (None = no restriction, list = restrict)
+        if allowed_tools is not None and tool_name not in allowed_tools:
             return {
                 "content": [{"type": "text", "text": f"Access denied: tool '{tool_name}' is not allowed for this API key"}],
                 "isError": True,
