@@ -1,0 +1,100 @@
+# =============================================================================
+# MCP Server Configuration
+# =============================================================================
+# Secrets use _vault suffix — resolved automatically by config_loader
+# Managed via /admin/secrets UI
+
+server:
+  name: "ESA Backend MCP"
+  host: "127.0.0.1"
+  port: 8002
+  debug: false
+
+features:
+  database: true
+  google_ads: true
+
+# =============================================================================
+# Google Ads API
+# =============================================================================
+google_ads:
+  client_id: "387700327426-cmsrklgau8vqh9mnjvl95cc4vvenqj77.apps.googleusercontent.com"
+  login_customer_id: "3494417856"
+  client_secret_vault: "GOOGLE_ADS_CLIENT_SECRET"
+  developer_token_vault: "GOOGLE_ADS_DEVELOPER_TOKEN"
+  refresh_token_vault: "GOOGLE_ADS_REFRESH_TOKEN"
+
+# =============================================================================
+# Database Presets (for DB_* MCP tools)
+# =============================================================================
+# Each key becomes a preset name (e.g. DB_connect_preset("esa_pbi"))
+
+databases:
+  esa_pbi:
+    type: postgresql
+    host: esapbi.postgres.database.azure.com
+    port: 5432
+    database: esa_pbi
+    user: esa_pbi_admin
+    password_vault: PBI_DB_PASSWORD
+    ssl: true
+
+  esa_backend:
+    type: postgresql
+    host: esapbi.postgres.database.azure.com
+    port: 5432
+    database: backend
+    user: esa_pbi_admin
+    password_vault: PBI_DB_PASSWORD
+    ssl: true
+
+  rudderstack:
+    type: postgresql
+    host: esapbi.postgres.database.azure.com
+    port: 5432
+    database: rudderstack
+    user: esa_pbi_admin
+    password_vault: PBI_DB_PASSWORD
+    ssl: true
+
+  bigquery:
+    type: bigquery
+    project_id: planar-beach-485003-v9
+    location: asia-southeast1
+    credentials_json_vault: BIGQUERY_SA_JSON
+
+  kinsta_esa_sg:
+    type: mysql
+    host: 127.0.0.1
+    port: 13306
+    database: extraspaceasiasg
+    user: extraspaceasiasg
+    password_vault: MYSQL1_PASSWORD
+    note: "Requires SSH tunnel to Kinsta"
+
+  kinsta_esa_my:
+    type: mysql
+    host: 127.0.0.1
+    port: 13307
+    database: extraspaceasiamy
+    user: extraspaceasiamy
+    password_vault: MYSQL2_PASSWORD
+    note: "Requires SSH tunnel to Kinsta"
+
+  kinsta_esa_kr:
+    type: mysql
+    host: 127.0.0.1
+    port: 13308
+    database: extraspaceasiakr
+    user: extraspaceasiakr
+    password_vault: MYSQL3_PASSWORD
+    note: "Requires SSH tunnel to Kinsta"
+
+  kinsta_esa_hk:
+    type: mysql
+    host: 127.0.0.1
+    port: 13309
+    database: extraspaceasiahk
+    user: extraspaceasiahk
+    password_vault: MYSQL4_PASSWORD
+    note: "Requires SSH tunnel to Kinsta"
