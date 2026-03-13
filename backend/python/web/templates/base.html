@@ -346,7 +346,7 @@
     </div>
     {% endif %}
 
-    {% if request.endpoint and (request.endpoint == 'main.pages_list' or request.endpoint == 'main.serve_page' or (request.endpoint and 'admin' in request.endpoint and 'page' in request.endpoint)) %}
+    {% if request.endpoint and (request.endpoint == 'main.pages_list' or request.endpoint == 'main.serve_page' or (request.endpoint and 'admin' in request.endpoint and 'page' in request.endpoint and 'services' not in request.endpoint)) %}
     <div class="sub-navbar">
         <a href="{{ url_for('main.pages_list') }}" class="{{ 'active' if request.endpoint == 'main.pages_list' or request.endpoint == 'main.serve_page' else '' }}">Available Pages</a>
         {% if current_user.can_manage_pages() %}

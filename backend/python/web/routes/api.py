@@ -1124,6 +1124,52 @@ def api_stop_scheduler():
         session.close()
 
 
+@api_bp.route('/services/mcp/start', methods=['POST'])
+@require_auth
+@require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=5, window_seconds=60)
+def api_start_mcp():
+    """Start the MCP server via systemctl."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'start', 'backend-mcp'],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0:
+            return jsonify({'success': True, 'message': 'MCP server starting...'})
+        else:
+            current_app.logger.error(f"Failed to start MCP: {result.stderr}")
+            return jsonify({'success': False, 'error': 'Failed to start MCP server'}), 500
+    except Exception as e:
+        current_app.logger.error(f"Failed to start MCP: {e}")
+        return jsonify({'success': False, 'error': 'Failed to start MCP server'}), 500
+
+
+@api_bp.route('/services/mcp/stop', methods=['POST'])
+@require_auth
+@require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=5, window_seconds=60)
+def api_stop_mcp():
+    """Stop the MCP server via systemctl."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'stop', 'backend-mcp'],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode == 0:
+            return jsonify({'success': True, 'message': 'MCP server stopped'})
+        else:
+            current_app.logger.error(f"Failed to stop MCP: {result.stderr}")
+            return jsonify({'success': False, 'error': 'Failed to stop MCP server'}), 500
+    except Exception as e:
+        current_app.logger.error(f"Failed to stop MCP: {e}")
+        return jsonify({'success': False, 'error': 'Failed to stop MCP server'}), 500
+
+
 @api_bp.route('/services/<service>/restart', methods=['POST'])
 @require_auth
 @require_api_scope('scheduler:write')

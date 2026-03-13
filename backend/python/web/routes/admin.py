@@ -1072,17 +1072,12 @@ def edit_api_key(user_id):
 
             # Update MCP access
             api_key.mcp_enabled = request.form.get('mcp_enabled') == 'on'
-            mcp_tools_raw = request.form.get('mcp_tools', '').strip()
-            if mcp_tools_raw:
-                api_key.mcp_tools = [t.strip() for t in mcp_tools_raw.split(',') if t.strip()]
-            else:
-                api_key.mcp_tools = []
 
             db.commit()
             audit_log(AuditEvent.CONFIG_UPDATED,
                       f"Updated API key config for user '{user.username}': scopes={scopes}, "
                       f"rate_limit={api_key.rate_limit}, daily_quota={api_key.daily_quota}, "
-                      f"mcp_enabled={api_key.mcp_enabled}, mcp_tools={api_key.mcp_tools}")
+                      f"mcp_enabled={api_key.mcp_enabled}")
             flash(f'API key settings updated for {user.username}.', 'success')
             return redirect(url_for('admin.list_api_keys'))
 

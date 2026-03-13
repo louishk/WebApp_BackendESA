@@ -89,21 +89,14 @@
     <div class="card">
         <h2>MCP Server Access</h2>
         <p style="font-size: 0.85rem; color: #888; margin-bottom: 0.75rem;">
-            Control whether this key can connect to the MCP server and which tools are available.
+            Allow this key to connect to the MCP server for LLM agent integrations.
         </p>
-        <div style="margin-bottom: 0.75rem;">
+        <div>
             <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                <input type="checkbox" name="mcp_enabled" id="mcp_enabled"
-                       {{ 'checked' if api_key.mcp_enabled }}>
-                <strong>MCP Access Enabled</strong>
+                <input type="checkbox" name="mcp_enabled" {{ 'checked' if api_key.mcp_enabled }}>
+                <code>mcp:access</code>
             </label>
-        </div>
-        <div class="form-group" id="mcp_tools_group" style="{{ 'display:none;' if not api_key.mcp_enabled }}">
-            <label>Allowed MCP Tools</label>
-            <input type="text" name="mcp_tools" style="width: 100%; padding: 0.5rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem; font-family: monospace;"
-                   value="{{ (api_key.mcp_tools or [])|join(', ') }}"
-                   placeholder="Leave empty for all tools, or comma-separated: health_check, echo, ping">
-            <div class="hint">Comma-separated list of tool names. Empty = all registered tools allowed.</div>
+            <div class="scope-desc">Connect to MCP server and call all registered tools</div>
         </div>
     </div>
 
@@ -135,9 +128,5 @@
 {% block scripts %}
 <script>
 clearTimeout(window.autoRefreshTimeout);
-// Toggle MCP tools field visibility
-document.getElementById('mcp_enabled').addEventListener('change', function() {
-    document.getElementById('mcp_tools_group').style.display = this.checked ? '' : 'none';
-});
 </script>
 {% endblock %}

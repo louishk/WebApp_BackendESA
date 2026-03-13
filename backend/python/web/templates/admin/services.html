@@ -40,6 +40,10 @@
             </div>
             <div class="service-info">Streamable HTTP MCP Endpoint</div>
             <div class="service-details" id="details-mcp_server"></div>
+            <div class="service-actions">
+                <button class="btn btn-sm btn-success" id="btn-start-mcp" onclick="startMcp()">Start</button>
+                <button class="btn btn-sm btn-danger" id="btn-stop-mcp" onclick="stopMcp()">Stop</button>
+            </div>
         </div>
     </div>
 </div>
@@ -138,10 +142,11 @@ function loadServiceStatus() {
                     detailsEl.textContent = details.join(' | ');
                 }
 
-                // Update button states for scheduler
-                if (key === 'scheduler') {
-                    const startBtn = document.getElementById('btn-start-scheduler');
-                    const stopBtn = document.getElementById('btn-stop-scheduler');
+                // Update button states for services with start/stop
+                if (key === 'scheduler' || key === 'mcp_server') {
+                    const suffix = key === 'scheduler' ? 'scheduler' : 'mcp';
+                    const startBtn = document.getElementById('btn-start-' + suffix);
+                    const stopBtn = document.getElementById('btn-stop-' + suffix);
                     if (startBtn && stopBtn) {
                         if (info.status === 'running') {
                             startBtn.disabled = true;
@@ -206,6 +211,64 @@ function stopScheduler() {
     .then(data => {
         if (data.success) {
             alert(data.message || 'Scheduler stopped');
+        } else {
+            alert('Failed to stop: ' + (data.error || 'Unknown error'));
+        }
+        setTimeout(loadServiceStatus, 2000);
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        loadServiceStatus();
+    });
+}
+
+function startMcp() {
+    const statusEl = document.getElementById('status-mcp_server');
+    const startBtn = document.getElementById('btn-start-mcp');
+
+    startBtn.disabled = true;
+    statusEl.textContent = 'starting...';
+    statusEl.className = 'service-status unknown';
+
+    fetch('/api/services/mcp/start', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || 'MCP server started');
+        } else {
+            alert('Failed to start: ' + (data.error || 'Unknown error'));
+        }
+        setTimeout(loadServiceStatus, 3000);
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        loadServiceStatus();
+    });
+}
+
+function stopMcp() {
+    if (!confirm('Stop the MCP server? MCP clients will lose connectivity.')) {
+        return;
+    }
+
+    const statusEl = document.getElementById('status-mcp_server');
+    const stopBtn = document.getElementById('btn-stop-mcp');
+
+    stopBtn.disabled = true;
+    statusEl.textContent = 'stopping...';
+    statusEl.className = 'service-status unknown';
+
+    fetch('/api/services/mcp/stop', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || 'MCP server stopped');
         } else {
             alert('Failed to stop: ' + (data.error || 'Unknown error'));
         }
