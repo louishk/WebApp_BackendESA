@@ -81,6 +81,12 @@ class ApiKey(Base):
                          comment="Request count for current day")
     quota_reset_date = Column(Date, comment="Date when daily_usage was last reset")
 
+    # MCP access control
+    mcp_enabled = Column(Boolean, nullable=False, default=False,
+                         comment="Whether this key can access the MCP server")
+    mcp_tools = Column(JSONB, nullable=False, default=list,
+                       comment="Allowed MCP tool names (empty list = all tools)")
+
     is_active = Column(Boolean, nullable=False, default=True)
     last_used_at = Column(DateTime(timezone=True), comment="Last time this key was used")
     expires_at = Column(DateTime(timezone=True), comment="Optional expiry date")
@@ -111,6 +117,14 @@ class ApiKey(Base):
         """Deprecated: quota enforcement is now done atomically in jwt_auth._authenticate_api_key."""
         raise NotImplementedError("Use the atomic SQL UPDATE in jwt_auth._authenticate_api_key instead.")
 
+    def has_mcp_tool_access(self, tool_name):
+        """Check if this key can access a specific MCP tool. Empty list = all tools allowed."""
+        if not self.mcp_enabled:
+            return False
+        if not self.mcp_tools:
+            return True  # Empty list means all tools
+        return tool_name in self.mcp_tools
+
     def to_dict(self):
         """Convert to dictionary (never includes the hash)."""
         return {
@@ -119,6 +133,8 @@ class ApiKey(Base):
             'name': self.name,
             'key_prefix': f"esa_{self.key_id}.",
             'scopes': self.scopes or [],
+            'mcp_enabled': self.mcp_enabled,
+            'mcp_tools': self.mcp_tools or [],
             'rate_limit': self.rate_limit,
             'daily_quota': self.daily_quota,
             'daily_usage': self.daily_usage,

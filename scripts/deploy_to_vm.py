@@ -147,11 +147,13 @@ def step_stop_services(credentials: dict, verbose: bool = True) -> bool:
     stop_cmd = """
         sudo systemctl stop esa-backend 2>/dev/null || true
         sudo systemctl stop backend-scheduler 2>/dev/null || true
+        sudo systemctl stop backend-mcp 2>/dev/null || true
 
         # Kill any stray Python/gunicorn processes from backend
         sudo pkill -9 -f '/var/www/backend.*python' 2>/dev/null || true
         sudo pkill -9 -f 'gunicorn.*wsgi' 2>/dev/null || true
         sudo pkill -9 -f 'flask.*run' 2>/dev/null || true
+        sudo pkill -9 -f 'mcp_esa.main' 2>/dev/null || true
 
         sleep 2
 
@@ -159,6 +161,12 @@ def step_stop_services(credentials: dict, verbose: bool = True) -> bool:
         if sudo lsof -i :5000 2>/dev/null; then
             echo "WARNING: Port 5000 still in use"
             sudo fuser -k 5000/tcp 2>/dev/null || true
+        fi
+
+        # Verify nothing is running on port 8002
+        if sudo lsof -i :8002 2>/dev/null; then
+            echo "WARNING: Port 8002 still in use"
+            sudo fuser -k 8002/tcp 2>/dev/null || true
         fi
 
         echo "Services stopped"
@@ -260,6 +268,11 @@ def step_check_requirements(credentials: dict, verbose: bool = True) -> bool:
         echo "Installing/updating requirements..."
         sudo -u www-data {VM_VENV_PATH}/bin/pip install -r requirements.txt -q
 
+        # Install MCP server requirements
+        if [ -f "{VM_BACKEND_PATH}/mcp_esa/requirements.txt" ]; then
+            sudo -u www-data {VM_VENV_PATH}/bin/pip install -r {VM_BACKEND_PATH}/mcp_esa/requirements.txt -q
+        fi
+
         # Verify key packages
         {VM_VENV_PATH}/bin/python -c "import flask; import gunicorn; import authlib; print('Key packages OK')"
     """
@@ -315,6 +328,9 @@ def step_start_services(credentials: dict, verbose: bool = True) -> bool:
         if [ -f "{VM_PYTHON_PATH}/systemd/backend-scheduler.service" ]; then
             sudo cp {VM_PYTHON_PATH}/systemd/backend-scheduler.service /etc/systemd/system/
         fi
+        if [ -f "{VM_PYTHON_PATH}/systemd/backend-mcp.service" ]; then
+            sudo cp {VM_PYTHON_PATH}/systemd/backend-mcp.service /etc/systemd/system/
+        fi
         sudo systemctl daemon-reload
 
         # Sync nginx config if it exists
@@ -330,9 +346,11 @@ def step_start_services(credentials: dict, verbose: bool = True) -> bool:
             fi
         fi
 
-        # Create log directory if needed
+        # Create log directories if needed
         sudo mkdir -p /var/log/esa-backend
         sudo chown www-data:www-data /var/log/esa-backend
+        sudo mkdir -p /var/www/backend/backend/python/logs
+        sudo chown www-data:www-data /var/www/backend/backend/python/logs
 
         # Enable and start esa-backend (web UI)
         sudo systemctl enable esa-backend
@@ -341,6 +359,10 @@ def step_start_services(credentials: dict, verbose: bool = True) -> bool:
         # Enable and start backend-scheduler (scheduler daemon)
         sudo systemctl enable backend-scheduler
         sudo systemctl start backend-scheduler
+
+        # Enable and start backend-mcp (MCP server)
+        sudo systemctl enable backend-mcp
+        sudo systemctl start backend-mcp
 
         sleep 3
 
@@ -361,6 +383,16 @@ def step_start_services(credentials: dict, verbose: bool = True) -> bool:
         else
             echo "backend-scheduler: FAILED"
             sudo journalctl -u backend-scheduler --no-pager -n 20
+            exit 1
+        fi
+
+        # Check backend-mcp status
+        if sudo systemctl is-active --quiet backend-mcp; then
+            echo "backend-mcp: RUNNING"
+            sudo systemctl status backend-mcp --no-pager | head -5
+        else
+            echo "backend-mcp: FAILED"
+            sudo journalctl -u backend-mcp --no-pager -n 20
             exit 1
         fi
     """
@@ -435,6 +467,8 @@ def check_status(verbose: bool = True) -> bool:
     status_cmd = f"""
         echo "=== Services ==="
         sudo systemctl status esa-backend --no-pager 2>/dev/null || echo "esa-backend: not running"
+        echo ""
+        sudo systemctl status backend-mcp --no-pager 2>/dev/null || echo "backend-mcp: not running"
         echo ""
 
         echo "=== Python Environment ==="

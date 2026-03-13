@@ -1,0 +1,31 @@
+[Unit]
+Description=ESA Backend MCP Server
+After=network.target postgresql.service esa-backend.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/backend
+Environment="PATH=/var/www/backend/backend/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=/var/www/backend:/var/www/backend/backend/python"
+EnvironmentFile=-/var/www/backend/backend/python/.env
+
+ExecStart=/var/www/backend/backend/python/venv/bin/python -m mcp_esa.main
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=backend-mcp
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/esa-backend /var/www/backend
+
+[Install]
+WantedBy=multi-user.target

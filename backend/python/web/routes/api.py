@@ -964,6 +964,24 @@ def api_services_status():
                 'last_heartbeat': state.last_heartbeat.isoformat() if state.last_heartbeat else None,
             }
 
+        # MCP server status (via health endpoint)
+        mcp_port = os.environ.get('MCP_SERVER_PORT', '8002')
+        mcp_status = 'stopped'
+        mcp_info = {}
+        try:
+            import urllib.request
+            req = urllib.request.Request(f'http://127.0.0.1:{mcp_port}/health', method='GET')
+            req.add_header('User-Agent', 'esa-backend-status-check')
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                if resp.status == 200:
+                    mcp_data = json.loads(resp.read())
+                    mcp_status = 'running'
+                    mcp_info = {
+                        'transport': mcp_data.get('transport', 'streamable-http'),
+                    }
+        except Exception:
+            mcp_status = 'stopped'
+
         # Web UI is always running if we're responding
         result = {
             'web_ui': {
@@ -977,6 +995,12 @@ def api_services_status():
                 'active': scheduler_status == 'running',
                 'status': scheduler_status,
                 **scheduler_info
+            },
+            'mcp_server': {
+                'service': 'MCP Server',
+                'active': mcp_status == 'running',
+                'status': mcp_status,
+                **mcp_info
             }
         }
 
@@ -3224,7 +3248,7 @@ def api_cc_discount_plans_update():
 # Unit Availability
 # =============================================================================
 # GET  /api/unit-availability   — available units with pricing & discount plans
-# POST /api/unit-availability/reserve — reserve a unit via SOAP MakeReservation
+# Reservation endpoints moved to reservations.py blueprint (/api/reservations/*)
 # =============================================================================
 
 @api_bp.route('/unit-availability')
@@ -3426,136 +3450,3 @@ def api_unit_availability():
         return jsonify({'error': 'Failed to fetch available units'}), 500
     finally:
         pbi_session.close()
-
-
-@api_bp.route('/unit-availability/reserve', methods=['POST'])
-@require_auth
-@require_api_scope('inventory:write')
-@rate_limit_api(max_requests=10, window_seconds=60)
-def api_unit_reserve():
-    """
-    Reserve a unit via SOAP MakeReservation endpoint.
-
-    JSON body:
-        site_code    — location code (e.g. "LSETUP")
-        unit_id      — unit ID to reserve
-        tenant_name  — tenant first name
-        tenant_last  — tenant last name
-        phone        — contact phone
-        email        — contact email (optional)
-        notes        — reservation notes (optional)
-    """
-    from flask_login import current_user as flask_current_user
-    from common.config import DataLayerConfig
-    from common.soap_client import SOAPClient, SOAPFaultError
-
-    if flask_current_user.is_authenticated and not flask_current_user.can_access_inventory_tools():
-        return jsonify({'error': 'Forbidden', 'message': 'Inventory tools access required'}), 403
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'Request body required'}), 400
-
-    site_code = data.get('site_code', '').strip()
-    unit_id = data.get('unit_id')
-    tenant_name = data.get('tenant_name', '').strip()
-    tenant_last = data.get('tenant_last', '').strip()
-    phone = data.get('phone', '').strip()
-    email = data.get('email', '').strip()
-    notes = data.get('notes', '').strip()
-
-    if not site_code:
-        return jsonify({'error': 'site_code is required'}), 400
-    if not unit_id:
-        return jsonify({'error': 'unit_id is required'}), 400
-    if not tenant_name:
-        return jsonify({'error': 'tenant_name is required'}), 400
-    if not tenant_last:
-        return jsonify({'error': 'tenant_last is required'}), 400
-    if not phone:
-        return jsonify({'error': 'phone is required'}), 400
-
-    try:
-        unit_id = int(unit_id)
-    except (ValueError, TypeError):
-        return jsonify({'error': 'unit_id must be an integer'}), 400
-
-    # Validate site_code
-    from common.models import SiteInfo
-    pbi_session = get_pbi_session()
-    try:
-        site = pbi_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
-        if not site:
-            return jsonify({'error': 'Invalid site_code'}), 400
-    finally:
-        pbi_session.close()
-
-    config = DataLayerConfig.from_env()
-    if not config.soap:
-        current_app.logger.error("SOAP configuration not available")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-
-    cc_url = config.soap.base_url.replace('ReportingWs.asmx', 'CallCenterWs.asmx')
-    soap_client = SOAPClient(
-        base_url=cc_url,
-        corp_code=config.soap.corp_code,
-        corp_user=config.soap.corp_user,
-        api_key=config.soap.api_key,
-        corp_password=config.soap.corp_password,
-        timeout=config.soap.timeout,
-        retries=config.soap.retries
-    )
-
-    try:
-        results = soap_client.call(
-            operation="MakeReservation",
-            parameters={
-                "sLocationCode": site_code,
-                "iUnitID": str(unit_id),
-                "sFirstName": tenant_name,
-                "sLastName": tenant_last,
-                "sPhone": phone,
-                "sEmail": email or "",
-                "sNote": notes or "",
-            },
-            soap_action="http://tempuri.org/CallCenterWs/CallCenterWs/MakeReservation",
-            namespace="http://tempuri.org/CallCenterWs/CallCenterWs",
-            result_tag="RT",
-        )
-
-        ret_code = None
-        ret_msg = None
-        if results:
-            ret_code = results[0].get('Ret_Code')
-            ret_msg = results[0].get('Ret_Msg')
-            current_app.logger.info(
-                f"SOAP MakeReservation for unit {unit_id} at {site_code}: "
-                f"code={ret_code}, msg={ret_msg}"
-            )
-
-        return jsonify({
-            'success': True,
-            'site_code': site_code,
-            'unit_id': unit_id,
-            'ret_code': ret_code,
-            'message': ret_msg or 'Reservation submitted',
-        })
-
-    except SOAPFaultError as e:
-        current_app.logger.error(f"SOAP fault during MakeReservation: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'SOAP API error',
-            'details': 'SOAP API error occurred',
-        }), 502
-
-    except Exception as e:
-        current_app.logger.error(f"Unexpected error during MakeReservation: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Unexpected error',
-            'details': 'An internal error occurred',
-        }), 500
-
-    finally:
-        soap_client.close()

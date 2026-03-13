@@ -986,6 +986,18 @@ def type_mappings():
 
 
 # =============================================================================
+# Services (Config permission required)
+# =============================================================================
+
+@admin_bp.route('/services')
+@login_required
+@config_required
+def services_page():
+    """Service management page."""
+    return render_template('admin/services.html')
+
+
+# =============================================================================
 # API Key Management (Admin — under User Management section)
 # =============================================================================
 # Admins manage: scopes, rate limits, quotas per user's API key.

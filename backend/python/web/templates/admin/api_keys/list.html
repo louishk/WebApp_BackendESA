@@ -32,6 +32,7 @@
                 <th>User</th>
                 <th>Key Status</th>
                 <th>Scopes</th>
+                <th>MCP</th>
                 <th>Rate Limit</th>
                 <th>Daily Quota</th>
                 <th>Usage Today</th>
@@ -63,6 +64,22 @@
                         {% endfor %}
                     {% elif key %}
                         <span style="color: #dc2626; font-size: 0.85rem;">No scopes</span>
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if key %}
+                        {% if key.mcp_enabled %}
+                            <span class="status status-completed">On</span>
+                            {% if key.mcp_tools %}
+                                <span style="font-size: 0.7rem; color: #888;">{{ key.mcp_tools|length }} tools</span>
+                            {% else %}
+                                <span style="font-size: 0.7rem; color: #888;">All</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="status status-pending">Off</span>
+                        {% endif %}
                     {% else %}
                         -
                     {% endif %}

@@ -7,36 +7,6 @@
     <h1>Settings & Administration</h1>
 </div>
 
-<!-- Service Management -->
-<div class="card">
-    <h2>Service Management</h2>
-    <p style="color:#666;margin-bottom:1rem;">Manage the scheduler backend services</p>
-
-    <div class="services-grid">
-        <div class="service-card" id="service-web_ui">
-            <div class="service-header">
-                <span class="service-name">Web UI</span>
-                <span class="service-status" id="status-web_ui">checking...</span>
-            </div>
-            <div class="service-info">Flask Development Server</div>
-            <div class="service-details" id="details-web_ui"></div>
-        </div>
-
-        <div class="service-card" id="service-scheduler">
-            <div class="service-header">
-                <span class="service-name">Scheduler Daemon</span>
-                <span class="service-status" id="status-scheduler">checking...</span>
-            </div>
-            <div class="service-info">APScheduler Background Process</div>
-            <div class="service-details" id="details-scheduler"></div>
-            <div class="service-actions">
-                <button class="btn btn-sm btn-success" id="btn-start-scheduler" onclick="startScheduler()">Start</button>
-                <button class="btn btn-sm btn-danger" id="btn-stop-scheduler" onclick="stopScheduler()">Stop</button>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Pipeline Management -->
 <div class="card">
     <h2>Pipeline Management</h2>
@@ -174,69 +144,6 @@
 </div>
 
 <style>
-.services-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 1rem;
-}
-.service-card {
-    background: var(--esa-navy);
-    padding: 1.5rem;
-    border-radius: 8px;
-    color: #fff;
-}
-.service-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-}
-.service-name {
-    font-weight: 600;
-    font-size: 1.1rem;
-}
-.service-status {
-    padding: 0.25rem 0.75rem;
-    border-radius: 20px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-.service-status.running {
-    background: #28A745;
-}
-.service-status.stopped {
-    background: #C41230;
-}
-.service-status.unknown {
-    background: #6C757D;
-}
-.service-info {
-    color: rgba(255,255,255,0.6);
-    font-size: 0.85rem;
-    margin-bottom: 0.5rem;
-    font-family: monospace;
-}
-.service-details {
-    color: rgba(255,255,255,0.5);
-    font-size: 0.8rem;
-    margin-bottom: 1rem;
-}
-.service-actions {
-    display: flex;
-    gap: 0.5rem;
-}
-.btn-success {
-    background: #28A745;
-}
-.btn-success:hover {
-    background: #218838;
-}
-.btn-danger {
-    background: #C41230;
-}
-.btn-danger:hover {
-    background: #9E0E27;
-}
 .form-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -309,112 +216,6 @@
 <script>
 let pipelinesData = [];
 let pendingDeletePipeline = null;
-
-// Load service status
-function loadServiceStatus() {
-    fetch('/api/services/status')
-        .then(r => r.json())
-        .then(data => {
-            for (const [key, info] of Object.entries(data)) {
-                const statusEl = document.getElementById('status-' + key);
-                const detailsEl = document.getElementById('details-' + key);
-
-                if (statusEl) {
-                    statusEl.textContent = info.status;
-                    statusEl.className = 'service-status ' + info.status;
-                }
-
-                if (detailsEl) {
-                    let details = [];
-                    if (info.pid) details.push('PID: ' + info.pid);
-                    if (info.host) details.push('Host: ' + info.host);
-                    if (info.last_heartbeat) {
-                        const hb = new Date(info.last_heartbeat);
-                        details.push('Heartbeat: ' + hb.toLocaleTimeString());
-                    }
-                    detailsEl.textContent = details.join(' | ');
-                }
-
-                // Update button states for scheduler
-                if (key === 'scheduler') {
-                    const startBtn = document.getElementById('btn-start-scheduler');
-                    const stopBtn = document.getElementById('btn-stop-scheduler');
-                    if (startBtn && stopBtn) {
-                        if (info.status === 'running') {
-                            startBtn.disabled = true;
-                            stopBtn.disabled = false;
-                        } else {
-                            startBtn.disabled = false;
-                            stopBtn.disabled = true;
-                        }
-                    }
-                }
-            }
-        })
-        .catch(err => {
-            console.error('Failed to load service status:', err);
-        });
-}
-
-// Start scheduler
-function startScheduler() {
-    const statusEl = document.getElementById('status-scheduler');
-    const startBtn = document.getElementById('btn-start-scheduler');
-
-    startBtn.disabled = true;
-    statusEl.textContent = 'starting...';
-    statusEl.className = 'service-status unknown';
-
-    fetch('/api/services/scheduler/start', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'}
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            alert(data.message || 'Scheduler started');
-        } else {
-            alert('Failed to start: ' + (data.error || 'Unknown error'));
-        }
-        setTimeout(loadServiceStatus, 2000);
-    })
-    .catch(err => {
-        alert('Error: ' + err);
-        loadServiceStatus();
-    });
-}
-
-// Stop scheduler
-function stopScheduler() {
-    if (!confirm('Stop the scheduler daemon? Scheduled jobs will not run until restarted.')) {
-        return;
-    }
-
-    const statusEl = document.getElementById('status-scheduler');
-    const stopBtn = document.getElementById('btn-stop-scheduler');
-
-    stopBtn.disabled = true;
-    statusEl.textContent = 'stopping...';
-    statusEl.className = 'service-status unknown';
-
-    fetch('/api/services/scheduler/stop', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'}
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            alert(data.message || 'Scheduler stopped');
-        } else {
-            alert('Failed to stop: ' + (data.error || 'Unknown error'));
-        }
-        setTimeout(loadServiceStatus, 2000);
-    })
-    .catch(err => {
-        alert('Error: ' + err);
-        loadServiceStatus();
-    });
-}
 
 // Load pipelines
 function loadPipelines() {
@@ -608,11 +409,7 @@ document.getElementById('deleteModal').addEventListener('click', function(e) {
 });
 
 // Initial load
-loadServiceStatus();
 loadPipelines();
 loadModules();
-
-// Refresh service status every 30 seconds
-setInterval(loadServiceStatus, 30000);
 </script>
 {% endblock %}
