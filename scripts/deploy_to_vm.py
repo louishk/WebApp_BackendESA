@@ -69,29 +69,39 @@ RSYNC_EXCLUDES = [
 
 
 def get_ssh_credentials():
-    """Get SSH credentials from .env and vault."""
-    from common.secrets_vault import vault_config
-
-    host = env_config('VM_SSH_HOST', default=None)
+    """Get SSH credentials — uses SSH key auth with fallback to password."""
+    host = env_config('VM_SSH_HOST', default='20.6.132.108')
     port = env_config('VM_SSH_PORT', default=22, cast=int)
-    username = env_config('VM_SSH_ROOT_USERNAME', default=None)
-    password = vault_config('VM_SSH_PASSWORD', default=None)
+    username = env_config('VM_SSH_ROOT_USERNAME', default='esa_bk_admin')
 
-    if not all([host, username, password]):
-        missing = []
-        if not host:
-            missing.append('VM_SSH_HOST')
-        if not username:
-            missing.append('VM_SSH_ROOT_USERNAME')
-        if not password:
-            missing.append('VM_SSH_PASSWORD (in vault)')
-        raise ValueError(f"Missing SSH credentials: {', '.join(missing)}")
+    # Try SSH key first (preferred)
+    ssh_key_path = Path.home() / '.ssh' / 'id_ed25519_vm'
+    if ssh_key_path.exists():
+        return {
+            'host': host,
+            'port': port,
+            'username': username,
+            'password': None,
+            'key_filename': str(ssh_key_path),
+        }
+
+    # Fallback to password from vault
+    password = None
+    try:
+        from common.secrets_vault import vault_config
+        password = vault_config('VM_SSH_PASSWORD', default=None)
+    except Exception:
+        pass
+
+    if not password:
+        raise ValueError("No SSH key (~/.ssh/id_ed25519_vm) and no VM_SSH_PASSWORD in vault")
 
     return {
         'host': host,
         'port': port,
         'username': username,
-        'password': password
+        'password': password,
+        'key_filename': None,
     }
 
 
@@ -106,13 +116,17 @@ def run_ssh_command(credentials: dict, command: str, verbose: bool = True, timeo
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     try:
-        client.connect(
-            hostname=credentials['host'],
-            port=credentials['port'],
-            username=credentials['username'],
-            password=credentials['password'],
-            timeout=30
-        )
+        connect_kwargs = {
+            'hostname': credentials['host'],
+            'port': credentials['port'],
+            'username': credentials['username'],
+            'timeout': 30,
+        }
+        if credentials.get('key_filename'):
+            connect_kwargs['key_filename'] = credentials['key_filename']
+        if credentials.get('password'):
+            connect_kwargs['password'] = credentials['password']
+        client.connect(**connect_kwargs)
 
         if verbose:
             # Truncate long commands for display
@@ -184,13 +198,21 @@ def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bo
     dry_run_flag = '-n' if dry_run else ''
     temp_dir = "/tmp/webapp-deploy"
 
+    # Build SSH options for rsync
+    ssh_opts = f"-o StrictHostKeyChecking=no -p {credentials['port']}"
+    if credentials.get('key_filename'):
+        ssh_opts += f" -i {credentials['key_filename']}"
+
     rsync_cmd = (
-        f"sshpass -p '{credentials['password']}' "
         f"rsync -avz --delete {dry_run_flag} {excludes} "
-        f"-e 'ssh -o StrictHostKeyChecking=no -p {credentials['port']}' "
+        f"-e 'ssh {ssh_opts}' "
         f"{project_root}/ "
         f"{credentials['username']}@{credentials['host']}:{temp_dir}/"
     )
+
+    # If using password auth (no SSH key), prepend sshpass
+    if not credentials.get('key_filename') and credentials.get('password'):
+        rsync_cmd = f"sshpass -p '{credentials['password']}' " + rsync_cmd
 
     try:
         result = subprocess.run(rsync_cmd, shell=True, capture_output=True, text=True)
@@ -227,7 +249,7 @@ def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bo
         return exit_code == 0
 
     except FileNotFoundError:
-        print("    ERROR: sshpass not found. Install with: sudo apt install sshpass")
+        print("    ERROR: rsync or sshpass not found")
         return False
 
 
