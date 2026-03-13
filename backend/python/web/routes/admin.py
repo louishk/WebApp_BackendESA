@@ -1026,6 +1026,40 @@ def list_api_keys():
         db.close()
 
 
+def _get_mcp_tools_grouped():
+    """Get available MCP tools grouped by category for the admin UI."""
+    from collections import OrderedDict
+    tools = OrderedDict()
+    tools['Health'] = ['health_check', 'echo', 'ping']
+    tools['Database'] = [
+        'DB_list_database_presets', 'DB_connect_preset', 'DB_connect_multiple_presets',
+        'DB_execute_query', 'DB_list_tables', 'DB_describe_table',
+        'DB_list_connections', 'DB_disconnect_database',
+    ]
+    tools['Google Ads - Account'] = [
+        'GA_test_connection', 'GA_list_accessible_customers', 'GA_get_account_info',
+    ]
+    tools['Google Ads - Campaigns'] = [
+        'GA_list_campaigns', 'GA_get_campaign', 'GA_create_campaign',
+        'GA_update_campaign', 'GA_set_campaign_status',
+    ]
+    tools['Google Ads - Ad Groups'] = [
+        'GA_list_ad_groups', 'GA_create_ad_group', 'GA_update_ad_group',
+    ]
+    tools['Google Ads - Reporting'] = [
+        'GA_query', 'GA_get_campaign_performance', 'GA_get_account_performance',
+        'GA_get_keyword_performance',
+    ]
+    tools['Google Ads - AI Analysis'] = [
+        'GA_audit_account', 'GA_analyze_keywords', 'GA_analyze_search_terms',
+        'GA_suggest_negative_keywords', 'GA_analyze_competitors',
+        'GA_analyze_quality_scores', 'GA_analyze_trends',
+        'GA_analyze_audiences', 'GA_optimize_budget', 'GA_generate_report',
+    ]
+    tools['Google Ads - Token'] = ['GA_start_token_refresh']
+    return tools
+
+
 @admin_bp.route('/api-keys/<int:user_id>/edit', methods=['GET', 'POST'])
 @login_required
 @admin_required
@@ -1073,20 +1107,28 @@ def edit_api_key(user_id):
             # Update MCP access
             api_key.mcp_enabled = request.form.get('mcp_enabled') == 'on'
 
+            # Update MCP tool restrictions
+            mcp_tools = request.form.getlist('mcp_tools')
+            api_key.mcp_tools = mcp_tools if mcp_tools else []
+
             db.commit()
             audit_log(AuditEvent.CONFIG_UPDATED,
                       f"Updated API key config for user '{user.username}': scopes={scopes}, "
                       f"rate_limit={api_key.rate_limit}, daily_quota={api_key.daily_quota}, "
-                      f"mcp_enabled={api_key.mcp_enabled}")
+                      f"mcp_enabled={api_key.mcp_enabled}, mcp_tools={len(mcp_tools)} selected")
             flash(f'API key settings updated for {user.username}.', 'success')
             return redirect(url_for('admin.list_api_keys'))
+
+        # Build grouped MCP tool list for the UI
+        mcp_tools_available = _get_mcp_tools_grouped()
 
         return render_template('admin/api_keys/edit.html',
                                user=user,
                                api_key=api_key,
                                all_scopes=API_SCOPES,
                                default_rate_limit=DEFAULT_RATE_LIMIT,
-                               default_daily_quota=DEFAULT_DAILY_QUOTA)
+                               default_daily_quota=DEFAULT_DAILY_QUOTA,
+                               mcp_tools_available=mcp_tools_available)
     finally:
         db.close()
 
