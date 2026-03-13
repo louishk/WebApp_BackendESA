@@ -109,10 +109,10 @@ php sql/migrate_mysql_to_postgresql.php
 
 ```bash
 # Copy files to server
-scp -r . user@57.158.27.35:/var/www/html/
+scp -r . user@20.6.132.108:/var/www/html/
 
 # SSH to server and run deployment
-ssh user@57.158.27.35
+ssh user@20.6.132.108
 cd /var/www/html
 sudo ./deploy.sh
 ```

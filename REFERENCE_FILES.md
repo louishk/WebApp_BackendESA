@@ -1037,7 +1037,7 @@ Save to `/etc/nginx/sites-available/backend`:
 
 ```nginx
 server {
-    server_name backend.extraspace.com.sg 57.158.27.35;
+    server_name backend.extraspace.com.sg 20.6.132.108;
 
     root /var/www/backend;
     index index.php index.html;
@@ -1095,7 +1095,7 @@ server {
 
 server {
     listen 80;
-    server_name backend.extraspace.com.sg 57.158.27.35;
+    server_name backend.extraspace.com.sg 20.6.132.108;
 
     # ACME challenges for Let's Encrypt
     location /.well-known/acme-challenge/ {

@@ -1,0 +1,445 @@
+{% extends "base.html" %}
+
+{% block title %}Pricing Review - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Pricing Review</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Occupied ARR vs vacant promo pricing by unit category</p>
+</div>
+
+<!-- Site Selector + Budget -->
+<div class="card">
+    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: end;">
+        <div class="form-group" style="flex: 1; min-width: 250px;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Site</label>
+            <select id="site-select" class="form-select" onchange="loadSite()">
+                <option value="">Select a site...</option>
+            </select>
+        </div>
+        <div id="budget-display" style="display: none; font-size: 0.85rem; line-height: 1.8;">
+            <div>Budget Mar: <strong id="budget-mar-arr">-</strong>/sqft | Occ: <strong id="budget-mar-occ">-</strong></div>
+            <div>Budget Dec: <strong id="budget-dec-arr">-</strong>/sqft | Occ: <strong id="budget-dec-occ">-</strong></div>
+        </div>
+    </div>
+</div>
+
+<!-- Filters + Discount Slider -->
+<div id="controls-section" style="display: none;">
+    <div class="card">
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+            <div class="form-group" style="min-width: 120px;">
+                <label style="display: block; margin-bottom: 0.25rem; font-size: 0.8rem;">Type</label>
+                <select id="filter-type" class="form-select" onchange="applyFilters()" style="font-size: 0.85rem;">
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 120px;">
+                <label style="display: block; margin-bottom: 0.25rem; font-size: 0.8rem;">Climate</label>
+                <select id="filter-climate" class="form-select" onchange="applyFilters()" style="font-size: 0.85rem;">
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 120px;">
+                <label style="display: block; margin-bottom: 0.25rem; font-size: 0.8rem;">Shape</label>
+                <select id="filter-shape" class="form-select" onchange="applyFilters()" style="font-size: 0.85rem;">
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 120px;">
+                <label style="display: block; margin-bottom: 0.25rem; font-size: 0.8rem;">Pillar</label>
+                <select id="filter-pillar" class="form-select" onchange="applyFilters()" style="font-size: 0.85rem;">
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div class="form-group" style="flex: 1; min-width: 220px;">
+                <label style="display: block; margin-bottom: 0.25rem; font-size: 0.8rem;">
+                    What-If Discount: <strong id="slider-value">35</strong>%
+                </label>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <input type="range" id="discount-slider" min="0" max="70" value="35" step="1"
+                           oninput="updateSlider()" style="flex: 1;">
+                    <button type="button" class="btn btn-sm" onclick="applyFilters()">Apply</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Summary Bar -->
+<div id="summary-section" style="display: none;">
+    <div class="card">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value" id="stat-occ-count">0</div>
+                <div class="label">Occupied Units</div>
+            </div>
+            <div class="stat-card" style="background: #17a2b8;">
+                <div class="value" id="stat-occ-arr">-</div>
+                <div class="label">Occupied ARR/sqft</div>
+            </div>
+            <div class="stat-card" style="background: #C41230;">
+                <div class="value" id="stat-vac-count">0</div>
+                <div class="label">Vacant Units</div>
+            </div>
+            <div class="stat-card" style="background: #6f42c1;">
+                <div class="value" id="stat-blended-arr">-</div>
+                <div class="label">Blended ARR (if sold)</div>
+            </div>
+        </div>
+        <div id="summary-detail" style="margin-top: 0.75rem; font-size: 0.85rem; color: #555;"></div>
+    </div>
+</div>
+
+<!-- Legend -->
+<div id="legend-section" style="display: none;">
+    <div style="font-size: 0.8rem; color: #555; margin-bottom: 0.5rem; display: flex; gap: 1.5rem; flex-wrap: wrap;">
+        <span><span style="display: inline-block; width: 12px; height: 12px; background: #d4edda; border: 1px solid #28a745; border-radius: 2px; vertical-align: middle;"></span> Promo &ge; Dec budget (safe)</span>
+        <span><span style="display: inline-block; width: 12px; height: 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 2px; vertical-align: middle;"></span> Promo &ge; Mar budget (watch)</span>
+        <span><span style="display: inline-block; width: 12px; height: 12px; background: #f8d7da; border: 1px solid #dc3545; border-radius: 2px; vertical-align: middle;"></span> Promo &lt; Mar budget (risk)</span>
+        <label style="margin-left: auto; cursor: pointer;">
+            <input type="checkbox" id="toggle-detail" onchange="applyFilters()"> Show shape/pillar/days vacant
+        </label>
+    </div>
+</div>
+
+<!-- Data Table -->
+<div id="table-section" style="display: none;">
+    <div class="card">
+        <div style="max-height: 600px; overflow: auto;">
+            <table id="pricing-table" style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                <thead id="pricing-thead"></thead>
+                <tbody id="pricing-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Loading -->
+<div id="loading" style="display: none; text-align: center; padding: 2rem;">
+    <div class="spinner"></div>
+    <p style="color: #666; margin-top: 1rem;">Loading pricing data...</p>
+</div>
+
+<script>
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+
+    let allCategories = [];
+    let filteredCategories = [];
+    let budgetData = {};
+    let siteData = {};
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function fmt(v, decimals = 2) {
+        if (v == null) return '-';
+        return Number(v).toFixed(decimals);
+    }
+
+    function fmtPct(v, decimals = 1) {
+        if (v == null) return '-';
+        return Number(v).toFixed(decimals) + '%';
+    }
+
+    function updateSlider() {
+        document.getElementById('slider-value').textContent = document.getElementById('discount-slider').value;
+    }
+
+    // --- Load sites dropdown ---
+    async function loadSites() {
+        try {
+            const response = await fetch('/api/sites', { headers: apiHeaders() });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const select = document.getElementById('site-select');
+            const grouped = {};
+            data.sites.forEach(site => {
+                const country = site.country || 'Other';
+                if (!grouped[country]) grouped[country] = [];
+                grouped[country].push(site);
+            });
+            Object.keys(grouped).sort().forEach(country => {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = country;
+                grouped[country].forEach(site => {
+                    const opt = document.createElement('option');
+                    opt.value = site.site_id;
+                    opt.textContent = `${site.site_code} - ${site.name}`;
+                    optgroup.appendChild(opt);
+                });
+                select.appendChild(optgroup);
+            });
+
+            // Auto-select from URL param
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('site_id')) {
+                select.value = params.get('site_id');
+                loadSite();
+            }
+        } catch (e) {
+            console.error('Failed to load sites:', e);
+        }
+    }
+
+    // --- Load site data ---
+    async function loadSite() {
+        const siteId = document.getElementById('site-select').value;
+        if (!siteId) return;
+
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('controls-section').style.display = 'none';
+        document.getElementById('summary-section').style.display = 'none';
+        document.getElementById('legend-section').style.display = 'none';
+        document.getElementById('table-section').style.display = 'none';
+
+        try {
+            const response = await fetch(`/api/pricing/site-review?site_id=${siteId}`, { headers: apiHeaders() });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+
+            siteData = data.site;
+            budgetData = data.budget;
+            allCategories = data.categories;
+
+            // Update budget display
+            const bd = document.getElementById('budget-display');
+            bd.style.display = 'block';
+            document.getElementById('budget-mar-arr').textContent = budgetData.mar_arr != null ? fmt(budgetData.mar_arr) : 'N/A';
+            document.getElementById('budget-mar-occ').textContent = budgetData.mar_occ != null ? fmtPct(budgetData.mar_occ) : 'N/A';
+            document.getElementById('budget-dec-arr').textContent = budgetData.dec_arr != null ? fmt(budgetData.dec_arr) : 'N/A';
+            document.getElementById('budget-dec-occ').textContent = budgetData.dec_occ != null ? fmtPct(budgetData.dec_occ) : 'N/A';
+
+            // Populate filter dropdowns
+            populateFilters();
+
+            // Show controls and render
+            document.getElementById('controls-section').style.display = 'block';
+            document.getElementById('summary-section').style.display = 'block';
+            document.getElementById('legend-section').style.display = 'block';
+            document.getElementById('table-section').style.display = 'block';
+
+            applyFilters();
+
+            // Update URL without reload
+            const url = new URL(window.location);
+            url.searchParams.set('site_id', siteId);
+            history.replaceState(null, '', url);
+
+        } catch (e) {
+            console.error('Failed to load site data:', e);
+            alert('Failed to load pricing data. Check console for details.');
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    function populateFilters() {
+        const types = [...new Set(allCategories.map(c => c.type_code).filter(Boolean))].sort();
+        const climates = [...new Set(allCategories.map(c => c.climate_code).filter(Boolean))].sort();
+        const shapes = [...new Set(allCategories.map(c => c.shape).filter(Boolean))].sort();
+        const pillars = [...new Set(allCategories.map(c => c.pillar).filter(Boolean))].sort();
+
+        fillSelect('filter-type', types);
+        fillSelect('filter-climate', climates);
+        fillSelect('filter-shape', shapes);
+        fillSelect('filter-pillar', pillars);
+    }
+
+    function fillSelect(id, values) {
+        const sel = document.getElementById(id);
+        const current = sel.value;
+        sel.innerHTML = '<option value="">All</option>';
+        values.forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v;
+            sel.appendChild(opt);
+        });
+        sel.value = current;
+    }
+
+    // --- Size range sort helper ---
+    function sizeRangeSort(a, b) {
+        const numA = parseFloat((a || '0').split('-')[0]);
+        const numB = parseFloat((b || '0').split('-')[0]);
+        return numA - numB;
+    }
+
+    // --- Apply filters and re-render ---
+    function applyFilters() {
+        const typeFilter = document.getElementById('filter-type').value;
+        const climateFilter = document.getElementById('filter-climate').value;
+        const shapeFilter = document.getElementById('filter-shape').value;
+        const pillarFilter = document.getElementById('filter-pillar').value;
+        const discount = parseInt(document.getElementById('discount-slider').value) / 100;
+
+        filteredCategories = allCategories.filter(c => {
+            if (typeFilter && c.type_code !== typeFilter) return false;
+            if (climateFilter && c.climate_code !== climateFilter) return false;
+            if (shapeFilter && c.shape !== shapeFilter) return false;
+            if (pillarFilter && c.pillar !== pillarFilter) return false;
+            return true;
+        });
+
+        filteredCategories.sort((a, b) => {
+            if (a.type_code !== b.type_code) return (a.type_code || '').localeCompare(b.type_code || '');
+            if (a.climate_code !== b.climate_code) return (a.climate_code || '').localeCompare(b.climate_code || '');
+            return sizeRangeSort(a.size_range, b.size_range);
+        });
+
+        renderTable(discount);
+        renderSummary(discount);
+    }
+
+    function renderTable(discount) {
+        const showDetail = document.getElementById('toggle-detail').checked;
+        const marBudget = budgetData.mar_arr;
+        const decBudget = budgetData.dec_arr;
+
+        // Header
+        const thead = document.getElementById('pricing-thead');
+        let headerHtml = `<tr style="background: #f0f4ff; position: sticky; top: 0; z-index: 1;">
+            <th style="padding: 6px 8px; text-align: left; border-bottom: 2px solid #ccc; white-space: nowrap;">Type</th>
+            <th style="padding: 6px 8px; text-align: left; border-bottom: 2px solid #ccc;">Climate</th>
+            <th style="padding: 6px 8px; text-align: left; border-bottom: 2px solid #ccc;">Size</th>`;
+        if (showDetail) {
+            headerHtml += `<th style="padding: 6px 8px; text-align: center; border-bottom: 2px solid #ccc;">Shape</th>
+                <th style="padding: 6px 8px; text-align: center; border-bottom: 2px solid #ccc;">Pillar</th>`;
+        }
+        headerHtml += `
+            <th style="padding: 6px 8px; text-align: right; border-bottom: 2px solid #ccc; background: #e8f5e9;">Occ #</th>
+            <th style="padding: 6px 8px; text-align: right; border-bottom: 2px solid #ccc; background: #e8f5e9;">Avg Disc%</th>
+            <th style="padding: 6px 8px; text-align: right; border-bottom: 2px solid #ccc; background: #e8f5e9;">Occ ARR/sqft</th>
+            <th style="padding: 6px 8px; text-align: right; border-bottom: 2px solid #ccc; background: #fff8e1;">Vac #</th>
+            <th style="padding: 6px 8px; text-align: right; border-bottom: 2px solid #ccc; background: #fff8e1;">Std/sqft</th>
+            <th style="padding: 6px 8px; text-align: right; border-bottom: 2px solid #ccc; background: #fff8e1;">Promo/sqft</th>`;
+        if (showDetail) {
+            headerHtml += `<th style="padding: 6px 8px; text-align: right; border-bottom: 2px solid #ccc; background: #fff8e1;">Days Vac</th>`;
+        }
+        headerHtml += `</tr>`;
+        thead.innerHTML = headerHtml;
+
+        // Body
+        const tbody = document.getElementById('pricing-tbody');
+        let html = '';
+        let prevGroup = '';
+
+        filteredCategories.forEach(cat => {
+            const group = `${cat.type_code}-${cat.climate_code}`;
+            const isNewGroup = group !== prevGroup;
+            prevGroup = group;
+
+            const occ = cat.occupied;
+            const vac = cat.vacant;
+
+            // Calculate promo rate/sqft for vacant
+            let promoSqft = null;
+            if (vac.std_rate_sqft != null) {
+                promoSqft = vac.std_rate_sqft * (1 - discount);
+            }
+
+            // Color coding for promo rate
+            let promoColor = '';
+            let promoBg = '';
+            if (promoSqft != null && marBudget != null) {
+                if (decBudget != null && promoSqft >= decBudget) {
+                    promoBg = '#d4edda'; promoColor = '#155724';
+                } else if (promoSqft >= marBudget) {
+                    promoBg = '#fff3cd'; promoColor = '#856404';
+                } else {
+                    promoBg = '#f8d7da'; promoColor = '#721c24';
+                }
+            }
+
+            const borderTop = isNewGroup ? 'border-top: 2px solid #dee2e6;' : '';
+            const rowStyle = `${borderTop}`;
+
+            html += `<tr style="${rowStyle}">
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee; font-weight: ${isNewGroup ? '600' : '400'};">${cat.type_code || '-'}</td>
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">${cat.climate_code || '-'}</td>
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee;">${cat.size_range || '-'}</td>`;
+            if (showDetail) {
+                html += `<td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: center;">${cat.shape || '-'}</td>
+                    <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: center;">${cat.pillar || '-'}</td>`;
+            }
+            html += `
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; background: #f8fdf8;">${occ.count || 0}</td>
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; background: #f8fdf8;">${fmtPct(occ.avg_discount_pct)}</td>
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; background: #f8fdf8; font-weight: 600;">${fmt(occ.arr_sqft)}</td>
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; background: #fffef5;">${vac.count || 0}</td>
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; background: #fffef5;">${fmt(vac.std_rate_sqft)}</td>
+                <td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; font-weight: 600; ${promoBg ? `background: ${promoBg}; color: ${promoColor};` : 'background: #fffef5;'}">${promoSqft != null ? fmt(promoSqft) : '-'}</td>`;
+            if (showDetail) {
+                html += `<td style="padding: 5px 8px; border-bottom: 1px solid #eee; text-align: right; background: #fffef5;">${vac.avg_days_vacant != null ? Math.round(vac.avg_days_vacant) : '-'}</td>`;
+            }
+            html += `</tr>`;
+        });
+
+        if (filteredCategories.length === 0) {
+            const colspan = showDetail ? 12 : 9;
+            html = `<tr><td colspan="${colspan}" style="text-align: center; padding: 2rem; color: #999;">No categories match the current filters</td></tr>`;
+        }
+
+        tbody.innerHTML = html;
+    }
+
+    function renderSummary(discount) {
+        // Aggregate totals from filtered categories
+        let totalOccRent = 0, totalOccArea = 0, totalOccCount = 0;
+        let totalVacStdRate = 0, totalVacArea = 0, totalVacCount = 0;
+
+        filteredCategories.forEach(cat => {
+            totalOccRent += cat.occupied.total_eff_rent || 0;
+            totalOccArea += cat.occupied.total_area || 0;
+            totalOccCount += cat.occupied.count || 0;
+            totalVacStdRate += cat.vacant.total_std_rate || 0;
+            totalVacArea += cat.vacant.total_area || 0;
+            totalVacCount += cat.vacant.count || 0;
+        });
+
+        const occArrSqft = totalOccArea > 0 ? totalOccRent / totalOccArea : null;
+
+        // Blended ARR if all vacant sold at promo discount
+        const vacPromoRent = totalVacStdRate * (1 - discount);
+        const blendedArr = (totalOccArea + totalVacArea) > 0
+            ? (totalOccRent + vacPromoRent) / (totalOccArea + totalVacArea)
+            : null;
+
+        document.getElementById('stat-occ-count').textContent = totalOccCount;
+        document.getElementById('stat-occ-arr').textContent = occArrSqft != null ? fmt(occArrSqft) : '-';
+        document.getElementById('stat-vac-count').textContent = totalVacCount;
+        document.getElementById('stat-blended-arr').textContent = blendedArr != null ? fmt(blendedArr) : '-';
+
+        // Detail line
+        const detail = document.getElementById('summary-detail');
+        let detailHtml = '';
+        if (occArrSqft != null && budgetData.mar_arr != null) {
+            const gapMar = ((occArrSqft - budgetData.mar_arr) / budgetData.mar_arr * 100);
+            detailHtml += `Current vs Mar budget: <strong>${gapMar >= 0 ? '+' : ''}${fmt(gapMar, 1)}%</strong>`;
+        }
+        if (blendedArr != null && budgetData.dec_arr != null) {
+            const gapDec = ((blendedArr - budgetData.dec_arr) / budgetData.dec_arr * 100);
+            detailHtml += ` &nbsp;|&nbsp; Blended (${Math.round(discount * 100)}% disc) vs Dec budget: <strong style="color: ${gapDec >= 0 ? '#28a745' : '#dc3545'};">${gapDec >= 0 ? '+' : ''}${fmt(gapDec, 1)}%</strong>`;
+        }
+        if (totalVacCount > 0 && occArrSqft != null && blendedArr != null) {
+            const dilution = ((blendedArr - occArrSqft) / occArrSqft * 100);
+            detailHtml += ` &nbsp;|&nbsp; ARR dilution if all ${totalVacCount} vacant sold: <strong style="color: ${dilution >= 0 ? '#28a745' : '#dc3545'};">${dilution >= 0 ? '+' : ''}${fmt(dilution, 1)}%</strong>`;
+        }
+        detail.innerHTML = detailHtml;
+    }
+
+    // Init
+    loadSites();
+</script>
+{% endblock %}

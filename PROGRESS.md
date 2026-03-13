@@ -2,7 +2,7 @@
 
 ## Project: WebApp_BackendESA
 **Started:** 2026-01-28
-**VM:** 57.158.27.35 (backend.extraspace.com.sg)
+**VM:** 20.6.132.108 (backend.extraspace.com.sg)
 
 ---
 
@@ -131,7 +131,7 @@ WebApp_BackendESA/
 
 ### SSH
 ```bash
-sshpass -p 'K9wKmtRfj3zJqRU' ssh esa_pbi_admin@57.158.27.35
+sshpass -p 'K9wKmtRfj3zJqRU' ssh esa_pbi_admin@20.6.132.108
 ```
 
 ### PostgreSQL
