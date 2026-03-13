@@ -84,8 +84,14 @@ class StreamableHTTPTransport:
     async def _handle_get_stream(self, request: Request) -> Response:
         async def event_stream() -> AsyncIterator[str]:
             yield f"data: {json.dumps({'type': 'connected', 'timestamp': datetime.now().isoformat()})}\n\n"
+            max_duration = 3600 * 8  # match access token TTL
+            start = asyncio.get_event_loop().time()
             while True:
                 await asyncio.sleep(30)
+                if await request.is_disconnected():
+                    break
+                if asyncio.get_event_loop().time() - start > max_duration:
+                    break
                 yield f"data: {json.dumps({'type': 'ping', 'timestamp': datetime.now().isoformat()})}\n\n"
 
         return StreamingResponse(
@@ -215,8 +221,8 @@ async def server_info(request: Request) -> Response:
         "version": "1.0.0",
         "transport": "streamable-http",
         "protocol_version": "2024-11-05",
-        "auth": {"type": "X-API-Key"},
-        "endpoints": {"mcp": "/mcp", "health": "/health"},
+        "auth": {"types": ["X-API-Key", "OAuth 2.0 Bearer"]},
+        "endpoints": {"mcp": "/mcp", "health": "/health", "oauth_metadata": "/.well-known/oauth-authorization-server"},
     })
 
 
@@ -225,16 +231,21 @@ def create_starlette_app(mcp_app: MCPServerApp) -> Starlette:
 
     transport = StreamableHTTPTransport(mcp_app)
 
+    from mcp_esa.server.oauth import get_oauth_routes
+
     routes = [
         Route("/", endpoint=server_info, methods=["GET"]),
         Route("/health", endpoint=health_check, methods=["GET"]),
         Route("/mcp", endpoint=transport.handle_mcp_request, methods=["GET", "POST", "OPTIONS"]),
-    ]
+    ] + get_oauth_routes()
 
     middleware = [
         Middleware(
             CORSMiddleware,
-            allow_origins=["https://esa-backend.extraspaceasia.com"],
+            allow_origins=[
+                "https://backend.extraspace.com.sg",
+                "https://claude.ai",
+            ],
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],

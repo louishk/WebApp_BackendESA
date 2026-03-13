@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 import bcrypt
+import jwt
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
@@ -58,7 +59,14 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
     Protected endpoints require a valid, active, non-expired API key.
     """
 
-    PUBLIC_PATHS = {"/", "/health"}
+    PUBLIC_PATHS = {
+        "/", "/health",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-protected-resource",
+        "/oauth/register",
+        "/oauth/authorize",
+        "/oauth/token",
+    }
 
     def __init__(self, app):
         super().__init__(app)
@@ -66,7 +74,7 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # Public endpoints
+        # Public endpoints (includes OAuth discovery/flow)
         if path in self.PUBLIC_PATHS:
             return await call_next(request)
 
@@ -91,42 +99,84 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         hits.append(now)
         _rate_limit_window[client_ip] = hits
 
-        # Validate API key
+        # Try X-API-Key first, then Bearer token (OAuth)
         api_key_header = request.headers.get("X-API-Key", "")
-        if not api_key_header:
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32001, "message": "Authentication required. Provide X-API-Key header."},
-                    "id": None,
-                },
-                status_code=401,
-            )
+        token = self._extract_token(request)
 
-        user_info, error = _authenticate_api_key(api_key_header)
-        if error:
-            logger.warning(f"MCP auth failed from {client_ip}: {error}")
-            status_code = 429 if error == "Daily quota exceeded" else 401
-            # Generic message — don't reveal specific failure reason
-            public_msg = "Rate limit exceeded" if status_code == 429 else "Invalid or unauthorized API key"
-            return JSONResponse(
-                {
-                    "jsonrpc": "2.0",
-                    "error": {"code": -32002, "message": public_msg},
-                    "id": None,
-                },
-                status_code=status_code,
-            )
+        if api_key_header:
+            user_info, error = _authenticate_api_key(api_key_header)
+            if error:
+                logger.warning(f"MCP auth failed from {client_ip}: {error}")
+                status_code = 429 if error == "Daily quota exceeded" else 401
+                public_msg = "Rate limit exceeded" if status_code == 429 else "Invalid or unauthorized API key"
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "error": {"code": -32002, "message": public_msg},
+                        "id": None,
+                    },
+                    status_code=status_code,
+                )
+            request.state.user = user_info["username"]
+            request.state.user_id = user_info["user_id"]
+            request.state.key_id = user_info["key_id"]
+            request.state.scopes = user_info["scopes"]
+            request.state.mcp_tools = user_info["mcp_tools"]
+            logger.info(f"MCP auth OK: {user_info['username']} (key: {user_info['key_id']}) from {client_ip}")
+            return await call_next(request)
 
-        # Attach user info to request state for tools to access
-        request.state.user = user_info["username"]
-        request.state.user_id = user_info["user_id"]
-        request.state.key_id = user_info["key_id"]
-        request.state.scopes = user_info["scopes"]
-        request.state.mcp_tools = user_info["mcp_tools"]  # empty = all tools allowed
+        if token:
+            user_info, error = _authenticate_bearer_token(token)
+            if error:
+                logger.warning(f"MCP OAuth auth failed from {client_ip}: {error}")
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "error": {"code": -32002, "message": "Invalid or expired token"},
+                        "id": None,
+                    },
+                    status_code=401,
+                )
+            request.state.user = user_info["username"]
+            request.state.user_id = user_info["user_id"]
+            request.state.key_id = user_info["key_id"]
+            request.state.scopes = user_info["scopes"]
+            request.state.mcp_tools = user_info["mcp_tools"]
+            logger.info(f"MCP OAuth auth OK: {user_info['username']} from {client_ip}")
+            return await call_next(request)
 
-        logger.info(f"MCP auth OK: {user_info['username']} (key: {user_info['key_id']}) from {client_ip}")
-        return await call_next(request)
+        # No credentials — return 401 with OAuth discovery per RFC 6750
+        resource_metadata_url = self._get_resource_metadata_url(request)
+        return JSONResponse(
+            {
+                "jsonrpc": "2.0",
+                "error": {"code": -32001, "message": "Authentication required."},
+                "id": None,
+            },
+            status_code=401,
+            headers={
+                "WWW-Authenticate": f'Bearer resource_metadata="{resource_metadata_url}"'
+            },
+        )
+
+    @staticmethod
+    def _extract_token(request: Request) -> Optional[str]:
+        """Extract JWT token from Authorization header."""
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return auth_header[7:]
+        return None
+
+    @staticmethod
+    def _get_resource_metadata_url(request: Request) -> str:
+        """Build the OAuth protected resource metadata URL from request headers."""
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host", request.headers.get("host", "localhost"))
+        base_url = f"{scheme}://{host}"
+        prefix = request.headers.get("x-forwarded-prefix", "")
+        if prefix:
+            base_url = f"{base_url}{prefix}"
+        return f"{base_url}/.well-known/oauth-protected-resource"
 
 
 def _authenticate_api_key(api_key_header: str) -> Tuple[Optional[dict], Optional[str]]:
@@ -222,3 +272,47 @@ def _authenticate_api_key(api_key_header: str) -> Tuple[Optional[dict], Optional
         return None, "Authentication error"
     finally:
         session.close()
+
+
+def _get_jwt_secret() -> str:
+    """Get JWT secret from the backend's vault. Fails hard if not configured."""
+    try:
+        from common.secrets_vault import vault_config
+        secret = vault_config('JWT_SECRET', default=None)
+        if secret:
+            return secret
+    except Exception as e:
+        logger.error(f"Could not load JWT_SECRET from vault: {e}")
+    import os
+    secret = os.environ.get('JWT_SECRET')
+    if not secret:
+        raise RuntimeError("JWT_SECRET is not configured — refusing to validate tokens")
+    return secret
+
+
+def _authenticate_bearer_token(token: str) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Validate an OAuth Bearer JWT token.
+
+    Returns:
+        (user_info_dict, None) on success
+        (None, error_message) on failure
+    """
+    jwt_secret = _get_jwt_secret()
+    try:
+        payload = jwt.decode(token, jwt_secret, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        return None, "Token expired"
+    except jwt.InvalidTokenError:
+        return None, "Invalid token"
+
+    if payload.get("type") != "access":
+        return None, "Not an access token"
+
+    return {
+        "username": payload.get("sub", "oauth_client"),
+        "user_id": None,
+        "key_id": f"oauth_{payload.get('client_id', 'unknown')}",
+        "scopes": payload.get("scope", "mcp:*").split(),
+        "mcp_tools": [],  # OAuth clients get access to all tools
+    }, None
