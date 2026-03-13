@@ -101,6 +101,13 @@
         {% endif %}
     </div>
 
+    {% if api_key.mcp_enabled %}
+    <div style="margin-top: 1rem;">
+        <strong style="font-size: 0.85rem; color: var(--esa-navy);">MCP Server Access:</strong>
+        <span class="scope-badge scope-write">mcp:access</span>
+    </div>
+    {% endif %}
+
     <div style="margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--esa-gray-dark);">
         <form action="{{ url_for('api_keys.regenerate_key') }}" method="POST" style="display: inline;"
               onsubmit="return confirm('Regenerate your API key? The current key will stop working immediately. Your scopes and settings will be preserved.');">
@@ -112,6 +119,37 @@
         </span>
     </div>
 </div>
+
+{% if api_key.mcp_enabled %}
+<!-- Claude.ai MCP Connection -->
+<div class="card">
+    <h2>Claude.ai MCP Connection</h2>
+    <p style="font-size: 0.85rem; color: #888; margin-bottom: 1rem;">
+        Use these details to connect Claude.ai to the MCP server. In Claude.ai, go to Settings &gt; MCP Servers &gt; Add Server.
+    </p>
+    <div style="display: grid; grid-template-columns: 120px 1fr; gap: 0.5rem 1rem; align-items: center; font-size: 0.9rem;">
+        <strong style="color: var(--esa-navy);">Server URL</strong>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <code id="mcp-url" style="background: var(--esa-gray); padding: 0.3rem 0.6rem; border-radius: 3px; font-size: 0.85rem; word-break: break-all;">https://backend.extraspace.com.sg/mcp-server/mcp</code>
+            <button onclick="copyField('mcp-url')" class="btn btn-sm btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">Copy</button>
+        </div>
+
+        <strong style="color: var(--esa-navy);">Client ID</strong>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <code id="mcp-client-id" style="background: var(--esa-gray); padding: 0.3rem 0.6rem; border-radius: 3px; font-size: 0.85rem;">{{ api_key.key_id }}</code>
+            <button onclick="copyField('mcp-client-id')" class="btn btn-sm btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;">Copy</button>
+        </div>
+
+        <strong style="color: var(--esa-navy);">Client Secret</strong>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <code style="background: var(--esa-gray); padding: 0.3rem 0.6rem; border-radius: 3px; font-size: 0.85rem; color: #888;">Your API key (esa_{{ api_key.key_id }}.&lt;secret&gt;)</code>
+        </div>
+    </div>
+    <div style="margin-top: 1rem; padding: 0.75rem; background: var(--esa-gray); border-radius: 6px; font-size: 0.8rem; color: #666;">
+        The Client Secret is your full API key. It was shown once when generated — if you don't have it, use <strong>Regenerate Key</strong> above to get a new one.
+    </div>
+</div>
+{% endif %}
 
 {% else %}
 <!-- No Key Yet -->
@@ -169,5 +207,16 @@
 {% block scripts %}
 <script>
 clearTimeout(window.autoRefreshTimeout);
+
+function copyField(elementId) {
+    const el = document.getElementById(elementId);
+    const text = el.textContent.trim();
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = el.nextElementSibling;
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = orig, 1500);
+    });
+}
 </script>
 {% endblock %}

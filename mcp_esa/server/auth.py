@@ -274,6 +274,22 @@ def _authenticate_api_key(api_key_header: str) -> Tuple[Optional[dict], Optional
         session.close()
 
 
+def _validate_client_id(client_id: str) -> bool:
+    """Check if a client_id (API key_id) exists in the DB and has MCP enabled."""
+    session = _get_session()
+    try:
+        row = session.execute(
+            text("SELECT is_active, mcp_enabled FROM api_keys WHERE key_id = :key_id"),
+            {"key_id": client_id},
+        ).fetchone()
+        return bool(row and row.is_active and row.mcp_enabled)
+    except Exception as e:
+        logger.error(f"Client ID validation error: {e}")
+        return False
+    finally:
+        session.close()
+
+
 def _get_jwt_secret() -> str:
     """Get JWT secret from the backend's vault. Fails hard if not configured."""
     try:

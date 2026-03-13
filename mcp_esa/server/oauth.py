@@ -2,10 +2,17 @@
 MCP OAuth 2.0 Authentication for ESA Backend
 Implements OAuth 2.0 endpoints required by claude.ai MCP integration.
 
+Authentication is tied to the ESA API key system:
+- client_id  = API key_id (e.g. "bd26e494")
+- client_secret = full API key (e.g. "esa_bd26e494.BKbc...")
+
+No dynamic registration needed — claude.ai enters client_id + client_secret
+in its MCP settings, and the server validates against the api_keys DB table.
+
 Endpoints:
 - GET  /.well-known/oauth-authorization-server  - OAuth metadata
 - GET  /.well-known/oauth-protected-resource     - Protected resource metadata
-- POST /oauth/register                           - Dynamic client registration
+- POST /oauth/register                           - Dynamic client registration (API key required)
 - GET  /oauth/authorize                          - Authorization code grant
 - POST /oauth/token                              - Token exchange
 """
@@ -26,12 +33,10 @@ from starlette.routing import Route
 
 logger = logging.getLogger(__name__)
 
-# In-memory storage (single-process uvicorn, acceptable for this deployment)
-_oauth_clients: Dict[str, Dict[str, Any]] = {}
+# In-memory storage
 _authorization_codes: Dict[str, Dict[str, Any]] = {}
 
 # Limits
-_MAX_CLIENTS = 50
 _MAX_PENDING_CODES = 500
 
 
@@ -61,6 +66,33 @@ def _get_jwt_secret() -> str:
     return secret
 
 
+def _validate_client(client_id: str, client_secret: str) -> tuple:
+    """
+    Validate OAuth client credentials against the API keys table.
+    client_id = key_id, client_secret = full API key (esa_<key_id>.<secret>).
+
+    Returns:
+        (user_info_dict, None) on success
+        (None, error_message) on failure
+    """
+    from mcp_esa.server.auth import _authenticate_api_key
+
+    # The client_secret IS the full API key
+    if not client_secret:
+        return None, "client_secret required"
+
+    # Validate the API key
+    user_info, error = _authenticate_api_key(client_secret)
+    if error:
+        return None, error
+
+    # Verify client_id matches the key_id from the API key
+    if client_id and client_id != user_info["key_id"]:
+        return None, "client_id does not match API key"
+
+    return user_info, None
+
+
 def _prune_expired_codes():
     """Remove expired authorization codes to prevent memory accumulation."""
     now = datetime.now()
@@ -79,7 +111,7 @@ async def oauth_metadata_endpoint(request: Request) -> Response:
         "authorization_endpoint": f"{base_url}/oauth/authorize",
         "token_endpoint": f"{base_url}/oauth/token",
         "registration_endpoint": f"{base_url}/oauth/register",
-        "token_endpoint_auth_methods_supported": ["none"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
@@ -100,75 +132,49 @@ async def oauth_protected_resource_endpoint(request: Request) -> Response:
 
 
 async def oauth_register_endpoint(request: Request) -> Response:
-    """OAuth 2.0 Dynamic Client Registration (RFC 7591)"""
-    # Cap total registered clients
-    if len(_oauth_clients) >= _MAX_CLIENTS:
+    """OAuth 2.0 Dynamic Client Registration (RFC 7591)
+    Validates the API key passed as Bearer token, then returns it back
+    as client_id/client_secret so claude.ai can use it for the OAuth flow.
+    """
+    # Extract API key from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    api_key = None
+    if auth_header.startswith("Bearer "):
+        api_key = auth_header[7:]
+
+    if not api_key:
         return JSONResponse(
-            {"error": "server_error", "error_description": "Registration limit reached"},
-            status_code=503,
+            {"error": "invalid_token", "error_description": "API key required as Bearer token"},
+            status_code=401,
+        )
+
+    from mcp_esa.server.auth import _authenticate_api_key
+    user_info, error = _authenticate_api_key(api_key)
+    if error:
+        logger.warning(f"OAuth registration denied: {error}")
+        return JSONResponse(
+            {"error": "invalid_token", "error_description": "Invalid or unauthorized API key"},
+            status_code=401,
         )
 
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse(
-            {"error": "invalid_request", "error_description": "Invalid JSON body"},
-            status_code=400,
-        )
+        body = {}
 
-    # Require at least one valid redirect_uri (must be https, or http://localhost for dev)
-    redirect_uris = body.get("redirect_uris", [])
-    if not redirect_uris:
-        return JSONResponse(
-            {"error": "invalid_request", "error_description": "redirect_uris required"},
-            status_code=400,
-        )
-    for uri in redirect_uris:
-        try:
-            p = urlparse(uri)
-            if p.scheme == "https":
-                continue
-            if p.scheme == "http" and p.hostname in ("localhost", "127.0.0.1"):
-                continue
-            return JSONResponse(
-                {"error": "invalid_request", "error_description": "redirect_uris must use https"},
-                status_code=400,
-            )
-        except Exception:
-            return JSONResponse(
-                {"error": "invalid_request", "error_description": "Invalid redirect_uri format"},
-                status_code=400,
-            )
-
-    client_id = f"claude_{secrets.token_hex(16)}"
-    client_secret = secrets.token_urlsafe(32)
-
-    # Sanitize client_name for log safety
-    client_name = str(body.get("client_name", "Claude")).replace("\n", " ").replace("\r", " ")[:128]
-
-    client_info = {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "client_name": client_name,
-        "redirect_uris": redirect_uris,
-        "grant_types": body.get("grant_types", ["authorization_code"]),
-        "response_types": body.get("response_types", ["code"]),
-        "scope": body.get("scope", "mcp:*"),
-        "token_endpoint_auth_method": body.get("token_endpoint_auth_method", "none"),
-        "created_at": datetime.now().isoformat(),
-    }
-    _oauth_clients[client_id] = client_info
-    logger.info(f"Registered OAuth client: {client_id} ({client_name})")
+    # Return the API key credentials as OAuth client credentials
+    # client_id = key_id, client_secret = full API key
+    logger.info(f"OAuth client registered via API key: {user_info['username']} (key: {user_info['key_id']})")
 
     return JSONResponse({
-        "client_id": client_id,
-        "client_secret": client_secret,
+        "client_id": user_info["key_id"],
+        "client_secret": api_key,
         "client_id_issued_at": int(datetime.now().timestamp()),
         "client_secret_expires_at": 0,
-        "redirect_uris": client_info["redirect_uris"],
-        "grant_types": client_info["grant_types"],
-        "response_types": client_info["response_types"],
-        "token_endpoint_auth_method": client_info["token_endpoint_auth_method"],
+        "redirect_uris": body.get("redirect_uris", []),
+        "grant_types": ["authorization_code"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "client_secret_post",
     }, status_code=201)
 
 
@@ -193,18 +199,37 @@ async def oauth_authorize_endpoint(request: Request) -> Response:
             status_code=400,
         )
 
-    # Validate client_id is registered
-    if not client_id or client_id not in _oauth_clients:
+    if not client_id:
+        return JSONResponse(
+            {"error": "invalid_request", "error_description": "client_id required"},
+            status_code=400,
+        )
+
+    # Validate client_id exists in API keys table
+    from mcp_esa.server.auth import _validate_client_id
+    if not _validate_client_id(client_id):
         return JSONResponse(
             {"error": "invalid_client", "error_description": "Unknown client_id"},
             status_code=400,
         )
 
-    # Validate redirect_uri matches registered URIs
-    client = _oauth_clients[client_id]
-    if redirect_uri not in client["redirect_uris"]:
+    # Validate redirect_uri is https and from a trusted domain
+    _ALLOWED_REDIRECT_DOMAINS = {"claude.ai", "localhost", "127.0.0.1"}
+    try:
+        p = urlparse(redirect_uri)
+        if p.scheme != "https" and not (p.scheme == "http" and p.hostname in ("localhost", "127.0.0.1")):
+            return JSONResponse(
+                {"error": "invalid_request", "error_description": "redirect_uri must use https"},
+                status_code=400,
+            )
+        if p.hostname not in _ALLOWED_REDIRECT_DOMAINS:
+            return JSONResponse(
+                {"error": "invalid_request", "error_description": "redirect_uri domain not allowed"},
+                status_code=400,
+            )
+    except Exception:
         return JSONResponse(
-            {"error": "invalid_request", "error_description": "redirect_uri mismatch"},
+            {"error": "invalid_request", "error_description": "Invalid redirect_uri"},
             status_code=400,
         )
 
@@ -276,6 +301,7 @@ async def _handle_auth_code_grant(body: dict) -> Response:
     code = body.get("code")
     code_verifier = body.get("code_verifier")
     client_id = body.get("client_id")
+    client_secret = body.get("client_secret")
 
     if code not in _authorization_codes:
         return JSONResponse(
@@ -297,6 +323,20 @@ async def _handle_auth_code_grant(body: dict) -> Response:
         return JSONResponse(
             {"error": "invalid_grant", "error_description": "client_id mismatch"},
             status_code=400,
+        )
+
+    # Validate client credentials (API key) — mandatory
+    if not client_secret:
+        return JSONResponse(
+            {"error": "invalid_client", "error_description": "client_secret required"},
+            status_code=401,
+        )
+    user_info, error = _validate_client(client_id, client_secret)
+    if error:
+        logger.warning(f"OAuth token exchange denied: {error}")
+        return JSONResponse(
+            {"error": "invalid_client", "error_description": "Invalid client credentials"},
+            status_code=401,
         )
 
     # PKCE verification (mandatory — code_challenge is always present)
