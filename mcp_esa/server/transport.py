@@ -24,8 +24,9 @@ from mcp_esa.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Context variable for per-request DB preset restrictions (used by DB tools)
+# Context variables for per-request state (used by DB tools and stats)
 allowed_db_presets_var: contextvars.ContextVar[List[str]] = contextvars.ContextVar('allowed_db_presets', default=[])
+request_context_var: contextvars.ContextVar[dict] = contextvars.ContextVar('request_context', default={})
 
 
 class StreamableHTTPTransport:
@@ -48,6 +49,14 @@ class StreamableHTTPTransport:
         # Set DB preset restrictions in contextvar for DB tools to check
         db_presets = getattr(request.state, 'mcp_db_presets', []) if hasattr(request, 'state') else []
         allowed_db_presets_var.set(db_presets)
+
+        # Set request context for tool stats tracking
+        client_ip = request.client.host if request.client else "unknown"
+        request_context_var.set({
+            'username': getattr(request.state, 'user', None) if hasattr(request, 'state') else None,
+            'key_id': getattr(request.state, 'key_id', None) if hasattr(request, 'state') else None,
+            'client_ip': client_ip,
+        })
 
         if request.method == "POST":
             return await self._handle_post(request, allowed_tools)
@@ -204,14 +213,49 @@ class StreamableHTTPTransport:
 
         if hasattr(self.server, '_tool_handlers') and tool_name in self.server._tool_handlers:
             handler = self.server._tool_handlers[tool_name]
+            start_time = asyncio.get_event_loop().time()
+            is_error = False
             try:
                 result = await handler(**arguments)
                 return {"content": [{"type": "text", "text": str(result)}], "isError": False}
             except Exception as e:
                 logger.error(f"Tool {tool_name} failed: {e}")
+                is_error = True
                 return {"content": [{"type": "text", "text": f"Tool '{tool_name}' encountered an error"}], "isError": True}
+            finally:
+                elapsed_ms = (asyncio.get_event_loop().time() - start_time) * 1000
+                asyncio.ensure_future(_record_tool_stat(tool_name, elapsed_ms, is_error))
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
+
+
+async def _record_tool_stat(tool_name: str, elapsed_ms: float, is_error: bool):
+    """Record MCP tool call to mcp_tool_statistics table (fire-and-forget)."""
+    try:
+        ctx = request_context_var.get({})
+        from mcp_esa.config.settings import get_settings
+        settings = get_settings()
+        from sqlalchemy import create_engine, text
+        engine = create_engine(settings.get_backend_db_url(), pool_size=1, max_overflow=1)
+        with engine.connect() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO mcp_tool_statistics (tool_name, username, key_id, client_ip, response_time_ms, is_error)
+                    VALUES (:tool_name, :username, :key_id, :client_ip, :response_time_ms, :is_error)
+                """),
+                {
+                    'tool_name': tool_name,
+                    'username': ctx.get('username'),
+                    'key_id': ctx.get('key_id'),
+                    'client_ip': ctx.get('client_ip'),
+                    'response_time_ms': round(elapsed_ms, 2),
+                    'is_error': is_error,
+                }
+            )
+            conn.commit()
+        engine.dispose()
+    except Exception as e:
+        logger.debug(f"Failed to record tool stat: {e}")
 
 
 async def health_check(request: Request) -> Response:

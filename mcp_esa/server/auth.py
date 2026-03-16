@@ -71,8 +71,21 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
 
+    # Paths that indicate probing/attack — block immediately
+    _BLOCKED_PATTERNS = ('.env', '.git', 'wp-admin', 'wp-login', 'phpMyAdmin',
+                         'phpmyadmin', '.php', 'cgi-bin', 'wp-content', 'wp-includes',
+                         'xmlrpc', '.asp', 'shell', 'admin/config', '.sql', '.bak',
+                         '.DS_Store', 'etc/passwd', '..', '.htaccess', '.htpasswd')
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+
+        # Block probing/attack paths
+        path_lower = path.lower()
+        if any(pattern in path_lower for pattern in self._BLOCKED_PATTERNS):
+            client_ip = request.client.host if request.client else "unknown"
+            logger.warning(f"Blocked suspicious path from {client_ip}: {path}")
+            return JSONResponse({"error": "Not found"}, status_code=404)
 
         # Public endpoints (includes OAuth discovery/flow)
         if path in self.PUBLIC_PATHS:

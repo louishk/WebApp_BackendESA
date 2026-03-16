@@ -133,6 +133,21 @@ def init_api_stats(app):
     _writer_thread.start()
     logger.info("API statistics writer started")
 
+    # Block suspicious probing paths (bots scanning for .env, wp-admin, etc.)
+    _BLOCKED_PATTERNS = ('.env', '.git', 'wp-admin', 'wp-login', 'phpMyAdmin',
+                         'phpmyadmin', '.php', 'cgi-bin', 'wp-content', 'wp-includes',
+                         'xmlrpc', '.asp', 'shell', '.sql', '.bak',
+                         '.DS_Store', 'etc/passwd', '..', '.htaccess', '.htpasswd')
+
+    @app.before_request
+    def _block_suspicious_paths():
+        path_lower = request.path.lower()
+        if any(pattern in path_lower for pattern in _BLOCKED_PATTERNS):
+            client_ip = _get_client_ip()
+            logger.warning(f"Blocked suspicious path from {client_ip}: {request.path}")
+            from flask import abort
+            abort(404)
+
     @app.before_request
     def _stats_before():
         if request.path.startswith('/api/'):
