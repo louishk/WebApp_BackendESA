@@ -72,10 +72,24 @@
                     {% if key %}
                         {% if key.mcp_enabled %}
                             <span class="status status-completed">On</span>
-                            {% if key.mcp_tools %}
-                                <span style="font-size: 0.7rem; color: #888;">{{ key.mcp_tools|length }} tools</span>
-                            {% else %}
-                                <span style="font-size: 0.7rem; color: #888;">All</span>
+                            <div style="margin-top: 2px;">
+                                {% if key.mcp_tools %}
+                                    {% for tool in key.mcp_tools %}
+                                        <span style="display: inline-block; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.65rem; margin: 1px;
+                                            {% if tool.startswith('DB_') %}background: #ede9fe; color: #7c3aed;
+                                            {% elif tool.startswith('GA_') %}background: #fef3c7; color: #d97706;
+                                            {% else %}background: #e0e7ff; color: #4338ca;{% endif %}">{{ tool }}</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span style="font-size: 0.65rem; color: #888;">All tools</span>
+                                {% endif %}
+                            </div>
+                            {% if key.mcp_db_presets %}
+                            <div style="margin-top: 2px;">
+                                {% for preset in key.mcp_db_presets %}
+                                    <span style="display: inline-block; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.65rem; margin: 1px; background: #f0fdf4; color: #16a34a;">db:{{ preset }}</span>
+                                {% endfor %}
+                            </div>
                             {% endif %}
                         {% else %}
                             <span class="status status-pending">Off</span>
