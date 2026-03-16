@@ -104,7 +104,28 @@
     {% if api_key.mcp_enabled %}
     <div style="margin-top: 1rem;">
         <strong style="font-size: 0.85rem; color: var(--esa-navy);">MCP Server Access:</strong>
-        <span class="scope-badge scope-write">mcp:access</span>
+        <span class="scope-badge" style="background: #ede9fe; color: #7c3aed;">mcp:access</span>
+        <div style="margin-top: 0.5rem;">
+            <strong style="font-size: 0.8rem; color: #666;">Tools:</strong>
+            {% if api_key.mcp_tools %}
+                {% for tool in api_key.mcp_tools %}
+                    <span class="scope-badge" style="font-size: 0.7rem;
+                        {% if tool.startswith('DB_') %}background: #ede9fe; color: #7c3aed;
+                        {% elif tool.startswith('GA_') %}background: #fef3c7; color: #d97706;
+                        {% else %}background: #e0e7ff; color: #4338ca;{% endif %}">{{ tool }}</span>
+                {% endfor %}
+            {% else %}
+                <span style="font-size: 0.8rem; color: #888;">All tools</span>
+            {% endif %}
+        </div>
+        {% if api_key.mcp_db_presets %}
+        <div style="margin-top: 0.35rem;">
+            <strong style="font-size: 0.8rem; color: #666;">DB Presets:</strong>
+            {% for preset in api_key.mcp_db_presets %}
+                <span class="scope-badge" style="font-size: 0.7rem; background: #f0fdf4; color: #16a34a;">{{ preset }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 
