@@ -3,6 +3,7 @@ Google Ads Service Module
 Handles Google Ads API integration and operations using the official google-ads library
 """
 
+import re
 import asyncio
 import logging
 from typing import Optional, Dict, Any
@@ -98,13 +99,50 @@ class GoogleAdsService:
         'THIS_YEAR',
     }
 
+    # Regex for ISO date range: "2025-03-01,2026-03-01"
+    _DATE_RANGE_RE = re.compile(r'^(\d{4}-\d{2}-\d{2}),(\d{4}-\d{2}-\d{2})$')
+
     @classmethod
     def _validate_date_range(cls, value: str) -> str:
-        """Validate GAQL date range constant."""
-        upper = value.upper().strip()
-        if upper not in cls._VALID_DATE_RANGES:
-            raise ValueError(f"Invalid date_range: must be one of {sorted(cls._VALID_DATE_RANGES)}")
-        return upper
+        """Validate GAQL date range — accepts enum constants or ISO date pairs.
+
+        Enum: "LAST_30_DAYS" → returned as-is (used with DURING)
+        ISO:  "2025-03-01,2026-03-01" → returned as-is (used with BETWEEN)
+        """
+        stripped = value.strip()
+
+        # Check enum constants first
+        if stripped.upper() in cls._VALID_DATE_RANGES:
+            return stripped.upper()
+
+        # Check ISO date pair: YYYY-MM-DD,YYYY-MM-DD
+        m = cls._DATE_RANGE_RE.match(stripped)
+        if m:
+            from datetime import datetime as _dt
+            try:
+                start = _dt.strptime(m.group(1), '%Y-%m-%d')
+                end = _dt.strptime(m.group(2), '%Y-%m-%d')
+                if end < start:
+                    raise ValueError("End date must be after start date")
+                return stripped  # return as-is, caller builds the GAQL
+            except ValueError as e:
+                raise ValueError(f"Invalid date range: {e}")
+
+        raise ValueError(
+            f"Invalid date_range '{value}': use a GAQL enum (e.g. LAST_30_DAYS) "
+            f"or ISO date pair (e.g. 2025-03-01,2026-03-01)"
+        )
+
+    @classmethod
+    def _build_date_clause(cls, date_range: str) -> str:
+        """Build GAQL date filter clause from validated date_range.
+        Enum → 'segments.date DURING LAST_30_DAYS'
+        ISO  → 'segments.date BETWEEN '2025-03-01' AND '2026-03-01'
+        """
+        if ',' in date_range:
+            start, end = date_range.split(',', 1)
+            return f"segments.date BETWEEN '{start}' AND '{end}'"
+        return f"segments.date DURING {date_range}"
 
     def _parse_google_ads_exception(self, ex: GoogleAdsException) -> GoogleAdsAPIError:
         """Parse GoogleAdsException into a more readable error"""
@@ -838,7 +876,7 @@ class GoogleAdsService:
                     metrics.conversions_value,
                     metrics.cost_per_conversion
                 FROM campaign
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
             """
 
             if campaign_id:
@@ -902,7 +940,7 @@ class GoogleAdsService:
                     metrics.conversions,
                     metrics.conversions_value
                 FROM customer
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
             """
 
             response = await asyncio.to_thread(
@@ -966,7 +1004,7 @@ class GoogleAdsService:
                     metrics.average_cpc,
                     metrics.conversions
                 FROM keyword_view
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
             """
 
             if campaign_id:
@@ -1048,7 +1086,7 @@ class GoogleAdsService:
                     metrics.conversions,
                     metrics.conversions_value
                 FROM search_term_view
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
             """
 
             if campaign_id:
@@ -1186,7 +1224,7 @@ class GoogleAdsService:
                     metrics.auction_insight_search_absolute_top_impression_percentage,
                     metrics.auction_insight_search_outranking_share
                 FROM campaign
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
             """
 
             if campaign_id:
@@ -1302,7 +1340,7 @@ class GoogleAdsService:
                     metrics.conversions,
                     metrics.conversions_value
                 FROM geographic_view
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
             """
 
             if campaign_id:
@@ -1369,7 +1407,7 @@ class GoogleAdsService:
                     metrics.conversions,
                     metrics.conversions_value
                 FROM campaign
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
             """
 
             if campaign_id:
@@ -1443,7 +1481,7 @@ class GoogleAdsService:
                     metrics.conversions,
                     metrics.conversions_value
                 FROM ad_group_ad
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
                   AND ad_group_ad.status != 'REMOVED'
             """
 
@@ -1529,7 +1567,7 @@ class GoogleAdsService:
                     metrics.conversions,
                     metrics.conversions_value
                 FROM campaign
-                WHERE segments.date DURING {date_range}
+                WHERE {self._build_date_clause(date_range)}
             """
 
             if campaign_id:
