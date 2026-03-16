@@ -3658,6 +3658,17 @@ def api_unit_availability():
             if r[3]: shapes_set.add(r[3])
             if r[4] is not None: floors_set.add(r[4])
 
+        # Fetch label lookups from dim tables
+        label_lookups = {}
+        try:
+            for dim_table, key in [('dim_unit_type', 'type_codes'), ('dim_climate_type', 'climate_codes'), ('dim_unit_shape', 'shapes')]:
+                dim_rows = pbi_session.execute(
+                    text(f'SELECT code, description FROM {dim_table} ORDER BY sort_order')
+                ).fetchall()
+                label_lookups[key] = {r[0]: r[1] for r in dim_rows}
+        except Exception:
+            pass  # dim tables may not exist on all environments
+
         return jsonify({
             'units': units,
             'count': len(units),
@@ -3667,7 +3678,8 @@ def api_unit_availability():
                 'climate_codes': sorted(climate_codes_set),
                 'shapes': sorted(shapes_set),
                 'floors': sorted(floors_set),
-            }
+            },
+            'label_lookups': label_lookups,
         })
 
     except Exception as e:

@@ -91,14 +91,6 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Climate</label>
-                    <select id="filter-climate" class="form-select" onchange="applyFilters()">
-                        <option value="">All</option>
-                        <option value="true">Climate Controlled</option>
-                        <option value="false">Non-Climate</option>
-                    </select>
-                </div>
-                <div class="form-group">
                     <label>Min Size (sqft)</label>
                     <input type="number" id="filter-min-size" class="form-select" placeholder="0" onchange="applyFilters()" step="1" min="0">
                 </div>
@@ -194,6 +186,7 @@
         <form id="reserve-form" onsubmit="submitReservation(event)">
             <input type="hidden" id="res-site-code">
             <input type="hidden" id="res-unit-id">
+            <input type="hidden" id="res-quoted-rate">
             <div class="form-group">
                 <label>First Name <span style="color: var(--esa-red);">*</span></label>
                 <input type="text" id="res-first-name" class="form-select" required maxlength="100" autocomplete="given-name" style="max-width: 100%;">
@@ -595,6 +588,11 @@ select.form-select {
     let siteMap = {};
     let currentView = window.innerWidth <= 820 ? 'card' : 'table';
 
+    // Code → description lookups — populated from dim tables via API
+    let TYPE_CODE_LABELS = {};
+    let CLIMATE_CODE_LABELS = {};
+    let SHAPE_LABELS = {};
+
     function getCSRFToken() {
         const meta = document.querySelector('meta[name="csrf-token"]');
         return meta ? meta.getAttribute('content') : '';
@@ -713,6 +711,12 @@ select.form-select {
             allUnits = data.units || [];
             const filters = data.filters || {};
 
+            // Populate label lookups from dim tables
+            const lookups = data.label_lookups || {};
+            if (lookups.type_codes) TYPE_CODE_LABELS = lookups.type_codes;
+            if (lookups.climate_codes) CLIMATE_CODE_LABELS = lookups.climate_codes;
+            if (lookups.shapes) SHAPE_LABELS = lookups.shapes;
+
             const populateSelect = (id, items, defaultLabel, labelFn) => {
                 const sel = document.getElementById(id);
                 sel.innerHTML = `<option value="">${defaultLabel}</option>`;
@@ -725,9 +729,9 @@ select.form-select {
             };
 
             populateSelect('filter-category', filters.categories, 'All Categories');
-            populateSelect('filter-type-code', filters.type_codes, 'All Types');
-            populateSelect('filter-climate-code', filters.climate_codes, 'All Climate');
-            populateSelect('filter-shape', filters.shapes, 'All Shapes');
+            populateSelect('filter-type-code', filters.type_codes, 'All Types', c => TYPE_CODE_LABELS[c] || c);
+            populateSelect('filter-climate-code', filters.climate_codes, 'All Climate', c => CLIMATE_CODE_LABELS[c] || c);
+            populateSelect('filter-shape', filters.shapes, 'All Shapes', c => SHAPE_LABELS[c] || c);
             populateSelect('filter-floor', filters.floors, 'All Floors', f => `Floor ${f}`);
 
             document.getElementById('stat-total').textContent = allUnits.length;
@@ -751,7 +755,6 @@ select.form-select {
         const typeCode = document.getElementById('filter-type-code').value;
         const climateCode = document.getElementById('filter-climate-code').value;
         const shape = document.getElementById('filter-shape').value;
-        const climate = document.getElementById('filter-climate').value;
         const floor = document.getElementById('filter-floor').value;
         const minSize = parseFloat(document.getElementById('filter-min-size').value) || 0;
         const maxSize = parseFloat(document.getElementById('filter-max-size').value) || Infinity;
@@ -762,8 +765,6 @@ select.form-select {
             if (typeCode && u.label_type_code !== typeCode) return false;
             if (climateCode && u.label_climate_code !== climateCode) return false;
             if (shape && u.label_shape !== shape) return false;
-            if (climate === 'true' && !u.bClimate) return false;
-            if (climate === 'false' && u.bClimate) return false;
             if (floor && u.iFloor !== parseInt(floor)) return false;
             if (u.area && u.area < minSize) return false;
             if (u.area && u.area > maxSize) return false;
@@ -782,7 +783,7 @@ select.form-select {
 
     function resetFilters() {
         ['filter-category', 'filter-type-code', 'filter-climate-code',
-         'filter-shape', 'filter-climate', 'filter-floor'].forEach(id => {
+         'filter-shape', 'filter-floor'].forEach(id => {
             document.getElementById(id).value = '';
         });
         document.getElementById('filter-min-size').value = '';
@@ -994,9 +995,16 @@ select.form-select {
 
         document.getElementById('res-site-code').value = siteCode;
         document.getElementById('res-unit-id').value = unitId;
+        document.getElementById('res-quoted-rate').value = selectedPlan ? (calcIndicative(parseFloat(rate)) || rate) : rate;
+        let planInfo = '';
+        if (selectedPlan) {
+            const indic = calcIndicative(parseFloat(rate));
+            planInfo = `<br>Discount: <strong>${escHtml(selectedPlan.plan_name)}</strong>`;
+            if (indic != null) planInfo += ` &middot; Indicative: <span style="color:#28A745;font-weight:700;">${fmtRate(indic)}</span>`;
+        }
         document.getElementById('reserve-unit-info').innerHTML = `
             <strong>${escHtml(unitName)}</strong> at <strong>${escHtml(siteCode)}</strong><br>
-            Category: ${escHtml(typeName)} &middot; Size: ${area} sqft &middot; Std Rate: ${rate}
+            Category: ${escHtml(typeName)} &middot; Size: ${area} sqft &middot; Std Rate: ${rate}${planInfo}
         `;
         document.getElementById('res-first-name').value = '';
         document.getElementById('res-last-name').value = '';
@@ -1019,14 +1027,27 @@ select.form-select {
         btn.disabled = true;
         btn.textContent = 'Submitting...';
 
+        const siteCode = document.getElementById('res-site-code').value;
+
+        // Resolve concession_id from selected discount plan's linked_concessions
+        let concessionId = 0;
+        if (selectedPlan && selectedPlan.linked_concessions) {
+            const match = selectedPlan.linked_concessions.find(
+                lc => lc.site_code === siteCode || String(lc.site_id) === String(siteMap[siteCode])
+            );
+            if (match) concessionId = match.concession_id;
+        }
+
         const payload = {
-            site_code: document.getElementById('res-site-code').value,
+            site_code: siteCode,
             unit_id: parseInt(document.getElementById('res-unit-id').value),
             first_name: document.getElementById('res-first-name').value.trim(),
             last_name: document.getElementById('res-last-name').value.trim(),
             phone: document.getElementById('res-phone').value.trim(),
             email: document.getElementById('res-email').value.trim(),
             comment: document.getElementById('res-notes').value.trim(),
+            quoted_rate: parseFloat(document.getElementById('res-quoted-rate').value) || 0,
+            concession_id: concessionId,
         };
 
         try {
