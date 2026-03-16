@@ -166,9 +166,13 @@ function translateRow(btn) {
                     if (input) input.value = t[lang];
                 }
             }
-            btn.textContent = 'Done';
+            btn.textContent = 'Saving...';
             btn.classList.add('done');
-            setTimeout(function() { btn.textContent = 'AI'; btn.classList.remove('done'); btn.disabled = false; }, 2000);
+            // Auto-submit the form after translations are filled
+            var form = row.querySelector('form') || btn.closest('form');
+            if (form) {
+                setTimeout(function() { form.submit(); }, 300);
+            }
         } else {
             alert('Translation failed: ' + (data.error || 'Unknown error'));
             btn.textContent = 'AI';
