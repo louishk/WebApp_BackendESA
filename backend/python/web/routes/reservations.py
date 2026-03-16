@@ -152,7 +152,7 @@ def _clamp(value, max_len):
 
 
 def _record_reservation(**kwargs):
-    """Insert reservation tracking record into esa_pbi. Best-effort, never raises."""
+    """Upsert reservation tracking record into esa_pbi. Best-effort, never raises."""
     try:
         session = get_pbi_session()
         try:
@@ -161,19 +161,67 @@ def _record_reservation(**kwargs):
                     site_code, unit_id, first_name, last_name, email, phone,
                     mobile, quoted_rate, concession_id, needed_date, source_name,
                     comment, tenant_id, waiting_id, global_waiting_num,
-                    source, gclid, gid, botid, api_key_id, api_user
+                    source, gclid, gid, botid, api_key_id, api_user,
+                    reserved_at, status
                 ) VALUES (
                     :site_code, :unit_id, :first_name, :last_name, :email, :phone,
                     :mobile, :quoted_rate, :concession_id, :needed_date, :source_name,
                     :comment, :tenant_id, :waiting_id, :global_waiting_num,
-                    :source, :gclid, :gid, :botid, :api_key_id, :api_user
+                    :source, :gclid, :gid, :botid, :api_key_id, :api_user,
+                    NOW(), :status
                 )
+                ON CONFLICT (site_code, waiting_id) WHERE waiting_id IS NOT NULL
+                DO UPDATE SET
+                    unit_id = EXCLUDED.unit_id,
+                    first_name = EXCLUDED.first_name,
+                    last_name = EXCLUDED.last_name,
+                    email = EXCLUDED.email,
+                    phone = EXCLUDED.phone,
+                    mobile = EXCLUDED.mobile,
+                    quoted_rate = EXCLUDED.quoted_rate,
+                    concession_id = EXCLUDED.concession_id,
+                    needed_date = EXCLUDED.needed_date,
+                    source_name = EXCLUDED.source_name,
+                    comment = EXCLUDED.comment,
+                    tenant_id = COALESCE(EXCLUDED.tenant_id, api_reservations.tenant_id),
+                    global_waiting_num = COALESCE(EXCLUDED.global_waiting_num, api_reservations.global_waiting_num),
+                    source = EXCLUDED.source,
+                    gclid = COALESCE(EXCLUDED.gclid, api_reservations.gclid),
+                    gid = COALESCE(EXCLUDED.gid, api_reservations.gid),
+                    botid = COALESCE(EXCLUDED.botid, api_reservations.botid),
+                    updated_at = NOW()
             """), kwargs)
             session.commit()
         finally:
             session.close()
     except Exception as e:
         logger.warning(f"Failed to record reservation tracking: {e}")
+
+
+_LIFECYCLE_DATE_COLUMNS = frozenset({'reserved_at', 'moved_in_at', 'cancelled_at', 'expired_at'})
+
+
+def _update_reservation_status(site_code, waiting_id, status, date_column):
+    """Update reservation status and lifecycle date. Best-effort, never raises."""
+    if date_column not in _LIFECYCLE_DATE_COLUMNS:
+        logger.error(f"Invalid date_column rejected: {date_column!r}")
+        return 0
+    try:
+        session = get_pbi_session()
+        try:
+            # safe: date_column validated against _LIFECYCLE_DATE_COLUMNS allowlist above
+            result = session.execute(text(f"""
+                UPDATE api_reservations
+                SET status = :status, {date_column} = NOW(), updated_at = NOW()
+                WHERE site_code = :site_code AND waiting_id = :waiting_id
+            """), {'status': status, 'site_code': site_code, 'waiting_id': waiting_id})
+            session.commit()
+            return result.rowcount
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning(f"Failed to update reservation status: {e}")
+        return 0
 
 
 def _get_caller_info():
@@ -384,6 +432,7 @@ def reservation_reserve():
             waiting_id=waiting_id, global_waiting_num=global_waiting_num,
             source=source, gclid=gclid, gid=gid, botid=botid,
             api_key_id=api_key_id, api_user=api_user,
+            status='created',
         )
 
         return jsonify({
@@ -536,6 +585,7 @@ def reservation_create():
             waiting_id=waiting_id, global_waiting_num=global_waiting_num,
             source=source, gclid=gclid, gid=gid, botid=botid,
             api_key_id=api_key_id, api_user=api_user,
+            status='created',
         )
 
         return jsonify({
@@ -947,6 +997,9 @@ def reservation_cancel(waiting_id):
             f"reason={_sanitize_log(data.get('cancellation_reason', ''))}"
         )
 
+        # Sync tracking table
+        _update_reservation_status(site_code, waiting_id, 'cancelled', 'cancelled_at')
+
         return jsonify({
             'success': True,
             'waiting_id': waiting_id,
@@ -1175,3 +1228,519 @@ def reservation_fee_retrieve():
     finally:
         if soap_client:
             soap_client.close()
+
+
+# =============================================================================
+# POST /api/reservations/track — external reservation tracking
+# =============================================================================
+
+_VALID_TRACK_EVENT_TYPES = {'reservation', 'move_in'}
+_VALID_EVENT_TYPES = {'move_in', 'cancellation', 'expiry'}
+_EVENT_STATUS_MAP = {
+    'move_in': ('moved_in', 'moved_in_at'),
+    'cancellation': ('cancelled', 'cancelled_at'),
+    'expiry': ('expired', 'expired_at'),
+}
+
+
+@reservations_bp.route('/track', methods=['POST'])
+@require_auth
+@require_api_scope('reservations:track')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def reservation_track():
+    """
+    Push an external reservation/move-in record into the tracking table.
+
+    JSON body:
+        site_code    — location code          [required]
+        unit_id      — unit ID                [required]
+        waiting_id   — SiteLink WaitingID     [required]
+        event_type   — "reservation" or "move_in" [default: "reservation"]
+        ... plus optional fields (see plan)
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    site_code = _clamp(data.get('site_code', '').strip(), 10)
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+
+    unit_id = data.get('unit_id')
+    if not unit_id:
+        return jsonify({'error': 'unit_id is required'}), 400
+    unit_id, uid_err = _safe_int(unit_id, min_val=1)
+    if uid_err:
+        return jsonify({'error': f'unit_id: {uid_err}'}), 400
+
+    waiting_id = data.get('waiting_id')
+    if not waiting_id:
+        return jsonify({'error': 'waiting_id is required'}), 400
+    waiting_id, wid_err = _safe_int(waiting_id, min_val=1)
+    if wid_err:
+        return jsonify({'error': f'waiting_id: {wid_err}'}), 400
+
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    event_type = _clamp(data.get('event_type', 'reservation'), 20).lower()
+    if event_type not in _VALID_TRACK_EVENT_TYPES:
+        return jsonify({'error': f'event_type must be one of: {", ".join(sorted(_VALID_TRACK_EVENT_TYPES))}'}), 400
+
+    # Optional fields
+    global_waiting_num = None
+    if data.get('global_waiting_num') is not None:
+        global_waiting_num, gwn_err = _safe_int(data['global_waiting_num'], min_val=0)
+        if gwn_err:
+            return jsonify({'error': f'global_waiting_num: {gwn_err}'}), 400
+
+    tenant_id = None
+    if data.get('tenant_id') is not None:
+        tenant_id, tid_err = _safe_int(data['tenant_id'], min_val=0)
+        if tid_err:
+            return jsonify({'error': f'tenant_id: {tid_err}'}), 400
+
+    quoted_rate = '0.00'
+    if data.get('quoted_rate') is not None:
+        quoted_rate, rate_err = _safe_rate(data['quoted_rate'])
+        if rate_err:
+            return jsonify({'error': f'quoted_rate: {rate_err}'}), 400
+
+    concession_id = 0
+    if data.get('concession_id') is not None:
+        concession_id, cid_err = _safe_int(data['concession_id'], min_val=0)
+        if cid_err:
+            return jsonify({'error': f'concession_id: {cid_err}'}), 400
+
+    needed_date = None
+    if data.get('needed_date'):
+        needed_date, nd_err = _require_date(data['needed_date'])
+        if nd_err:
+            return jsonify({'error': f'needed_date: {nd_err}'}), 400
+
+    # Determine status based on event_type
+    status = 'created' if event_type == 'reservation' else 'moved_in'
+
+    api_key_id, api_user = _get_caller_info()
+
+    try:
+        session = get_pbi_session()
+        try:
+            # Build the upsert — same SQL as _record_reservation but with moved_in_at handling
+            moved_in_clause = "NOW()" if event_type == 'move_in' else "NULL"
+            result = session.execute(text(f"""
+                INSERT INTO api_reservations (
+                    site_code, unit_id, first_name, last_name, email, phone,
+                    mobile, quoted_rate, concession_id, needed_date, source_name,
+                    comment, tenant_id, waiting_id, global_waiting_num,
+                    source, gclid, gid, botid, api_key_id, api_user,
+                    reserved_at, moved_in_at, status
+                ) VALUES (
+                    :site_code, :unit_id, :first_name, :last_name, :email, :phone,
+                    :mobile, :quoted_rate, :concession_id, :needed_date, :source_name,
+                    :comment, :tenant_id, :waiting_id, :global_waiting_num,
+                    :source, :gclid, :gid, :botid, :api_key_id, :api_user,
+                    NOW(), {moved_in_clause}, :status
+                )
+                ON CONFLICT (site_code, waiting_id) WHERE waiting_id IS NOT NULL
+                DO UPDATE SET
+                    unit_id = EXCLUDED.unit_id,
+                    first_name = EXCLUDED.first_name,
+                    last_name = EXCLUDED.last_name,
+                    email = EXCLUDED.email,
+                    phone = EXCLUDED.phone,
+                    mobile = EXCLUDED.mobile,
+                    quoted_rate = EXCLUDED.quoted_rate,
+                    concession_id = EXCLUDED.concession_id,
+                    needed_date = EXCLUDED.needed_date,
+                    source_name = EXCLUDED.source_name,
+                    comment = EXCLUDED.comment,
+                    tenant_id = COALESCE(EXCLUDED.tenant_id, api_reservations.tenant_id),
+                    global_waiting_num = COALESCE(EXCLUDED.global_waiting_num, api_reservations.global_waiting_num),
+                    source = EXCLUDED.source,
+                    gclid = COALESCE(EXCLUDED.gclid, api_reservations.gclid),
+                    gid = COALESCE(EXCLUDED.gid, api_reservations.gid),
+                    botid = COALESCE(EXCLUDED.botid, api_reservations.botid),
+                    status = EXCLUDED.status,
+                    moved_in_at = CASE WHEN EXCLUDED.status = 'moved_in' THEN NOW() ELSE api_reservations.moved_in_at END,
+                    updated_at = NOW()
+                RETURNING id
+            """), {
+                'site_code': site_code,
+                'unit_id': unit_id,
+                'first_name': _clamp(data.get('first_name', ''), 100),
+                'last_name': _clamp(data.get('last_name', ''), 100),
+                'email': _clamp(data.get('email', ''), 100) or None,
+                'phone': _clamp(data.get('phone', ''), 20) or None,
+                'mobile': _clamp(data.get('mobile', ''), 20) or None,
+                'quoted_rate': quoted_rate,
+                'concession_id': concession_id,
+                'needed_date': needed_date,
+                'source_name': _clamp(data.get('source_name', 'ESA Backend'), 64),
+                'comment': _clamp(data.get('comment', ''), 500) or None,
+                'tenant_id': tenant_id,
+                'waiting_id': waiting_id,
+                'global_waiting_num': global_waiting_num,
+                'source': _clamp(data.get('source', 'api'), 50),
+                'gclid': _clamp(data.get('gclid', ''), 255) or None,
+                'gid': _clamp(data.get('gid', ''), 255) or None,
+                'botid': _clamp(data.get('botid', ''), 255) or None,
+                'api_key_id': api_key_id,
+                'api_user': api_user,
+                'status': status,
+            })
+            row = result.fetchone()
+            session.commit()
+
+            record_id = row[0] if row else None
+            logger.info(
+                f"Reservation tracked: id={record_id} site={site_code} "
+                f"waiting_id={waiting_id} event={event_type}"
+            )
+            audit_log(
+                'RESERVATION_TRACKED',
+                f"site={site_code} waiting_id={waiting_id} event={event_type} "
+                f"source={_sanitize_log(data.get('source', 'api'))}"
+            )
+
+            return jsonify({
+                'success': True,
+                'id': record_id,
+                'event_type': event_type,
+            })
+
+        finally:
+            session.close()
+
+    except Exception as e:
+        logger.error(f"Error tracking reservation: {e}")
+        return jsonify({'error': 'Failed to track reservation'}), 500
+
+
+# =============================================================================
+# PUT /api/reservations/track/event — lifecycle event on tracked reservation
+# =============================================================================
+
+@reservations_bp.route('/track/event', methods=['PUT'])
+@require_auth
+@require_api_scope('reservations:track')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def reservation_track_event():
+    """
+    Push a lifecycle event (move-in, cancellation, expiry) against an
+    existing tracked reservation.
+
+    JSON body:
+        site_code   — location code          [required]
+        waiting_id  — reservation WaitingID   [required]
+        event_type  — move_in / cancellation / expiry [required]
+        comment     — event notes (appended)  [optional]
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    site_code = _clamp(data.get('site_code', '').strip(), 10)
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+
+    waiting_id = data.get('waiting_id')
+    if not waiting_id:
+        return jsonify({'error': 'waiting_id is required'}), 400
+    waiting_id, wid_err = _safe_int(waiting_id, min_val=1)
+    if wid_err:
+        return jsonify({'error': f'waiting_id: {wid_err}'}), 400
+
+    event_type = _clamp(data.get('event_type', '').strip(), 20).lower()
+    if event_type not in _VALID_EVENT_TYPES:
+        return jsonify({'error': f'event_type must be one of: {", ".join(sorted(_VALID_EVENT_TYPES))}'}), 400
+
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    status, date_column = _EVENT_STATUS_MAP[event_type]
+    if date_column not in _LIFECYCLE_DATE_COLUMNS:
+        return jsonify({'error': 'Invalid event type'}), 400
+    comment = _clamp(data.get('comment', ''), 500) or None
+
+    try:
+        session = get_pbi_session()
+        try:
+            # Build update with optional comment append
+            # safe: date_column validated against _LIFECYCLE_DATE_COLUMNS allowlist above
+            if comment:
+                result = session.execute(text(f"""
+                    UPDATE api_reservations
+                    SET status = :status,
+                        {date_column} = NOW(),
+                        comment = CASE
+                            WHEN comment IS NULL OR comment = '' THEN :comment
+                            ELSE comment || ' | ' || :comment
+                        END,
+                        updated_at = NOW()
+                    WHERE site_code = :site_code AND waiting_id = :waiting_id
+                    RETURNING waiting_id, status, {date_column}
+                """), {
+                    'status': status,
+                    'comment': comment,
+                    'site_code': site_code,
+                    'waiting_id': waiting_id,
+                })
+            else:
+                result = session.execute(text(f"""
+                    UPDATE api_reservations
+                    SET status = :status,
+                        {date_column} = NOW(),
+                        updated_at = NOW()
+                    WHERE site_code = :site_code AND waiting_id = :waiting_id
+                    RETURNING waiting_id, status, {date_column}
+                """), {
+                    'status': status,
+                    'site_code': site_code,
+                    'waiting_id': waiting_id,
+                })
+
+            row = result.fetchone()
+            session.commit()
+
+            if not row:
+                return jsonify({'error': 'Reservation not found'}), 404
+
+            logger.info(
+                f"Reservation event: site={site_code} waiting_id={waiting_id} "
+                f"event={event_type} status={status}"
+            )
+            audit_log(
+                'RESERVATION_EVENT',
+                f"site={site_code} waiting_id={waiting_id} event={event_type}"
+            )
+
+            return jsonify({
+                'success': True,
+                'waiting_id': row[0],
+                'status': row[1],
+                date_column: row[2].isoformat() if row[2] else None,
+            })
+
+        finally:
+            session.close()
+
+    except Exception as e:
+        logger.error(f"Error processing reservation event: {e}")
+        return jsonify({'error': 'Failed to process event'}), 500
+
+
+# =============================================================================
+# POST /api/reservations/track/batch — bulk import tracked reservations
+# =============================================================================
+
+@reservations_bp.route('/track/batch', methods=['POST'])
+@require_auth
+@require_api_scope('reservations:track')
+@rate_limit_api(max_requests=5, window_seconds=60)
+def reservation_track_batch():
+    """
+    Batch import external reservation records.
+
+    JSON body:
+        records — array of reservation objects (max 100), each following
+                  the same schema as POST /api/reservations/track
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    records = data.get('records')
+    if not records or not isinstance(records, list):
+        return jsonify({'error': 'records array is required'}), 400
+
+    if len(records) > 100:
+        return jsonify({'error': 'Maximum 100 records per batch'}), 400
+
+    api_key_id, api_user = _get_caller_info()
+
+    # Cache site code validations
+    valid_sites = {}
+
+    inserted = 0
+    updated = 0
+    errors = []
+
+    session = get_pbi_session()
+    try:
+        for idx, rec in enumerate(records):
+            if not isinstance(rec, dict):
+                errors.append({'index': idx, 'error': 'Record must be an object'})
+                continue
+
+            # Validate required fields
+            sc = _clamp(str(rec.get('site_code', '')).strip(), 10)
+            if not sc:
+                errors.append({'index': idx, 'error': 'site_code is required'})
+                continue
+
+            uid = rec.get('unit_id')
+            if not uid:
+                errors.append({'index': idx, 'error': 'unit_id is required'})
+                continue
+            uid, uid_err = _safe_int(uid, min_val=1)
+            if uid_err:
+                errors.append({'index': idx, 'error': f'unit_id: {uid_err}'})
+                continue
+
+            wid = rec.get('waiting_id')
+            if not wid:
+                errors.append({'index': idx, 'error': 'waiting_id is required'})
+                continue
+            wid, wid_err = _safe_int(wid, min_val=1)
+            if wid_err:
+                errors.append({'index': idx, 'error': f'waiting_id: {wid_err}'})
+                continue
+
+            # Validate site_code (cached)
+            if sc not in valid_sites:
+                valid_sites[sc] = _validate_site_code(sc) is not None
+            if not valid_sites[sc]:
+                errors.append({'index': idx, 'error': 'Invalid site_code'})
+                continue
+
+            event_type = _clamp(str(rec.get('event_type', 'reservation')), 20).lower()
+            if event_type not in _VALID_TRACK_EVENT_TYPES:
+                errors.append({'index': idx, 'error': f'Invalid event_type: {event_type}'})
+                continue
+
+            # Optional fields
+            gwn = None
+            if rec.get('global_waiting_num') is not None:
+                gwn, gwn_err = _safe_int(rec['global_waiting_num'], min_val=0)
+                if gwn_err:
+                    errors.append({'index': idx, 'error': f'global_waiting_num: {gwn_err}'})
+                    continue
+
+            tid = None
+            if rec.get('tenant_id') is not None:
+                tid, tid_err = _safe_int(rec['tenant_id'], min_val=0)
+                if tid_err:
+                    errors.append({'index': idx, 'error': f'tenant_id: {tid_err}'})
+                    continue
+
+            qr = '0.00'
+            if rec.get('quoted_rate') is not None:
+                qr, qr_err = _safe_rate(rec['quoted_rate'])
+                if qr_err:
+                    errors.append({'index': idx, 'error': f'quoted_rate: {qr_err}'})
+                    continue
+
+            cid = 0
+            if rec.get('concession_id') is not None:
+                cid, cid_err = _safe_int(rec['concession_id'], min_val=0)
+                if cid_err:
+                    errors.append({'index': idx, 'error': f'concession_id: {cid_err}'})
+                    continue
+
+            nd = None
+            if rec.get('needed_date'):
+                nd, nd_err = _require_date(rec['needed_date'])
+                if nd_err:
+                    errors.append({'index': idx, 'error': f'needed_date: {nd_err}'})
+                    continue
+
+            status = 'created' if event_type == 'reservation' else 'moved_in'
+            moved_in_clause = "NOW()" if event_type == 'move_in' else "NULL"
+
+            try:
+                result = session.execute(text(f"""
+                    INSERT INTO api_reservations (
+                        site_code, unit_id, first_name, last_name, email, phone,
+                        mobile, quoted_rate, concession_id, needed_date, source_name,
+                        comment, tenant_id, waiting_id, global_waiting_num,
+                        source, gclid, gid, botid, api_key_id, api_user,
+                        reserved_at, moved_in_at, status
+                    ) VALUES (
+                        :site_code, :unit_id, :first_name, :last_name, :email, :phone,
+                        :mobile, :quoted_rate, :concession_id, :needed_date, :source_name,
+                        :comment, :tenant_id, :waiting_id, :global_waiting_num,
+                        :source, :gclid, :gid, :botid, :api_key_id, :api_user,
+                        NOW(), {moved_in_clause}, :status
+                    )
+                    ON CONFLICT (site_code, waiting_id) WHERE waiting_id IS NOT NULL
+                    DO UPDATE SET
+                        unit_id = EXCLUDED.unit_id,
+                        first_name = EXCLUDED.first_name,
+                        last_name = EXCLUDED.last_name,
+                        email = EXCLUDED.email,
+                        phone = EXCLUDED.phone,
+                        mobile = EXCLUDED.mobile,
+                        quoted_rate = EXCLUDED.quoted_rate,
+                        concession_id = EXCLUDED.concession_id,
+                        needed_date = EXCLUDED.needed_date,
+                        source_name = EXCLUDED.source_name,
+                        comment = EXCLUDED.comment,
+                        tenant_id = COALESCE(EXCLUDED.tenant_id, api_reservations.tenant_id),
+                        global_waiting_num = COALESCE(EXCLUDED.global_waiting_num, api_reservations.global_waiting_num),
+                        source = EXCLUDED.source,
+                        gclid = COALESCE(EXCLUDED.gclid, api_reservations.gclid),
+                        gid = COALESCE(EXCLUDED.gid, api_reservations.gid),
+                        botid = COALESCE(EXCLUDED.botid, api_reservations.botid),
+                        status = EXCLUDED.status,
+                        moved_in_at = CASE WHEN EXCLUDED.status = 'moved_in' THEN NOW() ELSE api_reservations.moved_in_at END,
+                        updated_at = NOW()
+                    RETURNING (xmax = 0) AS is_insert
+                """), {
+                    'site_code': sc,
+                    'unit_id': uid,
+                    'first_name': _clamp(rec.get('first_name', ''), 100),
+                    'last_name': _clamp(rec.get('last_name', ''), 100),
+                    'email': _clamp(rec.get('email', ''), 100) or None,
+                    'phone': _clamp(rec.get('phone', ''), 20) or None,
+                    'mobile': _clamp(rec.get('mobile', ''), 20) or None,
+                    'quoted_rate': qr,
+                    'concession_id': cid,
+                    'needed_date': nd,
+                    'source_name': _clamp(rec.get('source_name', 'ESA Backend'), 64),
+                    'comment': _clamp(rec.get('comment', ''), 500) or None,
+                    'tenant_id': tid,
+                    'waiting_id': wid,
+                    'global_waiting_num': gwn,
+                    'source': _clamp(rec.get('source', 'api'), 50),
+                    'gclid': _clamp(rec.get('gclid', ''), 255) or None,
+                    'gid': _clamp(rec.get('gid', ''), 255) or None,
+                    'botid': _clamp(rec.get('botid', ''), 255) or None,
+                    'api_key_id': api_key_id,
+                    'api_user': api_user,
+                    'status': status,
+                })
+                row = result.fetchone()
+                if row and row[0]:
+                    inserted += 1
+                else:
+                    updated += 1
+            except Exception as e:
+                logger.warning(f"Batch record {idx} failed: {e}")
+                errors.append({'index': idx, 'error': 'Database error'})
+
+        session.commit()
+
+        logger.info(
+            f"Batch track: {inserted} inserted, {updated} updated, "
+            f"{len(errors)} errors"
+        )
+        audit_log(
+            'RESERVATION_BATCH_TRACKED',
+            f"inserted={inserted} updated={updated} errors={len(errors)}"
+        )
+
+        return jsonify({
+            'success': True,
+            'processed': inserted + updated,
+            'inserted': inserted,
+            'updated': updated,
+            'errors': errors,
+        })
+
+    except Exception as e:
+        logger.error(f"Error in batch track: {e}")
+        return jsonify({'error': 'Failed to process batch'}), 500
+
+    finally:
+        session.close()

@@ -479,6 +479,57 @@ const API_ENDPOINTS = {
             }
         ]
     },
+    "Reservation Tracking": {
+        "read_scope": "reservations:track",
+        "write_scope": "reservations:track",
+        "endpoints": [
+            {
+                "method": "POST", "path": "/api/reservations/track", "scope": "reservations:track",
+                "description": "Track an external reservation (upsert by site_code + waiting_id)",
+                "body": {
+                    "site_code":         {"type": "string",  "required": true,  "description": "Location code"},
+                    "unit_id":           {"type": "integer", "required": true,  "description": "Unit ID"},
+                    "waiting_id":        {"type": "integer", "required": true,  "description": "SiteLink WaitingID"},
+                    "global_waiting_num":{"type": "integer", "required": false, "description": "SiteLink GlobalWaitingNum"},
+                    "tenant_id":         {"type": "integer", "required": false, "description": "SiteLink TenantID"},
+                    "first_name":        {"type": "string",  "required": false, "description": "Tenant first name"},
+                    "last_name":         {"type": "string",  "required": false, "description": "Tenant last name"},
+                    "email":             {"type": "string",  "required": false, "description": "Contact email"},
+                    "phone":             {"type": "string",  "required": false, "description": "Contact phone"},
+                    "quoted_rate":       {"type": "number",  "required": false, "description": "Quoted rate"},
+                    "concession_id":     {"type": "integer", "required": false, "description": "Discount concession ID"},
+                    "needed_date":       {"type": "string",  "required": false, "description": "Move-in date YYYY-MM-DD"},
+                    "comment":           {"type": "string",  "required": false, "description": "Notes"},
+                    "source":            {"type": "string",  "required": false, "description": "Channel: website, chatbot, etc. (default: api)"},
+                    "source_name":       {"type": "string",  "required": false, "description": "Source label for reporting"},
+                    "gclid":             {"type": "string",  "required": false, "description": "Google Ads click ID"},
+                    "gid":               {"type": "string",  "required": false, "description": "Campaign ID"},
+                    "botid":             {"type": "string",  "required": false, "description": "Chatbot session ID"},
+                    "event_type":        {"type": "string",  "required": false, "description": "reservation (default) or move_in"}
+                },
+                "example_response": {"success": true, "id": 123, "event_type": "reservation"}
+            },
+            {
+                "method": "PUT", "path": "/api/reservations/track/event", "scope": "reservations:track",
+                "description": "Push a lifecycle event against a tracked reservation",
+                "body": {
+                    "site_code":   {"type": "string", "required": true,  "description": "Location code"},
+                    "waiting_id":  {"type": "integer","required": true,  "description": "The reservation to update"},
+                    "event_type":  {"type": "string", "required": true,  "description": "move_in, cancellation, or expiry"},
+                    "comment":     {"type": "string", "required": false, "description": "Event notes (appended to existing)"}
+                },
+                "example_response": {"success": true, "waiting_id": 848768, "status": "moved_in", "moved_in_at": "2026-03-18T10:30:00"}
+            },
+            {
+                "method": "POST", "path": "/api/reservations/track/batch", "scope": "reservations:track",
+                "description": "Batch import reservation records (max 100 per call, 5 req/min)",
+                "body": {
+                    "records": {"type": "array", "required": true, "description": "Array of reservation objects (same schema as /track)"}
+                },
+                "example_response": {"success": true, "processed": 100, "inserted": 85, "updated": 15, "errors": []}
+            }
+        ]
+    },
     "Inventory": {
         "read_scope": "inventory:read",
         "write_scope": "inventory:write",
