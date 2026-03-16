@@ -40,6 +40,7 @@
                 <th>#</th>
                 <th>Plan Type</th>
                 <th>Plan Name</th>
+                <th>Storage Type</th>
                 <th>Sitelink Name</th>
                 <th>Period</th>
                 <th>Sites</th>
@@ -58,6 +59,7 @@
                     <span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">{{ plan.plan_type }}</span>
                 </td>
                 <td><strong>{{ plan.plan_name }}</strong></td>
+                <td>{{ plan.storage_type or '-' }}</td>
                 <td>{{ plan.sitelink_discount_name or '-' }}</td>
                 <td>
                     {% if plan.promo_period_start or plan.promo_period_end %}

@@ -50,6 +50,11 @@ class DiscountPlan(Base):
     applicable_sites = Column(JSONB, comment="Site applicability, e.g. {L001: true, L003: false}")
 
     # =========================================================================
+    # Storage Type
+    # =========================================================================
+    storage_type = Column(String(50), comment="Storage type: Self Storage, Wine Storage, etc.")
+
+    # =========================================================================
     # Discount Details
     # =========================================================================
     discount_value = Column(String(255), comment="Discount description, e.g. 5%, 300HKD, First 2 Weeks Free")
@@ -150,6 +155,8 @@ class DiscountPlan(Base):
             'booking_period_end': self.booking_period_end.isoformat() if self.booking_period_end else None,
             'move_in_range': self.move_in_range,
             'applicable_sites': self.applicable_sites or {},
+            # Storage type
+            'storage_type': self.storage_type,
             # Discount
             'discount_value': self.discount_value,
             'discount_type': self.discount_type,

@@ -6,7 +6,7 @@ import json
 from datetime import date
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, current_app
 from flask_login import login_required, current_user
-from sqlalchemy import asc, desc
+from sqlalchemy import asc
 from web.utils.audit import audit_log, AuditEvent
 from web.utils.rate_limit import rate_limit_api
 
@@ -159,12 +159,24 @@ def _parse_date_field(form_value):
         return None
 
 
-def _build_plan_from_form(form, plan=None):
+def _build_plan_from_form(form, plan=None, config_options=None):
     """Extract discount plan fields from the submitted form."""
     from web.models.discount_plan import DiscountPlan
 
     if plan is None:
         plan = DiscountPlan()
+
+    if config_options is None:
+        config_options = _get_config_options()
+
+    def _validate_config_value(value, field_name):
+        """Validate value against config allowlist. Returns None if invalid."""
+        if not value:
+            return None
+        allowed = config_options.get(field_name, [])
+        if allowed and value not in allowed:
+            return None
+        return value
 
     # Identification
     plan.plan_type = form.get('plan_type', '').strip()
@@ -180,10 +192,10 @@ def _build_plan_from_form(form, plan=None):
     plan.promo_period_end = _parse_date_field(form.get('promo_period_end'))
     plan.booking_period_start = _parse_date_field(form.get('booking_period_start'))
     plan.booking_period_end = _parse_date_field(form.get('booking_period_end'))
-    plan.move_in_range = form.get('move_in_range', '').strip() or None
+    plan.move_in_range = _validate_config_value(form.get('move_in_range', '').strip(), 'move_in_range')
 
     # Lock-in period
-    plan.lock_in_period = form.get('lock_in_period', '').strip() or None
+    plan.lock_in_period = _validate_config_value(form.get('lock_in_period', '').strip(), 'lock_in_period')
 
     # Sites - build from checkboxes (dynamic codes from form)
     site_codes = form.getlist('site_code')
@@ -192,21 +204,27 @@ def _build_plan_from_form(form, plan=None):
         sites[code] = True
     plan.applicable_sites = sites
 
+    # Storage type (validated against config)
+    plan.storage_type = _validate_config_value(form.get('storage_type', '').strip(), 'storage_type')
+
     # Discount details
     plan.discount_value = form.get('discount_value', '').strip() or None
     plan.discount_type = form.get('discount_type', '').strip() or None
     raw_numeric = form.get('discount_numeric', '').strip()
-    plan.discount_numeric = float(raw_numeric) if raw_numeric else None
-    plan.discount_segmentation = form.get('discount_segmentation', '').strip() or None
+    try:
+        plan.discount_numeric = float(raw_numeric) if raw_numeric else None
+    except ValueError:
+        plan.discount_numeric = None
+    plan.discount_segmentation = _validate_config_value(form.get('discount_segmentation', '').strip(), 'discount_segmentation')
     plan.clawback_condition = form.get('clawback_condition', '').strip() or None
 
     # Offers (JSON)
     plan.offers = _parse_json_field(form.get('offers_json'), [])
 
     # Terms
-    plan.deposit = form.get('deposit', '').strip() or None
-    plan.payment_terms = form.get('payment_terms', '').strip() or None
-    plan.termination_notice = form.get('termination_notice', '').strip() or None
+    plan.deposit = _validate_config_value(form.get('deposit', '').strip(), 'deposit')
+    plan.payment_terms = _validate_config_value(form.get('payment_terms', '').strip(), 'payment_terms')
+    plan.termination_notice = _validate_config_value(form.get('termination_notice', '').strip(), 'termination_notice')
     plan.extra_offer = form.get('extra_offer', '').strip() or None
 
     # T&Cs - dynamic array-style fields
@@ -221,9 +239,13 @@ def _build_plan_from_form(form, plan=None):
     plan.hidden_rate = form.get('hidden_rate') == 'on'
     plan.available_for_chatbot = form.get('available_for_chatbot') == 'on'
     plan.chatbot_notes = form.get('chatbot_notes', '').strip() or None
-    plan.switch_to_us = form.get('switch_to_us', 'Not Eligible')
-    plan.referral_program = form.get('referral_program', 'Not Eligible')
-    plan.distribution_channel = form.get('distribution_channel', '').strip() or None
+    plan.switch_to_us = _validate_config_value(form.get('switch_to_us', '').strip(), 'switch_to_us') or 'Not Eligible'
+    plan.referral_program = _validate_config_value(form.get('referral_program', '').strip(), 'referral_program') or 'Not Eligible'
+    # Distribution channel (multi-choice checkboxes, stored comma-separated, validated against config)
+    allowed_channels = set(config_options.get('distribution_channel', []))
+    dist_channels = form.getlist('distribution_channel')
+    valid_channels = [c.strip() for c in dist_channels if c.strip() and (not allowed_channels or c.strip() in allowed_channels)]
+    plan.distribution_channel = ', '.join(valid_channels) or None
 
     # Custom fields - dynamic key/value pairs from the form
     cf_keys = form.getlist('cf_key')
@@ -299,7 +321,7 @@ def create_plan():
     if request.method == 'POST':
         db_session = get_session()
         try:
-            plan = _build_plan_from_form(request.form)
+            plan = _build_plan_from_form(request.form, config_options=tpl_kwargs.get('config_options'))
             plan.created_by = current_user.username
 
             if not plan.plan_type or not plan.plan_name:
@@ -352,7 +374,7 @@ def edit_plan(plan_id):
 
         if request.method == 'POST':
             old_name = plan.plan_name
-            _build_plan_from_form(request.form, plan)
+            _build_plan_from_form(request.form, plan, config_options=tpl_kwargs.get('config_options'))
             plan.updated_by = current_user.username
 
             if not plan.plan_type or not plan.plan_name:

@@ -113,6 +113,15 @@
                 <div class="hint">Discount plan name from Sitelink</div>
             </div>
             <div class="form-group">
+                <label>Storage Type</label>
+                <select name="storage_type">
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('storage_type', ['Self Storage', 'Wine Storage']) %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.storage_type == opt) or form_data.get('storage_type') == opt }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
                 <label>Sort Order</label>
                 <input type="number" name="sort_order" value="{{ plan.sort_order if plan else form_data.get('sort_order', '0') }}" min="0">
             </div>
@@ -259,7 +268,12 @@
             </div>
             <div class="form-group">
                 <label>Discount Segmentation</label>
-                <input type="text" name="discount_segmentation" value="{{ plan.discount_segmentation if plan else form_data.get('discount_segmentation', '') }}" placeholder="e.g. >=5% < 10%">
+                <select name="discount_segmentation">
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('discount_segmentation', []) %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.discount_segmentation == opt) or form_data.get('discount_segmentation') == opt }}>{{ opt }}</option>
+                    {% endfor %}
+                </select>
             </div>
             <div class="form-group form-full">
                 <label>Clawback Condition</label>
@@ -425,12 +439,16 @@
         </div>
         <div class="form-group" style="margin-top: 0.75rem;">
             <label>Distribution Channel</label>
-            <select name="distribution_channel">
-                <option value="">-- Select --</option>
+            <div class="site-checkboxes" style="margin-top: 0.25rem;">
+                {% set channel_list = (plan.distribution_channel or '').split(', ') if plan else form_data.getlist('distribution_channel') %}
                 {% for opt in config_options.get('distribution_channel', []) %}
-                <option value="{{ opt }}" {{ 'selected' if (plan and plan.distribution_channel == opt) or form_data.get('distribution_channel') == opt }}>{{ opt }}</option>
+                <label>
+                    <input type="checkbox" name="distribution_channel" value="{{ opt }}"
+                           {{ 'checked' if opt in channel_list }}>
+                    {{ opt }}
+                </label>
                 {% endfor %}
-            </select>
+            </div>
         </div>
     </div>
 

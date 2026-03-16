@@ -115,9 +115,14 @@
         <!-- ALL Department -->
         <!-- ============================================================ -->
         <tr>
-            <td class="dept-cell" rowspan="{{ 13 + (1 if plan.lock_in_period else 0) }}">ALL</td>
+            <td class="dept-cell" rowspan="{{ 14 + (1 if plan.lock_in_period else 0) }}">ALL</td>
             <td class="item-cell">Name</td>
             <td class="value-cell">{{ plan.plan_name }}</td>
+            <td class="notes-cell"></td>
+        </tr>
+        <tr>
+            <td class="item-cell">Storage Type</td>
+            <td class="value-cell">{{ plan.storage_type or '-' }}</td>
             <td class="notes-cell"></td>
         </tr>
         <tr>
