@@ -347,21 +347,27 @@ def _authenticate_bearer_token(token: str) -> Tuple[Optional[dict], Optional[str
     if payload.get("type") != "access":
         return None, "Not an access token"
 
-    # Look up the API key's mcp_tools and mcp_db_presets from DB
+    # Look up the API key's mcp_tools, mcp_db_presets, and real username from DB
     client_id = payload.get("client_id")
     mcp_tools = None  # None = no restriction (all tools)
     mcp_db_presets = []  # empty = all presets
+    oauth_username = None
     if client_id:
         session = _get_session()
         try:
             row = session.execute(
-                text("SELECT mcp_tools, mcp_db_presets FROM api_keys WHERE key_id = :key_id AND is_active = true AND mcp_enabled = true"),
+                text("""
+                    SELECT ak.mcp_tools, ak.mcp_db_presets, u.username
+                    FROM api_keys ak JOIN users u ON u.id = ak.user_id
+                    WHERE ak.key_id = :key_id AND ak.is_active = true AND ak.mcp_enabled = true
+                """),
                 {"key_id": client_id},
             ).fetchone()
             if not row:
                 return None, "API key no longer active"
             mcp_tools = row.mcp_tools or None
             mcp_db_presets = row.mcp_db_presets or []
+            oauth_username = row.username
         except Exception as e:
             logger.error(f"OAuth token key lookup error: {e}")
             return None, "Authentication error"
@@ -369,7 +375,7 @@ def _authenticate_bearer_token(token: str) -> Tuple[Optional[dict], Optional[str
             session.close()
 
     return {
-        "username": payload.get("sub", "oauth_client"),
+        "username": oauth_username or payload.get("sub", "oauth_client"),
         "user_id": None,
         "key_id": client_id or "unknown",
         "scopes": payload.get("scope", "mcp:*").split(),
