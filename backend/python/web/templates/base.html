@@ -332,6 +332,7 @@
         {% endif %}
         {% if current_user.can_access_inventory_tools() %}
         <a href="{{ url_for('tools.inventory_checker') }}" class="{{ 'active' if request.endpoint == 'tools.inventory_checker' else '' }}">Inventory Checker</a>
+        <a href="{{ url_for('tools.unit_availability') }}" class="{{ 'active' if request.endpoint == 'tools.unit_availability' else '' }}">Unit Availability</a>
         {% endif %}
     </div>
     {% endif %}
