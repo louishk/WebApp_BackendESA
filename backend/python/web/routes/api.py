@@ -2623,6 +2623,185 @@ def api_ext_statistics_services():
 
 
 # =============================================================================
+# MCP Tool Statistics - MCP server call monitoring
+# =============================================================================
+
+@api_bp.route('/statistics/mcp/summary')
+@require_auth
+@require_api_scope('statistics:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
+@cached(ttl_seconds=30)
+def api_mcp_statistics_summary():
+    """
+    MCP tool call summary.
+    Query params: period (1d, 7d, 30d, 90d)
+    """
+    period = request.args.get('period', '7d')
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        trunc_unit = 'hour' if period == '1d' else 'day'
+        result = session.execute(text("""
+            SELECT
+                COUNT(*) AS total_calls,
+                AVG(response_time_ms) AS avg_response_ms,
+                SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS error_count
+            FROM mcp_tool_statistics
+            WHERE called_at >= :since
+        """), {'since': since}).fetchone()
+
+        total = int(result.total_calls or 0)
+        avg_ms = float(result.avg_response_ms or 0)
+        error_count = int(result.error_count or 0)
+
+        volume_rows = session.execute(text("""
+            SELECT
+                date_trunc(:trunc_unit,
+                    timezone('Asia/Singapore', timezone('UTC', called_at))
+                ) AS bucket,
+                COUNT(*) AS count
+            FROM mcp_tool_statistics
+            WHERE called_at >= :since
+            GROUP BY bucket
+            ORDER BY bucket
+        """), {'trunc_unit': trunc_unit, 'since': since}).fetchall()
+
+        time_unit, timeline = _build_volume_timeline(period, volume_rows)
+
+        return jsonify({
+            'period': period,
+            'since': since.isoformat(),
+            'total_calls': total,
+            'avg_response_time_ms': round(avg_ms, 2),
+            'error_count': error_count,
+            'error_rate': round(error_count / total * 100, 2) if total > 0 else 0,
+            'time_unit': time_unit,
+            'calls_per_day': timeline,
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/statistics/mcp/tools')
+@require_auth
+@require_api_scope('statistics:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
+@cached(ttl_seconds=30)
+def api_mcp_statistics_tools():
+    """
+    Per-tool breakdown of MCP calls.
+    Query params:
+        period: 1d, 7d, 30d, 90d (default 7d)
+        sort: calls, avg_time, errors (default calls)
+    """
+    period = request.args.get('period', '7d')
+    sort_by = request.args.get('sort', 'calls')
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        rows = session.execute(text("""
+            SELECT
+                tool_name,
+                COUNT(*) AS total_calls,
+                AVG(response_time_ms) AS avg_response_ms,
+                MAX(response_time_ms) AS max_response_ms,
+                SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS error_count
+            FROM mcp_tool_statistics
+            WHERE called_at >= :since
+            GROUP BY tool_name
+        """), {'since': since}).fetchall()
+
+        def _category(name):
+            if name.startswith('DB_'):
+                return 'Database'
+            if name.startswith('GA_'):
+                return 'Google Ads'
+            return 'Health'
+
+        tools = []
+        for r in rows:
+            total = int(r.total_calls or 0)
+            errors = int(r.error_count or 0)
+            tools.append({
+                'tool_name': r.tool_name,
+                'category': _category(r.tool_name),
+                'total_calls': total,
+                'avg_response_ms': round(float(r.avg_response_ms or 0), 2),
+                'max_response_ms': round(float(r.max_response_ms or 0), 2),
+                'error_count': errors,
+                'error_rate': round(errors / total * 100, 2) if total > 0 else 0,
+            })
+
+        sort_key = {
+            'calls': lambda x: x['total_calls'],
+            'avg_time': lambda x: x['avg_response_ms'],
+            'errors': lambda x: x['error_count'],
+        }.get(sort_by, lambda x: x['total_calls'])
+        tools.sort(key=sort_key, reverse=True)
+
+        return jsonify({
+            'period': period,
+            'since': since.isoformat(),
+            'tools': tools,
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/statistics/mcp/users')
+@require_auth
+@require_api_scope('statistics:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
+@cached(ttl_seconds=30)
+def api_mcp_statistics_users():
+    """
+    Per-user breakdown of MCP calls.
+    Query params: period (1d, 7d, 30d, 90d)
+    """
+    period = request.args.get('period', '7d')
+    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
+    since = datetime.utcnow() - timedelta(days=days)
+
+    session = get_session()
+    try:
+        rows = session.execute(text("""
+            SELECT
+                username,
+                key_id,
+                COUNT(*) AS total_calls,
+                COUNT(DISTINCT tool_name) AS tools_used,
+                AVG(response_time_ms) AS avg_response_ms,
+                SUM(CASE WHEN is_error THEN 1 ELSE 0 END) AS error_count
+            FROM mcp_tool_statistics
+            WHERE called_at >= :since
+            GROUP BY username, key_id
+            ORDER BY COUNT(*) DESC
+        """), {'since': since}).fetchall()
+
+        return jsonify({
+            'period': period,
+            'since': since.isoformat(),
+            'users': [
+                {
+                    'username': r.username,
+                    'key_id': r.key_id,
+                    'total_calls': int(r.total_calls or 0),
+                    'tools_used': int(r.tools_used or 0),
+                    'avg_response_ms': round(float(r.avg_response_ms or 0), 2),
+                    'error_count': int(r.error_count or 0),
+                }
+                for r in rows
+            ],
+        })
+    finally:
+        session.close()
+
+
+# =============================================================================
 # Discount Plans API — External-facing REST endpoints
 # =============================================================================
 # Usable by external systems (chatbot, website, partner integrations)
