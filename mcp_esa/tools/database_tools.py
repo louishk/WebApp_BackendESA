@@ -12,6 +12,7 @@ from mcp.server import Server
 from mcp_esa.services.simple_database import SimpleDatabase
 from mcp_esa.services.database_service import get_database_service
 from mcp_esa.config.database_presets import get_database_presets
+from mcp_esa.server.transport import allowed_db_presets_var
 
 if TYPE_CHECKING:
     from mcp_esa.server.mcp_server import MCPServerApp
@@ -37,6 +38,11 @@ def register_database_tools(server: Server, app: 'MCPServerApp') -> None:
     async def DB_list_database_presets() -> str:
         """List all available database presets from environment configuration"""
         available = presets.get_available_presets()
+
+        # Filter by per-key preset restrictions
+        allowed_presets = allowed_db_presets_var.get([])
+        if allowed_presets:
+            available = {k: v for k, v in available.items() if k in allowed_presets}
 
         if not available:
             return "No database presets configured. Check your .env file for POSTGRES*, MARIADB*, MYSQL*, or MSSQL* configurations."
@@ -65,6 +71,11 @@ def register_database_tools(server: Server, app: 'MCPServerApp') -> None:
         Use DB_list_database_presets to see available presets.
         """
         global _active_connections
+
+        # Check per-key preset restriction
+        allowed_presets = allowed_db_presets_var.get([])
+        if allowed_presets and preset_name not in allowed_presets:
+            return f"Access denied: preset '{preset_name}' is not allowed for this API key"
 
         # Check if already connected
         if preset_name in _active_connections:

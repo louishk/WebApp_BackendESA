@@ -1026,6 +1026,26 @@ def list_api_keys():
         db.close()
 
 
+def _get_mcp_db_presets():
+    """Get available MCP database presets for the admin UI.
+    Returns dict of {preset_name: 'type — database'} for display."""
+    try:
+        from common.config_loader import get_config
+        config = get_config()
+        raw = config.get_raw_config('mcp')
+        databases = raw.get('databases', {})
+        result = {}
+        for name, db in databases.items():
+            db_type = db.get('type', 'postgresql')
+            if db_type == 'bigquery':
+                result[name] = f"BigQuery — {db.get('project_id', '?')}"
+            else:
+                result[name] = f"{db_type} — {db.get('database', '?')}"
+        return result
+    except Exception:
+        return {}
+
+
 def _get_mcp_tools_grouped():
     """Get available MCP tools grouped by category for the admin UI."""
     from collections import OrderedDict
@@ -1111,16 +1131,22 @@ def edit_api_key(user_id):
             mcp_tools = request.form.getlist('mcp_tools')
             api_key.mcp_tools = mcp_tools if mcp_tools else []
 
+            # Update MCP DB preset restrictions
+            mcp_db_presets = request.form.getlist('mcp_db_presets')
+            api_key.mcp_db_presets = mcp_db_presets if mcp_db_presets else []
+
             db.commit()
             audit_log(AuditEvent.CONFIG_UPDATED,
                       f"Updated API key config for user '{user.username}': scopes={scopes}, "
                       f"rate_limit={api_key.rate_limit}, daily_quota={api_key.daily_quota}, "
-                      f"mcp_enabled={api_key.mcp_enabled}, mcp_tools={len(mcp_tools)} selected")
+                      f"mcp_enabled={api_key.mcp_enabled}, mcp_tools={len(mcp_tools)} selected, "
+                      f"mcp_db_presets={len(mcp_db_presets)} selected")
             flash(f'API key settings updated for {user.username}.', 'success')
             return redirect(url_for('admin.list_api_keys'))
 
         # Build grouped MCP tool list for the UI
         mcp_tools_available = _get_mcp_tools_grouped()
+        mcp_db_presets_available = _get_mcp_db_presets()
 
         return render_template('admin/api_keys/edit.html',
                                user=user,
@@ -1128,7 +1154,8 @@ def edit_api_key(user_id):
                                all_scopes=API_SCOPES,
                                default_rate_limit=DEFAULT_RATE_LIMIT,
                                default_daily_quota=DEFAULT_DAILY_QUOTA,
-                               mcp_tools_available=mcp_tools_available)
+                               mcp_tools_available=mcp_tools_available,
+                               mcp_db_presets_available=mcp_db_presets_available)
     finally:
         db.close()
 

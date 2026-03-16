@@ -86,6 +86,8 @@ class ApiKey(Base):
                          comment="Whether this key can access the MCP server")
     mcp_tools = Column(JSONB, nullable=False, default=list,
                        comment="Allowed MCP tool names (empty list = all tools)")
+    mcp_db_presets = Column(JSONB, nullable=False, default=list,
+                            comment="Allowed DB preset names (empty list = all presets)")
 
     is_active = Column(Boolean, nullable=False, default=True)
     last_used_at = Column(DateTime(timezone=True), comment="Last time this key was used")
@@ -135,6 +137,7 @@ class ApiKey(Base):
             'scopes': self.scopes or [],
             'mcp_enabled': self.mcp_enabled,
             'mcp_tools': self.mcp_tools or [],
+            'mcp_db_presets': self.mcp_db_presets or [],
             'rate_limit': self.rate_limit,
             'daily_quota': self.daily_quota,
             'daily_usage': self.daily_usage,

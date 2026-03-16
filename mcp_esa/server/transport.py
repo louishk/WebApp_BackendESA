@@ -8,6 +8,7 @@ Single /mcp endpoint for all JSON-RPC operations.
 import json
 import logging
 import asyncio
+import contextvars
 from typing import AsyncIterator, List
 from datetime import datetime
 
@@ -22,6 +23,9 @@ from mcp_esa.server.mcp_server import MCPServerApp
 from mcp_esa.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Context variable for per-request DB preset restrictions (used by DB tools)
+allowed_db_presets_var: contextvars.ContextVar[List[str]] = contextvars.ContextVar('allowed_db_presets', default=[])
 
 
 class StreamableHTTPTransport:
@@ -40,6 +44,10 @@ class StreamableHTTPTransport:
         # Extract per-request allowed tools from auth middleware (NOT stored on self)
         # None = no restriction (all tools), list = only those tools
         allowed_tools = getattr(request.state, 'mcp_tools', None) if hasattr(request, 'state') else None
+
+        # Set DB preset restrictions in contextvar for DB tools to check
+        db_presets = getattr(request.state, 'mcp_db_presets', []) if hasattr(request, 'state') else []
+        allowed_db_presets_var.set(db_presets)
 
         if request.method == "POST":
             return await self._handle_post(request, allowed_tools)

@@ -133,6 +133,27 @@
             {% endfor %}
         </div>
         {% endif %}
+
+        {% if mcp_db_presets_available %}
+        <div id="mcp-presets-section" style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--esa-gray-dark); {{ 'display: none;' if not api_key.mcp_enabled }}">
+            <label style="font-weight: 600; font-size: 0.85rem; color: var(--esa-navy); margin-bottom: 0.25rem; display: block;">Database Preset Access</label>
+            <p style="font-size: 0.8rem; color: #888; margin-bottom: 0.5rem;">
+                Leave all unchecked to grant access to <strong>all presets</strong>. Check specific presets to restrict access.
+            </p>
+            <div class="scope-grid">
+                {% for preset_name, preset_info in mcp_db_presets_available.items() %}
+                <div>
+                    <label style="font-size: 0.8rem;">
+                        <input type="checkbox" name="mcp_db_presets" value="{{ preset_name }}"
+                               {{ 'checked' if api_key.mcp_db_presets and preset_name in api_key.mcp_db_presets }}>
+                        <code style="font-size: 0.75rem;">{{ preset_name }}</code>
+                        <span style="color: #888; font-size: 0.7rem;">({{ preset_info }})</span>
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Rate Limits & Quotas -->
@@ -164,12 +185,14 @@
 <script>
 clearTimeout(window.autoRefreshTimeout);
 
-// Show/hide MCP tools section when mcp_enabled is toggled
+// Show/hide MCP tools and presets sections when mcp_enabled is toggled
 const mcpCb = document.getElementById('mcp_enabled_cb');
 const mcpSection = document.getElementById('mcp-tools-section');
-if (mcpCb && mcpSection) {
+const mcpPresetsSection = document.getElementById('mcp-presets-section');
+if (mcpCb) {
     mcpCb.addEventListener('change', function() {
-        mcpSection.style.display = this.checked ? '' : 'none';
+        if (mcpSection) mcpSection.style.display = this.checked ? '' : 'none';
+        if (mcpPresetsSection) mcpPresetsSection.style.display = this.checked ? '' : 'none';
     });
 }
 
