@@ -1,0 +1,146 @@
+-- Migration 027: Expand ccws_tenants with full tenant fields from GetTenantInfoByTenantID
+-- Adds columns to match the rich tenant record returned by the per-tenant API endpoint.
+-- Run BEFORE deploying the updated pipeline code.
+
+-- Access & Security (new columns)
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sAccessCode2" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iAccessCode2Type" INTEGER;
+
+-- Primary Contact (new columns)
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sMrMrs" VARCHAR(20);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCountry" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sFax" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPager" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCountryCodeMobile" VARCHAR(10);
+
+-- Alternate Contact
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sMrMrsAlt" VARCHAR(20);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sFNameAlt" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sMIAlt" VARCHAR(10);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sLNameAlt" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sAddr1Alt" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sAddr2Alt" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCityAlt" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sRegionAlt" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPostalCodeAlt" VARCHAR(20);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCountryAlt" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPhoneAlt" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sEmailAlt" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sRelationshipAlt" VARCHAR(100);
+
+-- Business Contact
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sMrMrsBus" VARCHAR(20);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sFNameBus" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sMIBus" VARCHAR(10);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sLNameBus" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCompanyBus" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sAddr1Bus" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sAddr2Bus" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCityBus" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sRegionBus" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPostalCodeBus" VARCHAR(20);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCountryBus" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPhoneBus" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sEmailBus" VARCHAR(255);
+
+-- Additional Contact
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sMrMrsAdd" VARCHAR(20);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sFNameAdd" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sMIAdd" VARCHAR(10);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sLNameAdd" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sAddr1Add" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sAddr2Add" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCityAdd" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sRegionAdd" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPostalCodeAdd" VARCHAR(20);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sCountryAdd" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPhoneAdd" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sEmailAdd" VARCHAR(255);
+
+-- Identification
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sLicRegion" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sTaxID" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sTaxExemptCode" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "dDOB" TIMESTAMP;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iGender" INTEGER;
+
+-- Status Flags
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bCommercial" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bTaxExempt" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bSpecial" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bNeverLockOut" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bCompanyIsTenant" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bOnWaitingList" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bNoChecks" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bPermanent" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bWalkInPOS" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bSpecialAlert" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bPermanentGateLockout" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bSMSOptIn" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bDisabledWebAccess" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iBlackListRating" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iTenEvents_OptOut" INTEGER;
+
+-- Marketing
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "MarketingID" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "MktgDistanceID" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "MktgWhatID" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "MktgReasonID" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "MktgWhyID" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "MktgTypeID" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iHowManyOtherStorageCosDidYouContact" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iUsedSelfStorageInThePast" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iMktg_DidYouVisitWebSite" INTEGER;
+
+-- Exit Survey
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bExit_OnEmailOfferList" BOOLEAN;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iExitSat_Cleanliness" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iExitSat_Safety" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iExitSat_Services" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iExitSat_Staff" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iExitSat_Price" INTEGER;
+
+-- Geographic
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "dcLongitude" NUMERIC(14,10);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "dcLatitude" NUMERIC(14,10);
+
+-- Notes & Icons
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sTenNote" TEXT;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sIconList" VARCHAR(255);
+
+-- Pictures
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iPrimaryPic" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN1" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN2" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN3" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN4" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN5" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN6" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN7" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN8" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sPicFileN9" VARCHAR(255);
+
+-- Source Timestamps
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "dCreated" TIMESTAMP;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "dUpdated" TIMESTAMP;
+
+-- Access & Security (additional)
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sWebPassword" VARCHAR(255);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bAllowedFacilityAccess" BOOLEAN;
+
+-- Identification (additional)
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sSSN" VARCHAR(100);
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "sEmployer" VARCHAR(255);
+
+-- Status Flags (additional)
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "bHasActiveLedger" BOOLEAN;
+
+-- Global/National Account
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iGlobalNum_NationalMasterAccount" INTEGER;
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "iGlobalNum_NationalFranchiseAccount" INTEGER;
+
+-- Source Timestamps (additional)
+ALTER TABLE ccws_tenants ADD COLUMN IF NOT EXISTS "uTS" VARCHAR(100);
+
+-- New index on extract_date for backfill queries
+CREATE INDEX IF NOT EXISTS idx_ccws_tenant_extract ON ccws_tenants (extract_date);

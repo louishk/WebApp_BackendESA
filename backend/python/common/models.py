@@ -1815,9 +1815,12 @@ class Charge(Base, BaseModel, TimestampMixin):
 
 class CcwsTenant(Base, BaseModel, TimestampMixin):
     """
-    Tenant data from CallCenterWs TenantList SOAP API endpoint.
+    Tenant data from CallCenterWs SOAP API.
 
-    Data Source: CallCenterWs TenantList endpoint (17 fields)
+    Data Sources:
+    - TenantList endpoint (17 basic fields — used for initial seed)
+    - GetTenantInfoByTenantID endpoint (full tenant record — used for backfill)
+
     Composite unique key: SiteID + TenantID
     """
     __tablename__ = 'ccws_tenants'
@@ -1826,10 +1829,15 @@ class CcwsTenant(Base, BaseModel, TimestampMixin):
     TenantID = Column(Integer, primary_key=True, nullable=False, comment="Unique tenant identifier")
     SiteID = Column(Integer, primary_key=True, nullable=False, comment="Site/Location ID")
 
-    # Access
-    sAccessCode = Column(String(100), nullable=True, comment="Gate access code")
+    # Access & Security
+    sAccessCode = Column(String(100), nullable=True, comment="Primary gate access code")
+    sAccessCode2 = Column(String(100), nullable=True, comment="Secondary access code")
+    iAccessCode2Type = Column(Integer, nullable=True, comment="Type of secondary access code")
+    sWebPassword = Column(String(255), nullable=True, comment="Web portal password (encrypted)")
+    bAllowedFacilityAccess = Column(Boolean, nullable=True, comment="Facility access allowed flag")
 
-    # Contact Information
+    # Primary Contact Information
+    sMrMrs = Column(String(20), nullable=True, comment="Title (Mr., Mrs., etc.)")
     sFName = Column(String(100), nullable=True, comment="First name")
     sMI = Column(String(10), nullable=True, comment="Middle initial")
     sLName = Column(String(100), nullable=True, comment="Last name")
@@ -1839,19 +1847,143 @@ class CcwsTenant(Base, BaseModel, TimestampMixin):
     sCity = Column(String(100), nullable=True, comment="City")
     sRegion = Column(String(100), nullable=True, comment="State/Region")
     sPostalCode = Column(String(20), nullable=True, comment="Postal code")
-    sEmail = Column(String(255), nullable=True, comment="Email")
+    sCountry = Column(String(100), nullable=True, comment="Country")
     sPhone = Column(String(100), nullable=True, comment="Phone")
+    sFax = Column(String(100), nullable=True, comment="Fax number")
+    sEmail = Column(String(255), nullable=True, comment="Email")
+    sPager = Column(String(100), nullable=True, comment="Pager number")
     sMobile = Column(String(100), nullable=True, comment="Mobile")
+    sCountryCodeMobile = Column(String(10), nullable=True, comment="Mobile country code")
+
+    # Alternate Contact
+    sMrMrsAlt = Column(String(20), nullable=True, comment="Alt contact title")
+    sFNameAlt = Column(String(100), nullable=True, comment="Alt contact first name")
+    sMIAlt = Column(String(10), nullable=True, comment="Alt contact middle initial")
+    sLNameAlt = Column(String(100), nullable=True, comment="Alt contact last name")
+    sAddr1Alt = Column(String(255), nullable=True, comment="Alt contact address line 1")
+    sAddr2Alt = Column(String(255), nullable=True, comment="Alt contact address line 2")
+    sCityAlt = Column(String(100), nullable=True, comment="Alt contact city")
+    sRegionAlt = Column(String(100), nullable=True, comment="Alt contact state/region")
+    sPostalCodeAlt = Column(String(20), nullable=True, comment="Alt contact postal code")
+    sCountryAlt = Column(String(100), nullable=True, comment="Alt contact country")
+    sPhoneAlt = Column(String(100), nullable=True, comment="Alt contact phone")
+    sEmailAlt = Column(String(255), nullable=True, comment="Alt contact email")
+    sRelationshipAlt = Column(String(100), nullable=True, comment="Relationship to tenant")
+
+    # Business Contact
+    sMrMrsBus = Column(String(20), nullable=True, comment="Business contact title")
+    sFNameBus = Column(String(100), nullable=True, comment="Business contact first name")
+    sMIBus = Column(String(10), nullable=True, comment="Business contact middle initial")
+    sLNameBus = Column(String(100), nullable=True, comment="Business contact last name")
+    sCompanyBus = Column(String(255), nullable=True, comment="Business company name")
+    sAddr1Bus = Column(String(255), nullable=True, comment="Business address line 1")
+    sAddr2Bus = Column(String(255), nullable=True, comment="Business address line 2")
+    sCityBus = Column(String(100), nullable=True, comment="Business city")
+    sRegionBus = Column(String(100), nullable=True, comment="Business state/region")
+    sPostalCodeBus = Column(String(20), nullable=True, comment="Business postal code")
+    sCountryBus = Column(String(100), nullable=True, comment="Business country")
+    sPhoneBus = Column(String(100), nullable=True, comment="Business phone")
+    sEmailBus = Column(String(255), nullable=True, comment="Business email")
+
+    # Additional Contact
+    sMrMrsAdd = Column(String(20), nullable=True, comment="Additional contact title")
+    sFNameAdd = Column(String(100), nullable=True, comment="Additional contact first name")
+    sMIAdd = Column(String(10), nullable=True, comment="Additional contact middle initial")
+    sLNameAdd = Column(String(100), nullable=True, comment="Additional contact last name")
+    sAddr1Add = Column(String(255), nullable=True, comment="Additional contact address line 1")
+    sAddr2Add = Column(String(255), nullable=True, comment="Additional contact address line 2")
+    sCityAdd = Column(String(100), nullable=True, comment="Additional contact city")
+    sRegionAdd = Column(String(100), nullable=True, comment="Additional contact state/region")
+    sPostalCodeAdd = Column(String(20), nullable=True, comment="Additional contact postal code")
+    sCountryAdd = Column(String(100), nullable=True, comment="Additional contact country")
+    sPhoneAdd = Column(String(100), nullable=True, comment="Additional contact phone")
+    sEmailAdd = Column(String(255), nullable=True, comment="Additional contact email")
+
+    # Identification
     sLicense = Column(String(100), nullable=True, comment="License number")
-    sLocationCode = Column(String(10), nullable=True, comment="Location code (L001, etc.)")
+    sLicRegion = Column(String(100), nullable=True, comment="License issuing region")
+    sSSN = Column(String(100), nullable=True, comment="Social Security Number (encrypted)")
+    sTaxID = Column(String(100), nullable=True, comment="Tax ID number")
+    sTaxExemptCode = Column(String(100), nullable=True, comment="Tax exemption code")
+    dDOB = Column(DateTime, nullable=True, comment="Date of birth")
+    iGender = Column(Integer, nullable=True, comment="Gender code")
+    sEmployer = Column(String(255), nullable=True, comment="Employer name")
+
+    # Status Flags
+    bCommercial = Column(Boolean, nullable=True, comment="Commercial tenant flag")
+    bTaxExempt = Column(Boolean, nullable=True, comment="Tax exempt flag")
+    bSpecial = Column(Boolean, nullable=True, comment="Special tenant flag")
+    bNeverLockOut = Column(Boolean, nullable=True, comment="Never lock out flag")
+    bCompanyIsTenant = Column(Boolean, nullable=True, comment="Company is the tenant flag")
+    bOnWaitingList = Column(Boolean, nullable=True, comment="On waiting list flag")
+    bNoChecks = Column(Boolean, nullable=True, comment="No checks accepted flag")
+    bPermanent = Column(Boolean, nullable=True, comment="Permanent tenant flag")
+    bWalkInPOS = Column(Boolean, nullable=True, comment="Walk-in POS customer flag")
+    bSpecialAlert = Column(Boolean, nullable=True, comment="Special alert flag")
+    bPermanentGateLockout = Column(Boolean, nullable=True, comment="Permanent gate lockout flag")
+    bSMSOptIn = Column(Boolean, nullable=True, comment="SMS opt-in flag")
+    bDisabledWebAccess = Column(Boolean, nullable=True, comment="Web access disabled flag")
+    bHasActiveLedger = Column(Boolean, nullable=True, comment="Has active ledger flag")
+    iBlackListRating = Column(Integer, nullable=True, comment="Blacklist rating")
+    iTenEvents_OptOut = Column(Integer, nullable=True, comment="Tenant events opt-out setting")
+
+    # Marketing
+    MarketingID = Column(Integer, nullable=True, comment="Marketing source ID")
+    MktgDistanceID = Column(Integer, nullable=True, comment="Marketing distance ID")
+    MktgWhatID = Column(Integer, nullable=True, comment="Marketing 'what' ID")
+    MktgReasonID = Column(Integer, nullable=True, comment="Marketing reason ID")
+    MktgWhyID = Column(Integer, nullable=True, comment="Marketing 'why' ID")
+    MktgTypeID = Column(Integer, nullable=True, comment="Marketing type ID")
+    iHowManyOtherStorageCosDidYouContact = Column(Integer, nullable=True, comment="Other storage companies contacted")
+    iUsedSelfStorageInThePast = Column(Integer, nullable=True, comment="Used self storage before")
+    iMktg_DidYouVisitWebSite = Column(Integer, nullable=True, comment="Visited website flag")
+
+    # Exit Survey
+    bExit_OnEmailOfferList = Column(Boolean, nullable=True, comment="On email offer list after exit")
+    iExitSat_Cleanliness = Column(Integer, nullable=True, comment="Exit satisfaction: cleanliness")
+    iExitSat_Safety = Column(Integer, nullable=True, comment="Exit satisfaction: safety")
+    iExitSat_Services = Column(Integer, nullable=True, comment="Exit satisfaction: services")
+    iExitSat_Staff = Column(Integer, nullable=True, comment="Exit satisfaction: staff")
+    iExitSat_Price = Column(Integer, nullable=True, comment="Exit satisfaction: price")
+
+    # Geographic
+    dcLongitude = Column(Numeric(14, 10), nullable=True, comment="Longitude")
+    dcLatitude = Column(Numeric(14, 10), nullable=True, comment="Latitude")
+
+    # Notes & Icons
+    sTenNote = Column(Text, nullable=True, comment="Tenant notes")
+    sIconList = Column(String(255), nullable=True, comment="Icon list for UI")
+
+    # Pictures
+    iPrimaryPic = Column(Integer, nullable=True, comment="Primary picture index")
+    sPicFileN1 = Column(String(255), nullable=True, comment="Picture file 1")
+    sPicFileN2 = Column(String(255), nullable=True, comment="Picture file 2")
+    sPicFileN3 = Column(String(255), nullable=True, comment="Picture file 3")
+    sPicFileN4 = Column(String(255), nullable=True, comment="Picture file 4")
+    sPicFileN5 = Column(String(255), nullable=True, comment="Picture file 5")
+    sPicFileN6 = Column(String(255), nullable=True, comment="Picture file 6")
+    sPicFileN7 = Column(String(255), nullable=True, comment="Picture file 7")
+    sPicFileN8 = Column(String(255), nullable=True, comment="Picture file 8")
+    sPicFileN9 = Column(String(255), nullable=True, comment="Picture file 9")
+
+    # Global/National Account
+    iGlobalNum_NationalMasterAccount = Column(Integer, nullable=True, comment="National master account number")
+    iGlobalNum_NationalFranchiseAccount = Column(Integer, nullable=True, comment="National franchise account number")
+
+    # Source Timestamps
+    dCreated = Column(DateTime, nullable=True, comment="Record creation date in source")
+    dUpdated = Column(DateTime, nullable=True, comment="Record last update date in source")
+    uTS = Column(String(100), nullable=True, comment="Source timestamp token")
 
     # ETL Tracking
+    sLocationCode = Column(String(10), nullable=True, comment="Location code (L001, etc.)")
     extract_date = Column(Date, nullable=True, comment="Date when data was extracted")
 
     __table_args__ = (
         Index('idx_ccws_tenant_site', 'SiteID'),
         Index('idx_ccws_tenant_location', 'sLocationCode'),
         Index('idx_ccws_tenant_name', 'sLName', 'sFName'),
+        Index('idx_ccws_tenant_extract', 'extract_date'),
     )
 
 

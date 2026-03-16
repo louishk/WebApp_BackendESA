@@ -39,6 +39,8 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+from sqlalchemy import text as sa_text
+
 from common import (
     DataLayerConfig,
     SOAPClient,
@@ -53,6 +55,7 @@ from common import (
     CcwsTenant,
     CcwsLedger,
     CcwsCharge,
+    SiteInfo,
     # Data utilities
     convert_to_bool,
     convert_to_int,
@@ -108,7 +111,7 @@ def transform_ledger(record: Dict[str, Any], tenant_id: int, extract_date: date)
 
         # Foreign Keys
         'TenantID': tenant_id,
-        'UnitID': convert_to_int(record.get('UnitID')),
+        'unitID': convert_to_int(record.get('UnitID')),
         'EmployeeID': convert_to_int(record.get('EmployeeID')),
 
         # Unit Information
@@ -231,11 +234,24 @@ def transform_charge(record: Dict[str, Any], ledger_id: int, site_id: int, extra
 # =============================================================================
 
 def transform_ccws_tenant(record: Dict[str, Any], location_code: str, extract_date: date) -> Dict[str, Any]:
-    """Transform TenantList API record for ccws_tenants (all 17 API fields)."""
+    """Transform tenant API record for ccws_tenants (expanded fields).
+
+    Works with both TenantList (17 fields) and GetTenantInfoByTenantID (full record).
+    Missing fields from TenantList will just be None — existing data preserved by upsert.
+    """
     return {
         'SiteID': convert_to_int(record.get('SiteID')),
         'TenantID': convert_to_int(record.get('TenantID')),
+
+        # Access & Security
         'sAccessCode': record.get('sAccessCode'),
+        'sAccessCode2': record.get('sAccessCode2'),
+        'iAccessCode2Type': convert_to_int(record.get('iAccessCode2Type')),
+        'sWebPassword': record.get('sWebPassword'),
+        'bAllowedFacilityAccess': convert_to_bool(record.get('bAllowedFacilityAccess')),
+
+        # Primary Contact
+        'sMrMrs': record.get('sMrMrs'),
         'sFName': record.get('sFName'),
         'sMI': record.get('sMI'),
         'sLName': record.get('sLName'),
@@ -245,10 +261,135 @@ def transform_ccws_tenant(record: Dict[str, Any], location_code: str, extract_da
         'sCity': record.get('sCity'),
         'sRegion': record.get('sRegion'),
         'sPostalCode': record.get('sPostalCode'),
-        'sEmail': record.get('sEmail'),
+        'sCountry': record.get('sCountry'),
         'sPhone': record.get('sPhone'),
+        'sFax': record.get('sFax'),
+        'sEmail': record.get('sEmail'),
+        'sPager': record.get('sPager'),
         'sMobile': record.get('sMobile'),
+        'sCountryCodeMobile': record.get('sCountryCodeMobile'),
+
+        # Alternate Contact
+        'sMrMrsAlt': record.get('sMrMrsAlt'),
+        'sFNameAlt': record.get('sFNameAlt'),
+        'sMIAlt': record.get('sMIAlt'),
+        'sLNameAlt': record.get('sLNameAlt'),
+        'sAddr1Alt': record.get('sAddr1Alt'),
+        'sAddr2Alt': record.get('sAddr2Alt'),
+        'sCityAlt': record.get('sCityAlt'),
+        'sRegionAlt': record.get('sRegionAlt'),
+        'sPostalCodeAlt': record.get('sPostalCodeAlt'),
+        'sCountryAlt': record.get('sCountryAlt'),
+        'sPhoneAlt': record.get('sPhoneAlt'),
+        'sEmailAlt': record.get('sEmailAlt'),
+        'sRelationshipAlt': record.get('sRelationshipAlt'),
+
+        # Business Contact
+        'sMrMrsBus': record.get('sMrMrsBus'),
+        'sFNameBus': record.get('sFNameBus'),
+        'sMIBus': record.get('sMIBus'),
+        'sLNameBus': record.get('sLNameBus'),
+        'sCompanyBus': record.get('sCompanyBus'),
+        'sAddr1Bus': record.get('sAddr1Bus'),
+        'sAddr2Bus': record.get('sAddr2Bus'),
+        'sCityBus': record.get('sCityBus'),
+        'sRegionBus': record.get('sRegionBus'),
+        'sPostalCodeBus': record.get('sPostalCodeBus'),
+        'sCountryBus': record.get('sCountryBus'),
+        'sPhoneBus': record.get('sPhoneBus'),
+        'sEmailBus': record.get('sEmailBus'),
+
+        # Additional Contact
+        'sMrMrsAdd': record.get('sMrMrsAdd'),
+        'sFNameAdd': record.get('sFNameAdd'),
+        'sMIAdd': record.get('sMIAdd'),
+        'sLNameAdd': record.get('sLNameAdd'),
+        'sAddr1Add': record.get('sAddr1Add'),
+        'sAddr2Add': record.get('sAddr2Add'),
+        'sCityAdd': record.get('sCityAdd'),
+        'sRegionAdd': record.get('sRegionAdd'),
+        'sPostalCodeAdd': record.get('sPostalCodeAdd'),
+        'sCountryAdd': record.get('sCountryAdd'),
+        'sPhoneAdd': record.get('sPhoneAdd'),
+        'sEmailAdd': record.get('sEmailAdd'),
+
+        # Identification
         'sLicense': record.get('sLicense'),
+        'sLicRegion': record.get('sLicRegion'),
+        'sSSN': record.get('sSSN'),
+        'sTaxID': record.get('sTaxID'),
+        'sTaxExemptCode': record.get('sTaxExemptCode'),
+        'dDOB': convert_to_datetime(record.get('dDOB')),
+        'iGender': convert_to_int(record.get('iGender')),
+        'sEmployer': record.get('sEmployer'),
+
+        # Status Flags
+        'bCommercial': convert_to_bool(record.get('bCommercial')),
+        'bTaxExempt': convert_to_bool(record.get('bTaxExempt')),
+        'bSpecial': convert_to_bool(record.get('bSpecial')),
+        'bNeverLockOut': convert_to_bool(record.get('bNeverLockOut')),
+        'bCompanyIsTenant': convert_to_bool(record.get('bCompanyIsTenant')),
+        'bOnWaitingList': convert_to_bool(record.get('bOnWaitingList')),
+        'bNoChecks': convert_to_bool(record.get('bNoChecks')),
+        'bPermanent': convert_to_bool(record.get('bPermanent')),
+        'bWalkInPOS': convert_to_bool(record.get('bWalkInPOS')),
+        'bSpecialAlert': convert_to_bool(record.get('bSpecialAlert')),
+        'bPermanentGateLockout': convert_to_bool(record.get('bPermanentGateLockout')),
+        'bSMSOptIn': convert_to_bool(record.get('bSMSOptIn')),
+        'bDisabledWebAccess': convert_to_bool(record.get('bDisabledWebAccess')),
+        'bHasActiveLedger': convert_to_bool(record.get('bHasActiveLedger')),
+        'iBlackListRating': convert_to_int(record.get('iBlackListRating')),
+        'iTenEvents_OptOut': convert_to_int(record.get('iTenEvents_OptOut')),
+
+        # Marketing
+        'MarketingID': convert_to_int(record.get('MarketingID')),
+        'MktgDistanceID': convert_to_int(record.get('MktgDistanceID')),
+        'MktgWhatID': convert_to_int(record.get('MktgWhatID')),
+        'MktgReasonID': convert_to_int(record.get('MktgReasonID')),
+        'MktgWhyID': convert_to_int(record.get('MktgWhyID')),
+        'MktgTypeID': convert_to_int(record.get('MktgTypeID')),
+        'iHowManyOtherStorageCosDidYouContact': convert_to_int(record.get('iHowManyOtherStorageCosDidYouContact')),
+        'iUsedSelfStorageInThePast': convert_to_int(record.get('iUsedSelfStorageInThePast')),
+        'iMktg_DidYouVisitWebSite': convert_to_int(record.get('iMktg_DidYouVisitWebSite')),
+
+        # Exit Survey
+        'bExit_OnEmailOfferList': convert_to_bool(record.get('bExit_OnEmailOfferList')),
+        'iExitSat_Cleanliness': convert_to_int(record.get('iExitSat_Cleanliness')),
+        'iExitSat_Safety': convert_to_int(record.get('iExitSat_Safety')),
+        'iExitSat_Services': convert_to_int(record.get('iExitSat_Services')),
+        'iExitSat_Staff': convert_to_int(record.get('iExitSat_Staff')),
+        'iExitSat_Price': convert_to_int(record.get('iExitSat_Price')),
+
+        # Geographic
+        'dcLongitude': convert_to_decimal(record.get('dcLongitude')),
+        'dcLatitude': convert_to_decimal(record.get('dcLatitude')),
+
+        # Notes & Icons
+        'sTenNote': record.get('sTenNote'),
+        'sIconList': record.get('sIconList'),
+
+        # Pictures
+        'iPrimaryPic': convert_to_int(record.get('iPrimaryPic')),
+        'sPicFileN1': record.get('sPicFileN1'),
+        'sPicFileN2': record.get('sPicFileN2'),
+        'sPicFileN3': record.get('sPicFileN3'),
+        'sPicFileN4': record.get('sPicFileN4'),
+        'sPicFileN5': record.get('sPicFileN5'),
+        'sPicFileN6': record.get('sPicFileN6'),
+        'sPicFileN7': record.get('sPicFileN7'),
+        'sPicFileN8': record.get('sPicFileN8'),
+        'sPicFileN9': record.get('sPicFileN9'),
+
+        # Global/National Account
+        'iGlobalNum_NationalMasterAccount': convert_to_int(record.get('iGlobalNum_NationalMasterAccount')),
+        'iGlobalNum_NationalFranchiseAccount': convert_to_int(record.get('iGlobalNum_NationalFranchiseAccount')),
+
+        # Source Timestamps
+        'dCreated': convert_to_datetime(record.get('dCreated')),
+        'dUpdated': convert_to_datetime(record.get('dUpdated')),
+        'uTS': record.get('uTS'),
+
+        # ETL Tracking
         'sLocationCode': location_code,
         'extract_date': extract_date,
     }
@@ -535,6 +676,122 @@ def fetch_charges_for_ledger(
             'ledgerId': ledger_id
         }
     )
+
+
+def fetch_tenant_info(
+    soap_client: SOAPClient,
+    location_code: str,
+    tenant_id: int
+) -> Optional[Dict[str, Any]]:
+    """Fetch full tenant info by TenantID. Returns first record or None."""
+    try:
+        results = call_soap_endpoint(
+            soap_client,
+            'tenant_info_by_tenant_id',
+            {
+                'sLocationCode': location_code,
+                'iTenantID': tenant_id
+            }
+        )
+        if results:
+            return results[0]
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to fetch tenant info for {location_code}/TenantID={tenant_id}: {e}")
+        return None
+
+
+# =============================================================================
+# Phase C: Discover new tenants from rentroll not yet in ccws_tenants
+# =============================================================================
+
+def discover_and_backfill_new_tenants(
+    soap_client: SOAPClient,
+    engine,
+    location_codes: List[str],
+    extract_date: date,
+    chunk_size: int = 500
+) -> int:
+    """
+    Check rentroll for TenantIDs not yet in ccws_tenants.
+    INSERT new IDs, then call GetTenantInfoByTenantID to fill details.
+    Returns count of new tenants added.
+    """
+    logger.info("Phase C: Discovering new tenants from rentroll...")
+
+    # Build SiteID → location_code map
+    with engine.connect() as conn:
+        rows = conn.execute(sa_text(
+            'SELECT "SiteID", "SiteCode" FROM siteinfo WHERE "SiteCode" IS NOT NULL'
+        )).fetchall()
+    site_to_location = {row[0]: row[1] for row in rows}
+
+    # Find TenantIDs in rentroll that don't exist in ccws_tenants
+    with engine.connect() as conn:
+        new_pairs = conn.execute(sa_text("""
+            SELECT DISTINCT r."SiteID", r."TenantID"
+            FROM rentroll r
+            LEFT JOIN ccws_tenants ct ON r."SiteID" = ct."SiteID" AND r."TenantID" = ct."TenantID"
+            WHERE ct."TenantID" IS NULL
+              AND r."TenantID" IS NOT NULL
+              AND r."SiteID" IS NOT NULL
+        """)).fetchall()
+
+    if not new_pairs:
+        logger.info("  No new tenants found in rentroll.")
+        return 0
+
+    logger.info(f"  Found {len(new_pairs)} new (SiteID, TenantID) pairs")
+
+    # Insert skeleton rows + call GetTenantInfoByTenantID for each
+    added = 0
+    session_manager = SessionManager(engine)
+
+    with session_manager.session_scope() as session:
+        upsert_ops = UpsertOperations(session, 'postgresql')
+
+        ccws_tenant_records = []
+        with tqdm(total=len(new_pairs), desc="  New tenants", unit="t") as pbar:
+            for site_id, tenant_id in new_pairs:
+                location_code = site_to_location.get(site_id)
+                if not location_code:
+                    pbar.update(1)
+                    continue
+
+                # Try to get full data via API
+                raw = fetch_tenant_info(soap_client, location_code, tenant_id)
+                if raw:
+                    transformed = transform_ccws_tenant(raw, location_code, extract_date)
+                else:
+                    # Insert skeleton with just IDs
+                    transformed = {
+                        'SiteID': site_id,
+                        'TenantID': tenant_id,
+                        'sLocationCode': location_code,
+                        'extract_date': extract_date,
+                    }
+
+                if transformed.get('TenantID'):
+                    ccws_tenant_records.append(transformed)
+                    added += 1
+
+                pbar.update(1)
+
+        # Upsert all at once
+        if ccws_tenant_records:
+            ccws_tenant_records = deduplicate_records(ccws_tenant_records, ['SiteID', 'TenantID'])
+            logger.info(f"  Upserting {len(ccws_tenant_records)} new ccws_tenants...")
+            for i in range(0, len(ccws_tenant_records), chunk_size):
+                chunk = ccws_tenant_records[i:i + chunk_size]
+                upsert_ops.upsert_batch(
+                    model=CcwsTenant,
+                    records=chunk,
+                    constraint_columns=['SiteID', 'TenantID'],
+                    chunk_size=chunk_size
+                )
+
+    logger.info(f"  Phase C complete: {added} new tenants added")
+    return added
 
 
 # =============================================================================
@@ -881,6 +1138,19 @@ def main():
     logger.info("Pushing data to database...")
     push_to_database(all_data, config, chunk_size)
 
+    # Phase C: Discover new tenants from rentroll not yet in ccws_tenants
+    logger.info("-" * 70)
+    db_config = config.databases.get('postgresql')
+    engine = create_engine_from_config(db_config)
+    new_tenants = discover_and_backfill_new_tenants(
+        soap_client=soap_client,
+        engine=engine,
+        location_codes=location_codes,
+        extract_date=extract_date,
+        chunk_size=chunk_size,
+    )
+    engine.dispose()
+
     # Close SOAP client
     soap_client.close()
 
@@ -890,6 +1160,8 @@ def main():
     logger.info(f"  cc_tenants:  {len(all_data['tenants'])}  |  ccws_tenants:  {len(all_data['ccws_tenants'])}")
     logger.info(f"  cc_ledgers:  {len(all_data['ledgers'])}  |  ccws_ledgers:  {len(all_data['ccws_ledgers'])}")
     logger.info(f"  cc_charges:  {len(all_data['charges'])}  |  ccws_charges:  {len(all_data['ccws_charges'])}")
+    if new_tenants:
+        logger.info(f"  New tenants discovered (Phase C): {new_tenants}")
     logger.info("=" * 70)
 
 

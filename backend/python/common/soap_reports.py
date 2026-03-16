@@ -561,6 +561,13 @@ REPORT_REGISTRY = {
         result_tag='Table',
         required_params=['sLocationCode', 'ledgerId']
     ),
+    'tenant_info_by_tenant_id': ReportConfig(
+        operation='TenantInfoByTenantID',
+        soap_action='http://tempuri.org/CallCenterWs/CallCenterWs/TenantInfoByTenantID',
+        namespace='http://tempuri.org/CallCenterWs/CallCenterWs',
+        result_tag='Table',  # TODO: verify via probe — may need adjustment
+        required_params=['sLocationCode', 'iTenantID']
+    ),
 }
 
 
