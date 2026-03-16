@@ -8,8 +8,10 @@ to avoid adding latency to request handling.
 import time
 import threading
 import logging
+import re
 from queue import Queue, Empty
 from datetime import datetime
+from urllib.parse import unquote
 
 from flask import request, g
 
@@ -21,10 +23,16 @@ _writer_thread = None
 _writer_stop = threading.Event()
 
 
+_IP_RE = re.compile(r'^[\d.:a-fA-F]+$')
+
+
 def _get_client_ip():
     """Get client IP, handling proxies."""
-    if request.headers.get('X-Forwarded-For'):
-        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    xff = request.headers.get('X-Forwarded-For', '')
+    if xff:
+        candidate = xff.split(',')[0].strip()
+        if _IP_RE.match(candidate):
+            return candidate
     return request.remote_addr or 'unknown'
 
 
@@ -138,15 +146,19 @@ def init_api_stats(app):
                          'phpmyadmin', '.php', 'cgi-bin', 'wp-content', 'wp-includes',
                          'xmlrpc', '.asp', 'shell', '.sql', '.bak',
                          '.DS_Store', 'etc/passwd', '..', '.htaccess', '.htpasswd')
+    # Legitimate paths that match blocked patterns (e.g. Azure AD OAuth redirect)
+    _BLOCKED_WHITELIST = ('/oauth_callback.php',)
 
     @app.before_request
     def _block_suspicious_paths():
-        path_lower = request.path.lower()
+        # Normalize percent-encoding before checking patterns
+        path_lower = unquote(request.path).lower()
         if any(pattern in path_lower for pattern in _BLOCKED_PATTERNS):
-            client_ip = _get_client_ip()
-            logger.warning(f"Blocked suspicious path from {client_ip}: {request.path}")
-            from flask import abort
-            abort(404)
+            if path_lower not in _BLOCKED_WHITELIST:
+                client_ip = _get_client_ip()
+                logger.warning(f"Blocked suspicious path from {client_ip}: {request.path}")
+                from flask import abort
+                abort(404)
 
     @app.before_request
     def _stats_before():
