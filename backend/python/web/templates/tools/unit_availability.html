@@ -1022,15 +1022,15 @@ select.form-select {
         const payload = {
             site_code: document.getElementById('res-site-code').value,
             unit_id: parseInt(document.getElementById('res-unit-id').value),
-            tenant_name: document.getElementById('res-first-name').value.trim(),
-            tenant_last: document.getElementById('res-last-name').value.trim(),
+            first_name: document.getElementById('res-first-name').value.trim(),
+            last_name: document.getElementById('res-last-name').value.trim(),
             phone: document.getElementById('res-phone').value.trim(),
             email: document.getElementById('res-email').value.trim(),
-            notes: document.getElementById('res-notes').value.trim(),
+            comment: document.getElementById('res-notes').value.trim(),
         };
 
         try {
-            const res = await fetch('/api/reservations/quick', {
+            const res = await fetch('/api/reservations/reserve', {
                 method: 'POST',
                 headers: apiHeaders(),
                 body: JSON.stringify(payload),
@@ -1045,7 +1045,8 @@ select.form-select {
             if (res.ok && data.success) {
                 title.textContent = 'Reservation Submitted';
                 title.style.color = '#28A745';
-                msg.textContent = data.message || 'Reservation was successfully submitted.';
+                const extra = data.waiting_id ? ` (Ref: ${data.waiting_id})` : '';
+                msg.textContent = (data.message || 'Reservation was successfully submitted.') + extra;
 
                 const unit = allUnits.find(u => u.UnitID === payload.unit_id && u.sLocationCode === payload.site_code);
                 if (unit) unit.bWaitingListReserved = true;
