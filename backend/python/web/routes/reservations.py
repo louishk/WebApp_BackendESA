@@ -16,7 +16,8 @@ value or use the _default_date() / _PLACEHOLDER_DOB helpers.
 import logging
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from web.auth.jwt_auth import require_auth, require_api_scope
@@ -150,6 +151,37 @@ def _clamp(value, max_len):
     return str(value)[:max_len] if value else ''
 
 
+def _record_reservation(**kwargs):
+    """Insert reservation tracking record into esa_pbi. Best-effort, never raises."""
+    try:
+        session = get_pbi_session()
+        try:
+            session.execute(text("""
+                INSERT INTO api_reservations (
+                    site_code, unit_id, first_name, last_name, email, phone,
+                    mobile, quoted_rate, concession_id, needed_date, source_name,
+                    comment, tenant_id, waiting_id, global_waiting_num,
+                    source, gclid, gid, botid, api_key_id, api_user
+                ) VALUES (
+                    :site_code, :unit_id, :first_name, :last_name, :email, :phone,
+                    :mobile, :quoted_rate, :concession_id, :needed_date, :source_name,
+                    :comment, :tenant_id, :waiting_id, :global_waiting_num,
+                    :source, :gclid, :gid, :botid, :api_key_id, :api_user
+                )
+            """), kwargs)
+            session.commit()
+        finally:
+            session.close()
+    except Exception as e:
+        logger.warning(f"Failed to record reservation tracking: {e}")
+
+
+def _get_caller_info():
+    """Extract API caller identity from Flask g."""
+    user = getattr(g, 'current_user', None) or {}
+    return user.get('key_id'), user.get('sub')
+
+
 # =============================================================================
 # POST /api/reservations/reserve — full flow: create tenant + reservation
 # =============================================================================
@@ -230,6 +262,12 @@ def reservation_reserve():
     concession_id, cid_err = _safe_int(data.get('concession_id', 0), min_val=0)
     if cid_err:
         return jsonify({'error': f'concession_id: {cid_err}'}), 400
+
+    # Distribution tracking fields
+    source = _clamp(data.get('source', 'api'), 50)
+    gclid = _clamp(data.get('gclid', ''), 255) or None
+    gid = _clamp(data.get('gid', ''), 255) or None
+    botid = _clamp(data.get('botid', ''), 255) or None
 
     soap_client = None
     try:
@@ -334,6 +372,20 @@ def reservation_reserve():
             f"waiting_id={waiting_id} name={_sanitize_log(first_name)} {_sanitize_log(last_name)}"
         )
 
+        # Record for distribution analytics
+        api_key_id, api_user = _get_caller_info()
+        _record_reservation(
+            site_code=site_code, unit_id=unit_id,
+            first_name=first_name, last_name=last_name,
+            email=email, phone=phone, mobile=mobile,
+            quoted_rate=quoted_rate, concession_id=concession_id,
+            needed_date=needed, source_name=source_name,
+            comment=comment, tenant_id=tenant_id,
+            waiting_id=waiting_id, global_waiting_num=global_waiting_num,
+            source=source, gclid=gclid, gid=gid, botid=botid,
+            api_key_id=api_key_id, api_user=api_user,
+        )
+
         return jsonify({
             'success': True,
             'site_code': site_code,
@@ -423,6 +475,12 @@ def reservation_create():
     if cid_err:
         return jsonify({'error': f'concession_id: {cid_err}'}), 400
 
+    # Distribution tracking fields
+    source = _clamp(data.get('source', 'api'), 50)
+    gclid = _clamp(data.get('gclid', ''), 255) or None
+    gid = _clamp(data.get('gid', ''), 255) or None
+    botid = _clamp(data.get('botid', ''), 255) or None
+
     soap_client = None
     try:
         soap_client = _get_cc_soap_client()
@@ -464,6 +522,20 @@ def reservation_create():
         audit_log(
             'RESERVATION_CREATED',
             f"site={site_code} unit={unit_id} tenant={tenant_id} waiting_id={waiting_id}"
+        )
+
+        # Record for distribution analytics
+        api_key_id, api_user = _get_caller_info()
+        _record_reservation(
+            site_code=site_code, unit_id=unit_id,
+            first_name='', last_name='',
+            email='', phone='', mobile='',
+            quoted_rate=quoted_rate, concession_id=concession_id,
+            needed_date=needed, source_name=_clamp(data.get('source_name', 'ESA Backend'), 64),
+            comment=_clamp(data.get('comment', ''), 500), tenant_id=tenant_id,
+            waiting_id=waiting_id, global_waiting_num=global_waiting_num,
+            source=source, gclid=gclid, gid=gid, botid=botid,
+            api_key_id=api_key_id, api_user=api_user,
         )
 
         return jsonify({
