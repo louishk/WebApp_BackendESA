@@ -23,6 +23,133 @@
     }
     .info-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.9rem; }
     .info-row strong { min-width: 100px; color: var(--esa-navy); }
+
+    /* API Reference styles */
+    .api-group { margin-bottom: 1rem; border: 1px solid var(--esa-gray-dark); border-radius: 6px; overflow: hidden; }
+    .api-group-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.6rem 0.9rem;
+        background: var(--esa-gray);
+        cursor: pointer;
+        user-select: none;
+        border: none;
+        width: 100%;
+        text-align: left;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--esa-navy);
+    }
+    .api-group-header:hover { background: #e2e5ea; }
+    .api-group-header .group-meta { display: flex; align-items: center; gap: 0.5rem; }
+    .api-group-header .chevron { font-size: 0.7rem; transition: transform 0.2s ease; color: #666; }
+    .api-group-header.open .chevron { transform: rotate(90deg); }
+    .api-group-body { display: none; }
+    .api-group-body.open { display: block; }
+
+    .endpoint-row {
+        display: grid;
+        grid-template-columns: 60px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.55rem 0.9rem;
+        border-top: 1px solid var(--esa-gray-dark);
+        cursor: pointer;
+        font-size: 0.85rem;
+        transition: background 0.1s;
+    }
+    .endpoint-row:hover { background: #f7f8fa; }
+    .endpoint-row.expanded { background: #f0f4ff; }
+    .endpoint-path { font-family: monospace; font-size: 0.82rem; color: #333; }
+    .endpoint-desc { color: #555; font-size: 0.82rem; }
+    .endpoint-scope-col { text-align: right; white-space: nowrap; }
+
+    .method-badge {
+        display: inline-block;
+        padding: 0.15rem 0.4rem;
+        border-radius: 3px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        font-family: monospace;
+        letter-spacing: 0.02em;
+        min-width: 40px;
+        text-align: center;
+    }
+    .method-GET    { background: #d1fae5; color: #065f46; }
+    .method-POST   { background: #dbeafe; color: #1e40af; }
+    .method-PUT    { background: #fef3c7; color: #92400e; }
+    .method-DELETE { background: #fee2e2; color: #991b1b; }
+
+    .endpoint-detail {
+        display: none;
+        padding: 0.85rem 0.9rem 0.85rem 1.5rem;
+        border-top: 1px dashed var(--esa-gray-dark);
+        background: #fafbfc;
+        font-size: 0.82rem;
+    }
+    .endpoint-detail.open { display: block; }
+    .detail-section { margin-bottom: 0.75rem; }
+    .detail-section:last-child { margin-bottom: 0; }
+    .detail-label { font-size: 0.75rem; font-weight: 600; color: var(--esa-navy); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+
+    .param-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .param-table th { text-align: left; font-weight: 600; color: #555; padding: 0.2rem 0.5rem; background: var(--esa-gray); font-size: 0.75rem; }
+    .param-table td { padding: 0.25rem 0.5rem; border-top: 1px solid var(--esa-gray-dark); vertical-align: top; }
+    .param-name { font-family: monospace; color: var(--esa-navy); }
+    .param-type { color: #888; font-size: 0.75rem; }
+    .param-req { font-size: 0.7rem; font-weight: 600; }
+    .param-req.required { color: #dc2626; }
+    .param-req.optional { color: #9ca3af; }
+    .param-desc { color: #555; }
+
+    .curl-block {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    .curl-block pre {
+        flex: 1;
+        background: var(--esa-navy);
+        color: #d1fae5;
+        padding: 0.6rem 0.8rem;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        overflow-x: auto;
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    .curl-copy-btn {
+        flex-shrink: 0;
+        padding: 0.25rem 0.55rem;
+        font-size: 0.72rem;
+        background: var(--esa-gray);
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        cursor: pointer;
+        color: #333;
+        margin-top: 2px;
+    }
+    .curl-copy-btn:hover { background: #e2e5ea; }
+
+    .example-resp pre {
+        background: #1e293b;
+        color: #94a3b8;
+        padding: 0.6rem 0.8rem;
+        border-radius: 5px;
+        font-size: 0.78rem;
+        overflow-x: auto;
+        margin: 0;
+        white-space: pre-wrap;
+    }
+
+    .api-empty-state { font-size: 0.85rem; color: #888; padding: 0.5rem 0; }
+
+    @media (max-width: 640px) {
+        .endpoint-row { grid-template-columns: 52px 1fr; }
+        .endpoint-scope-col { display: none; }
+    }
 </style>
 
 <div class="page-header">
@@ -191,27 +318,13 @@
 </div>
 {% endif %}
 
-<!-- Usage Guide -->
+<!-- API Usage + Reference -->
 <div class="card">
     <h2>API Usage</h2>
-    <div style="font-size: 0.9rem;">
+    <div style="font-size: 0.9rem; margin-bottom: 1.25rem;">
         <p style="margin-bottom: 0.5rem;">Send your API key in the <code>X-API-Key</code> header:</p>
         <pre style="background: var(--esa-navy); color: #fff; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem;">curl -H "X-API-Key: esa_xxxxxxxx.your_secret_here" \
-     https://your-domain.com/api/discount-plans</pre>
-
-        <p style="margin-top: 1rem; margin-bottom: 0.5rem;"><strong>Available endpoints:</strong></p>
-        <table>
-            <thead>
-                <tr><th>Method</th><th>Endpoint</th><th>Scope Required</th><th>Description</th></tr>
-            </thead>
-            <tbody>
-                <tr><td>GET</td><td><code>/api/discount-plans</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>List all plans (with filters)</td></tr>
-                <tr><td>GET</td><td><code>/api/discount-plans/&lt;id&gt;</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>Get plan by ID</td></tr>
-                <tr><td>GET</td><td><code>/api/discount-plans/by-name/&lt;name&gt;</code></td><td><span class="scope-badge scope-read">discount_plans:read</span></td><td>Get plan by name</td></tr>
-                <tr><td>POST</td><td><code>/api/discount-plans</code></td><td><span class="scope-badge scope-write">discount_plans:write</span></td><td>Create new plan</td></tr>
-                <tr><td>PUT</td><td><code>/api/discount-plans/&lt;id&gt;</code></td><td><span class="scope-badge scope-write">discount_plans:write</span></td><td>Update a plan</td></tr>
-            </tbody>
-        </table>
+     https://backend.extraspace.com.sg/api/discount-plans</pre>
 
         <div style="margin-top: 1rem; padding: 0.75rem; background: var(--esa-gray); border-radius: 6px; font-size: 0.85rem;">
             <strong>Response headers:</strong> Each API response includes rate limit and quota information:
@@ -220,6 +333,16 @@
                 <li><code>X-Quota-Limit</code> — your daily quota</li>
                 <li><code>X-Quota-Remaining</code> — remaining requests for today</li>
             </ul>
+        </div>
+    </div>
+
+    <div id="api-reference">
+        <h3 style="font-size: 1rem; color: var(--esa-navy); margin-bottom: 0.75rem; border-top: 1px solid var(--esa-gray-dark); padding-top: 1rem;">
+            API Reference
+            <span style="font-size: 0.8rem; font-weight: normal; color: #888; margin-left: 0.5rem;">— showing endpoints for your assigned scopes</span>
+        </h3>
+        <div id="api-groups-container">
+            <p style="font-size: 0.85rem; color: #888;">No API scopes assigned — contact an admin.</p>
         </div>
     </div>
 </div>
@@ -239,5 +362,464 @@ function copyField(elementId) {
         setTimeout(() => btn.textContent = orig, 1500);
     });
 }
+
+// ── API Reference ──────────────────────────────────────────────────────────
+
+const API_ENDPOINTS = {
+    "Reservations": {
+        "read_scope": "reservations:read",
+        "write_scope": "reservations:write",
+        "endpoints": [
+            {
+                "method": "POST", "path": "/api/reservations/reserve", "scope": "reservations:write",
+                "description": "Reserve a unit (creates tenant + reservation)",
+                "body": {
+                    "site_code":    {"type": "string",  "required": true,  "description": "Location code (e.g. LSETUP)"},
+                    "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID to reserve"},
+                    "first_name":   {"type": "string",  "required": true,  "description": "Tenant first name"},
+                    "last_name":    {"type": "string",  "required": true,  "description": "Tenant last name"},
+                    "phone":        {"type": "string",  "required": true,  "description": "Contact phone"},
+                    "email":        {"type": "string",  "required": false, "description": "Contact email"},
+                    "mobile":       {"type": "string",  "required": false, "description": "Mobile phone"},
+                    "address":      {"type": "string",  "required": false, "description": "Street address"},
+                    "city":         {"type": "string",  "required": false, "description": "City"},
+                    "postal_code":  {"type": "string",  "required": false, "description": "Postal code"},
+                    "country":      {"type": "string",  "required": false, "description": "Country code (e.g. SG)"},
+                    "comment":      {"type": "string",  "required": false, "description": "Reservation comment"},
+                    "quoted_rate":  {"type": "number",  "required": false, "description": "Quoted rate (default: 0)"},
+                    "needed_date":  {"type": "string",  "required": false, "description": "Move-in date YYYY-MM-DD (default: tomorrow)"},
+                    "source_name":  {"type": "string",  "required": false, "description": "Lead source (default: ESA Backend)"},
+                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID (default: 0)"}
+                },
+                "example_response": {"success": true, "site_code": "LSETUP", "unit_id": 106155, "tenant_id": "1109544", "waiting_id": "848757", "global_waiting_num": "809363726", "message": "Reservation created"}
+            },
+            {
+                "method": "POST", "path": "/api/reservations/create", "scope": "reservations:write",
+                "description": "Create reservation for existing tenant",
+                "body": {
+                    "site_code":    {"type": "string",  "required": true,  "description": "Location code"},
+                    "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID"},
+                    "tenant_id":    {"type": "integer", "required": true,  "description": "Existing tenant ID"},
+                    "needed_date":  {"type": "string",  "required": false, "description": "Move-in date YYYY-MM-DD"},
+                    "expires_date": {"type": "string",  "required": false, "description": "Expiry date YYYY-MM-DD"},
+                    "comment":      {"type": "string",  "required": false, "description": "Comment"},
+                    "quoted_rate":  {"type": "number",  "required": false, "description": "Quoted rate"},
+                    "source_name":  {"type": "string",  "required": false, "description": "Source name"},
+                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID"}
+                },
+                "example_response": {"success": true, "site_code": "LSETUP", "unit_id": 106155, "tenant_id": 1109544, "waiting_id": "848758", "global_waiting_num": "700485212", "message": "Reservation created"}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/list", "scope": "reservations:read",
+                "description": "List reservations for a site",
+                "params": {
+                    "site_code":           {"type": "string",  "required": true,  "description": "Location code"},
+                    "waiting_id":          {"type": "integer", "required": false, "description": "Filter by WaitingID (default: 0 = all)"},
+                    "global_waiting_num":  {"type": "integer", "required": false, "description": "Filter by global waiting number"}
+                },
+                "example_response": {"site_code": "LSETUP", "count": 178, "reservations": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/<id>", "scope": "reservations:read",
+                "description": "Get single reservation by WaitingID",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code (query param)"}
+                },
+                "example_response": {"site_code": "LSETUP", "reservation": {"WaitingID": "848757", "TenantID": "1109544", "sUnitName": "4120", "iWaitingStatus": "0"}}
+            },
+            {
+                "method": "PUT", "path": "/api/reservations/<id>", "scope": "reservations:write",
+                "description": "Update a reservation",
+                "body": {
+                    "site_code":    {"type": "string",  "required": true,  "description": "Location code"},
+                    "tenant_id":    {"type": "integer", "required": true,  "description": "Tenant ID"},
+                    "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID"},
+                    "needed_date":  {"type": "string",  "required": true,  "description": "Needed date YYYY-MM-DD"},
+                    "comment":      {"type": "string",  "required": false, "description": "Comment"},
+                    "status":       {"type": "integer", "required": false, "description": "Status code (0=active, 2=cancelled)"},
+                    "quoted_rate":  {"type": "number",  "required": false, "description": "Quoted rate"},
+                    "expires_date": {"type": "string",  "required": false, "description": "Expiry date YYYY-MM-DD"},
+                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID"}
+                },
+                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "848757", "message": "Reservation updated"}
+            },
+            {
+                "method": "PUT", "path": "/api/reservations/<id>/cancel", "scope": "reservations:write",
+                "description": "Cancel a reservation",
+                "body": {
+                    "site_code":            {"type": "string", "required": true,  "description": "Location code"},
+                    "cancellation_reason":  {"type": "string", "required": false, "description": "Reason for cancellation"}
+                },
+                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "848757", "message": "Reservation cancelled"}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/<id>/notes", "scope": "reservations:read",
+                "description": "Get notes for a reservation",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code (query param)"}
+                },
+                "example_response": {"waiting_id": 848757, "notes": [], "count": 0}
+            },
+            {
+                "method": "POST", "path": "/api/reservations/<id>/notes", "scope": "reservations:write",
+                "description": "Add a note to a reservation",
+                "body": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code"},
+                    "note":      {"type": "string", "required": true, "description": "Note text"}
+                },
+                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "3207283", "message": "Note added"}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/fees", "scope": "reservations:read",
+                "description": "Get reservation fee config for a site",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code"}
+                },
+                "example_response": {"site_code": "LSETUP", "fees": [{"dcPrice": "0.0000", "bReqReservationFee": "true", "iDaysReservationExpAfterDateNeed": "7"}]}
+            }
+        ]
+    },
+    "Inventory": {
+        "read_scope": "inventory:read",
+        "write_scope": "inventory:write",
+        "endpoints": [
+            {
+                "method": "GET", "path": "/api/sites", "scope": "inventory:read",
+                "description": "List all sites",
+                "params": {},
+                "example_response": {"sites": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/unit-availability", "scope": "inventory:read",
+                "description": "Get available units with pricing and labels",
+                "params": {
+                    "site_code": {"type": "string",  "required": true,  "description": "Location code"},
+                    "category":  {"type": "string",  "required": false, "description": "Filter by category"},
+                    "climate":   {"type": "string",  "required": false, "description": "Filter by climate code"},
+                    "floor":     {"type": "integer", "required": false, "description": "Filter by floor"}
+                },
+                "example_response": {"units": ["..."], "count": 42}
+            },
+            {
+                "method": "GET", "path": "/api/inventory/units", "scope": "inventory:read",
+                "description": "Get unit inventory data",
+                "params": {
+                    "site_code": {"type": "string", "required": false, "description": "Filter by site"}
+                },
+                "example_response": {"units": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/inventory/type-mappings", "scope": "inventory:read",
+                "description": "Get inventory type mappings",
+                "params": {},
+                "example_response": {"mappings": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/inventory/overrides", "scope": "inventory:read",
+                "description": "Get unit overrides",
+                "params": {},
+                "example_response": {"overrides": ["..."]}
+            },
+            {
+                "method": "PUT", "path": "/api/inventory/type-mappings", "scope": "inventory:write",
+                "description": "Bulk upsert type mappings",
+                "body": {
+                    "mappings": {"type": "array", "required": true, "description": "Array of mapping objects"}
+                },
+                "example_response": {"success": true, "updated": 5}
+            },
+            {
+                "method": "PUT", "path": "/api/inventory/overrides", "scope": "inventory:write",
+                "description": "Bulk upsert unit overrides",
+                "body": {
+                    "overrides": {"type": "array", "required": true, "description": "Array of override objects"}
+                },
+                "example_response": {"success": true, "updated": 3}
+            },
+            {
+                "method": "POST", "path": "/api/inventory/publish-labels", "scope": "inventory:write",
+                "description": "Publish labels to esa_pbi",
+                "body": {},
+                "example_response": {"success": true, "published": 150}
+            }
+        ]
+    },
+    "Discount Plans": {
+        "read_scope": "discount_plans:read",
+        "write_scope": "discount_plans:write",
+        "endpoints": [
+            {
+                "method": "GET", "path": "/api/discount-plans", "scope": "discount_plans:read",
+                "description": "List all discount plans",
+                "params": {
+                    "site_code":   {"type": "string",  "required": false, "description": "Filter by site"},
+                    "active_only": {"type": "boolean", "required": false, "description": "Only active plans"}
+                },
+                "example_response": {"plans": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/discount-plans/<id>", "scope": "discount_plans:read",
+                "description": "Get discount plan by ID",
+                "params": {},
+                "example_response": {"plan": {"id": 1, "name": "Standard"}}
+            },
+            {
+                "method": "GET", "path": "/api/discount-plans/by-name/<name>", "scope": "discount_plans:read",
+                "description": "Get discount plan by name",
+                "params": {},
+                "example_response": {"plan": {"id": 1, "name": "Standard"}}
+            },
+            {
+                "method": "POST", "path": "/api/discount-plans", "scope": "discount_plans:write",
+                "description": "Create new discount plan",
+                "body": {
+                    "name":      {"type": "string", "required": true, "description": "Plan name"},
+                    "site_code": {"type": "string", "required": true, "description": "Location code"}
+                },
+                "example_response": {"success": true, "id": 5}
+            },
+            {
+                "method": "PUT", "path": "/api/discount-plans/<id>", "scope": "discount_plans:write",
+                "description": "Update a discount plan",
+                "body": {
+                    "name": {"type": "string", "required": false, "description": "Plan name"}
+                },
+                "example_response": {"success": true}
+            }
+        ]
+    },
+    "Statistics": {
+        "read_scope": "statistics:read",
+        "write_scope": null,
+        "endpoints": [
+            {
+                "method": "GET", "path": "/api/statistics/summary", "scope": "statistics:read",
+                "description": "API usage summary",
+                "params": {
+                    "days": {"type": "integer", "required": false, "description": "Lookback days (default: 7)"}
+                },
+                "example_response": {"total_requests": 1234, "avg_response_ms": 45}
+            },
+            {
+                "method": "GET", "path": "/api/statistics/endpoints", "scope": "statistics:read",
+                "description": "Per-endpoint statistics",
+                "params": {},
+                "example_response": {"endpoints": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/statistics/timeline", "scope": "statistics:read",
+                "description": "Performance timeline",
+                "params": {},
+                "example_response": {"timeline": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/statistics/top-consumers", "scope": "statistics:read",
+                "description": "Top API consumers",
+                "params": {},
+                "example_response": {"consumers": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/statistics/external/summary", "scope": "statistics:read",
+                "description": "External API call summary",
+                "params": {},
+                "example_response": {"services": ["..."]}
+            }
+        ]
+    }
+};
+
+// Scopes assigned to this user (passed from Jinja2)
+const USER_SCOPES = new Set({{ api_key.scopes | tojson if api_key and api_key.scopes else '[]' }});
+const KEY_PREFIX = "{{ 'esa_' + api_key.key_id if api_key else 'esa_xxxxxxxx' }}";
+const BASE_URL = "https://backend.extraspace.com.sg";
+
+function buildCurl(endpoint) {
+    const key = KEY_PREFIX + ".your_secret_here";
+    const url = BASE_URL + endpoint.path;
+    const method = endpoint.method;
+
+    if (method === "GET") {
+        const params = endpoint.params || {};
+        const required = Object.entries(params)
+            .filter(([, v]) => v.required)
+            .map(([k]) => k + "=VALUE")
+            .join("&");
+        const qs = required ? "?" + required : "";
+        return `curl -H "X-API-Key: ${key}" \\\n     "${url}${qs}"`;
+    }
+
+    const body = endpoint.body || {};
+    const bodyObj = {};
+    Object.entries(body).forEach(([k, v]) => {
+        if (v.required) bodyObj[k] = v.type === "integer" ? 0 : v.type === "number" ? 0.0 : "VALUE";
+    });
+    const bodyStr = Object.keys(bodyObj).length
+        ? ` \\\n     -d '${JSON.stringify(bodyObj)}'`
+        : "";
+    return `curl -X ${method} -H "X-API-Key: ${key}" \\\n     -H "Content-Type: application/json" \\\n     "${url}"${bodyStr}`;
+}
+
+function buildParamTable(fields, labelRequired) {
+    if (!fields || Object.keys(fields).length === 0) return null;
+    const rows = Object.entries(fields).map(([name, f]) => {
+        const reqClass = f.required ? "required" : "optional";
+        const reqLabel = f.required ? "required" : "optional";
+        return `<tr>
+            <td class="param-name">${esc(name)}</td>
+            <td class="param-type">${esc(f.type || "")}</td>
+            <td class="param-req ${reqClass}">${reqLabel}</td>
+            <td class="param-desc">${esc(f.description || "")}</td>
+        </tr>`;
+    }).join("");
+    return `<table class="param-table">
+        <thead><tr><th>Name</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+        <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function esc(s) {
+    return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function buildEndpointDetail(ep, detailId) {
+    const hasParams = ep.params && Object.keys(ep.params).length > 0;
+    const hasBody   = ep.body   && Object.keys(ep.body).length > 0;
+    const paramHtml = hasParams ? buildParamTable(ep.params) : null;
+    const bodyHtml  = hasBody   ? buildParamTable(ep.body)   : null;
+    const curlCmd   = buildCurl(ep);
+    const respJson  = JSON.stringify(ep.example_response, null, 2);
+
+    let html = `<div class="endpoint-detail" id="${detailId}">`;
+
+    if (paramHtml) {
+        html += `<div class="detail-section">
+            <div class="detail-label">Query Parameters</div>
+            ${paramHtml}
+        </div>`;
+    }
+    if (bodyHtml) {
+        html += `<div class="detail-section">
+            <div class="detail-label">Request Body (JSON)</div>
+            ${bodyHtml}
+        </div>`;
+    }
+
+    html += `<div class="detail-section">
+        <div class="detail-label">Example curl</div>
+        <div class="curl-block">
+            <pre id="curl-${detailId}">${esc(curlCmd)}</pre>
+            <button class="curl-copy-btn" onclick="copyCurl('curl-${detailId}', this)">Copy</button>
+        </div>
+    </div>`;
+
+    html += `<div class="detail-section example-resp">
+        <div class="detail-label">Example Response</div>
+        <pre>${esc(respJson)}</pre>
+    </div>`;
+
+    html += `</div>`;
+    return html;
+}
+
+function copyCurl(preId, btn) {
+    const text = document.getElementById(preId).textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => btn.textContent = orig, 1500);
+    });
+}
+
+function buildApiReference() {
+    const container = document.getElementById("api-groups-container");
+    if (!container) return;
+
+    // If no scopes at all, leave the default "no scopes" message
+    if (USER_SCOPES.size === 0) return;
+
+    let html = "";
+    let anyRendered = false;
+    let groupIndex = 0;
+
+    for (const [groupName, groupDef] of Object.entries(API_ENDPOINTS)) {
+        // Filter endpoints to only those the user has the scope for
+        const visibleEndpoints = groupDef.endpoints.filter(ep => USER_SCOPES.has(ep.scope));
+        if (visibleEndpoints.length === 0) continue;
+
+        anyRendered = true;
+        const groupId = "api-group-" + groupIndex;
+        groupIndex++;
+
+        const scopeBadges = [groupDef.read_scope, groupDef.write_scope]
+            .filter(Boolean)
+            .filter(s => USER_SCOPES.has(s))
+            .map(s => {
+                const cls = s.endsWith(":write") ? "scope-write" : "scope-read";
+                return `<span class="scope-badge ${cls}">${esc(s)}</span>`;
+            }).join(" ");
+
+        const endpointCountLabel = `<span style="font-size:0.75rem; color:#888; font-weight:400;">${visibleEndpoints.length} endpoint${visibleEndpoints.length !== 1 ? "s" : ""}</span>`;
+
+        let rowsHtml = "";
+        visibleEndpoints.forEach((ep, epIdx) => {
+            const rowId = `${groupId}-ep-${epIdx}`;
+            const detailId = `${groupId}-detail-${epIdx}`;
+            const scopeCls = ep.scope.endsWith(":write") ? "scope-write" : "scope-read";
+
+            rowsHtml += `<div class="endpoint-row" id="${rowId}" onclick="toggleEndpoint('${rowId}','${detailId}')">
+                <span class="method-badge method-${esc(ep.method)}">${esc(ep.method)}</span>
+                <span>
+                    <span class="endpoint-path">${esc(ep.path)}</span>
+                    <span class="endpoint-desc"> — ${esc(ep.description)}</span>
+                </span>
+                <span class="endpoint-scope-col"><span class="scope-badge ${scopeCls}" style="font-size:0.7rem;">${esc(ep.scope)}</span></span>
+            </div>`;
+            rowsHtml += buildEndpointDetail(ep, detailId);
+        });
+
+        html += `<div class="api-group">
+            <button class="api-group-header open" id="${groupId}-header" onclick="toggleGroup('${groupId}')">
+                <span class="group-meta">
+                    <span>${esc(groupName)}</span>
+                    ${scopeBadges}
+                    ${endpointCountLabel}
+                </span>
+                <span class="chevron">&#9654;</span>
+            </button>
+            <div class="api-group-body open" id="${groupId}-body">
+                ${rowsHtml}
+            </div>
+        </div>`;
+    }
+
+    if (!anyRendered) {
+        container.innerHTML = '<p class="api-empty-state">No endpoints available for your current scopes.</p>';
+        return;
+    }
+
+    container.innerHTML = html;
+}
+
+function toggleGroup(groupId) {
+    const header = document.getElementById(groupId + "-header");
+    const body   = document.getElementById(groupId + "-body");
+    header.classList.toggle("open");
+    body.classList.toggle("open");
+}
+
+function toggleEndpoint(rowId, detailId) {
+    const row    = document.getElementById(rowId);
+    const detail = document.getElementById(detailId);
+    const isOpen = detail.classList.contains("open");
+    detail.classList.toggle("open", !isOpen);
+    row.classList.toggle("expanded", !isOpen);
+}
+
+// Build on page load
+buildApiReference();
 </script>
 {% endblock %}
