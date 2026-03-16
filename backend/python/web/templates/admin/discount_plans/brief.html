@@ -237,6 +237,7 @@
         <!-- ============================================================ -->
         {% set tc_en = plan.terms_conditions or [] %}
         {% set tc_cn = plan.terms_conditions_cn or [] %}
+        {% set tc_lab = plan.tc_labels or [] %}
         {% set tc_count = [tc_en|length, tc_cn|length] | max %}
         {% if tc_count > 0 %}
         <tr>
@@ -246,10 +247,13 @@
                 <table style="width: 100%; border: none; margin: 0;">
                 {% for i in range(tc_count) %}
                     <tr>
-                        <td style="border: none; border-bottom: 1px solid var(--esa-gray-dark); padding: 0.5rem 0.75rem; width: 50%; vertical-align: top;">
+                        <td style="border: none; border-bottom: 1px solid var(--esa-gray-dark); padding: 0.5rem 0.75rem; width: 20%; vertical-align: top; font-weight: 600; font-size: 0.8rem; color: var(--esa-navy);">
+                            {{ tc_lab[i] if i < tc_lab|length else '' }}
+                        </td>
+                        <td style="border: none; border-bottom: 1px solid var(--esa-gray-dark); padding: 0.5rem 0.75rem; width: 40%; vertical-align: top;">
                             {{ tc_en[i] if i < tc_en|length else '' }}
                         </td>
-                        <td style="border: none; border-bottom: 1px solid var(--esa-gray-dark); border-left: 1px solid var(--esa-gray-dark); padding: 0.5rem 0.75rem; width: 50%; vertical-align: top; color: #555;">
+                        <td style="border: none; border-bottom: 1px solid var(--esa-gray-dark); border-left: 1px solid var(--esa-gray-dark); padding: 0.5rem 0.75rem; width: 40%; vertical-align: top; color: #555;">
                             {{ tc_cn[i] if i < tc_cn|length else '' }}
                         </td>
                     </tr>

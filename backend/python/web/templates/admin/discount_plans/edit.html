@@ -46,7 +46,7 @@
         display: flex; align-items: center; gap: 0.3rem;
         font-weight: 500; font-size: 0.85rem; cursor: pointer;
     }
-    .tc-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem; align-items: start; }
+    .tc-row { display: grid; grid-template-columns: 160px 1fr 1fr auto; gap: 0.5rem; margin-bottom: 0.5rem; align-items: start; }
     .tc-row label { font-size: 0.8rem; color: #555; }
     .tc-number { display: inline-block; width: 28px; font-weight: 700; color: var(--esa-navy); }
     .toggle-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
@@ -336,23 +336,46 @@
         </div>
 
         <div style="margin-top: 1rem;">
-            <label style="font-weight: 600; color: var(--esa-navy); font-size: 0.85rem;">T&amp;C Clauses (EN / CN)</label>
-            <div class="hint" style="margin-bottom: 0.5rem;">Add as many T&amp;C rows as needed. Each row has an English and Chinese clause.</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <div>
+                    <label style="font-weight: 600; color: var(--esa-navy); font-size: 0.85rem;">T&amp;C Clauses</label>
+                    <div class="hint">Each row has a category label, English clause, and optional Chinese clause.</div>
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <select id="copy-tc-source" style="padding: 0.3rem 0.5rem; border: 1px solid var(--esa-gray-dark); border-radius: 3px; font-size: 0.8rem; max-width: 220px;">
+                        <option value="">Copy T&amp;Cs from plan...</option>
+                    </select>
+                    <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="copyTcsFromPlan()">Copy</button>
+                </div>
+            </div>
+            <div class="tc-row" style="margin-bottom: 0.25rem; font-weight: 600; font-size: 0.8rem; color: var(--esa-navy);">
+                <div>Label</div>
+                <div>English</div>
+                <div>Chinese</div>
+                <div></div>
+            </div>
             <div id="tc-container">
                 {% set tc_en = plan.terms_conditions or [] if plan else [] %}
                 {% set tc_cn = plan.terms_conditions_cn or [] if plan else [] %}
+                {% set tc_lab = plan.tc_labels or [] if plan else [] %}
                 {% set tc_count = [tc_en|length, tc_cn|length, 1] | max %}
                 {% for i in range(tc_count) %}
                 <div class="tc-row">
                     <div>
-                        <label><span class="tc-number">T{{ i + 1 }}</span> English</label>
+                        <select name="tc_label" style="width: 100%; padding: 0.3rem; font-size: 0.82rem; border: 1px solid var(--esa-gray-dark); border-radius: 3px;">
+                            <option value="">--</option>
+                            {% for opt in config_options.get('tc_label', []) %}
+                            <option value="{{ opt }}" {{ 'selected' if i < tc_lab|length and tc_lab[i] == opt }}>{{ opt }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
                         <textarea name="tc_en" rows="2" style="width:100%; font-size: 0.85rem;">{{ tc_en[i] if i < tc_en|length else '' }}</textarea>
                     </div>
                     <div>
-                        <label><span class="tc-number">T{{ i + 1 }}</span> Chinese</label>
                         <textarea name="tc_cn" rows="2" style="width:100%; font-size: 0.85rem;">{{ tc_cn[i] if i < tc_cn|length else '' }}</textarea>
                     </div>
-                    <div style="padding-top: 1.3rem;">
+                    <div style="padding-top: 0.3rem;">
                         <button type="button" onclick="removeTcRow(this)" class="btn btn-sm" style="background: #dc2626; padding: 0.3rem 0.5rem; font-size: 0.8rem;">X</button>
                     </div>
                 </div>
@@ -621,35 +644,75 @@ function deselectAllSites() {
 // Dynamic T&C rows
 // =========================================================================
 var tcContainer = document.getElementById('tc-container');
-var tcCounter = tcContainer.querySelectorAll('.tc-row').length;
+var tcLabelOptions = {{ config_options.get('tc_label', []) | tojson }};
 
-function renumberTcRows() {
-    var rows = tcContainer.querySelectorAll('.tc-row');
-    rows.forEach(function(row, idx) {
-        var nums = row.querySelectorAll('.tc-number');
-        nums.forEach(function(n) { n.textContent = 'T' + (idx + 1); });
+function buildTcLabelSelect(selectedValue) {
+    var opts = '<option value="">--</option>';
+    tcLabelOptions.forEach(function(opt) {
+        var sel = (opt === selectedValue) ? ' selected' : '';
+        opts += '<option value="' + opt + '"' + sel + '>' + opt + '</option>';
     });
+    return '<select name="tc_label" style="width: 100%; padding: 0.3rem; font-size: 0.82rem; border: 1px solid var(--esa-gray-dark); border-radius: 3px;">' + opts + '</select>';
 }
 
 function removeTcRow(btn) {
     btn.closest('.tc-row').remove();
-    renumberTcRows();
 }
 
-document.getElementById('add-tc-row').addEventListener('click', function() {
-    tcCounter++;
+function addTcRow(label, enText, cnText) {
     var row = document.createElement('div');
     row.className = 'tc-row';
     row.innerHTML =
-        '<div><label><span class="tc-number">T' + tcCounter + '</span> English</label>' +
-        '<textarea name="tc_en" rows="2" style="width:100%; font-size: 0.85rem;"></textarea></div>' +
-        '<div><label><span class="tc-number">T' + tcCounter + '</span> Chinese</label>' +
-        '<textarea name="tc_cn" rows="2" style="width:100%; font-size: 0.85rem;"></textarea></div>' +
-        '<div style="padding-top: 1.3rem;"><button type="button" onclick="removeTcRow(this)" class="btn btn-sm" style="background: #dc2626; padding: 0.3rem 0.5rem; font-size: 0.8rem;">X</button></div>';
+        '<div>' + buildTcLabelSelect(label || '') + '</div>' +
+        '<div><textarea name="tc_en" rows="2" style="width:100%; font-size: 0.85rem;">' + (enText || '') + '</textarea></div>' +
+        '<div><textarea name="tc_cn" rows="2" style="width:100%; font-size: 0.85rem;">' + (cnText || '') + '</textarea></div>' +
+        '<div style="padding-top: 0.3rem;"><button type="button" onclick="removeTcRow(this)" class="btn btn-sm" style="background: #dc2626; padding: 0.3rem 0.5rem; font-size: 0.8rem;">X</button></div>';
     tcContainer.appendChild(row);
-    renumberTcRows();
+    return row;
+}
+
+document.getElementById('add-tc-row').addEventListener('click', function() {
+    var row = addTcRow('', '', '');
     row.querySelector('textarea').focus();
 });
+
+// Copy T&Cs from another plan
+(function() {
+    var copySelect = document.getElementById('copy-tc-source');
+    fetch('{{ url_for("discount_plans.api_list") }}')
+        .then(function(r) { return r.json(); })
+        .then(function(plans) {
+            plans.forEach(function(p) {
+                if (p.terms_conditions && p.terms_conditions.length > 0) {
+                    var opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = p.plan_name + ' (' + p.terms_conditions.length + ' clauses)';
+                    copySelect.appendChild(opt);
+                }
+            });
+        })
+        .catch(function() {});
+})();
+
+function copyTcsFromPlan() {
+    var sel = document.getElementById('copy-tc-source');
+    var planId = sel.value;
+    if (!planId) { alert('Select a plan to copy from.'); return; }
+    if (!confirm('This will replace all current T&Cs. Continue?')) return;
+
+    fetch('{{ url_for("discount_plans.api_get", plan_id=0) }}'.replace('/0', '/' + planId))
+        .then(function(r) { return r.json(); })
+        .then(function(p) {
+            tcContainer.innerHTML = '';
+            var labels = p.tc_labels || [];
+            var ens = p.terms_conditions || [];
+            var cns = p.terms_conditions_cn || [];
+            for (var i = 0; i < ens.length; i++) {
+                addTcRow(labels[i] || '', ens[i] || '', cns[i] || '');
+            }
+        })
+        .catch(function(err) { alert('Failed to load plan: ' + err.message); });
+}
 
 // =========================================================================
 // Dynamic custom fields

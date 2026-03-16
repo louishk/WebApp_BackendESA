@@ -227,13 +227,24 @@ def _build_plan_from_form(form, plan=None, config_options=None):
     plan.termination_notice = _validate_config_value(form.get('termination_notice', '').strip(), 'termination_notice')
     plan.extra_offer = form.get('extra_offer', '').strip() or None
 
-    # T&Cs - dynamic array-style fields
+    # T&Cs - dynamic array-style fields with labels
+    tcs_label_raw = form.getlist('tc_label')
     tcs_en_raw = form.getlist('tc_en')
     tcs_cn_raw = form.getlist('tc_cn')
-    tcs_en = [t.strip() for t in tcs_en_raw if t.strip()]
-    tcs_cn = [t.strip() for t in tcs_cn_raw if t.strip()]
+    # Filter out empty rows (where EN text is blank)
+    tcs_labels = []
+    tcs_en = []
+    tcs_cn = []
+    for i in range(len(tcs_en_raw)):
+        en_text = tcs_en_raw[i].strip() if i < len(tcs_en_raw) else ''
+        if not en_text:
+            continue
+        tcs_en.append(en_text)
+        tcs_cn.append(tcs_cn_raw[i].strip() if i < len(tcs_cn_raw) else '')
+        tcs_labels.append(tcs_label_raw[i].strip() if i < len(tcs_label_raw) else '')
     plan.terms_conditions = tcs_en if tcs_en else None
-    plan.terms_conditions_cn = tcs_cn if tcs_cn else None
+    plan.terms_conditions_cn = [t for t in tcs_cn if t] if any(tcs_cn) else None
+    plan.tc_labels = tcs_labels if any(tcs_labels) else None
 
     # Promotion brief fields
     plan.hidden_rate = form.get('hidden_rate') == 'on'

@@ -77,6 +77,7 @@ class DiscountPlan(Base):
     lock_in_period = Column(String(255), comment="Lock-in period, e.g. Minimum 6 months")
     terms_conditions = Column(JSONB, comment="Array of T&C clauses (English)")
     terms_conditions_cn = Column(JSONB, comment="Array of T&C clauses (Chinese)")
+    tc_labels = Column(JSONB, comment="Array of T&C clause labels, parallel to terms_conditions")
     terms_conditions_translations = Column(JSONB, default=dict, comment="AI-translated T&Cs keyed by language code")
 
     # =========================================================================
@@ -172,6 +173,7 @@ class DiscountPlan(Base):
             'extra_offer': self.extra_offer,
             'terms_conditions': self.terms_conditions or [],
             'terms_conditions_cn': self.terms_conditions_cn or [],
+            'tc_labels': self.tc_labels or [],
             'terms_conditions_translations': self.terms_conditions_translations or {},
             # Promotion brief
             'hidden_rate': self.hidden_rate,
