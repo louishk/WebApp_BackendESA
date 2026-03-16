@@ -129,7 +129,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Google Ads connection test failed: {e}", exc_info=True)
             return "Connection test failed. Check server logs for details."
@@ -166,7 +166,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error listing accessible customers: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -203,7 +203,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error getting account info: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -268,7 +268,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error listing campaigns: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -315,7 +315,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error getting campaign: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -369,7 +369,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error creating campaign: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -427,7 +427,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error updating campaign: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -472,7 +472,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error setting campaign status: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -531,7 +531,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error listing ad groups: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -584,7 +584,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error creating ad group: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -642,7 +642,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error updating ad group: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -699,7 +699,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error executing query: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -759,7 +759,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error getting campaign performance: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -813,7 +813,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error getting account performance: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -877,7 +877,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error getting keyword performance: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -977,7 +977,7 @@ Be specific with numbers, percentages, and actionable recommendations. Focus on 
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error in account audit: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -1080,7 +1080,7 @@ Be specific with keyword names and actionable recommendations."""
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error in keyword analysis: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -1187,7 +1187,7 @@ Focus on ROI impact and provide specific search terms in your recommendations.""
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error in search term analysis: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -1288,7 +1288,7 @@ Be specific with exact terms and recommended match types. Consider the existing 
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error suggesting negatives: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -1390,7 +1390,7 @@ Be specific with competitor names and actionable recommendations."""
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error in competitor analysis: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -1504,7 +1504,7 @@ Remember: Each QS point can reduce CPC by ~16%. Focus on high-spend, low-QS keyw
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error in QS analysis: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -1628,7 +1628,7 @@ Use specific numbers and percentages in your analysis."""
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error in trend analysis: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -1758,7 +1758,7 @@ Be specific with location IDs and recommended bid adjustments (e.g., +20%, -30%)
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error in audience analysis: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -1882,7 +1882,7 @@ Be specific with campaign names, dollar amounts, and expected outcomes."""
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error in budget optimization: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."
@@ -2015,7 +2015,7 @@ Focus on actionable items with expected impact."""
 
         except GoogleAdsAPIError as e:
             logger.error(f"Google Ads API error: {e}")
-            return "Google Ads API operation failed. Check server logs for details."
+            return f"Google Ads API error: {e}"
         except Exception as e:
             logger.error(f"Error generating report: {e}", exc_info=True)
             return "Operation failed. Check server logs for details."

@@ -260,29 +260,45 @@ class GoogleAdsService:
             raise self._parse_google_ads_exception(ex)
 
     def _proto_to_dict(self, proto_obj) -> Dict[str, Any]:
-        """Convert a protobuf object to a dictionary"""
+        """Convert a protobuf object to a dictionary.
+        Only includes fields that are actually set (non-default) to avoid
+        returning the entire schema with hundreds of empty fields.
+        """
         result = {}
 
-        # Get all fields from the proto object
-        for field in proto_obj._pb.DESCRIPTOR.fields:
-            field_name = field.name
+        # Use ListFields() which only returns fields that have been set
+        try:
+            set_fields = proto_obj._pb.ListFields()
+        except AttributeError:
+            # Fallback for non-proto objects
+            return str(proto_obj)
+
+        for field_descriptor, value in set_fields:
+            field_name = field_descriptor.name
             try:
-                value = getattr(proto_obj, field_name)
+                # Get the proto-plus wrapper value for proper enum/message handling
+                wrapper_value = getattr(proto_obj, field_name)
 
                 # Handle nested proto objects
-                if hasattr(value, '_pb'):
-                    result[field_name] = self._proto_to_dict(value)
+                if hasattr(wrapper_value, '_pb'):
+                    nested = self._proto_to_dict(wrapper_value)
+                    if nested:  # skip empty nested objects
+                        result[field_name] = nested
                 # Handle repeated fields
-                elif hasattr(value, '__iter__') and not isinstance(value, (str, bytes)):
-                    result[field_name] = [
-                        self._proto_to_dict(item) if hasattr(item, '_pb') else item
-                        for item in value
-                    ]
+                elif hasattr(wrapper_value, '__iter__') and not isinstance(wrapper_value, (str, bytes)):
+                    items = []
+                    for item in wrapper_value:
+                        if hasattr(item, '_pb'):
+                            items.append(self._proto_to_dict(item))
+                        else:
+                            items.append(item)
+                    if items:
+                        result[field_name] = items
                 # Handle enum values
-                elif hasattr(value, 'name'):
-                    result[field_name] = value.name
+                elif hasattr(wrapper_value, 'name') and hasattr(wrapper_value, 'value'):
+                    result[field_name] = wrapper_value.name
                 else:
-                    result[field_name] = value
+                    result[field_name] = wrapper_value
             except Exception:
                 continue
 
