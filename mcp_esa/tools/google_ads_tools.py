@@ -933,7 +933,7 @@ def register_google_ads_tools(server: Server, app: 'MCPServerApp') -> None:
             data_summary = _format_audit_data(campaigns, keywords, quality, search_terms, account, date_range)
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM service unavailable. Raw data summary:\n\n{data_summary}"
@@ -1040,7 +1040,7 @@ Top Keywords by Impressions:
                 data_summary += f"- \"{st['search_term']}\": {st['impressions']:,} impr, {st['clicks']} clicks, {st['conversions']:.1f} conv, ${st['cost']:.2f}\n"
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
@@ -1148,7 +1148,7 @@ HIGH SPEND SEARCH TERMS (by cost):
                 data_summary += f"- {neg['keyword']} [{neg['match_type']}]\n"
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
@@ -1243,7 +1243,7 @@ Focus on ROI impact and provide specific search terms in your recommendations.""
                 data_summary += f"- {neg['keyword']} [{neg['match_type']}]\n"
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
@@ -1350,7 +1350,7 @@ COMPETITOR METRICS:
                 data_summary += f"- {c['campaign_name']}: {c['impressions']:,} impr, ${c['cost']:,.2f}, {c['conversions']:.1f} conv\n"
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
@@ -1461,7 +1461,7 @@ LOW QUALITY SCORE KEYWORDS (Priority):
                 data_summary += f"- {ad['ad_group_name']}: strength={strength}, {ad['clicks']} clicks, {ad['ctr']:.2f}% CTR\n"
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
@@ -1584,7 +1584,7 @@ Remember: Each QS point can reduce CPC by ~16%. Focus on high-spend, low-QS keyw
                 data_summary += f"- {dev}: {metrics['impressions']:,} impr, {ctr:.2f}% CTR, ${metrics['cost']:.2f}, {metrics['conversions']:.1f} conv\n"
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
@@ -1706,7 +1706,7 @@ Top Locations by Spend:
 """
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
@@ -1834,7 +1834,7 @@ ACCOUNT TOTALS:
 """
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
@@ -1984,7 +1984,7 @@ Focus on actionable items with expected impact."""
             prompt_instruction = report_prompts.get(report_type, report_prompts["executive"])
 
             # Get LLM analysis
-            from services.llm.llm_manager import get_llm_manager
+            from mcp_esa.services.llm_manager import get_llm_manager
             llm_manager = get_llm_manager()
             if not llm_manager:
                 return f"LLM unavailable. Raw data:\n\n{data_summary}"
