@@ -12,6 +12,123 @@ description: >
   health/diagnostics, multi-database access, and Google Ads campaign management.
 
 # =============================================================================
+# How to Connect
+# =============================================================================
+
+connection:
+  server_url: "https://backend.extraspace.com.sg/mcp-server"
+  transport: Streamable HTTP
+  protocol_version: "2024-11-05"
+
+  # ---------------------------------------------------------------------------
+  # Method 1: Direct API Key (Claude Code, custom clients, curl)
+  # ---------------------------------------------------------------------------
+  method_api_key:
+    description: >
+      Send the API key in the X-API-Key header on every request.
+      Simplest method — no OAuth flow needed.
+    prerequisites:
+      - "User generates an API key from the 'My API Key' page on the web app"
+      - "Admin enables MCP access and configures tool/preset permissions via API Key Management"
+    header: "X-API-Key: esa_<key_id>.<secret>"
+    example_curl: |
+      # Health check (public — no auth needed)
+      curl https://backend.extraspace.com.sg/mcp-server/health
+
+      # Initialize MCP session
+      curl -X POST https://backend.extraspace.com.sg/mcp-server/mcp \
+        -H "Content-Type: application/json" \
+        -H "X-API-Key: esa_bd26e494.BKbc..." \
+        -d '{"jsonrpc":"2.0","method":"initialize","params":{"clientInfo":{"name":"my-client"}},"id":1}'
+
+      # List available tools
+      curl -X POST https://backend.extraspace.com.sg/mcp-server/mcp \
+        -H "Content-Type: application/json" \
+        -H "X-API-Key: esa_bd26e494.BKbc..." \
+        -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":2}'
+
+      # Call a tool
+      curl -X POST https://backend.extraspace.com.sg/mcp-server/mcp \
+        -H "Content-Type: application/json" \
+        -H "X-API-Key: esa_bd26e494.BKbc..." \
+        -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"ping","arguments":{}},"id":3}'
+
+  # ---------------------------------------------------------------------------
+  # Method 2: OAuth 2.0 (claude.ai MCP integration)
+  # ---------------------------------------------------------------------------
+  method_oauth:
+    description: >
+      Used by claude.ai's native MCP integration. The API key is entered as
+      client_id + client_secret in the claude.ai MCP settings. The OAuth flow
+      issues JWT tokens for subsequent requests.
+    prerequisites:
+      - "User has an ESA API key with MCP access enabled"
+    claude_ai_settings:
+      server_url: "https://backend.extraspace.com.sg/mcp-server"
+      client_id: "<key_id>  (e.g. bd26e494)"
+      client_secret: "<full API key>  (e.g. esa_bd26e494.BKbc...)"
+      note: "claude.ai auto-discovers OAuth endpoints via /.well-known/oauth-authorization-server"
+    flow_summary:
+      - "claude.ai fetches /.well-known/oauth-authorization-server → discovers endpoints"
+      - "POST /oauth/register (Bearer <api_key>) → receives client credentials"
+      - "GET /oauth/authorize?client_id=...&code_challenge=...&redirect_uri=... → auth code"
+      - "POST /oauth/token (code + code_verifier + client_secret) → access_token + refresh_token"
+      - "All subsequent MCP requests use: Authorization: Bearer <access_token>"
+      - "Token refresh: POST /oauth/token (grant_type=refresh_token) → new tokens"
+    token_lifetime:
+      access_token: "8 hours"
+      refresh_token: "30 days"
+    pkce: "S256 mandatory — plain not supported"
+
+  # ---------------------------------------------------------------------------
+  # Method 3: Claude Code (MCP config in settings)
+  # ---------------------------------------------------------------------------
+  method_claude_code:
+    description: >
+      Add the server to Claude Code's MCP configuration file. Uses the API key
+      directly as a header — no OAuth flow.
+    config_file: "~/.claude/settings.json (or project .claude/settings.json)"
+    example_config: |
+      {
+        "mcpServers": {
+          "ESA_MCP": {
+            "type": "streamableHttp",
+            "url": "https://backend.extraspace.com.sg/mcp-server/mcp",
+            "headers": {
+              "X-API-Key": "esa_<key_id>.<secret>"
+            }
+          }
+        }
+      }
+
+  # ---------------------------------------------------------------------------
+  # Access Control (RBAC)
+  # ---------------------------------------------------------------------------
+  access_control:
+    description: >
+      Admins configure per-key access via the API Key Management page (/admin/api-keys).
+      Three levels of restriction are available.
+    levels:
+      mcp_enabled:
+        description: "Master toggle — must be ON for the key to access the MCP server at all"
+        column: "api_keys.mcp_enabled (boolean)"
+        default: false
+      mcp_tools:
+        description: "Which MCP tools the key can call (empty = all tools)"
+        column: "api_keys.mcp_tools (JSONB array of tool names)"
+        default: "[] (all tools)"
+        example: '["DB_connect_preset", "DB_execute_query", "DB_list_tables", "DB_describe_table"]'
+      mcp_db_presets:
+        description: "Which database presets the key can connect to (empty = all presets)"
+        column: "api_keys.mcp_db_presets (JSONB array of preset names)"
+        default: "[] (all presets)"
+        example: '["esa_pbi"]'
+    enforcement:
+      - "mcp_enabled checked at auth middleware (401 if false)"
+      - "mcp_tools checked at tool dispatch in transport layer (access denied if not in list)"
+      - "mcp_db_presets checked in DB_connect_preset and DB_list_database_presets via contextvar"
+
+# =============================================================================
 # Architecture
 # =============================================================================
 
