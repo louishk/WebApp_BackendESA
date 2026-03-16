@@ -1,0 +1,406 @@
+description: Catalog of SQL views and dimension tables in the esa_pbi database.
+database: esa_pbi
+source_files: sql/
+
+# =============================================================================
+# Views
+# =============================================================================
+views:
+
+  mimo_enriched:
+    file: sql/mimo_enriched.sql
+    type: VIEW
+    purpose: >
+      Enriches the raw mimo (move-in/move-out) table with currency-normalized rate
+      columns and area fixes. Korean sites store area in m2 — these are converted
+      to sqft (* 10.7639). Rates for HKD, MYR, and KRW sites are converted to SGD
+      using monthly fx_rates_monthly averages. Adds a stable mimo_id surrogate
+      key (SiteID_UnitName) for joining.
+    source_tables:
+      - mimo
+      - fx_rates_monthly (LEFT JOIN x3 — HKD, MYR, KRW)
+    key_columns:
+      - SiteID, TenantID, MoveDate, extract_date
+      - MoveIn, MoveOut, Transfer
+      - UnitName, UnitSize, Width, Length, sUnitType
+      - TenantName, sCompany, sEmail
+      - tenant_email: "lower(trim(sEmail)) — normalized for joining"
+      - StandardRate, MovedInRentalRate, MovedInVariance, MovedInDaysVacant
+      - MovedOutRentalRate, MovedOutVariance, MovedOutDaysRented
+      - dcInsurPremium, dcDiscount, sDiscountPlan, sDiscountPlanAtMoveIn
+      - MovedInArea_fixed: "sqft corrected for Korean sites (m2 * 10.7639)"
+      - MovedOutArea_fixed: "sqft corrected for Korean sites"
+      - MovedInRentalRate_SGD: "rate normalized to SGD using monthly fx rate"
+      - MovedOutRentalRate_SGD: "rate normalized to SGD"
+      - mimo_id: "SiteID_UnitName — join key to units_info_enriched"
+    notes: >
+      Two versions of this view exist in sql/: mimo_enriched.sql is the exported
+      view definition; dim_inventory_labels.sql also contains a DROP+CREATE for
+      mimo_enriched as part of the label dimension migration. Both are identical
+      in content. The authoritative deployed version is the one applied last.
+
+  rentroll_enriched:
+    file: sql/rentroll_enriched.sql
+    type: VIEW
+    purpose: >
+      Enriches the daily rentroll snapshot with discount details (joined from the
+      discount table), currency-normalized revenue, length-of-stay bucketing,
+      and derived occupancy/revenue metrics used across Power BI reports.
+    source_tables:
+      - rentroll
+      - discount (filtered to sChgDesc = 'Rent', DISTINCT ON unit per date)
+      - fx_rates_monthly (LEFT JOIN x3 — HKD, MYR, KRW)
+      - site_revenue_config
+      - losrange
+    key_columns:
+      - extract_date, SiteID, UnitID, LedgerID, sUnit, sUnitName, sSize, Area
+      - sTypeName, iFloor, dcWidth, dcLength
+      - dcPushRate, dcStdRate, dcWebRate, dcRent, dcVar
+      - bRentable, bRented, bCorporate, bDamaged
+      - dLeaseDate, dPaidThru, dRentLastChanged
+      - TenantID, sTenant, sEmail
+      - disc_dcprice, disc_dcamt, disc_sdiscmemo, disc_dcdiscount, disc_sconcessionplan
+      - disc_dcamt_adjusted: "COALESCE(discount amount, dcRent) — effective rent after discount"
+      - dcarea_fixed: "sqft corrected for Korean sites"
+      - days_rented: "extract_date - dLeaseDate"
+      - los_range: "length-of-stay bucket label from losrange table"
+      - disc_dcamt_adjusted_samecurrency: "disc_dcamt_adjusted normalized to SGD"
+      - FutureMoveins: "1 if bRented=true but LedgerID=0 and no lease date (pre-move-in)"
+      - UnitInventory: "always 1 (useful for SUM aggregations)"
+      - Unitrented: "1 if LedgerID > 0"
+      - Arearented: "Area if rented, else 0 (sqft-corrected)"
+      - Unitrented_withinsurance: "1 if rented and has insurance premium"
+      - Unitrented_withautobill: "1 if rented and iAutoBillType = 1"
+      - InsuranceRevenue, InsuranceRevenue_sgd
+      - revenue_effective: "disc_dcamt_adjusted (alias)"
+      - revenue_effective_sgd: "disc_dcamt_adjusted normalized to SGD"
+
+  units_info_enriched:
+    file: sql/units_info_enriched.sql
+    type: VIEW
+    purpose: >
+      Enriches the units_info table (current unit inventory snapshot) with category
+      labels from unit_category_labels. Replaces the old unit_type and unit_range
+      columns with the label_* fields that carry standardized codes for size,
+      climate, type, shape, and pillar. Adds dcarea_fixed for Korean site sqft
+      conversion and mimo_id for joining to mimo_enriched.
+    source_tables:
+      - units_info
+      - unit_category_labels (LEFT JOIN on site_id + unit_id)
+    key_columns:
+      - UnitID, SiteID, UnitTypeID, sLocationCode, sUnitName, sTypeName
+      - dcWidth, dcLength, iFloor, iDoorType, iADA
+      - dcarea_fixed: "dcWidth * dcLength, corrected for Korean sites (* 10.7639)"
+      - bClimate, bPower, bInside, bAlarm, bRentable, bMobile
+      - bRented, bWaitingListReserved, bCorporate
+      - iDaysVacant, iDaysRented, dMovedIn
+      - dcStdRate, dcWebRate, dcPushRate, dcPushRate_NotRounded
+      - dcBoardRate, dcPreferredRate, dcStdWeeklyRate, dcStdSecDep
+      - label_size_category: "S/M/L/XL from unit_category_labels"
+      - label_size_range: "e.g. '30-35' from unit_category_labels"
+      - label_type_code: "W/U/M/L/WN/BZ etc. from unit_category_labels"
+      - label_climate_code: "NC/A/D/AD/RF from unit_category_labels"
+      - label_shape: "SS/WR/NR/OS from unit_category_labels"
+      - label_pillar: "P/NP from unit_category_labels"
+      - category_label: "final combined label string"
+      - label_published_at: "when the label was published"
+      - mimo_id: "SiteID_sUnitName — join key"
+
+  discount_plan:
+    file: sql/discount_plan.sql
+    type: VIEW
+    purpose: >
+      Normalizes the free-text sDiscountPlanAtMoveIn field from mimo into unified,
+      comparable discount categories. Extracts a numeric percentage (discount_pct),
+      duration in months (discount_months), and a broad discount type classification.
+      Includes a synthetic 'No Discount' row for completeness in reports.
+    source_tables:
+      - mimo
+    key_columns:
+      - discount_plan_name: "raw sDiscountPlanAtMoveIn value from mimo"
+      - discount_plan_unified: "normalized category name (e.g. '10% Discount - 3 Months')"
+      - discount_pct: "numeric percentage extracted (0-100)"
+      - discount_months: "duration in months (1, 3, 6, 12, or NULL)"
+      - discount_type: >
+          broad classification — one of: First Month, Months Free, Percentage, Rebate,
+          Referral, Waiver, Promo, Voucher, Manual, Complementary, Prepayment, None, Other
+
+  vw_gads_overview:
+    file: sql/vw_gads_overview.sql
+    type: VIEW
+    purpose: >
+      Joins Google Ads daily campaign performance with campaign metadata and account
+      currency info. Converts cost from micros to local currency and adds SGD-normalized
+      cost using fx_rates_monthly. Used for cross-market Google Ads spend reporting.
+    source_tables:
+      - gads_campaign_daily
+      - gads_campaigns (JOIN on campaign_id)
+      - gads_account_map (JOIN on customer_id)
+      - fx_rates_monthly (LEFT JOIN on currency + year + month, for non-SGD accounts)
+    key_columns:
+      - segments_date, campaign_id, campaign_name, campaign_status, channel_type
+      - country, currency
+      - device, ad_network_type
+      - impressions, clicks, interactions, conversions, conversions_value
+      - cost_local: "cost_micros / 1,000,000 in account local currency"
+      - cost_sgd: "cost_local converted to SGD using monthly fx rate (KRW only currently)"
+
+  vw_tenant_mimo_summary:
+    file: sql/vw_tenant_mimo_summary.sql
+    type: VIEW
+    purpose: >
+      Aggregates move-in/move-out history per tenant email from the mimo table.
+      Provides lifetime statistics: total move-ins, move-outs, transfers, revenue,
+      active/former status, and the full list of sites and units rented.
+    source_tables:
+      - mimo (WHERE sEmail IS NOT NULL)
+    group_by: lower(trim(sEmail))
+    key_columns:
+      - tenant_email: "normalized email — join key"
+      - first_tenant_id, last_tenant_id, unique_tenant_ids
+      - total_move_ins, total_move_outs, total_transfers, total_mimo_records
+      - first_move_in_date, last_move_in_date, first_move_out_date, last_move_out_date
+      - tenant_status: "Active Tenant / Former Tenant / Unknown (based on last MoveIn vs MoveOut)"
+      - site_ids: "array of distinct SiteIDs"
+      - unique_sites
+      - units_rented: "array of distinct UnitNames"
+      - unique_units
+      - unit_sizes: "array of distinct UnitSize values"
+      - avg_move_in_rate, min_move_in_rate, max_move_in_rate, total_move_in_revenue
+      - ever_had_climate, ever_had_power, ever_had_alarm
+      - tenant_name: "most recent TenantName"
+      - company: "most recent sCompany"
+
+  vw_tenant_rentroll_summary:
+    file: sql/vw_tenant_rentroll_summary.sql
+    type: VIEW
+    purpose: >
+      Aggregates rent roll history per tenant email from the rentroll table.
+      Provides a snapshot-based view of active/former status, months in system,
+      and average rent. Complements vw_tenant_mimo_summary with current-state data.
+    source_tables:
+      - rentroll (WHERE sEmail IS NOT NULL AND TenantID IS NOT NULL)
+    group_by: lower(trim(sEmail))
+    key_columns:
+      - tenant_email: "normalized email — join key"
+      - first_tenant_id, last_tenant_id, unique_tenant_ids
+      - first_seen_date, last_seen_date
+      - months_in_system: "count of distinct extract_date values"
+      - tenant_status: "Active if last seen within 60 days, else Former Tenant"
+      - site_ids, unique_sites
+      - units_rented: "array of distinct sUnit values"
+      - unique_units
+      - unit_types: "array of distinct sTypeName values"
+      - avg_rent, min_rent, max_rent
+      - avg_unit_area, total_area_rented
+      - tenant_name, company
+
+  vw_tenant_combined:
+    file: sql/vw_tenant_combined.sql
+    type: VIEW
+    purpose: >
+      Full OUTER JOIN of vw_tenant_mimo_summary and vw_tenant_rentroll_summary on
+      tenant_email. Provides a unified tenant profile that combines historical
+      move data with current rent roll state. Feeds into the customer journey
+      and customer summary views.
+    source_tables:
+      - vw_tenant_mimo_summary (m)
+      - vw_tenant_rentroll_summary (r)
+    join_type: FULL OUTER JOIN on tenant_email
+    key_columns:
+      - tenant_email: "COALESCE(m.tenant_email, r.tenant_email)"
+      - data_source: "Both / MIMO Only / RentRoll Only"
+      - tenant_id, total_tenant_ids
+      - tenant_status: "COALESCE(mimo status, rentroll status)"
+      - total_move_ins, total_move_outs, total_transfers
+      - first_tenant_date: "LEAST(mimo first_move_in, rentroll first_seen)"
+      - last_tenant_date: "GREATEST(mimo last activity, rentroll last_seen)"
+      - months_in_system (from rentroll)
+      - mimo_unique_units, rentroll_unique_units
+      - mimo_units, rentroll_units
+      - avg_move_in_rate, total_move_in_revenue
+      - rentroll_avg_rent, avg_unit_area
+      - ever_had_climate, ever_had_power, ever_had_alarm
+      - tenant_name, company
+      - mimo_record_count, rentroll_record_count
+
+  vw_customer_master:
+    file: sql/vw_customer_master.sql
+    type: VIEW
+    purpose: >
+      Core CRM view over the sugarcrm_leads table. Normalizes contact info,
+      derives a unified customer_id (email preferred, fallback to mobile),
+      and applies comprehensive data quality scoring and exclusion logic.
+      Enriches each lead row with lead source channel mapping. This is the
+      foundation for all customer journey and summary views.
+    source_tables:
+      - sugarcrm_leads (WHERE deleted = false)
+      - lead_source_mapping (LEFT JOIN on source_of_call_c)
+    key_columns:
+      - customer_id: "COALESCE(unified_email, 'MOBILE:' || unified_mobile) — cross-lead identity key"
+      - identifier_type: "email / mobile / unidentifiable"
+      - unified_email: "best email from email1/email/email2/webtolead fields, lowercased"
+      - unified_mobile: "phone_mobile normalized (digits + + only), min 8 digits"
+      - is_internal_email: "extraspaceasia.com / extraspace.com.sg / aboroadlink.com"
+      - is_test_email: "test*, tba*, dummy*, fake*, sample*, demo*, na*, none*, noemail*"
+      - is_competitor_email: "storhub, store-friendly, lockandstore, redboxstorage, spaceship, etc."
+      - is_dummy_phone: "repeated digit patterns, 12345678, 87654321, etc."
+      - is_same_day_duplicate: "second+ lead from same email on same calendar day"
+      - email_type: "Consumer (gmail/yahoo/hotmail/etc.) / Business (other domains) / NULL"
+      - data_completeness_score: >
+          integer score 0-10: email (+2), mobile (+2), full_name (+1), first_name (+1),
+          last_name (+1), postal_code (+1), facility (+1), source_of_call (+1)
+      - data_quality_category: "Complete / Email Only / Mobile Only / Internal / Test/Dummy / No Contact Info"
+      - exclusion_reason, exclusion_category, is_valid_for_analysis
+      - site_code: "L001-L030 etc., derived from facility_location_c text"
+      - lead_year, lead_month, lead_year_month, lead_day_of_week, lead_age_days
+      - source_channel, source_subchannel, source_name_clean (from lead_source_mapping)
+      - All original sugarcrm_leads fields
+
+  vw_customer_summary:
+    file: sql/vw_customer_summary.sql
+    type: VIEW
+    purpose: >
+      One row per customer_id — collapses all leads for a customer into a summary
+      profile. Aggregates lead counts, source channels, conversion status, recency,
+      facility history, UTM data, and data quality flags across the full lead history.
+    source_tables:
+      - vw_customer_master (WHERE customer_id IS NOT NULL)
+    group_by: [customer_id, identifier_type]
+    key_columns:
+      - customer_id, identifier_type
+      - customer_name, first_name, last_name, primary_email, primary_mobile
+      - email_domain, email_type, email/mobile/address contact flags
+      - max_data_completeness, avg_data_completeness
+      - primary_quality_category, primary_exclusion_reason, primary_exclusion_category
+      - has_valid_leads, all_leads_valid, valid_lead_count, excluded_lead_count
+      - total_leads, unique_lead_records, lead_count_category
+      - is_repeat_customer, is_multi_channel, is_multi_facility
+      - first_lead_date, last_lead_date, last_activity_date, journey_duration_days, days_since_last_lead
+      - first/last_lead_year, first/last_lead_year_month
+      - recency_category: "Active (30d) / Recent (90d) / This Year / Last Year / Dormant (2y+)"
+      - status_new/assigned/in_process/converted/recycled/dead counts, current_status
+      - ever_converted, conversion_date, converted_contact_id, days_to_conversion
+      - lead_sources_used (array), first/last_lead_source, unique_lead_sources
+      - source_channels_used (array), first/last_source_channel, unique_source_channels
+      - facilities_inquired (array), unique_facilities
+      - first/last utm_source, utm_medium, utm_campaign
+      - primary_customer_type, primary_goods_type, primary_storage_reason
+      - company, current_assigned_user
+
+  vw_customer_journey:
+    file: sql/vw_customer_journey.sql
+    type: VIEW
+    purpose: >
+      One row per lead (not per customer). Adds window function columns to each
+      lead to describe its position in the customer's journey: sequence number,
+      days since first/previous lead, status/source/channel/facility change flags,
+      and journey stage classification. Used for funnel and multi-touch analysis.
+    source_tables:
+      - vw_customer_master (WHERE customer_id IS NOT NULL)
+    key_columns:
+      - All columns from vw_customer_master
+      - lead_sequence: "row_number() within customer ordered by date_entered"
+      - customer_total_leads: "count(*) per customer"
+      - days_since_first_lead: "days from first lead to this lead"
+      - days_since_previous_lead: "days from previous lead"
+      - previous_status, previous_lead_source, previous_source_channel, previous_facility
+      - is_first_lead, is_latest_lead
+      - status_changed, source_changed, channel_changed, facility_changed
+      - journey_stage: "First Touch / Re-engagement / Conversion / Churned / Current"
+      - re_engagement_timing: >
+          First Touch / Quick Follow-up (<=7d) / Monthly (8-30d) / Quarterly (31-90d) /
+          Annual (91-365d) / Long Gap (>1yr)
+
+  vw_customer_tenant_enriched:
+    file: sql/vw_customer_tenant_enriched.sql
+    type: VIEW
+    purpose: >
+      Thin wrapper over the materialized view mv_customer_tenant_enriched. Exposes
+      the full enriched customer profile that combines CRM summary data from
+      vw_customer_summary with actual tenant/ledger data (move-in rates, rentroll
+      averages, lifecycle stage). Used for cross-CRM-operational reporting.
+    source_tables:
+      - mv_customer_tenant_enriched (materialized view — not a plain view)
+    key_columns:
+      - All columns from vw_customer_summary
+      - tenant_data_source: "source of the tenant match"
+      - tenant_id, tenant_status
+      - total_move_ins, total_move_outs
+      - first_tenant_date, last_tenant_date, months_in_system
+      - avg_move_in_rate, total_move_in_revenue
+      - rentroll_avg_rent
+      - tenant_name, tenant_company
+      - lifecycle_stage, is_tenant
+
+# =============================================================================
+# Dimension Tables (created in dim_inventory_labels.sql)
+# =============================================================================
+dimension_tables:
+
+  dim_size_category:
+    file: sql/dim_inventory_labels.sql
+    type: TABLE
+    purpose: "Labels for unit size categories: S/M/L/XL with sqft ranges."
+    columns:
+      - code: "VARCHAR(5) PK — S, M, L, XL"
+      - description: "Small / Medium / Large / X-Large"
+      - range_min_sqft, range_max_sqft: "boundary for automatic classification"
+      - sort_order: "display ordering"
+
+  dim_size_range:
+    file: sql/dim_inventory_labels.sql
+    type: TABLE
+    purpose: >
+      Fine-grained sqft buckets (e.g. '30-35', '0-6', '250+') with a foreign key
+      to dim_size_category. Used to assign a specific range label to each unit.
+    columns:
+      - range_code: "VARCHAR(10) PK — e.g. '30-35'"
+      - description: "human-readable range (e.g. '30 to 35 sqft')"
+      - range_min_sqft, range_max_sqft
+      - size_category: "FK to dim_size_category"
+      - sort_order
+
+  dim_unit_type:
+    file: sql/dim_inventory_labels.sql
+    type: TABLE
+    purpose: >
+      Reference for all unit type codes used in ESA facilities, grouped by
+      type_group (Walk-In, Locker, Wine, Others).
+    columns:
+      - code: "VARCHAR(10) PK — W, E, S, U, M, L, WN, WNU, DV, BZ, etc."
+      - description: "full name (e.g. 'Walk-In', 'Executive Locker Upper')"
+      - type_group: "Walk-In / Locker / Wine / Others"
+      - sort_order
+
+  dim_climate_type:
+    file: sql/dim_inventory_labels.sql
+    type: TABLE
+    purpose: "Standardized climate codes used in unit_category_labels and units_info_enriched."
+    columns:
+      - code: "VARCHAR(5) PK — NC, A, D, AD, RF"
+      - description: "No Climate Control / Aircon Only / Dehumidifier Only / Aircon + Dehumidifier / Refrigerated"
+      - sort_order
+    notes: >
+      The bClimate field in the SOAP API is unreliable (Korean sites return false even
+      with AC). The authoritative climate source is unit_range_mappings (esa_pbi) which
+      uses these codes, with fallback to inventory_type_mappings (esa_backend).
+
+  dim_unit_shape:
+    file: sql/dim_inventory_labels.sql
+    type: TABLE
+    purpose: "Unit shape codes based on length/width ratio and minimum dimension thresholds."
+    columns:
+      - code: "SS, WR, NR, OS"
+      - description: "Square / Wide Rectangle / Narrow Rectangle / Odd Shape"
+      - rule: "classification rule text"
+      - sort_order
+
+  dim_pillar:
+    file: sql/dim_inventory_labels.sql
+    type: TABLE
+    purpose: "Whether a unit has a pillar inside (P) or not (NP)."
+    columns:
+      - code: "P, NP"
+      - description
+      - sort_order

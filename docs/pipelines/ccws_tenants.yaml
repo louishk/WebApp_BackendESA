@@ -1,0 +1,309 @@
+name: ccws_tenants
+description: >
+  CallCenterWs (CCWS) tenant data pipeline. Pulls full tenant, ledger, and charge
+  records from the StorageMaker/SMD SOAP API and stores them in ccws_* tables in
+  the esa_pbi PostgreSQL database. Replaces the legacy cc_tenants table with a
+  richer, API-sourced schema that includes contact details, financial fields, and
+  ETL tracking columns.
+
+database: esa_pbi
+service: CallCenterWs.asmx
+namespace: http://tempuri.org/CallCenterWs/CallCenterWs
+
+# =============================================================================
+# DB Tables
+# =============================================================================
+tables:
+  ccws_tenants:
+    description: >
+      One row per (SiteID, TenantID) pair. Seeded from cc_tenants UNION rentroll,
+      then backfilled with full data from GetTenantInfoByTenantID.
+    primary_key: [TenantID, SiteID]
+    model: backend/python/common/models.py::CcwsTenant
+    column_groups:
+      primary_key:
+        - TenantID: "integer — unique tenant identifier"
+        - SiteID: "integer — site/location identifier"
+      access_security:
+        - sAccessCode: "primary gate access code"
+        - sAccessCode2: "secondary access code"
+        - iAccessCode2Type: "type of secondary access code"
+        - sWebPassword: "web portal password"
+        - bAllowedFacilityAccess: "facility access allowed flag"
+      primary_contact:
+        - sMrMrs, sFName, sMI, sLName, sCompany
+        - sAddr1, sAddr2, sCity, sRegion, sPostalCode, sCountry
+        - sPhone, sFax, sEmail, sPager, sMobile, sCountryCodeMobile
+      alternate_contact:
+        - sMrMrsAlt, sFNameAlt, sMIAlt, sLNameAlt
+        - sAddr1Alt, sAddr2Alt, sCityAlt, sRegionAlt, sPostalCodeAlt, sCountryAlt
+        - sPhoneAlt, sEmailAlt, sRelationshipAlt
+      business_contact:
+        - sMrMrsBus, sFNameBus, sMIBus, sLNameBus, sCompanyBus
+        - sAddr1Bus, sAddr2Bus, sCityBus, sRegionBus, sPostalCodeBus, sCountryBus
+        - sPhoneBus, sEmailBus
+      additional_contact:
+        - sMrMrsAdd, sFNameAdd, sMIAdd, sLNameAdd
+        - sAddr1Add, sAddr2Add, sCityAdd, sRegionAdd, sPostalCodeAdd, sCountryAdd
+        - sPhoneAdd, sEmailAdd
+      identification:
+        - sLicense, sLicRegion, sSSN, sTaxID, sTaxExemptCode, dDOB, iGender, sEmployer
+      status_flags:
+        - bCommercial, bTaxExempt, bSpecial, bNeverLockOut, bCompanyIsTenant
+        - bOnWaitingList, bNoChecks, bPermanent, bWalkInPOS, bSpecialAlert
+        - bPermanentGateLockout, bSMSOptIn, bDisabledWebAccess, bHasActiveLedger
+        - iBlackListRating, iTenEvents_OptOut
+      marketing:
+        - MarketingID, MktgDistanceID, MktgWhatID, MktgReasonID, MktgWhyID, MktgTypeID
+        - iHowManyOtherStorageCosDidYouContact, iUsedSelfStorageInThePast
+        - iMktg_DidYouVisitWebSite
+      exit_survey:
+        - bExit_OnEmailOfferList
+        - iExitSat_Cleanliness, iExitSat_Safety, iExitSat_Services, iExitSat_Staff, iExitSat_Price
+      geographic:
+        - dcLongitude: "NUMERIC(14,10)"
+        - dcLatitude: "NUMERIC(14,10)"
+      notes_icons:
+        - sTenNote: "tenant notes (TEXT)"
+        - sIconList
+      pictures:
+        - iPrimaryPic, sPicFileN1 through sPicFileN9
+      national_accounts:
+        - iGlobalNum_NationalMasterAccount
+        - iGlobalNum_NationalFranchiseAccount
+      source_timestamps:
+        - dCreated: "record creation date in SMD source"
+        - dUpdated: "record last update date in SMD source"
+        - uTS: "source timestamp token"
+      etl_tracking:
+        - sLocationCode: "resolved location code (L001, etc.)"
+        - extract_date: "date this row was last extracted"
+    indexes:
+      - idx_ccws_tenant_site: [SiteID]
+      - idx_ccws_tenant_location: [sLocationCode]
+      - idx_ccws_tenant_name: [sLName, sFName]
+      - idx_ccws_tenant_extract: [extract_date]
+
+  ccws_ledgers:
+    description: >
+      One row per (SiteID, LedgerID). Populated by tenant_ledger_charges_to_sql.py
+      via LedgersByTenantID_v3. Contains 141 fields including full contact details
+      (denormalized from the ledger endpoint), financial fields, lease dates, and
+      status flags.
+    primary_key: [LedgerID, SiteID]
+    model: backend/python/common/models.py::CcwsLedger
+    key_columns:
+      - LedgerID, SiteID, TenantID, UnitID, EmployeeID
+      - TenantName, sUnitName
+      - dcRent, dcInsurPremium, dcChargeBalance, dcTotalDue
+      - sBillingFrequency, iAutoBillType, iInvoiceDeliveryType
+      - dMovedIn, dPaidThru, dSchedOut, dAnniv, dCreated, dUpdated
+      - bOverlocked, bCommercial, bTaxExempt, bPermanent, bNeverLockOut
+      - iLeaseNum, iDefLeaseNum
+      - extract_date, uTS, uTSbigint
+    indexes:
+      - idx_ccws_ledger_site: [SiteID]
+      - idx_ccws_ledger_tenant: [TenantID]
+      - idx_ccws_ledger_unit: [UnitID]
+      - idx_ccws_ledger_paid_thru: [dPaidThru]
+      - idx_ccws_ledger_moved_in: [dMovedIn]
+      - idx_ccws_ledger_sched_out: [dSchedOut]
+
+  ccws_charges:
+    description: >
+      One row per (SiteID, ChargeID, dcPmtAmt). Populated by tenant_ledger_charges_to_sql.py
+      via ChargesAllByLedgerID. dcPmtAmt is part of the composite PK to handle partial
+      payments (a single ChargeID can appear multiple times with different payment amounts).
+    primary_key: [ChargeID, SiteID, dcPmtAmt]
+    model: backend/python/common/models.py::CcwsCharge
+    key_columns:
+      - ChargeID, SiteID, dcPmtAmt (PK)
+      - LedgerID: "injected by ETL — not returned directly by ChargesAllByLedgerID"
+      - ChargeDescID
+      - sChgCategory, sChgDesc, sDefChgDesc
+      - dcAmt, dcPrice, dcQty, dcTax1, dcTax2
+      - dChgStrt, dChgEnd
+      - bMoveIn, bMoveOut
+      - extract_date
+    indexes:
+      - idx_ccws_charge_site: [SiteID]
+      - idx_ccws_charge_ledger: [LedgerID]
+      - idx_ccws_charge_category: [sChgCategory]
+      - idx_ccws_charge_date: [dChgStrt]
+
+# =============================================================================
+# SOAP Operations Used
+# =============================================================================
+soap_operations:
+  TenantList:
+    registry_key: tenant_list
+    soap_action: "http://tempuri.org/CallCenterWs/CallCenterWs/TenantList"
+    result_tag: Table
+    params: [sLocationCode, sTenantFirstName, sTenantLastName]
+    used_by: tenant_ledger_charges_to_sql.py (full and incremental modes)
+    notes: >
+      Returns basic tenant rows (17 fields). In full mode, called with empty name
+      params to retrieve all tenants at a location.
+
+  LedgersByTenantID_v3:
+    registry_key: ledgers_by_tenant_id_v3
+    soap_action: "http://tempuri.org/CallCenterWs/CallCenterWs/LedgersByTenantID_v3"
+    result_tag: Ledgers
+    params: [sLocationCode, sTenantID]
+    used_by: tenant_ledger_charges_to_sql.py
+    notes: >
+      Returns 141 fields per ledger including denormalized tenant contact info,
+      financial fields (dcRent, dcChargeBalance, dcTotalDue), and lease dates.
+
+  ChargesAllByLedgerID:
+    registry_key: charges_all_by_ledger_id
+    soap_action: "http://tempuri.org/CallCenterWs/CallCenterWs/ChargesAllByLedgerID"
+    result_tag: Table
+    params: [sLocationCode, ledgerId]
+    used_by: tenant_ledger_charges_to_sql.py
+    notes: >
+      Returns all charges (recurring and one-time) for a ledger. Returns 16 fields.
+      LedgerID is not in the response — it is injected by the ETL from context.
+
+  TenantInfoByTenantID:
+    registry_key: tenant_info_by_tenant_id
+    soap_action: "http://tempuri.org/CallCenterWs/CallCenterWs/TenantInfoByTenantID"
+    result_tag: Table
+    params: [sLocationCode, iTenantID]
+    used_by: seed_ccws_tenants.py (backfill and probe modes)
+    notes: >
+      Returns full tenant record (all fields including alternate/business/additional
+      contacts, marketing data, exit survey, geographic coords, pictures). Used
+      to backfill ccws_tenants rows that were seeded with only TenantID/SiteID.
+
+# =============================================================================
+# Pipeline Scripts
+# =============================================================================
+scripts:
+  tenant_ledger_charges_to_sql.py:
+    path: backend/python/datalayer/tenant_ledger_charges_to_sql.py
+    description: >
+      Main operational pipeline. Three-step workflow per location:
+      1. Call TenantList to get all tenants at the location.
+      2. For each tenant, call LedgersByTenantID_v3 to get their ledger(s).
+      3. For each ledger, call ChargesAllByLedgerID to get all charges.
+      Upserts results into ccws_tenants, ccws_ledgers, and ccws_charges.
+    modes:
+      full:
+        description: Fetches all tenants and their complete history. For initial load.
+        usage: "python tenant_ledger_charges_to_sql.py --mode full --location L001"
+      incremental:
+        description: Only processes ledgers updated since a threshold date. For ongoing refresh.
+        usage: "python tenant_ledger_charges_to_sql.py --mode incremental --location L001"
+        usage_with_date: "python tenant_ledger_charges_to_sql.py --mode incremental --location L001 --since 2026-01-01"
+    env_config:
+      SOAP_BASE_URL: "ReportingWs URL — converted to CallCenterWs.asmx by the script"
+      SOAP_CORP_CODE: "Corporation code for authentication"
+      SOAP_CORP_USER: "Corp username for authentication"
+      SOAP_API_KEY: "API key injected as password prefix"
+      SOAP_CORP_PASSWORD: "Corp password"
+      CHARGES_LOCATION_CODES: "Comma-separated list of location codes to process"
+      CHARGES_SQL_CHUNK_SIZE: "Upsert batch size (default: 500)"
+    concurrency: >
+      Uses concurrent.futures for parallel location processing where supported.
+
+  seed_ccws_tenants.py:
+    path: backend/python/datalayer/seed_ccws_tenants.py
+    description: >
+      One-time migration utility to populate ccws_tenants before the cc_tenants
+      table is decommissioned. Run seed first, then backfill.
+    modes:
+      seed:
+        description: >
+          Phase A. INSERTs all known (SiteID, TenantID) pairs from cc_tenants UNION
+          rentroll into ccws_tenants using ON CONFLICT DO NOTHING. Run once.
+        usage: "python seed_ccws_tenants.py --mode seed"
+      backfill:
+        description: >
+          Phase B. For each ccws_tenants row where dCreated IS NULL (never fully
+          fetched), resolves the SiteID to a location code via siteinfo, calls
+          TenantInfoByTenantID, and UPDATEs the row with all fields.
+        usage: "python seed_ccws_tenants.py --mode backfill"
+        usage_filtered: "python seed_ccws_tenants.py --mode backfill --location L001"
+        batch_size: "Commits every 100 rows (configurable via --batch-size)"
+      probe:
+        description: >
+          Calls TenantInfoByTenantID for a single tenant and logs all returned
+          fields. Use to verify result_tag and field names before running backfill.
+        usage: "python seed_ccws_tenants.py --mode probe --location L001 --tenant-id 12345"
+
+# =============================================================================
+# Migration
+# =============================================================================
+migration:
+  file: backend/python/migrations/027_ccws_tenants_expand.sql
+  description: >
+    Adds all fields required by GetTenantInfoByTenantID to the existing ccws_tenants
+    table. Must be applied BEFORE running seed_ccws_tenants.py --mode backfill or
+    deploying the updated pipeline code.
+  column_groups_added:
+    - "Access & Security: sAccessCode2, iAccessCode2Type, sWebPassword, bAllowedFacilityAccess"
+    - "Primary Contact extensions: sMrMrs, sCountry, sFax, sPager, sCountryCodeMobile"
+    - "Full Alternate Contact (13 columns)"
+    - "Full Business Contact (14 columns)"
+    - "Full Additional Contact (12 columns)"
+    - "Identification: sLicRegion, sTaxID, sTaxExemptCode, dDOB, iGender"
+    - "Status Flags (16 columns): bCommercial through bHasActiveLedger"
+    - "Marketing (9 columns): MarketingID through iMktg_DidYouVisitWebSite"
+    - "Exit Survey (6 columns)"
+    - "Geographic: dcLongitude NUMERIC(14,10), dcLatitude NUMERIC(14,10)"
+    - "Notes & Icons: sTenNote TEXT, sIconList"
+    - "Pictures: iPrimaryPic, sPicFileN1 through sPicFileN9"
+    - "Identification extras: sSSN, sEmployer"
+    - "National Accounts: iGlobalNum_NationalMasterAccount, iGlobalNum_NationalFranchiseAccount"
+    - "Source Timestamps: dCreated TIMESTAMP, dUpdated TIMESTAMP, uTS"
+  new_index: idx_ccws_tenant_extract on extract_date
+
+# =============================================================================
+# Transformation Notes
+# =============================================================================
+transformation:
+  type_conversion:
+    - "Integers via convert_to_int() — handles None, strings, and numeric coercion"
+    - "Booleans via convert_to_bool() — handles 'true'/'false' strings and integers"
+    - "Decimals via convert_to_decimal() — handles None and string representations"
+    - "Datetimes via convert_to_datetime() — parses ISO 8601 and common formats"
+  special_cases:
+    - >
+      dcPmtAmt defaults to Decimal('0') rather than None in ccws_charges because it
+      is part of the composite primary key and NULL would break uniqueness semantics.
+    - >
+      LedgerID is not returned by ChargesAllByLedgerID — it is injected by the ETL
+      from the outer loop context (the ledger being queried).
+    - >
+      In TenantList (17 fields), most ccws_tenants columns will be None. These are
+      preserved by upsert — existing data from a prior GetTenantInfoByTenantID call
+      is not overwritten with NULL on a lighter re-fetch.
+  backfill_marker: >
+    dCreated IS NULL serves as the sentinel for "not yet backfilled" in seed_ccws_tenants.py.
+    extract_date IS NULL is an additional check. Both must be NULL for a row to be
+    selected for backfill.
+  location_resolution: >
+    SiteID is mapped to sLocationCode via the siteinfo table (SiteCode column).
+    The SOAP client requires sLocationCode; the DB stores SiteID as the FK.
+
+# =============================================================================
+# Auth / Connection
+# =============================================================================
+auth:
+  method: "SOAP header injection — sCorpCode, sCorpUserName (format: USER:::APIKEY), sCorpPassword"
+  url_derivation: >
+    The CallCenterWs service URL is derived from the ReportingWs URL by replacing
+    'ReportingWs.asmx' with 'CallCenterWs.asmx'. The base_url in .env points to
+    ReportingWs; the pipeline applies this substitution at startup.
+  client: backend/python/common/soap_client.py (SOAPClient)
+  registry: backend/python/common/soap_reports.py (REPORT_REGISTRY)
+
+# =============================================================================
+# Related Code
+# =============================================================================
+related:
+  models: backend/python/common/models.py (CcwsTenant, CcwsLedger, CcwsCharge, CCDiscount)
+  soap_registry: backend/python/common/soap_reports.py
+  soap_client: backend/python/common/soap_client.py
+  migration: backend/python/migrations/027_ccws_tenants_expand.sql

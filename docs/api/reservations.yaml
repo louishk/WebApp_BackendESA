@@ -1,0 +1,1261 @@
+openapi: 3.0.3
+
+info:
+  title: ESA Backend — Reservations API
+  description: >
+    SOAP-backed reservation management endpoints for StorageMaker/SMD CallCenterWs.
+    All routes are under the `reservations` Flask blueprint with URL prefix `/api/reservations`.
+
+    **Authentication**: Bearer JWT in the `Authorization` header.
+
+    **Rate limiting** is applied per API key per sliding window; limits vary by endpoint.
+
+    **SOAP backend**: All mutation and read operations proxy to the SMD CallCenterWs SOAP
+    service (`CallCenterWs.asmx`). The `site_code` parameter is validated against the
+    `site_info` table in the `esa_pbi` database before every SOAP call.
+
+  version: "1.0.0"
+  contact:
+    name: ESA Backend
+
+servers:
+  - url: https://app.extraspaceasia.com.sg
+    description: Production (Azure VM)
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        HS256-signed JWT issued by `POST /api/auth/token`. Include as
+        `Authorization: Bearer <token>`.
+
+  schemas:
+
+    # -------------------------------------------------------------------------
+    # Shared / reusable
+    # -------------------------------------------------------------------------
+
+    SiteCode:
+      type: string
+      description: >
+        StorageMaker location code. Validated against the `site_info` table in
+        the `esa_pbi` database before any SOAP call is made.
+      example: "LSETUP"
+
+    RetResult:
+      type: object
+      description: SOAP operation return code and message, passed through as-is.
+      properties:
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from the SOAP operation (e.g. "0" for success).
+          example: "0"
+        message:
+          type: string
+          description: Human-readable return message from SOAP.
+          example: "Reservation created successfully"
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "site_code is required"
+
+    SoapErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "SOAP API error"
+
+    # -------------------------------------------------------------------------
+    # Request bodies
+    # -------------------------------------------------------------------------
+
+    QuickReservationRequest:
+      type: object
+      required:
+        - site_code
+        - unit_id
+        - tenant_name
+        - tenant_last
+        - phone
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        unit_id:
+          type: integer
+          description: StorageMaker unit ID to reserve.
+          example: 10042
+        tenant_name:
+          type: string
+          description: Tenant first name.
+          example: "John"
+        tenant_last:
+          type: string
+          description: Tenant last name.
+          example: "Smith"
+        phone:
+          type: string
+          description: Contact phone number.
+          example: "+6591234567"
+        email:
+          type: string
+          format: email
+          description: Contact email address (optional).
+          example: "john.smith@example.com"
+        notes:
+          type: string
+          description: Free-text reservation notes (optional).
+          example: "Needs ground-floor access"
+
+    CreateReservationRequest:
+      type: object
+      required:
+        - site_code
+        - unit_id
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        unit_id:
+          type: integer
+          description: StorageMaker unit ID to reserve.
+          example: 10042
+        tenant_id:
+          type: string
+          description: Existing tenant ID; use "0" for a walk-in / new enquiry.
+          default: "0"
+          example: "0"
+        needed_date:
+          type: string
+          format: date
+          description: Desired move-in date (YYYY-MM-DD). Defaults to tomorrow (UTC).
+          example: "2026-03-17"
+        expires_date:
+          type: string
+          format: date
+          description: >
+            Date the reservation expires if not converted (YYYY-MM-DD).
+            Defaults to today + 14 days (UTC).
+          example: "2026-03-30"
+        followup_date:
+          type: string
+          format: date
+          description: >
+            Date for the next follow-up call (YYYY-MM-DD).
+            Defaults to today + 3 days (UTC).
+          example: "2026-03-19"
+        quoted_rate:
+          type: number
+          format: float
+          description: Monthly rate quoted to the prospective tenant.
+          default: 0
+          example: 280.00
+        comment:
+          type: string
+          description: Free-text comment for the reservation.
+          default: ""
+          example: "Walk-in from website enquiry"
+        source_id:
+          type: integer
+          description: Numeric source ID (maps to SMD source table).
+          default: 0
+          example: 3
+        source_name:
+          type: string
+          description: Human-readable source label passed to SOAP.
+          default: "ESA Backend"
+          example: "Website"
+        rental_type_id:
+          type: integer
+          description: SOAP `QTRentalTypeID` — rental type identifier.
+          default: 0
+          example: 0
+        inquiry_type:
+          type: integer
+          description: Inquiry channel type code.
+          default: 0
+          example: 1
+        tracking_code:
+          type: string
+          description: Marketing or campaign tracking code.
+          default: ""
+          example: "GGL-CPC-2026"
+        caller_id:
+          type: string
+          description: Caller/agent identifier.
+          default: ""
+          example: "AGENT01"
+        concession_id:
+          type: integer
+          description: Discount/concession plan ID to apply.
+          default: 0
+          example: 0
+        promo_global:
+          type: integer
+          description: Global promotional offer number.
+          default: 0
+          example: 0
+
+    UpdateReservationRequest:
+      type: object
+      required:
+        - site_code
+        - unit_id
+        - needed_date
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        unit_id:
+          type: integer
+          description: Unit ID associated with the reservation.
+          example: 10042
+        tenant_id:
+          type: string
+          description: Tenant ID. Use "0" for walk-in.
+          default: "0"
+          example: "12345"
+        needed_date:
+          type: string
+          format: date
+          description: Desired move-in date (YYYY-MM-DD).
+          example: "2026-03-20"
+        comment:
+          type: string
+          description: Updated comment text.
+          default: ""
+          example: "Customer called to confirm"
+        status:
+          type: integer
+          description: Reservation status code (0 = active, 2 = cancelled in SMD).
+          default: 0
+          example: 0
+        followup:
+          type: boolean
+          description: Whether to schedule a follow-up call.
+          default: false
+          example: true
+        followup_date:
+          type: string
+          format: date
+          description: Date for follow-up (YYYY-MM-DD).
+          default: ""
+          example: "2026-03-21"
+        followup_last_date:
+          type: string
+          format: date
+          description: Date of the most recent follow-up contact.
+          default: ""
+          example: "2026-03-16"
+        inquiry_type:
+          type: integer
+          description: Inquiry channel type code.
+          default: 0
+          example: 1
+        quoted_rate:
+          type: number
+          format: float
+          description: Updated quoted monthly rate.
+          default: 0
+          example: 265.00
+        expires_date:
+          type: string
+          format: date
+          description: Updated expiry date for the reservation.
+          default: ""
+          example: "2026-04-02"
+        rental_type_id:
+          type: integer
+          description: SOAP `QTRentalTypeID`.
+          default: 0
+          example: 0
+        cancellation_type_id:
+          type: integer
+          description: SOAP `QTCancellationTypeID` — cancellation category.
+          default: 0
+          example: 0
+        cancellation_reason:
+          type: string
+          description: Free-text cancellation reason.
+          default: ""
+          example: ""
+        concession_id:
+          type: integer
+          description: Discount/concession plan ID.
+          default: 0
+          example: 0
+
+    CancelReservationRequest:
+      type: object
+      required:
+        - site_code
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        cancellation_reason:
+          type: string
+          description: Free-text reason for cancellation.
+          default: ""
+          example: "Tenant found alternative storage"
+        cancellation_type_id:
+          type: integer
+          description: SOAP `QTCancellationTypeID` — optional cancellation category code.
+          default: 0
+          example: 1
+
+    AddNoteRequest:
+      type: object
+      required:
+        - site_code
+        - note
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        note:
+          type: string
+          description: Note text to attach to the reservation.
+          example: "Customer confirmed move-in for the 20th"
+
+    SendConfirmationRequest:
+      type: object
+      required:
+        - site_code
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        move_in_link:
+          type: string
+          format: uri
+          description: Optional move-in guide URL to embed in the confirmation email.
+          default: ""
+          example: "https://extraspaceasia.com.sg/move-in"
+
+    # -------------------------------------------------------------------------
+    # Response bodies
+    # -------------------------------------------------------------------------
+
+    QuickReservationResponse:
+      allOf:
+        - $ref: "#/components/schemas/RetResult"
+        - type: object
+          required: [success, site_code, unit_id]
+          properties:
+            success:
+              type: boolean
+              example: true
+            site_code:
+              $ref: "#/components/schemas/SiteCode"
+            unit_id:
+              type: integer
+              example: 10042
+
+    CreateReservationResponse:
+      allOf:
+        - $ref: "#/components/schemas/RetResult"
+        - type: object
+          required: [success, site_code, unit_id]
+          properties:
+            success:
+              type: boolean
+              example: true
+            site_code:
+              $ref: "#/components/schemas/SiteCode"
+            unit_id:
+              type: integer
+              example: 10042
+            waiting_id:
+              type: string
+              nullable: true
+              description: >
+                WaitingID assigned by SMD (from `WaitingID` or `iWaitingID` in
+                SOAP response). Null if SOAP did not return one.
+              example: "8821"
+            raw:
+              type: object
+              nullable: true
+              description: Raw first record from the SOAP response, passed through unchanged.
+              additionalProperties: true
+
+    UpdateReservationResponse:
+      allOf:
+        - $ref: "#/components/schemas/RetResult"
+        - type: object
+          required: [success, waiting_id]
+          properties:
+            success:
+              type: boolean
+              example: true
+            waiting_id:
+              type: integer
+              example: 8821
+            raw:
+              type: object
+              nullable: true
+              description: Raw first record from the SOAP response.
+              additionalProperties: true
+
+    CancelReservationResponse:
+      allOf:
+        - $ref: "#/components/schemas/RetResult"
+        - type: object
+          required: [success, waiting_id]
+          properties:
+            success:
+              type: boolean
+              example: true
+            waiting_id:
+              type: integer
+              example: 8821
+
+    ReservationRecord:
+      type: object
+      description: >
+        A single reservation record as returned by the SMD `ReservationList_v3` SOAP
+        operation. Field names are the raw SMD column names; exact set depends on the
+        SMD version configured on each site.
+      additionalProperties: true
+      example:
+        WaitingID: "8821"
+        TenantID: "0"
+        UnitID: "10042"
+        dNeeded: "2026-03-20"
+        dExpires: "2026-03-30"
+        dcQuotedRate: "280.00"
+        iStatus: "0"
+        sComment: "Walk-in from website"
+
+    ReservationListResponse:
+      type: object
+      required: [site_code, reservations, count]
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        reservations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReservationRecord"
+        count:
+          type: integer
+          example: 3
+
+    ReservationGetResponse:
+      type: object
+      required: [site_code, reservation]
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        reservation:
+          $ref: "#/components/schemas/ReservationRecord"
+
+    NoteRecord:
+      type: object
+      description: >
+        A single note record as returned by the SMD `ReservationNotesRetrieve`
+        SOAP operation. Field names are raw SMD column names.
+      additionalProperties: true
+      example:
+        NoteID: "4412"
+        WaitingID: "8821"
+        sNote: "Customer confirmed move-in for the 20th"
+        dNoteDate: "2026-03-16"
+
+    NotesListResponse:
+      type: object
+      required: [waiting_id, notes, count]
+      properties:
+        waiting_id:
+          type: integer
+          example: 8821
+        notes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NoteRecord"
+        count:
+          type: integer
+          example: 2
+
+    AddNoteResponse:
+      allOf:
+        - $ref: "#/components/schemas/RetResult"
+        - type: object
+          required: [success, waiting_id]
+          properties:
+            success:
+              type: boolean
+              example: true
+            waiting_id:
+              type: integer
+              example: 8821
+
+    SendConfirmationResponse:
+      allOf:
+        - $ref: "#/components/schemas/RetResult"
+        - type: object
+          required: [success, waiting_id]
+          properties:
+            success:
+              type: boolean
+              example: true
+            waiting_id:
+              type: integer
+              example: 8821
+
+    FeeRecord:
+      type: object
+      description: >
+        A single fee configuration record as returned by `ReservationFeeRetrieve`.
+        Field names are raw SMD column names.
+      additionalProperties: true
+      example:
+        FeeTypeID: "1"
+        FeeName: "Reservation Fee"
+        FeeAmount: "50.00"
+        bRefundable: "true"
+
+    FeesResponse:
+      type: object
+      required: [site_code, fees]
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        fees:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeeRecord"
+
+  responses:
+    400BadRequest:
+      description: Missing or invalid request parameter.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    401Unauthorized:
+      description: Missing, expired, or invalid JWT.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Unauthorized"
+
+    403Forbidden:
+      description: JWT is valid but does not carry the required scope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Insufficient scope"
+
+    404NotFound:
+      description: The requested reservation does not exist for the given site.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Reservation not found"
+
+    429TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Rate limit exceeded"
+
+    500InternalError:
+      description: Unexpected internal server error or SOAP configuration unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    502SoapError:
+      description: The upstream SMD SOAP service returned a fault.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SoapErrorResponse"
+
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # POST /api/reservations/quick
+  # ---------------------------------------------------------------------------
+  /api/reservations/quick:
+    post:
+      summary: Quick walk-in reservation (MakeReservation)
+      operationId: reservationQuick
+      description: >
+        Creates a reservation using the simpler SMD `MakeReservation` SOAP operation.
+        Accepts name and phone directly without requiring an existing tenant ID.
+        Intended for the unit-availability tool page walk-in flow.
+
+        **SOAP operation**: `MakeReservation`
+
+        **Audit event**: `RESERVATION_CREATED`
+
+        **Rate limit**: 10 requests per 60 seconds per API key.
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuickReservationRequest"
+            example:
+              site_code: "LSETUP"
+              unit_id: 10042
+              tenant_name: "John"
+              tenant_last: "Smith"
+              phone: "+6591234567"
+              email: "john.smith@example.com"
+              notes: "Needs ground-floor access"
+      responses:
+        "200":
+          description: >
+            Reservation submitted. Check `ret_code` for the SMD-level result;
+            a non-zero code may indicate a business-rule rejection even when
+            HTTP 200 is returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuickReservationResponse"
+              example:
+                success: true
+                site_code: "LSETUP"
+                unit_id: 10042
+                ret_code: "0"
+                message: "Reservation created successfully"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/reservations/create
+  # ---------------------------------------------------------------------------
+  /api/reservations/create:
+    post:
+      summary: Create full reservation (ReservationNewWithSource_v6)
+      operationId: reservationCreate
+      description: >
+        Creates a new reservation via the full SMD `ReservationNewWithSource_v6`
+        SOAP operation. Supports all SMD reservation fields including source
+        tracking, concession IDs, and quoted rates. Returns a `waiting_id`
+        assigned by SMD.
+
+        Date fields default when omitted:
+        - `needed_date` → UTC today + 1 day
+        - `expires_date` → UTC today + 14 days
+        - `followup_date` → UTC today + 3 days
+
+        **SOAP operation**: `ReservationNewWithSource_v6`
+
+        **Audit event**: `RESERVATION_CREATED`
+
+        **Rate limit**: 10 requests per 60 seconds per API key.
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReservationRequest"
+            example:
+              site_code: "LSETUP"
+              unit_id: 10042
+              tenant_id: "0"
+              needed_date: "2026-03-17"
+              expires_date: "2026-03-30"
+              followup_date: "2026-03-19"
+              quoted_rate: 280.00
+              comment: "Website enquiry"
+              source_id: 3
+              source_name: "Website"
+              rental_type_id: 0
+              inquiry_type: 1
+              tracking_code: "GGL-CPC-2026"
+              caller_id: "AGENT01"
+              concession_id: 0
+              promo_global: 0
+      responses:
+        "200":
+          description: >
+            Reservation created. The `waiting_id` field contains the SMD-assigned
+            WaitingID for subsequent operations. Check `ret_code` for SOAP-level
+            status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateReservationResponse"
+              example:
+                success: true
+                site_code: "LSETUP"
+                unit_id: 10042
+                waiting_id: "8821"
+                ret_code: "0"
+                message: "Reservation created successfully"
+                raw:
+                  WaitingID: "8821"
+                  Ret_Code: "0"
+                  Ret_Msg: "Reservation created successfully"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/reservations/list
+  # ---------------------------------------------------------------------------
+  /api/reservations/list:
+    get:
+      summary: List reservations for a site (ReservationList_v3)
+      operationId: reservationList
+      description: >
+        Returns all active reservations for a site, or filters by `waiting_id`
+        or `global_waiting_num` when provided. Both filter parameters default
+        to 0, which the SMD API treats as "return all".
+
+        **SOAP operation**: `ReservationList_v3`
+
+        **No rate limit** on read operations.
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+        - name: waiting_id
+          in: query
+          required: false
+          description: >
+            Filter results to a specific reservation WaitingID. Pass 0 (default)
+            to return all reservations for the site.
+          schema:
+            type: integer
+            default: 0
+          example: 0
+        - name: global_waiting_num
+          in: query
+          required: false
+          description: >
+            Filter by global waiting number (`iGlobalWaitingNum` in SMD). Pass 0
+            (default) to return all.
+          schema:
+            type: integer
+            default: 0
+          example: 0
+      responses:
+        "200":
+          description: List of reservations (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationListResponse"
+              example:
+                site_code: "LSETUP"
+                reservations:
+                  - WaitingID: "8821"
+                    TenantID: "0"
+                    UnitID: "10042"
+                    dNeeded: "2026-03-20"
+                    dExpires: "2026-03-30"
+                    dcQuotedRate: "280.00"
+                    iStatus: "0"
+                count: 1
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/reservations/{waiting_id}
+  # ---------------------------------------------------------------------------
+  /api/reservations/{waiting_id}:
+    get:
+      summary: Get a single reservation (ReservationList_v3)
+      operationId: reservationGet
+      description: >
+        Retrieves a single reservation by its `waiting_id`. Internally calls
+        `ReservationList_v3` with the specific WaitingID and returns the first
+        result. Returns 404 if SOAP returns no records.
+
+        **SOAP operation**: `ReservationList_v3`
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: waiting_id
+          in: path
+          required: true
+          description: The SMD WaitingID of the reservation.
+          schema:
+            type: integer
+          example: 8821
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: The reservation record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReservationGetResponse"
+              example:
+                site_code: "LSETUP"
+                reservation:
+                  WaitingID: "8821"
+                  TenantID: "0"
+                  UnitID: "10042"
+                  dNeeded: "2026-03-20"
+                  dExpires: "2026-03-30"
+                  dcQuotedRate: "280.00"
+                  iStatus: "0"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "404":
+          $ref: "#/components/responses/404NotFound"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+    put:
+      summary: Update a reservation (ReservationUpdate_v4)
+      operationId: reservationUpdate
+      description: >
+        Updates an existing reservation via `ReservationUpdate_v4`. All mutable
+        SMD reservation fields can be changed in a single call. To cancel,
+        use the dedicated `PUT /api/reservations/{waiting_id}/cancel` endpoint
+        instead.
+
+        **SOAP operation**: `ReservationUpdate_v4`
+
+        **Audit event**: `RESERVATION_UPDATED`
+
+        **Rate limit**: 10 requests per 60 seconds per API key.
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: waiting_id
+          in: path
+          required: true
+          description: The SMD WaitingID of the reservation to update.
+          schema:
+            type: integer
+          example: 8821
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateReservationRequest"
+            example:
+              site_code: "LSETUP"
+              unit_id: 10042
+              needed_date: "2026-03-20"
+              comment: "Customer called to confirm"
+              followup: true
+              followup_date: "2026-03-21"
+              quoted_rate: 265.00
+      responses:
+        "200":
+          description: Reservation updated. Check `ret_code` for SOAP-level status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateReservationResponse"
+              example:
+                success: true
+                waiting_id: 8821
+                ret_code: "0"
+                message: "Reservation updated"
+                raw:
+                  Ret_Code: "0"
+                  Ret_Msg: "Reservation updated"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # PUT /api/reservations/{waiting_id}/cancel
+  # ---------------------------------------------------------------------------
+  /api/reservations/{waiting_id}/cancel:
+    put:
+      summary: Cancel a reservation
+      operationId: reservationCancel
+      description: >
+        Cancels a reservation by setting its SMD status to 2 (cancelled).
+        Internally performs two SOAP calls:
+        1. `ReservationList_v3` — fetches the current reservation to preserve
+           existing field values.
+        2. `ReservationUpdate_v4` — re-submits the record with `iStatus=2` and
+           the supplied cancellation reason.
+
+        Returns 404 if the reservation is not found in the first SOAP call.
+
+        **SOAP operations**: `ReservationList_v3`, then `ReservationUpdate_v4`
+
+        **Audit event**: `RESERVATION_CANCELLED`
+
+        **Rate limit**: 10 requests per 60 seconds per API key.
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: waiting_id
+          in: path
+          required: true
+          description: The SMD WaitingID of the reservation to cancel.
+          schema:
+            type: integer
+          example: 8821
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelReservationRequest"
+            example:
+              site_code: "LSETUP"
+              cancellation_reason: "Tenant found alternative storage"
+              cancellation_type_id: 1
+      responses:
+        "200":
+          description: Reservation cancelled. Check `ret_code` for SOAP-level status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CancelReservationResponse"
+              example:
+                success: true
+                waiting_id: 8821
+                ret_code: "0"
+                message: "Reservation cancelled"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "404":
+          $ref: "#/components/responses/404NotFound"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/reservations/{waiting_id}/notes
+  # ---------------------------------------------------------------------------
+  /api/reservations/{waiting_id}/notes:
+    get:
+      summary: Get notes for a reservation (ReservationNotesRetrieve)
+      operationId: reservationNotesGet
+      description: >
+        Returns all notes attached to a reservation from the SMD
+        `ReservationNotesRetrieve` SOAP operation. Returns an empty array if
+        no notes exist.
+
+        **SOAP operation**: `ReservationNotesRetrieve`
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: waiting_id
+          in: path
+          required: true
+          description: The SMD WaitingID of the reservation.
+          schema:
+            type: integer
+          example: 8821
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: List of notes (may be empty).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotesListResponse"
+              example:
+                waiting_id: 8821
+                notes:
+                  - NoteID: "4412"
+                    WaitingID: "8821"
+                    sNote: "Customer confirmed move-in for the 20th"
+                    dNoteDate: "2026-03-16"
+                count: 1
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+    post:
+      summary: Add a note to a reservation (ReservationNoteInsert)
+      operationId: reservationNotesAdd
+      description: >
+        Inserts a new note against a reservation via the SMD
+        `ReservationNoteInsert` SOAP operation.
+
+        **SOAP operation**: `ReservationNoteInsert`
+
+        **Rate limit**: 20 requests per 60 seconds per API key.
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: waiting_id
+          in: path
+          required: true
+          description: The SMD WaitingID of the reservation.
+          schema:
+            type: integer
+          example: 8821
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddNoteRequest"
+            example:
+              site_code: "LSETUP"
+              note: "Customer confirmed move-in for the 20th"
+      responses:
+        "200":
+          description: Note inserted. Check `ret_code` for SOAP-level status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddNoteResponse"
+              example:
+                success: true
+                waiting_id: 8821
+                ret_code: "0"
+                message: "Note added"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/reservations/{waiting_id}/send-confirmation
+  # ---------------------------------------------------------------------------
+  /api/reservations/{waiting_id}/send-confirmation:
+    post:
+      summary: Send reservation confirmation email (SendReservationConfirmationEmail)
+      operationId: reservationSendConfirmation
+      description: >
+        Triggers the SMD `SendReservationConfirmationEmail` SOAP operation, which
+        sends a confirmation email to the address on file for the reservation.
+        An optional `move_in_link` URL is embedded in the email when provided.
+
+        **SOAP operation**: `SendReservationConfirmationEmail`
+
+        **Rate limit**: 5 requests per 60 seconds per API key (stricter to avoid
+        duplicate email sends).
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: waiting_id
+          in: path
+          required: true
+          description: The SMD WaitingID of the reservation.
+          schema:
+            type: integer
+          example: 8821
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendConfirmationRequest"
+            example:
+              site_code: "LSETUP"
+              move_in_link: "https://extraspaceasia.com.sg/move-in"
+      responses:
+        "200":
+          description: >
+            Confirmation email dispatched. Check `ret_code` for SOAP-level status;
+            the SOAP layer controls actual delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendConfirmationResponse"
+              example:
+                success: true
+                waiting_id: 8821
+                ret_code: "0"
+                message: "Confirmation email sent"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/reservations/fees
+  # ---------------------------------------------------------------------------
+  /api/reservations/fees:
+    get:
+      summary: Get reservation fee configuration (ReservationFeeRetrieve)
+      operationId: reservationFeeRetrieve
+      description: >
+        Returns the reservation fee configuration for a site from the SMD
+        `ReservationFeeRetrieve` SOAP operation. Fees are site-specific and
+        may include refundable and non-refundable entries.
+
+        **SOAP operation**: `ReservationFeeRetrieve`
+
+        **No rate limit** on this read operation.
+      tags:
+        - Reservations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: Fee configuration for the site (may be empty array if none configured).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeesResponse"
+              example:
+                site_code: "LSETUP"
+                fees:
+                  - FeeTypeID: "1"
+                    FeeName: "Reservation Fee"
+                    FeeAmount: "50.00"
+                    bRefundable: "true"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+tags:
+  - name: Reservations
+    description: >
+      SOAP-backed reservation lifecycle management. All endpoints proxy to the
+      SMD CallCenterWs SOAP service. The `site_code` parameter is validated
+      against the `esa_pbi` database on every request.
+
+      Required JWT scopes:
+      - `inventory:read` — GET endpoints
+      - `inventory:write` — POST/PUT endpoints

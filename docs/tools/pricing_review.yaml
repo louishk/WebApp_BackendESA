@@ -1,0 +1,385 @@
+tool:
+  name: Pricing Review
+  description: >
+    Compares occupied ARR (Annualised Rental Revenue) per sq ft against vacant
+    unit standard and promotional pricing, grouped by unit category. Allows
+    management to evaluate whether proposed promo discounts would yield blended
+    ARR above or below budget thresholds, and to model "what-if" discount
+    scenarios interactively.
+  template: backend/python/web/templates/tools/pricing_review.html
+
+route:
+  # NOTE: As of the current codebase snapshot the route handler for this page
+  # is not yet registered in tools.py. The template exists and is functionally
+  # complete; the Flask route and the /api/pricing/site-review backend endpoint
+  # both need to be implemented before the page is accessible.
+  blueprint: tools
+  url_path: /tools/pricing-review       # expected — not yet registered
+  http_methods: [GET]
+  auth: flask-login (session)
+  permission_decorator: inventory_tools_access_required
+  permission_key: can_access_inventory_tools
+  template_rendered: tools/pricing_review.html
+
+ui_components:
+  site_selector:
+    type: select dropdown
+    id: site-select
+    behaviour: >
+      Populated on page load via GET /api/sites. Options are grouped by
+      country using <optgroup> elements. Selecting a site triggers loadSite().
+      If a ?site_id= query param is present on page load the matching site is
+      auto-selected and data loads immediately. Selecting a new site replaces
+      the URL query param via history.replaceState (no full page reload).
+
+  budget_display:
+    type: inline stat block
+    id: budget-display
+    visibility: hidden until a site is loaded
+    fields:
+      - budget-mar-arr: March budget ARR / sq ft (numeric, 2 dp)
+      - budget-mar-occ: March budget occupancy (%, 1 dp)
+      - budget-dec-arr: December budget ARR / sq ft (numeric, 2 dp)
+      - budget-dec-occ: December budget occupancy (%, 1 dp)
+    data_source: data.budget from GET /api/pricing/site-review
+
+  filter_bar:
+    id: controls-section
+    visibility: hidden until a site is loaded
+    filters:
+      - id: filter-type
+        label: Type
+        values: distinct type_code values from loaded categories
+      - id: filter-climate
+        label: Climate
+        values: distinct climate_code values from loaded categories
+      - id: filter-shape
+        label: Shape
+        values: distinct shape values from loaded categories
+      - id: filter-pillar
+        label: Pillar
+        values: distinct pillar values from loaded categories
+    discount_slider:
+      id: discount-slider
+      label: "What-If Discount"
+      range: 0–70%
+      default: 35%
+      step: 1%
+      behaviour: >
+        Changing the slider updates the displayed percentage label immediately
+        (updateSlider). Clicking Apply or changing any filter calls applyFilters()
+        which recalculates promo rates and re-renders the table and summary bar
+        entirely in the browser without another API call.
+
+  summary_bar:
+    id: summary-section
+    visibility: hidden until a site is loaded
+    stat_cards:
+      - id: stat-occ-count
+        label: Occupied Units
+        value: sum of occupied.count across filtered categories
+      - id: stat-occ-arr
+        label: Occupied ARR/sqft
+        value: total_eff_rent / total_area for occupied filtered units (2 dp)
+        colour: teal (#17a2b8)
+      - id: stat-vac-count
+        label: Vacant Units
+        value: sum of vacant.count across filtered categories
+        colour: red (#C41230)
+      - id: stat-blended-arr
+        label: Blended ARR (if sold)
+        value: >
+          (total_occ_eff_rent + total_vac_std_rate * (1 - discount)) /
+          (total_occ_area + total_vac_area) — 2 dp
+        colour: purple (#6f42c1)
+    summary_detail_line:
+      id: summary-detail
+      content: >
+        Inline text showing three percentage comparisons:
+        (1) Current occupied ARR vs March budget gap (%),
+        (2) Blended ARR at chosen discount vs December budget gap (coloured
+            green/red),
+        (3) ARR dilution if all vacant units are sold at promo rate (coloured
+            green/red).
+
+  legend:
+    id: legend-section
+    visibility: hidden until a site is loaded
+    colour_codes:
+      green:
+        background: "#d4edda"
+        border: "#28a745"
+        meaning: Promo/sqft >= December budget ARR (safe)
+      yellow:
+        background: "#fff3cd"
+        border: "#ffc107"
+        meaning: Promo/sqft >= March budget ARR but < December budget (watch)
+      red:
+        background: "#f8d7da"
+        border: "#dc3545"
+        meaning: Promo/sqft < March budget ARR (risk)
+    toggle_detail:
+      id: toggle-detail
+      type: checkbox
+      label: "Show shape/pillar/days vacant"
+      effect: adds Shape, Pillar, and Days Vac columns to the data table
+
+  data_table:
+    id: pricing-table
+    id_thead: pricing-thead
+    id_tbody: pricing-tbody
+    max_height: 600px (scrollable)
+    sort_order: >
+      Rows sorted client-side by type_code ASC, then climate_code ASC, then
+      size_range numerically (by leading number of the range string).
+    visual_grouping: >
+      Rows sharing the same (type_code, climate_code) group are separated from
+      the next group by a heavier top border (2px solid #dee2e6). The first row
+      of a new group renders the type_code in bold.
+    columns_default:
+      - Type: category type_code
+      - Climate: climate_code
+      - Size: size_range
+      - "Occ #": occupied.count
+      - Avg Disc%: occupied.avg_discount_pct
+      - Occ ARR/sqft: occupied.arr_sqft (bold)
+      - "Vac #": vacant.count
+      - Std/sqft: vacant.std_rate_sqft
+      - Promo/sqft: std_rate_sqft * (1 - discount) — colour-coded per legend
+    columns_detail_mode_adds:
+      - Shape: category shape (after Size)
+      - Pillar: category pillar (after Shape)
+      - Days Vac: vacant.avg_days_vacant rounded to integer (after Promo/sqft)
+
+  loading_indicator:
+    id: loading
+    type: spinner + text
+    visibility: shown while GET /api/pricing/site-review is in flight
+
+api_endpoints:
+  - endpoint: GET /api/sites
+    purpose: Populate the site selector dropdown on page load
+    auth: Bearer token (JWT) + CSRF header; scope inventory:read
+    cache: server-side 300 s
+    query_params: none
+    response:
+      status_ok: 200
+      body:
+        sites:
+          type: array
+          item_fields:
+            site_id: integer — SiteID PK
+            site_code: string — e.g. "L001"
+            name: string — site display name
+            country: string — country name
+    data_source:
+      database: esa_pbi
+      table: siteinfo
+      model: common/models.py :: SiteInfo
+      order_by: Country ASC, SiteCode ASC
+
+  - endpoint: GET /api/pricing/site-review
+    purpose: >
+      Return per-category occupied and vacant pricing summary for a single site,
+      plus site metadata and budget targets. This is the primary data load for
+      the tool.
+    status: NOT YET IMPLEMENTED — route and handler are missing as of this
+      codebase snapshot. The template calls this endpoint; it will 404 until
+      the route is created.
+    auth: Bearer token (JWT) + CSRF header; scope inventory:read (expected)
+    query_params:
+      site_id:
+        type: integer
+        required: true
+        description: SiteID of the site to review
+    expected_response:
+      status_ok: 200
+      body:
+        site:
+          description: basic site metadata
+          fields:
+            site_id: integer
+            site_code: string
+            name: string
+            country: string
+        budget:
+          description: >
+            Annual budget targets for the site. Null fields are rendered as
+            "N/A" in the UI.
+          fields:
+            mar_arr: "numeric | null — March budget ARR per sq ft"
+            mar_occ: "numeric | null — March budget occupancy as a percentage (e.g. 85.0)"
+            dec_arr: "numeric | null — December budget ARR per sq ft"
+            dec_occ: "numeric | null — December budget occupancy as a percentage"
+        categories:
+          description: >
+            Array of unit category objects. Each represents one logical category
+            (type + climate + size range + optional shape/pillar) and carries
+            pre-aggregated occupied and vacant sub-objects.
+          item_fields:
+            type_code: string — e.g. "Walk-In", "Locker"
+            climate_code: string — e.g. "A", "NC", "RF"
+            size_range: string — e.g. "10-20", "50-100"
+            shape: "string | null — e.g. 'Odd', 'Standard'"
+            pillar: "string | null — e.g. 'Standard', 'Big'"
+            occupied:
+              count: integer
+              avg_discount_pct: "numeric | null — average % discount off std rate"
+              arr_sqft: "numeric | null — effective rent / area"
+              total_eff_rent: numeric — sum of effective rent (for summary aggregation)
+              total_area: numeric — sum of unit area (for summary aggregation)
+            vacant:
+              count: integer
+              std_rate_sqft: "numeric | null — standard rate / area"
+              avg_days_vacant: "numeric | null — average iDaysVacant"
+              total_std_rate: numeric — sum of std rates (for blended ARR calc)
+              total_area: numeric — sum of unit area (for blended ARR calc)
+
+data_sources:
+  databases:
+    - name: esa_pbi
+      tables_views:
+        - name: siteinfo
+          model: common/models.py :: SiteInfo
+          used_for: site dropdown, site metadata in response
+          key_fields: [SiteID, SiteCode, Name, Country]
+
+        - name: rentroll
+          model: common/models.py :: RentRoll
+          used_for: >
+            Expected data source for occupied unit aggregations
+            (dcRent / dcStdRate for effective rent, Area, iDaysVacant,
+            bRented, bRentable). Latest extract_date snapshot per site.
+          key_fields:
+            - SiteID
+            - UnitID
+            - bRented
+            - bRentable
+            - dcRent (effective/actual rent charged)
+            - dcStdRate (standard rate)
+            - Area (sq ft)
+            - iDaysVacant
+            - extract_date
+
+        - name: units_info
+          model: common/models.py :: UnitsInfo
+          used_for: >
+            Expected data source for vacant unit pricing
+            (dcStdRate, dcWidth * dcLength for area).
+          key_fields:
+            - SiteID
+            - UnitID
+            - bRented
+            - bRentable
+            - dcStdRate
+            - dcWidth
+            - dcLength
+            - iDaysVacant
+
+        - name: vw_units_inventory
+          type: view
+          migration: backend/python/migrations/019_vw_units_inventory.sql
+          used_for: >
+            Provides enriched label fields joined onto unit rows.
+            Expected join source for category grouping fields.
+          key_fields:
+            - unit_id
+            - site_id
+            - label_type_code   # maps to type_code in category
+            - label_climate_code # maps to climate_code in category
+            - label_size_range  # maps to size_range in category
+            - label_shape       # maps to shape in category
+            - label_pillar      # maps to pillar in category
+            - category_label    # final composite label string
+
+        - name: unit_category_labels
+          type: table
+          migration: backend/python/migrations/020_unit_category_labels.sql
+          used_for: >
+            Staging table for published inventory labels from the Inventory
+            Checker tool. Joined through vw_units_inventory to supply the
+            category dimension fields (type_code, climate_code, size_range,
+            shape, pillar).
+          key_fields: [site_id, unit_id, unit_type_code, climate_code, size_range, shape, pillar]
+
+  external_apis:
+    soap: none — this tool reads from the esa_pbi analytics DB only, not live
+      SOAP calls.
+
+business_logic:
+  promo_rate_calculation:
+    formula: promo_sqft = vacant.std_rate_sqft * (1 - discount / 100)
+    description: >
+      Computed entirely client-side from the slider value each time
+      applyFilters() is called. Not persisted anywhere.
+
+  colour_coding_logic:
+    description: >
+      Each vacant category row's Promo/sqft cell is coloured based on the
+      relationship of promo_sqft to the site's budget targets.
+    rules:
+      - condition: promo_sqft >= dec_arr (December budget)
+        result: green — safe
+      - condition: promo_sqft >= mar_arr AND promo_sqft < dec_arr
+        result: yellow — watch
+      - condition: promo_sqft < mar_arr (March budget)
+        result: red — risk
+    fallback: >
+      If either budget figure is null, no colour is applied to the cell.
+
+  blended_arr_calculation:
+    formula: >
+      blended_arr = (sum(occupied.total_eff_rent) + sum(vacant.total_std_rate) *
+      (1 - discount)) / (sum(occupied.total_area) + sum(vacant.total_area))
+    description: >
+      Answers "what would site ARR/sqft be if every vacant unit in the current
+      filter were sold today at the chosen promo rate?" Computed over only the
+      filtered category set, not the whole site.
+
+  arr_dilution:
+    formula: dilution = (blended_arr - occ_arr_sqft) / occ_arr_sqft * 100
+    description: >
+      Shown in the summary detail line. A negative value means selling vacant
+      units at the promo rate would reduce the overall ARR/sqft.
+
+  category_grouping:
+    description: >
+      Categories are grouped visually (and sorted) by (type_code, climate_code),
+      then by size_range within that group. The grouping boundary is indicated
+      by a heavier top border. The API is expected to return pre-aggregated
+      category rows rather than individual unit rows; all filtering and sorting
+      happens client-side.
+
+  client_side_filtering:
+    description: >
+      All four dimension filters (Type, Climate, Shape, Pillar) and the discount
+      slider work entirely on the already-loaded allCategories array. No
+      additional API call is made when filters change. Filter dropdown options
+      are derived from the loaded data, so they reflect only what is present at
+      the selected site.
+
+  url_state:
+    description: >
+      The selected site_id is written to the URL via history.replaceState so
+      the page state is bookmarkable and shareable. On load, ?site_id= is read
+      to auto-select a site.
+
+notes:
+  - >
+    The /api/pricing/site-review endpoint is referenced in the template but
+    does not yet exist in any route file. It must be implemented before the
+    page works.
+  - >
+    No route handler for /tools/pricing-review exists in tools.py as of this
+    snapshot. It needs to be added (likely with @inventory_tools_access_required,
+    following the pattern of the other tool routes).
+  - >
+    Budget data (mar_arr, mar_occ, dec_arr, dec_occ) has no corresponding DB
+    table in the current schema. The API implementation will need to define how
+    these figures are stored (e.g., a new site_budgets table in esa_pbi).
+  - >
+    There are no SOAP calls involved. The tool is entirely DB-read-only.
+  - >
+    The bClimate field from units_info / rentroll is unreliable for Korean
+    sites (see project memory). Climate authority comes from unit_range_mappings
+    (climate_type field) surfaced via vw_units_inventory as label_climate_code.

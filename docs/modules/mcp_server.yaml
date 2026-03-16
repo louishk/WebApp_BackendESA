@@ -1,0 +1,540 @@
+# =============================================================================
+# Module Documentation: ESA MCP Server
+# Path: mcp_esa/
+# Generated: 2026-03-16
+# =============================================================================
+
+module: mcp_esa
+description: >
+  Independent MCP (Model Context Protocol) server for the ESA Backend platform.
+  Runs as a separate process from the Flask app, serving AI clients (e.g. claude.ai)
+  over Streamable HTTP transport. Exposes 37 tools across three categories:
+  health/diagnostics, multi-database access, and Google Ads campaign management.
+
+# =============================================================================
+# Architecture
+# =============================================================================
+
+architecture:
+  runtime: uvicorn (ASGI)
+  framework: Starlette
+  transport: Streamable HTTP (MCP protocol version 2024-11-05)
+  protocol: JSON-RPC 2.0
+  process: independent — not embedded in Flask app
+  entrypoint: mcp_esa/main.py
+
+  request_flow:
+    - "1. nginx (reverse proxy) → strips /mcp prefix, forwards X-Forwarded-* headers"
+    - "2. Starlette CORS middleware — allow_origins: backend.extraspace.com.sg, claude.ai"
+    - "3. ApiKeyAuthMiddleware — validates X-API-Key or Bearer token, attaches user context to request.state"
+    - "4. StreamableHTTPTransport.handle_mcp_request() — routes GET (SSE stream) vs POST (JSON-RPC)"
+    - "5. _process_jsonrpc() — dispatches to initialize / tools/list / tools/call handler"
+    - "6. Tool ACL check — compares tool name against request.state.mcp_tools (None = unrestricted)"
+    - "7. Tool handler executes — returns string result wrapped in JSON-RPC response"
+
+  endpoints:
+    GET /:
+      description: Server information (name, version, auth types, endpoint list)
+      auth: none
+    GET /health:
+      description: Liveness check — returns status, server name, timestamp, transport
+      auth: none
+    POST /mcp:
+      description: Main JSON-RPC endpoint for all MCP operations
+      auth: required (X-API-Key or Bearer)
+    GET /mcp:
+      description: SSE stream — emits ping events every 30 seconds, max 8-hour session
+      auth: required (X-API-Key or Bearer)
+    GET /.well-known/oauth-authorization-server:
+      description: OAuth 2.0 Authorization Server Metadata (RFC 8414)
+      auth: none
+    GET /.well-known/oauth-protected-resource:
+      description: OAuth 2.0 Protected Resource Metadata (RFC 9728)
+      auth: none
+    POST /oauth/register:
+      description: Dynamic client registration (RFC 7591) — validates API key, returns client credentials
+      auth: Bearer API key required
+    GET /oauth/authorize:
+      description: Authorization code grant endpoint — validates client_id, issues auth code, redirects
+      auth: none
+    POST /oauth/token:
+      description: Token endpoint — exchanges auth code or refresh token for JWT
+      auth: none
+
+  json_rpc_methods:
+    - initialize      # Returns server info + capabilities
+    - tools/list      # Returns tool list filtered by per-key ACL
+    - tools/call      # Invokes a tool, subject to per-key ACL
+    - resources/list  # Returns empty list (not implemented)
+    - prompts/list    # Returns empty list (not implemented)
+    - ping            # Returns {pong: true}
+
+# =============================================================================
+# Authentication
+# =============================================================================
+
+authentication:
+  overview: >
+    Two auth methods are accepted on every protected endpoint. Both resolve to the
+    same internal user_info structure stored on request.state. Public endpoints
+    (/, /health, all /oauth/* paths) bypass auth entirely.
+
+  method_1_api_key:
+    header: X-API-Key
+    format: "esa_<key_id>.<raw_secret>"
+    validation_steps:
+      - "Parse key_id and raw_secret from esa_ prefix format"
+      - "Fetch row from api_keys JOIN users WHERE key_id = :key_id"
+      - "bcrypt.checkpw() — always runs (even when key not found) for constant-time behavior"
+      - "Check is_active = true"
+      - "Check mcp_enabled = true"
+      - "Check expires_at (if set)"
+      - "Atomic quota increment via UPDATE ... RETURNING — rejects if daily_quota exceeded"
+    on_success: attaches username, user_id, key_id, scopes, mcp_tools to request.state
+
+  method_2_oauth_bearer:
+    header: "Authorization: Bearer <jwt>"
+    algorithm: HS256
+    secret_source: vault key JWT_SECRET (falls back to JWT_SECRET env var)
+    required_claim: "type == access"
+    validation_steps:
+      - "jwt.decode() with HS256"
+      - "Verify type claim == access"
+      - "Re-query api_keys WHERE key_id = client_id to confirm still active + mcp_enabled"
+    on_success: attaches username, user_id, key_id, scopes, mcp_tools to request.state
+    note: mcp_tools restriction is re-read from DB on every Bearer request (not from JWT payload)
+
+  oauth_flow:
+    description: >
+      OAuth 2.0 authorization code grant with PKCE (S256 mandatory). Designed for
+      claude.ai MCP integration. The ESA API key is used as both the client_secret
+      and as the credential validated at the /oauth/token step.
+    client_id: "API key_id (e.g. bd26e494)"
+    client_secret: "Full API key (esa_<key_id>.<secret>)"
+    steps:
+      - "POST /oauth/register with API key as Bearer → receives client_id + client_secret"
+      - "GET /oauth/authorize?client_id=...&code_challenge=...&redirect_uri=... → redirect with auth code"
+      - "POST /oauth/token with code + code_verifier + client_secret → JWT access + refresh tokens"
+      - "Subsequent requests: Authorization: Bearer <access_token>"
+    token_ttls:
+      access_token: 8 hours (28800 seconds)
+      refresh_token: 30 days
+    pkce: S256 only — code_challenge is mandatory, plain not supported
+    redirect_uri_restrictions:
+      - "Must use https (except localhost/127.0.0.1 which may use http)"
+      - "Hostname must be in: claude.ai, localhost, 127.0.0.1"
+    pending_codes_cap: 500 (server returns 503 if exceeded)
+    code_ttl: 10 minutes
+    storage: in-memory (lost on process restart)
+
+  rate_limiting:
+    scope: per source IP
+    limit: 60 requests per 60-second rolling window
+    implementation: in-memory defaultdict in ApiKeyAuthMiddleware
+    cleanup: stale IPs evicted when window dict exceeds 100 entries
+    response: HTTP 429 with JSON-RPC error code -32003
+
+  error_codes:
+    -32001: Authentication required (no credentials provided)
+    -32002: Invalid or unauthorized API key / expired token
+    -32003: Rate limit exceeded
+    -32601: Method not found
+    -32603: Internal error (generic — real error logged server-side only)
+    -32700: Parse error / empty request body
+
+  unauthenticated_response: >
+    Returns HTTP 401 with WWW-Authenticate header pointing to
+    /.well-known/oauth-protected-resource (RFC 6750 discovery).
+
+# =============================================================================
+# Tool Registration System
+# =============================================================================
+
+tool_registration:
+  mechanism: >
+    Tools are registered by directly writing async functions into
+    server._tool_handlers (a dict on the MCP SDK Server object).
+    Each function has two attributes attached before registration:
+      __doc__   — shown as the tool description in tools/list
+      _input_schema — JSON Schema object for the tool's input parameters
+  registration_order:
+    - health_tools (always registered)
+    - database_tools (if features.database = true)
+    - google_ads_tools (if features.google_ads = true)
+  files:
+    - mcp_esa/tools/health_tools.py       → register_health_tools()
+    - mcp_esa/tools/database_tools.py     → register_database_tools()
+    - mcp_esa/tools/google_ads_tools.py   → register_google_ads_tools()
+  tool_acl:
+    description: >
+      Each API key has an optional mcp_tools JSON array in the api_keys table.
+      If NULL/empty the key has unrestricted access. If set, tools/list only
+      returns allowed tools and tools/call enforces the restriction at dispatch time.
+    enforcement_point: StreamableHTTPTransport._handle_tools_list() and _handle_tools_call()
+    acl_source: request.state.mcp_tools (populated by auth middleware per-request)
+
+# =============================================================================
+# Tools Reference
+# =============================================================================
+
+tools:
+  total: 37
+
+  health:
+    count: 3
+    registered_by: register_health_tools()
+    always_enabled: true
+    tools:
+      health_check:
+        description: Check MCP server health and return diagnostic information
+        parameters: none
+        returns: Status, server name, uptime, tool count, transport, protocol version
+      echo:
+        description: Echo a message back for testing connectivity
+        parameters:
+          message: {type: string, maxLength: 1024, required: true}
+        returns: Echoed message with timestamp prefix
+      ping:
+        description: Simple ping/pong connectivity test
+        parameters: none
+        returns: '"pong"'
+
+  database:
+    count: 8
+    registered_by: register_database_tools()
+    feature_flag: features.database
+    connection_storage: module-level _active_connections dict (lifetime = process lifetime)
+    backends_supported: [postgresql, mysql, mariadb, mssql, bigquery]
+    async_drivers:
+      postgresql: asyncpg
+      mysql: aiomysql
+      mariadb: aiomysql
+      mssql: aioodbc
+      bigquery: google-cloud-bigquery (synchronous client, wrapped)
+    tools:
+      DB_list_database_presets:
+        description: List all available database presets from environment configuration
+        parameters: none
+        returns: Preset names and types (no credentials)
+      DB_connect_preset:
+        description: Connect to a database using a predefined preset
+        parameters:
+          preset_name: {type: string, required: true}
+        returns: Connection confirmation with usage hints
+      DB_connect_multiple_presets:
+        description: Connect to multiple database presets at once
+        parameters:
+          preset_names: {type: string, description: "Comma-separated preset names", required: true}
+        returns: Per-preset connection results
+      DB_execute_query:
+        description: Execute a SQL query on an existing database connection
+        parameters:
+          connection_name: {type: string, required: true}
+          query: {type: string, required: true}
+        returns: >
+          Query results (JSON, first 50 rows shown if >50), execution time,
+          query type classification, row count
+        safety: see database_security section
+      DB_list_tables:
+        description: List all tables in a connected database
+        parameters:
+          connection_name: {type: string, required: true}
+          schema: {type: string, required: false, note: "defaults to public (pg) or dbo (mssql)"}
+        returns: Numbered table list with types
+      DB_describe_table:
+        description: Get the structure/columns of a specific table
+        parameters:
+          connection_name: {type: string, required: true}
+          table_name: {type: string, required: true}
+          schema: {type: string, required: false}
+        returns: Column list with data types, nullability, defaults
+      DB_list_connections:
+        description: List all active database connections
+        parameters: none
+        returns: Connection names, types, databases, status
+      DB_disconnect_database:
+        description: Close and remove a database connection
+        parameters:
+          connection_name: {type: string, required: true}
+        returns: Disconnect confirmation
+
+  google_ads:
+    count: 26
+    registered_by: register_google_ads_tools()
+    feature_flag: features.google_ads
+    api: Google Ads API (GAQL — Google Ads Query Language)
+    groups:
+      utility:
+        tools: [GA_test_connection, GA_list_accessible_customers, GA_get_account_info]
+        description: Connectivity testing and account discovery
+      campaign_management:
+        tools: [GA_list_campaigns, GA_get_campaign, GA_create_campaign, GA_update_campaign, GA_set_campaign_status]
+        description: Full campaign CRUD and status control
+      ad_group_management:
+        tools: [GA_list_ad_groups, GA_create_ad_group, GA_update_ad_group]
+        description: Ad group creation and updates within campaigns
+      reporting:
+        tools: [GA_query, GA_get_campaign_performance, GA_get_account_performance, GA_get_keyword_performance]
+        description: Raw GAQL queries and pre-built performance reports
+      ai_analysis:
+        tools:
+          - GA_audit_account
+          - GA_analyze_keywords
+          - GA_analyze_search_terms
+          - GA_suggest_negative_keywords
+          - GA_analyze_competitors
+          - GA_analyze_quality_scores
+          - GA_analyze_trends
+          - GA_analyze_audiences
+          - GA_optimize_budget
+          - GA_generate_report
+        description: AI-assisted analysis, recommendations, and narrative reports
+      token_management:
+        tools: [GA_start_token_refresh]
+        description: OAuth token refresh for Google Ads API credentials
+
+# =============================================================================
+# Security Measures
+# =============================================================================
+
+security:
+  database_query_safety:
+    description: >
+      All queries through DB_execute_query pass through DatabaseService._check_query_safety()
+      before execution.
+    rules:
+      - "SQL comments (-- and /* */) stripped before prefix check to prevent bypass"
+      - "Only SELECT, SHOW, DESCRIBE, DESC, EXPLAIN, WITH prefixes allowed"
+      - "Maximum query length: 10,000 characters"
+      - "Maximum UNION count: 5"
+    enforcement: DatabaseService.execute_safe_query() in mcp_esa/services/database_service.py
+
+  identifier_validation:
+    description: >
+      Table names, schema names, dataset names, and BigQuery project IDs passed into
+      dynamically-constructed SQL (BigQuery INFORMATION_SCHEMA queries only) are
+      validated against _IDENTIFIER_RE before use.
+    pattern: "^[a-zA-Z_][a-zA-Z0-9_\\-]{0,127}$"
+    enforcement: simple_database._validate_identifier() in mcp_esa/services/simple_database.py
+
+  gaql_injection_prevention:
+    description: >
+      Google Ads Query Language (GAQL) queries are passed to the Google Ads API client,
+      not executed as raw SQL. The Google Ads API library handles its own query validation.
+
+  generic_error_responses:
+    description: >
+      All tool handler exceptions are caught at the transport layer. The client receives
+      only a generic "Tool encountered an error" message. Real exceptions are logged
+      server-side with exc_info=True.
+    pattern: Consistent across transport.py, database_tools.py, auth.py
+
+  constant_time_auth:
+    description: >
+      bcrypt.checkpw() is always called during API key validation — including when the
+      key_id is not found in the database (using a pre-computed _DUMMY_HASH). This
+      prevents timing attacks from distinguishing "key not found" from "wrong secret".
+
+  quota_enforcement:
+    description: >
+      Daily quota is incremented atomically via a single UPDATE ... RETURNING statement.
+      The UPDATE only succeeds if the quota is not exceeded, preventing race conditions.
+
+  credential_isolation:
+    description: >
+      Database passwords and Google Ads credentials are never returned to callers.
+      get_connection_info() returns only database type, database name, and connection
+      status — no host, port, user, or password.
+    connection_string_logging: Password replaced with *** in all log messages.
+
+  cors:
+    allowed_origins:
+      - https://backend.extraspace.com.sg
+      - https://claude.ai
+    credentials: true
+
+  rate_limiting:
+    type: in-memory per-IP sliding window
+    limit: 60 requests / 60 seconds
+    note: Resets on process restart (not shared across workers if multiple uvicorn workers used)
+
+  tool_acl:
+    description: >
+      Per-API-key tool restriction list (mcp_tools column in api_keys table).
+      NULL means unrestricted. A non-empty array limits the key to only those
+      tool names. Enforced at both tools/list (filtering) and tools/call (hard block).
+
+# =============================================================================
+# Configuration Reference
+# =============================================================================
+
+configuration:
+  primary_file: backend/config/mcp.yaml
+  loaded_by: mcp_esa/config/settings.py via common.config_loader.get_config()
+  secret_resolution: >
+    Keys with _vault suffix are resolved from the app_secrets DB vault
+    (encrypted Fernet, managed via /admin/secrets UI). Plain keys are
+    read directly from the YAML. Bootstrap env vars (VAULT_MASTER_KEY,
+    DB_PASSWORD, PBI_DB_PASSWORD) are loaded from repo root .env.
+
+  mcp_yaml_structure:
+    server:
+      name: Server display name (default: "ESA Backend MCP")
+      host: Bind address (default: "127.0.0.1")
+      port: Listen port (default: 8002)
+      debug: Enable Starlette debug mode and verbose logging (default: false)
+
+    features:
+      database: Enable DB_* tool group (default: true)
+      google_ads: Enable GA_* tool group (default: true)
+
+    google_ads:
+      client_id: OAuth 2.0 client ID for Google Ads API
+      login_customer_id: Manager account customer ID
+      client_secret_vault: Vault key for OAuth client secret
+      developer_token_vault: Vault key for Google Ads developer token
+      refresh_token_vault: Vault key for OAuth refresh token
+
+    databases:
+      description: >
+        Each top-level key under databases becomes a preset name accessible via
+        DB_connect_preset("<name>"). Supported types: postgresql, mysql, mariadb,
+        mssql, bigquery.
+      postgresql_fields:
+        type: postgresql
+        host: DB hostname
+        port: Port number
+        database: Database name
+        user: Username
+        password_vault: Vault key for password
+        ssl: true/false
+      mysql_mariadb_fields:
+        type: mysql or mariadb
+        host: DB hostname
+        port: Port number
+        database: Database name
+        user: Username
+        password_vault: Vault key for password
+        note: Optional human-readable note (e.g. SSH tunnel requirement)
+      bigquery_fields:
+        type: bigquery
+        project_id: GCP project ID
+        location: BQ location (e.g. asia-southeast1, US)
+        dataset: Optional default dataset
+        credentials_json_vault: Vault key for service account JSON
+
+  configured_presets:
+    esa_pbi:
+      type: postgresql
+      database: esa_pbi
+      note: Main analytics/reporting DB (Azure-hosted)
+    esa_backend:
+      type: postgresql
+      database: backend
+      note: App data DB (users, api_keys, roles, etc.)
+    rudderstack:
+      type: postgresql
+      database: rudderstack
+    bigquery:
+      type: bigquery
+      note: GCP project for analytics data
+    kinsta_esa_sg:
+      type: mysql
+      note: Singapore website DB — requires SSH tunnel to Kinsta
+    kinsta_esa_my:
+      type: mysql
+      note: Malaysia website DB — requires SSH tunnel to Kinsta
+    kinsta_esa_kr:
+      type: mysql
+      note: Korea website DB — requires SSH tunnel to Kinsta
+    kinsta_esa_hk:
+      type: mysql
+      note: Hong Kong website DB — requires SSH tunnel to Kinsta
+
+  settings_py_properties:
+    mcp_server_name: str — from server.name
+    mcp_server_host: str — from server.host
+    mcp_server_port: int — from server.port
+    mcp_debug: bool — from server.debug
+    database_enabled: bool — from features.database
+    google_ads_enabled: bool — from features.google_ads
+    google_ads_client_id: str — plaintext from yaml
+    google_ads_login_customer_id: str — plaintext from yaml
+    google_ads_client_secret: str — resolved from vault
+    google_ads_developer_token: str — resolved from vault
+    google_ads_refresh_token: str — resolved from vault
+    get_backend_db_url(): delegates to common.config_loader.get_database_url('backend')
+    get_pbi_db_url(): delegates to common.config_loader.get_database_url('pbi')
+
+  vault_keys_used:
+    JWT_SECRET: Signing/validating all OAuth JWTs (shared with Flask app)
+    PBI_DB_PASSWORD: Password for esa_pbi, esa_backend, rudderstack presets
+    BIGQUERY_SA_JSON: Service account JSON for BigQuery
+    MYSQL1_PASSWORD: kinsta_esa_sg
+    MYSQL2_PASSWORD: kinsta_esa_my
+    MYSQL3_PASSWORD: kinsta_esa_kr
+    MYSQL4_PASSWORD: kinsta_esa_hk
+    GOOGLE_ADS_CLIENT_SECRET: Google Ads OAuth client secret
+    GOOGLE_ADS_DEVELOPER_TOKEN: Google Ads developer token
+    GOOGLE_ADS_REFRESH_TOKEN: Google Ads OAuth refresh token
+
+# =============================================================================
+# File Layout
+# =============================================================================
+
+file_layout:
+  mcp_esa/main.py: Entrypoint — loads settings, creates server, starts uvicorn
+  mcp_esa/server/mcp_server.py: MCPServerApp wrapper + create_mcp_server() factory
+  mcp_esa/server/transport.py: StreamableHTTPTransport + create_starlette_app()
+  mcp_esa/server/auth.py: ApiKeyAuthMiddleware, _authenticate_api_key(), _authenticate_bearer_token()
+  mcp_esa/server/oauth.py: All OAuth 2.0 endpoints and token generation
+  mcp_esa/config/settings.py: Settings class (reads mcp.yaml, resolves vault secrets)
+  mcp_esa/config/database_presets.py: DatabasePresets loader (lazy, singleton)
+  mcp_esa/tools/health_tools.py: register_health_tools() — 3 tools
+  mcp_esa/tools/database_tools.py: register_database_tools() — 8 tools
+  mcp_esa/tools/google_ads_tools.py: register_google_ads_tools() — 26 tools
+  mcp_esa/services/simple_database.py: SimpleDatabase async connection class
+  mcp_esa/services/database_service.py: DatabaseService (safety checks, result metadata)
+  backend/config/mcp.yaml: Primary configuration file
+
+# =============================================================================
+# Deployment
+# =============================================================================
+
+deployment:
+  process_manager: systemd
+  service_name: esa-mcp (separate from esa-backend and backend-scheduler)
+  working_directory: /var/www/backend
+  command: "python mcp_esa/main.py"
+  listen: "127.0.0.1:8002 (localhost only — not directly exposed)"
+  python_path_requirements:
+    - Repo root must be on sys.path (for mcp_esa.* imports)
+    - backend/python must be on sys.path (for common.* imports)
+    - Both paths are set automatically in main.py and settings.py
+
+  nginx_proxy:
+    description: >
+      nginx forwards /mcp-server/ to 127.0.0.1:8002, stripping the prefix and
+      injecting X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-Prefix headers.
+      The OAuth and transport code reconstructs public URLs from these headers.
+    required_headers:
+      - X-Forwarded-Proto
+      - X-Forwarded-Host
+      - X-Forwarded-Prefix
+    sse_buffering: "X-Accel-Buffering: no (set on SSE responses to prevent nginx output buffering)"
+
+  deploy_method: >
+    Included in the standard rsync deploy via scripts/deploy_to_vm.py.
+    After deploy, restart with: sudo systemctl restart esa-mcp
+    (or via VM utility: /var/www/backend/update.sh restart)
+
+  dependencies_not_in_core_requirements:
+    - asyncpg (PostgreSQL async driver)
+    - aiomysql (MySQL/MariaDB async driver)
+    - aioodbc (SQL Server async driver)
+    - google-cloud-bigquery (BigQuery client)
+    - starlette
+    - uvicorn
+    - mcp (Anthropic MCP SDK)
+    - bcrypt
+    - pyjwt
