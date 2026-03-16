@@ -156,7 +156,7 @@ def _clamp(value, max_len):
 
 @reservations_bp.route('/reserve', methods=['POST'])
 @require_auth
-@require_api_scope('inventory:write')
+@require_api_scope('reservations:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def reservation_reserve():
     """
@@ -367,7 +367,7 @@ def reservation_reserve():
 
 @reservations_bp.route('/create', methods=['POST'])
 @require_auth
-@require_api_scope('inventory:write')
+@require_api_scope('reservations:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def reservation_create():
     """
@@ -499,7 +499,7 @@ def reservation_create():
 
 @reservations_bp.route('/list')
 @require_auth
-@require_api_scope('inventory:read')
+@require_api_scope('reservations:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def reservation_list():
     """
@@ -572,7 +572,7 @@ def reservation_list():
 
 @reservations_bp.route('/<int:waiting_id>')
 @require_auth
-@require_api_scope('inventory:read')
+@require_api_scope('reservations:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def reservation_get(waiting_id):
     """
@@ -639,7 +639,7 @@ def reservation_get(waiting_id):
 
 @reservations_bp.route('/<int:waiting_id>', methods=['PUT'])
 @require_auth
-@require_api_scope('inventory:write')
+@require_api_scope('reservations:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def reservation_update(waiting_id):
     """
@@ -783,7 +783,7 @@ def reservation_update(waiting_id):
 
 @reservations_bp.route('/<int:waiting_id>/cancel', methods=['PUT'])
 @require_auth
-@require_api_scope('inventory:write')
+@require_api_scope('reservations:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def reservation_cancel(waiting_id):
     """
@@ -905,7 +905,7 @@ def reservation_cancel(waiting_id):
 
 @reservations_bp.route('/<int:waiting_id>/notes')
 @require_auth
-@require_api_scope('inventory:read')
+@require_api_scope('reservations:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def reservation_notes_get(waiting_id):
     """
@@ -969,7 +969,7 @@ def reservation_notes_get(waiting_id):
 
 @reservations_bp.route('/<int:waiting_id>/notes', methods=['POST'])
 @require_auth
-@require_api_scope('inventory:write')
+@require_api_scope('reservations:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def reservation_notes_add(waiting_id):
     """
@@ -1052,7 +1052,7 @@ def reservation_notes_add(waiting_id):
 
 @reservations_bp.route('/fees')
 @require_auth
-@require_api_scope('inventory:read')
+@require_api_scope('reservations:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def reservation_fee_retrieve():
     """

@@ -22,6 +22,8 @@ API_SCOPES = {
     'statistics:read': 'Read API usage statistics',
     'inventory:read': 'Read unit inventory data',
     'inventory:write': 'Update inventory mappings and overrides',
+    'reservations:read': 'Read reservations, notes, and fees',
+    'reservations:write': 'Create/update/cancel reservations and tenants',
 }
 
 # Defaults
