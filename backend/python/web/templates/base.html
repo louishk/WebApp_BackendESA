@@ -289,8 +289,8 @@
                 {% if current_user.can_access_statistics() %}
                     <a href="{{ url_for('statistics.dashboard') }}" class="{{ 'active' if request.endpoint and 'statistics' in request.endpoint else '' }}">Statistics</a>
                 {% endif %}
-                {% if current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_discount_tools() %}
-                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else (url_for('tools.discount_plan_changer') if current_user.can_access_discount_tools() else url_for('tools.inventory_checker')) }}" class="{{ 'active' if request.endpoint and 'tools' in request.endpoint else '' }}">Tools</a>
+                {% if current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_discount_tools() or current_user.can_access_smart_lock() %}
+                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else (url_for('tools.discount_plan_changer') if current_user.can_access_discount_tools() else (url_for('tools.inventory_checker') if current_user.can_access_inventory_tools() else url_for('tools.smart_lock_keypads'))) }}" class="{{ 'active' if request.endpoint and 'tools' in request.endpoint else '' }}">Tools</a>
                 {% endif %}
                 {% if current_user.can_access_ecri() %}
                     <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
@@ -333,6 +333,12 @@
         {% if current_user.can_access_inventory_tools() %}
         <a href="{{ url_for('tools.inventory_checker') }}" class="{{ 'active' if request.endpoint == 'tools.inventory_checker' else '' }}">Inventory Checker</a>
         <a href="{{ url_for('tools.unit_availability') }}" class="{{ 'active' if request.endpoint == 'tools.unit_availability' else '' }}">Unit Availability</a>
+        {% endif %}
+        {% if current_user.can_access_smart_lock() %}
+        <span style="border-left: 1px solid #d1d5db; height: 1.2rem; margin: 0 0.25rem;"></span>
+        <a href="{{ url_for('tools.smart_lock_keypads') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_keypads' else '' }}">Keypads</a>
+        <a href="{{ url_for('tools.smart_lock_padlocks') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_padlocks' else '' }}">Padlocks</a>
+        <a href="{{ url_for('tools.smart_lock_assignments') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_assignments' else '' }}">Unit Assignments</a>
         {% endif %}
     </div>
     {% endif %}

@@ -7,7 +7,7 @@ from flask_login import login_required
 
 from web.auth.decorators import (
     billing_tools_access_required, inventory_tools_access_required,
-    discount_tools_access_required,
+    discount_tools_access_required, smart_lock_access_required,
 )
 
 tools_bp = Blueprint('tools', __name__, url_prefix='/tools')
@@ -43,3 +43,27 @@ def inventory_checker():
 def unit_availability():
     """Unit availability and reservation tool page."""
     return render_template('tools/unit_availability.html')
+
+
+@tools_bp.route('/smart-lock/keypads')
+@login_required
+@smart_lock_access_required
+def smart_lock_keypads():
+    """Smart Lock — keypad management page."""
+    return render_template('tools/smart_lock_keypads.html')
+
+
+@tools_bp.route('/smart-lock/padlocks')
+@login_required
+@smart_lock_access_required
+def smart_lock_padlocks():
+    """Smart Lock — padlock management page."""
+    return render_template('tools/smart_lock_padlocks.html')
+
+
+@tools_bp.route('/smart-lock/assignments')
+@login_required
+@smart_lock_access_required
+def smart_lock_assignments():
+    """Smart Lock — unit assignment page."""
+    return render_template('tools/smart_lock_assignments.html')

@@ -1,0 +1,340 @@
+{% extends "base.html" %}
+{% block title %}Smart Lock — Keypads{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Smart Lock — Keypads</h1>
+</div>
+
+<!-- Filters -->
+<div class="card" style="margin-bottom: 1rem;">
+    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+        <div>
+            <label style="display: block; font-weight: 500; margin-bottom: 0.25rem; font-size: 0.85rem;">Site</label>
+            <select id="site-select" style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; min-width: 220px;"></select>
+        </div>
+        <button class="btn" onclick="loadKeypads()">Load</button>
+        <button class="btn btn-secondary" onclick="loadKeypads('')" title="Show all sites">Show All</button>
+        <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
+    </div>
+</div>
+
+<!-- Add / CSV Upload -->
+<div class="card" style="margin-bottom: 1rem;">
+    <h3 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 1rem;">Add Keypads</h3>
+    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem;">
+        <div>
+            <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem;">Keypad ID</label>
+            <input type="text" id="add-keypad-id" placeholder="e.g. KP-001" style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; width: 140px;">
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem;">Site</label>
+            <select id="add-site-select" style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; min-width: 200px;"></select>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem;">Notes</label>
+            <input type="text" id="add-notes" placeholder="Optional" style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; width: 160px;">
+        </div>
+        <button class="btn" onclick="addKeypad()">Add</button>
+    </div>
+    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+        <div>
+            <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem;">CSV Batch Upload</label>
+            <input type="file" id="csv-file" accept=".csv" style="font-size: 0.85rem;">
+        </div>
+        <button class="btn btn-secondary" onclick="parseCSV()">Preview CSV</button>
+        <button class="btn" id="upload-btn" onclick="uploadBatch()" style="display: none;">Upload Batch</button>
+    </div>
+    <div id="csv-preview" style="display: none; margin-top: 0.75rem; max-height: 200px; overflow-y: auto; font-size: 0.8rem; background: #f9fafb; padding: 0.5rem; border-radius: 4px;"></div>
+</div>
+
+<!-- Keypads Table -->
+<div class="card" style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+            <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 5;">
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Keypad ID</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Site</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Status</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Assigned To</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Notes</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Actions</th>
+            </tr>
+        </thead>
+        <tbody id="keypads-tbody">
+            <tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">Select a site and click Load</td></tr>
+        </tbody>
+    </table>
+    <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
+</div>
+
+<!-- Audit Log -->
+<details style="margin-top: 1rem;">
+    <summary style="cursor: pointer; font-weight: 500; padding: 0.5rem; background: #f9fafb; border-radius: 6px;">Audit Log</summary>
+    <div class="card" style="margin-top: 0.5rem; max-height: 300px; overflow-y: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+            <thead>
+                <tr style="background: #f1f5f9;">
+                    <th style="padding: 0.4rem; text-align: left;">Time</th>
+                    <th style="padding: 0.4rem; text-align: left;">User</th>
+                    <th style="padding: 0.4rem; text-align: left;">Action</th>
+                    <th style="padding: 0.4rem; text-align: left;">Detail</th>
+                </tr>
+            </thead>
+            <tbody id="audit-tbody">
+                <tr><td colspan="4" style="padding: 1rem; text-align: center; color: #999;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</details>
+
+<script>
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+    let allSites = [];
+    let allKeypads = [];
+    let csvBatchData = null;
+
+    function esc(str) {
+        if (str == null) return '';
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+    }
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function showStatus(msg, ok) {
+        const el = document.getElementById('status-msg');
+        el.textContent = msg;
+        el.style.display = 'inline-block';
+        el.style.background = ok ? '#d1fae5' : '#fee2e2';
+        el.style.color = ok ? '#059669' : '#dc2626';
+        setTimeout(() => { el.style.display = 'none'; }, 4000);
+    }
+
+    function siteName(siteId) {
+        const s = allSites.find(x => x.site_id === siteId);
+        return s ? `${s.site_code} - ${s.name}` : `Site ${siteId}`;
+    }
+
+    async function loadSites() {
+        try {
+            const res = await fetch('/api/sites', { headers: apiHeaders() });
+            const data = await res.json();
+            allSites = data.sites || [];
+
+            [document.getElementById('site-select'), document.getElementById('add-site-select')].forEach(select => {
+                select.innerHTML = '<option value="">-- All --</option>';
+                const grouped = {};
+                allSites.forEach(s => {
+                    const c = s.country || 'Other';
+                    if (!grouped[c]) grouped[c] = [];
+                    grouped[c].push(s);
+                });
+                Object.keys(grouped).sort().forEach(country => {
+                    const og = document.createElement('optgroup');
+                    og.label = country;
+                    grouped[country].forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.site_id;
+                        opt.textContent = `${s.site_code} - ${s.name}`;
+                        opt.dataset.code = s.site_code;
+                        og.appendChild(opt);
+                    });
+                    select.appendChild(og);
+                });
+            });
+        } catch (e) {
+            console.error('Failed to load sites:', e);
+        }
+    }
+
+    async function loadKeypads(forceSiteId) {
+        const siteId = forceSiteId !== undefined ? forceSiteId : document.getElementById('site-select').value;
+        const url = siteId ? `/api/smart-lock/keypads?site_id=${siteId}` : '/api/smart-lock/keypads';
+        try {
+            const res = await fetch(url, { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            allKeypads = data.keypads || [];
+            renderTable();
+        } catch (e) {
+            showStatus('Failed to load keypads', false);
+        }
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('keypads-tbody');
+        if (allKeypads.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">No keypads found</td></tr>';
+            document.getElementById('count-info').textContent = '';
+            return;
+        }
+        tbody.innerHTML = allKeypads.map(k => {
+            const statusBadge = k.status === 'assigned'
+                ? '<span style="background:#d1fae5;color:#059669;padding:0.15rem 0.5rem;border-radius:9999px;font-size:0.75rem;">Assigned</span>'
+                : '<span style="background:#f3f4f6;color:#6b7280;padding:0.15rem 0.5rem;border-radius:9999px;font-size:0.75rem;">Not Assigned</span>';
+            const assignedTo = k.assigned_to ? `Unit ${k.assigned_to.unit_id}` : '—';
+            return `<tr>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;font-weight:500;">${esc(k.keypad_id)}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteName(k.site_id))}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${statusBadge}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(assignedTo)}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(k.notes)}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">
+                    <button data-pk="${k.id}" onclick="deleteKeypad(this)" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:0.8rem;" title="Delete">Delete</button>
+                </td>
+            </tr>`;
+        }).join('');
+        document.getElementById('count-info').textContent = `${allKeypads.length} keypad(s)`;
+    }
+
+    async function addKeypad() {
+        const keypad_id = document.getElementById('add-keypad-id').value.trim();
+        const site_id = document.getElementById('add-site-select').value;
+        const notes = document.getElementById('add-notes').value.trim();
+        if (!keypad_id || !site_id) { showStatus('Keypad ID and Site required', false); return; }
+
+        try {
+            const res = await fetch('/api/smart-lock/keypads', {
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({ keypad_id, site_id: parseInt(site_id), notes }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus(`Keypad ${keypad_id} added`, true);
+                document.getElementById('add-keypad-id').value = '';
+                document.getElementById('add-notes').value = '';
+                loadKeypads();
+                loadAuditLog();
+            } else {
+                showStatus(data.error || 'Failed to add', false);
+            }
+        } catch (e) { showStatus('Network error', false); }
+    }
+
+    async function deleteKeypad(btn) {
+        const pk = btn.dataset.pk;
+        if (!confirm('Delete this keypad? This will unlink it from any assigned unit.')) return;
+        try {
+            const res = await fetch(`/api/smart-lock/keypads/${pk}`, { method: 'DELETE', headers: apiHeaders() });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus('Keypad deleted', true);
+                loadKeypads();
+                loadAuditLog();
+            } else {
+                showStatus(data.error || 'Failed to delete', false);
+            }
+        } catch (e) { showStatus('Network error', false); }
+    }
+
+    // CSV handling
+    function parseCSV() {
+        const file = document.getElementById('csv-file').files[0];
+        if (!file) { showStatus('Select a CSV file first', false); return; }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const lines = e.target.result.split('\n').map(l => l.trim()).filter(l => l);
+            if (lines.length < 2) { showStatus('CSV must have header + data rows', false); return; }
+
+            const header = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, ''));
+            const kidIdx = header.indexOf('keypad_id');
+            const scIdx = header.indexOf('site_code');
+            if (kidIdx === -1 || scIdx === -1) {
+                showStatus('CSV must have keypad_id and site_code columns', false);
+                return;
+            }
+            const notesIdx = header.indexOf('notes');
+
+            csvBatchData = [];
+            const errors = [];
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split(',').map(c => c.trim().replace(/['"]/g, ''));
+                const kid = cols[kidIdx] || '';
+                const sc = cols[scIdx] || '';
+                const notes = notesIdx >= 0 ? (cols[notesIdx] || '') : '';
+                if (!kid || !sc) { errors.push(`Row ${i+1}: missing data`); continue; }
+                const site = allSites.find(s => s.site_code === sc);
+                if (!site) { errors.push(`Row ${i+1}: unknown site_code "${sc}"`); continue; }
+                csvBatchData.push({ keypad_id: kid, site_id: site.site_id, notes });
+            }
+
+            const preview = document.getElementById('csv-preview');
+            let html = `<strong>${csvBatchData.length} valid rows</strong>`;
+            if (errors.length) html += `<br><span style="color:#dc2626;">${errors.length} errors: ${errors.slice(0, 5).join('; ')}${errors.length > 5 ? '...' : ''}</span>`;
+            if (csvBatchData.length > 0) {
+                html += '<table style="width:100%;margin-top:0.5rem;border-collapse:collapse;"><tr><th style="text-align:left;padding:0.2rem;">Keypad ID</th><th style="text-align:left;padding:0.2rem;">Site</th><th style="text-align:left;padding:0.2rem;">Notes</th></tr>';
+                csvBatchData.slice(0, 10).forEach(r => {
+                    html += `<tr><td style="padding:0.2rem;">${esc(r.keypad_id)}</td><td style="padding:0.2rem;">${esc(siteName(r.site_id))}</td><td style="padding:0.2rem;">${esc(r.notes)}</td></tr>`;
+                });
+                if (csvBatchData.length > 10) html += `<tr><td colspan="3" style="padding:0.2rem;color:#999;">... and ${csvBatchData.length - 10} more</td></tr>`;
+                html += '</table>';
+            }
+            preview.innerHTML = html;
+            preview.style.display = 'block';
+            document.getElementById('upload-btn').style.display = csvBatchData.length > 0 ? 'inline-block' : 'none';
+        };
+        reader.readAsText(file);
+    }
+
+    async function uploadBatch() {
+        if (!csvBatchData || csvBatchData.length === 0) return;
+        const btn = document.getElementById('upload-btn');
+        btn.disabled = true; btn.textContent = 'Uploading...';
+        try {
+            const res = await fetch('/api/smart-lock/keypads/batch', {
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({ items: csvBatchData }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus(`Created ${data.created}, skipped ${data.skipped}`, true);
+                document.getElementById('csv-preview').style.display = 'none';
+                btn.style.display = 'none';
+                csvBatchData = null;
+                loadKeypads();
+                loadAuditLog();
+            } else {
+                showStatus(data.error || 'Upload failed', false);
+            }
+        } catch (e) { showStatus('Network error', false); }
+        finally { btn.disabled = false; btn.textContent = 'Upload Batch'; }
+    }
+
+    async function loadAuditLog() {
+        try {
+            const res = await fetch('/api/smart-lock/audit-log?limit=50', { headers: apiHeaders() });
+            const data = await res.json();
+            const entries = data.entries || [];
+            const tbody = document.getElementById('audit-tbody');
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="padding:1rem;text-align:center;color:#999;">No audit entries</td></tr>';
+                return;
+            }
+            tbody.innerHTML = entries.map(e => {
+                const dt = new Date(e.created_at + 'Z');
+                return `<tr>
+                    <td style="padding:0.3rem;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${esc(dt.toLocaleString())}</td>
+                    <td style="padding:0.3rem;border-bottom:1px solid #f1f5f9;">${esc(e.username)}</td>
+                    <td style="padding:0.3rem;border-bottom:1px solid #f1f5f9;">${esc(e.action)}</td>
+                    <td style="padding:0.3rem;border-bottom:1px solid #f1f5f9;">${esc(e.detail)}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) { console.error('Audit log error:', e); }
+    }
+
+    // Init
+    loadSites().then(() => { loadAuditLog(); });
+</script>
+{% endblock %}

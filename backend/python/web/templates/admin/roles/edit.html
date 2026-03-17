@@ -130,6 +130,14 @@
                         <p style="color: #666; font-size: 0.85rem; margin: 0;">Create batches and execute rate increase pushes to SiteLink</p>
                     </div>
                 </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_access_smart_lock" {% if role and role.can_access_smart_lock %}checked{% endif %}>
+                    <div>
+                        <strong>Smart Lock Access</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Manage keypads, padlocks, and unit assignments</p>
+                    </div>
+                </label>
             </div>
         </div>
 

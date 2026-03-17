@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+{% block title %}Smart Lock — Unit Assignments{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Smart Lock — Unit Assignments</h1>
+</div>
+
+<!-- Filters -->
+<div class="card" style="margin-bottom: 1rem;">
+    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+        <div>
+            <label style="display: block; font-weight: 500; margin-bottom: 0.25rem; font-size: 0.85rem;">Sites</label>
+            <select id="site-select" multiple style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; min-width: 260px; min-height: 80px;"></select>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <button class="btn" id="load-btn" onclick="loadUnits()">Load Units</button>
+            <button class="btn" id="save-btn" onclick="saveAssignments()" style="display: none; background: #059669;">Save Changes</button>
+        </div>
+        <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
+    </div>
+</div>
+
+<!-- Summary -->
+<div id="summary-row" style="display: none; margin-bottom: 1rem; gap: 1rem; flex-wrap: wrap;">
+    <div class="card" style="flex: 1; min-width: 120px; padding: 0.75rem; text-align: center;">
+        <div style="font-size: 1.5rem; font-weight: 700;" id="stat-total">0</div>
+        <div style="font-size: 0.8rem; color: #666;">Total Units</div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 120px; padding: 0.75rem; text-align: center;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: #059669;" id="stat-keypads">0</div>
+        <div style="font-size: 0.8rem; color: #666;">Keypads Assigned</div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 120px; padding: 0.75rem; text-align: center;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: #2563eb;" id="stat-padlocks">0</div>
+        <div style="font-size: 0.8rem; color: #666;">Padlocks Assigned</div>
+    </div>
+    <div class="card" style="flex: 1; min-width: 120px; padding: 0.75rem; text-align: center;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: #d97706;" id="stat-changes">0</div>
+        <div style="font-size: 0.8rem; color: #666;">Pending Changes</div>
+    </div>
+</div>
+
+<!-- Units Table -->
+<div class="card" style="overflow-x: auto;">
+    <div style="margin-bottom: 0.5rem; display: flex; gap: 1rem; align-items: center;">
+        <input type="text" id="search-input" placeholder="Filter by unit name..." oninput="renderTable()"
+               style="padding: 0.4rem 0.6rem; border: 1px solid #e5e7eb; border-radius: 4px; font-size: 0.85rem; width: 200px;">
+        <label style="font-size: 0.8rem; cursor: pointer;">
+            <input type="checkbox" id="filter-rentable" onchange="renderTable()"> Rentable only
+        </label>
+    </div>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+            <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 5;">
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Site</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Unit ID</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Unit Name</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Rentable</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Keypad</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Padlock</th>
+            </tr>
+        </thead>
+        <tbody id="units-tbody">
+            <tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
+        </tbody>
+    </table>
+    <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
+</div>
+
+<!-- Audit Log -->
+<details style="margin-top: 1rem;">
+    <summary style="cursor: pointer; font-weight: 500; padding: 0.5rem; background: #f9fafb; border-radius: 6px;">Audit Log</summary>
+    <div class="card" style="margin-top: 0.5rem; max-height: 300px; overflow-y: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+            <thead>
+                <tr style="background: #f1f5f9;">
+                    <th style="padding: 0.4rem; text-align: left;">Time</th>
+                    <th style="padding: 0.4rem; text-align: left;">User</th>
+                    <th style="padding: 0.4rem; text-align: left;">Action</th>
+                    <th style="padding: 0.4rem; text-align: left;">Detail</th>
+                </tr>
+            </thead>
+            <tbody id="audit-tbody">
+                <tr><td colspan="4" style="padding: 1rem; text-align: center; color: #999;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</details>
+
+<script>
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+    let allSites = [];
+    let units = [];          // from API
+
+    function esc(str) {
+        if (str == null) return '';
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+    }
+    let siteKeypads = {};    // site_id -> [{id, keypad_id, status, ...}]
+    let sitePadlocks = {};   // site_id -> [{id, padlock_id, status, ...}]
+    let changes = {};        // "siteId_unitId" -> {keypad_pk, padlock_pk}
+    let originalAssignments = {}; // "siteId_unitId" -> {keypad_pk, padlock_pk}
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function showStatus(msg, ok) {
+        const el = document.getElementById('status-msg');
+        el.textContent = msg;
+        el.style.display = 'inline-block';
+        el.style.background = ok ? '#d1fae5' : '#fee2e2';
+        el.style.color = ok ? '#059669' : '#dc2626';
+        setTimeout(() => { el.style.display = 'none'; }, 4000);
+    }
+
+    function siteCode(siteId) {
+        const s = allSites.find(x => x.site_id === siteId);
+        return s ? s.site_code : `${siteId}`;
+    }
+
+    async function loadSites() {
+        try {
+            const res = await fetch('/api/sites', { headers: apiHeaders() });
+            const data = await res.json();
+            allSites = data.sites || [];
+            const select = document.getElementById('site-select');
+            select.innerHTML = '';
+            const grouped = {};
+            allSites.forEach(s => {
+                const c = s.country || 'Other';
+                if (!grouped[c]) grouped[c] = [];
+                grouped[c].push(s);
+            });
+            Object.keys(grouped).sort().forEach(country => {
+                const og = document.createElement('optgroup');
+                og.label = country;
+                grouped[country].forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.site_id;
+                    opt.textContent = `${s.site_code} - ${s.name}`;
+                    og.appendChild(opt);
+                });
+                select.appendChild(og);
+            });
+        } catch (e) { console.error('Failed to load sites:', e); }
+    }
+
+    async function loadUnits() {
+        const select = document.getElementById('site-select');
+        const siteIds = Array.from(select.selectedOptions).map(o => o.value);
+        if (siteIds.length === 0) { showStatus('Select at least one site', false); return; }
+
+        const btn = document.getElementById('load-btn');
+        btn.disabled = true; btn.textContent = 'Loading...';
+
+        try {
+            const res = await fetch(`/api/smart-lock/units?site_ids=${siteIds.join(',')}`, { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+
+            units = data.units || [];
+            changes = {};
+            originalAssignments = {};
+
+            // Build per-site keypad/padlock maps
+            siteKeypads = {};
+            sitePadlocks = {};
+            (data.keypads || []).forEach(k => {
+                if (!siteKeypads[k.site_id]) siteKeypads[k.site_id] = [];
+                siteKeypads[k.site_id].push(k);
+            });
+            (data.padlocks || []).forEach(p => {
+                if (!sitePadlocks[p.site_id]) sitePadlocks[p.site_id] = [];
+                sitePadlocks[p.site_id].push(p);
+            });
+
+            // Store original assignments
+            units.forEach(u => {
+                const key = `${u.SiteID}_${u.UnitID}`;
+                if (u.assignment) {
+                    originalAssignments[key] = {
+                        keypad_pk: u.assignment.keypad_pk,
+                        padlock_pk: u.assignment.padlock_pk,
+                    };
+                }
+            });
+
+            document.getElementById('summary-row').style.display = 'flex';
+            document.getElementById('save-btn').style.display = 'inline-block';
+            renderTable();
+            updateStats();
+        } catch (e) {
+            showStatus('Failed to load units', false);
+            console.error(e);
+        } finally {
+            btn.disabled = false; btn.textContent = 'Load Units';
+        }
+    }
+
+    function getCurrentAssignment(siteId, unitId) {
+        const key = `${siteId}_${unitId}`;
+        if (changes[key] !== undefined) return changes[key];
+        return originalAssignments[key] || { keypad_pk: null, padlock_pk: null };
+    }
+
+    function getAssignedKeypadPks(siteId, excludeUnitId) {
+        // Collect all keypad_pks currently assigned to units in this site
+        const assigned = new Set();
+        units.filter(u => u.SiteID === siteId).forEach(u => {
+            if (u.UnitID === excludeUnitId) return;
+            const a = getCurrentAssignment(u.SiteID, u.UnitID);
+            if (a.keypad_pk) assigned.add(a.keypad_pk);
+        });
+        return assigned;
+    }
+
+    function getAssignedPadlockPks(siteId, excludeUnitId) {
+        const assigned = new Set();
+        units.filter(u => u.SiteID === siteId).forEach(u => {
+            if (u.UnitID === excludeUnitId) return;
+            const a = getCurrentAssignment(u.SiteID, u.UnitID);
+            if (a.padlock_pk) assigned.add(a.padlock_pk);
+        });
+        return assigned;
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('units-tbody');
+        const search = (document.getElementById('search-input').value || '').toLowerCase();
+        const rentableOnly = document.getElementById('filter-rentable').checked;
+
+        let filtered = units;
+        if (search) filtered = filtered.filter(u => (u.sUnitName || '').toLowerCase().includes(search));
+        if (rentableOnly) filtered = filtered.filter(u => u.bRentable === true);
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
+            document.getElementById('count-info').textContent = '';
+            return;
+        }
+
+        tbody.innerHTML = filtered.map(u => {
+            const key = `${u.SiteID}_${u.UnitID}`;
+            const current = getCurrentAssignment(u.SiteID, u.UnitID);
+            const hasChange = changes[key] !== undefined;
+            const rowBg = hasChange ? 'background: #fffbeb;' : '';
+            const rentBadge = u.bRentable
+                ? '<span style="color:#059669;">Yes</span>'
+                : '<span style="color:#dc2626;">No</span>';
+
+            // Build keypad dropdown
+            const siteKps = siteKeypads[u.SiteID] || [];
+            const assignedKps = getAssignedKeypadPks(u.SiteID, u.UnitID);
+            let kpOptions = '<option value="">— None —</option>';
+            siteKps.forEach(k => {
+                const isCurrently = current.keypad_pk === k.id;
+                const isTaken = assignedKps.has(k.id);
+                if (isTaken && !isCurrently) return; // hide taken
+                const sel = isCurrently ? 'selected' : '';
+                kpOptions += `<option value="${k.id}" ${sel}>${esc(k.keypad_id)}</option>`;
+            });
+
+            // Build padlock dropdown
+            const sitePls = sitePadlocks[u.SiteID] || [];
+            const assignedPls = getAssignedPadlockPks(u.SiteID, u.UnitID);
+            let plOptions = '<option value="">— None —</option>';
+            sitePls.forEach(p => {
+                const isCurrently = current.padlock_pk === p.id;
+                const isTaken = assignedPls.has(p.id);
+                if (isTaken && !isCurrently) return;
+                const sel = isCurrently ? 'selected' : '';
+                plOptions += `<option value="${p.id}" ${sel}>${esc(p.padlock_id)}</option>`;
+            });
+
+            return `<tr style="${rowBg}">
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteCode(u.SiteID))}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${u.UnitID}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${esc(u.sUnitName)}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${rentBadge}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">
+                    <select onchange="onAssignChange(${u.SiteID}, ${u.UnitID}, 'keypad_pk', this.value)"
+                            style="padding:0.3rem;border:1px solid #e5e7eb;border-radius:4px;width:100%;font-size:0.8rem;">${kpOptions}</select>
+                </td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">
+                    <select onchange="onAssignChange(${u.SiteID}, ${u.UnitID}, 'padlock_pk', this.value)"
+                            style="padding:0.3rem;border:1px solid #e5e7eb;border-radius:4px;width:100%;font-size:0.8rem;">${plOptions}</select>
+                </td>
+            </tr>`;
+        }).join('');
+
+        document.getElementById('count-info').textContent = `Showing ${filtered.length} of ${units.length} unit(s)`;
+    }
+
+    function onAssignChange(siteId, unitId, field, value) {
+        const key = `${siteId}_${unitId}`;
+        const orig = originalAssignments[key] || { keypad_pk: null, padlock_pk: null };
+        const current = changes[key] || { ...orig };
+
+        current[field] = value ? parseInt(value) : null;
+
+        // Check if it's back to original
+        if (current.keypad_pk === orig.keypad_pk && current.padlock_pk === orig.padlock_pk) {
+            delete changes[key];
+        } else {
+            changes[key] = current;
+        }
+
+        // Re-render to update dropdowns (remove taken items from other rows)
+        renderTable();
+        updateStats();
+    }
+
+    function updateStats() {
+        document.getElementById('stat-total').textContent = units.length;
+        let keypadsAssigned = 0, padlocksAssigned = 0;
+        units.forEach(u => {
+            const a = getCurrentAssignment(u.SiteID, u.UnitID);
+            if (a.keypad_pk) keypadsAssigned++;
+            if (a.padlock_pk) padlocksAssigned++;
+        });
+        document.getElementById('stat-keypads').textContent = keypadsAssigned;
+        document.getElementById('stat-padlocks').textContent = padlocksAssigned;
+        document.getElementById('stat-changes').textContent = Object.keys(changes).length;
+    }
+
+    async function saveAssignments() {
+        const changedKeys = Object.keys(changes);
+        if (changedKeys.length === 0) { showStatus('No changes to save', false); return; }
+
+        const assignments = changedKeys.map(key => {
+            const [siteId, unitId] = key.split('_').map(Number);
+            return {
+                site_id: siteId,
+                unit_id: unitId,
+                keypad_pk: changes[key].keypad_pk,
+                padlock_pk: changes[key].padlock_pk,
+            };
+        });
+
+        const btn = document.getElementById('save-btn');
+        btn.disabled = true; btn.textContent = 'Saving...';
+        try {
+            const res = await fetch('/api/smart-lock/assignments', {
+                method: 'PUT', headers: apiHeaders(),
+                body: JSON.stringify({ assignments }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus(`Saved ${data.upserted} assignment(s)`, true);
+                // Reload to refresh state
+                loadUnits();
+                loadAuditLog();
+            } else {
+                showStatus(data.error || 'Save failed', false);
+            }
+        } catch (e) { showStatus('Network error', false); }
+        finally { btn.disabled = false; btn.textContent = 'Save Changes'; }
+    }
+
+    async function loadAuditLog() {
+        try {
+            const res = await fetch('/api/smart-lock/audit-log?limit=50', { headers: apiHeaders() });
+            const data = await res.json();
+            const entries = data.entries || [];
+            const tbody = document.getElementById('audit-tbody');
+            if (entries.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="padding:1rem;text-align:center;color:#999;">No audit entries</td></tr>';
+                return;
+            }
+            tbody.innerHTML = entries.map(e => {
+                const dt = new Date(e.created_at + 'Z');
+                return `<tr>
+                    <td style="padding:0.3rem;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${esc(dt.toLocaleString())}</td>
+                    <td style="padding:0.3rem;border-bottom:1px solid #f1f5f9;">${esc(e.username)}</td>
+                    <td style="padding:0.3rem;border-bottom:1px solid #f1f5f9;">${esc(e.action)}</td>
+                    <td style="padding:0.3rem;border-bottom:1px solid #f1f5f9;">${esc(e.detail)}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) { console.error('Audit log error:', e); }
+    }
+
+    // Init
+    loadSites().then(() => { loadAuditLog(); });
+</script>
+{% endblock %}

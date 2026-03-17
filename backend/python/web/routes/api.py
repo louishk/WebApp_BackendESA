@@ -3687,3 +3687,676 @@ def api_unit_availability():
         return jsonify({'error': 'Failed to fetch available units'}), 500
     finally:
         pbi_session.close()
+
+
+# =============================================================================
+# Smart Lock Management
+# =============================================================================
+
+MAX_SL_BATCH_SIZE = 500
+MAX_SL_ID_LEN = 50
+MAX_SL_NOTES_LEN = 255
+
+
+def _sl_username():
+    """Get current username for smart lock audit."""
+    if hasattr(g, 'current_user') and g.current_user:
+        return g.current_user.get('sub', 'unknown')
+    return 'unknown'
+
+
+def _require_sl_session_access(f):
+    """Check can_access_smart_lock for session-authenticated users (RBAC guard)."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        from flask_login import current_user
+        if current_user and current_user.is_authenticated:
+            if not current_user.can_access_smart_lock():
+                return jsonify({'error': 'Forbidden'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+def _sl_audit(session, action, entity_type, entity_id=None, site_id=None, unit_id=None, detail=None):
+    """Write a smart lock audit log entry."""
+    from web.models.smart_lock import SmartLockAuditLog
+    entry = SmartLockAuditLog(
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        site_id=site_id,
+        unit_id=unit_id,
+        detail=detail,
+        username=_sl_username(),
+    )
+    session.add(entry)
+
+
+# --- Keypads CRUD ---
+
+@api_bp.route('/smart-lock/keypads')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_sl_keypads_list():
+    """List keypads, optionally filtered by site_id."""
+    site_id = request.args.get('site_id')
+    session = get_session()
+    try:
+        from web.models.smart_lock import SmartLockKeypad, SmartLockUnitAssignment
+        q = session.query(SmartLockKeypad)
+        if site_id:
+            q = q.filter(SmartLockKeypad.site_id == int(site_id))
+        keypads = q.order_by(SmartLockKeypad.site_id, SmartLockKeypad.keypad_id).all()
+
+        # Build assignment lookup: keypad pk -> unit info
+        keypad_pks = [k.id for k in keypads]
+        assignment_map = {}
+        if keypad_pks:
+            assignments = session.query(SmartLockUnitAssignment).filter(
+                SmartLockUnitAssignment.keypad_pk.in_(keypad_pks)
+            ).all()
+            for a in assignments:
+                assignment_map[a.keypad_pk] = {'site_id': a.site_id, 'unit_id': a.unit_id}
+
+        result = []
+        for k in keypads:
+            d = k.to_dict()
+            d['assigned_to'] = assignment_map.get(k.id)
+            result.append(d)
+
+        return jsonify({'keypads': result})
+    except Exception as e:
+        current_app.logger.error(f"Smart lock keypads list error: {e}")
+        return jsonify({'error': 'Failed to fetch keypads'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/keypads', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_keypads_create():
+    """Add a single keypad."""
+    from web.models.smart_lock import SmartLockKeypad
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    keypad_id = (data.get('keypad_id') or '').strip()
+    site_id = data.get('site_id')
+    notes = (data.get('notes') or '').strip() or None
+
+    if not keypad_id or not site_id:
+        return jsonify({'error': 'keypad_id and site_id are required'}), 400
+    if len(keypad_id) > MAX_SL_ID_LEN:
+        return jsonify({'error': f'keypad_id must be {MAX_SL_ID_LEN} characters or fewer'}), 400
+    if notes and len(notes) > MAX_SL_NOTES_LEN:
+        return jsonify({'error': f'notes must be {MAX_SL_NOTES_LEN} characters or fewer'}), 400
+    try:
+        site_id = int(site_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'site_id must be an integer'}), 400
+
+    session = get_session()
+    try:
+        existing = session.query(SmartLockKeypad).filter_by(keypad_id=keypad_id).first()
+        if existing:
+            return jsonify({'error': 'Keypad ID already exists'}), 409
+
+        keypad = SmartLockKeypad(
+            keypad_id=keypad_id,
+            site_id=site_id,
+            notes=notes,
+            created_by=_sl_username(),
+        )
+        session.add(keypad)
+        _sl_audit(session, 'keypad_added', 'keypad', keypad_id, site_id=site_id,
+                  detail=f'Added keypad {keypad_id} to site {site_id}')
+        session.commit()
+        return jsonify({'success': True, 'keypad': keypad.to_dict()}), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock keypad create error: {e}")
+        return jsonify({'error': 'Failed to create keypad'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/keypads/batch', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_keypads_batch():
+    """Batch create keypads from CSV upload."""
+    from web.models.smart_lock import SmartLockKeypad
+    data = request.get_json()
+    if not data or 'items' not in data:
+        return jsonify({'error': 'items array required'}), 400
+
+    items = data['items']
+    if len(items) > MAX_SL_BATCH_SIZE:
+        return jsonify({'error': f'Batch size cannot exceed {MAX_SL_BATCH_SIZE} items'}), 400
+
+    username = _sl_username()
+    session = get_session()
+    try:
+        created = 0
+        skipped = 0
+        errors = []
+        for i, item in enumerate(items):
+            kid = (item.get('keypad_id') or '').strip()
+            sid = item.get('site_id')
+            notes = (item.get('notes') or '').strip() or None
+            if not kid or not sid:
+                errors.append(f'Row {i+1}: missing keypad_id or site_id')
+                continue
+            if len(kid) > MAX_SL_ID_LEN:
+                errors.append(f'Row {i+1}: keypad_id too long')
+                continue
+            existing = session.query(SmartLockKeypad).filter_by(keypad_id=kid).first()
+            if existing:
+                skipped += 1
+                continue
+            session.add(SmartLockKeypad(
+                keypad_id=kid, site_id=int(sid), notes=notes, created_by=username,
+            ))
+            created += 1
+
+        if created > 0:
+            _sl_audit(session, 'keypad_batch_upload', 'keypad',
+                      detail=f'Batch uploaded {created} keypads ({skipped} skipped)')
+        session.commit()
+        return jsonify({'success': True, 'created': created, 'skipped': skipped, 'errors': errors})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock keypad batch error: {e}")
+        return jsonify({'error': 'Batch upload failed'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/keypads/<int:pk>', methods=['PUT'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_keypads_update(pk):
+    """Update a keypad (notes, site_id)."""
+    from web.models.smart_lock import SmartLockKeypad
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    session = get_session()
+    try:
+        keypad = session.query(SmartLockKeypad).get(pk)
+        if not keypad:
+            return jsonify({'error': 'Keypad not found'}), 404
+
+        changes = []
+        if 'site_id' in data and int(data['site_id']) != keypad.site_id:
+            changes.append(f'site {keypad.site_id}->{data["site_id"]}')
+            keypad.site_id = int(data['site_id'])
+        if 'notes' in data:
+            keypad.notes = (data['notes'] or '').strip() or None
+            changes.append('notes updated')
+        keypad.updated_at = datetime.utcnow()
+
+        if changes:
+            _sl_audit(session, 'keypad_updated', 'keypad', keypad.keypad_id,
+                      site_id=keypad.site_id, detail=', '.join(changes))
+        session.commit()
+        return jsonify({'success': True, 'keypad': keypad.to_dict()})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock keypad update error: {e}")
+        return jsonify({'error': 'Failed to update keypad'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/keypads/<int:pk>', methods=['DELETE'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_keypads_delete(pk):
+    """Delete a keypad."""
+    from web.models.smart_lock import SmartLockKeypad
+    session = get_session()
+    try:
+        keypad = session.query(SmartLockKeypad).get(pk)
+        if not keypad:
+            return jsonify({'error': 'Keypad not found'}), 404
+
+        kid = keypad.keypad_id
+        sid = keypad.site_id
+        session.delete(keypad)
+        _sl_audit(session, 'keypad_deleted', 'keypad', kid, site_id=sid,
+                  detail=f'Deleted keypad {kid} from site {sid}')
+        session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock keypad delete error: {e}")
+        return jsonify({'error': 'Failed to delete keypad'}), 500
+    finally:
+        session.close()
+
+
+# --- Padlocks CRUD ---
+
+@api_bp.route('/smart-lock/padlocks')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_sl_padlocks_list():
+    """List padlocks, optionally filtered by site_id."""
+    site_id = request.args.get('site_id')
+    session = get_session()
+    try:
+        from web.models.smart_lock import SmartLockPadlock, SmartLockUnitAssignment
+        q = session.query(SmartLockPadlock)
+        if site_id:
+            q = q.filter(SmartLockPadlock.site_id == int(site_id))
+        padlocks = q.order_by(SmartLockPadlock.site_id, SmartLockPadlock.padlock_id).all()
+
+        padlock_pks = [p.id for p in padlocks]
+        assignment_map = {}
+        if padlock_pks:
+            assignments = session.query(SmartLockUnitAssignment).filter(
+                SmartLockUnitAssignment.padlock_pk.in_(padlock_pks)
+            ).all()
+            for a in assignments:
+                assignment_map[a.padlock_pk] = {'site_id': a.site_id, 'unit_id': a.unit_id}
+
+        result = []
+        for p in padlocks:
+            d = p.to_dict()
+            d['assigned_to'] = assignment_map.get(p.id)
+            result.append(d)
+
+        return jsonify({'padlocks': result})
+    except Exception as e:
+        current_app.logger.error(f"Smart lock padlocks list error: {e}")
+        return jsonify({'error': 'Failed to fetch padlocks'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/padlocks', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_padlocks_create():
+    """Add a single padlock."""
+    from web.models.smart_lock import SmartLockPadlock
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    padlock_id = (data.get('padlock_id') or '').strip()
+    site_id = data.get('site_id')
+    notes = (data.get('notes') or '').strip() or None
+
+    if not padlock_id or not site_id:
+        return jsonify({'error': 'padlock_id and site_id are required'}), 400
+    if len(padlock_id) > MAX_SL_ID_LEN:
+        return jsonify({'error': f'padlock_id must be {MAX_SL_ID_LEN} characters or fewer'}), 400
+    if notes and len(notes) > MAX_SL_NOTES_LEN:
+        return jsonify({'error': f'notes must be {MAX_SL_NOTES_LEN} characters or fewer'}), 400
+    try:
+        site_id = int(site_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'site_id must be an integer'}), 400
+
+    session = get_session()
+    try:
+        existing = session.query(SmartLockPadlock).filter_by(padlock_id=padlock_id).first()
+        if existing:
+            return jsonify({'error': 'Padlock ID already exists'}), 409
+
+        padlock = SmartLockPadlock(
+            padlock_id=padlock_id,
+            site_id=site_id,
+            notes=notes,
+            created_by=_sl_username(),
+        )
+        session.add(padlock)
+        _sl_audit(session, 'padlock_added', 'padlock', padlock_id, site_id=site_id,
+                  detail=f'Added padlock {padlock_id} to site {site_id}')
+        session.commit()
+        return jsonify({'success': True, 'padlock': padlock.to_dict()}), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock padlock create error: {e}")
+        return jsonify({'error': 'Failed to create padlock'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/padlocks/batch', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_padlocks_batch():
+    """Batch create padlocks from CSV upload."""
+    from web.models.smart_lock import SmartLockPadlock
+    data = request.get_json()
+    if not data or 'items' not in data:
+        return jsonify({'error': 'items array required'}), 400
+
+    items = data['items']
+    if len(items) > MAX_SL_BATCH_SIZE:
+        return jsonify({'error': f'Batch size cannot exceed {MAX_SL_BATCH_SIZE} items'}), 400
+
+    username = _sl_username()
+    session = get_session()
+    try:
+        created = 0
+        skipped = 0
+        errors = []
+        for i, item in enumerate(items):
+            pid = (item.get('padlock_id') or '').strip()
+            sid = item.get('site_id')
+            notes = (item.get('notes') or '').strip() or None
+            if not pid or not sid:
+                errors.append(f'Row {i+1}: missing padlock_id or site_id')
+                continue
+            if len(pid) > MAX_SL_ID_LEN:
+                errors.append(f'Row {i+1}: padlock_id too long')
+                continue
+            existing = session.query(SmartLockPadlock).filter_by(padlock_id=pid).first()
+            if existing:
+                skipped += 1
+                continue
+            session.add(SmartLockPadlock(
+                padlock_id=pid, site_id=int(sid), notes=notes, created_by=username,
+            ))
+            created += 1
+
+        if created > 0:
+            _sl_audit(session, 'padlock_batch_upload', 'padlock',
+                      detail=f'Batch uploaded {created} padlocks ({skipped} skipped)')
+        session.commit()
+        return jsonify({'success': True, 'created': created, 'skipped': skipped, 'errors': errors})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock padlock batch error: {e}")
+        return jsonify({'error': 'Batch upload failed'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/padlocks/<int:pk>', methods=['PUT'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_padlocks_update(pk):
+    """Update a padlock (notes, site_id)."""
+    from web.models.smart_lock import SmartLockPadlock
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    session = get_session()
+    try:
+        padlock = session.query(SmartLockPadlock).get(pk)
+        if not padlock:
+            return jsonify({'error': 'Padlock not found'}), 404
+
+        changes = []
+        if 'site_id' in data and int(data['site_id']) != padlock.site_id:
+            changes.append(f'site {padlock.site_id}->{data["site_id"]}')
+            padlock.site_id = int(data['site_id'])
+        if 'notes' in data:
+            padlock.notes = (data['notes'] or '').strip() or None
+            changes.append('notes updated')
+        padlock.updated_at = datetime.utcnow()
+
+        if changes:
+            _sl_audit(session, 'padlock_updated', 'padlock', padlock.padlock_id,
+                      site_id=padlock.site_id, detail=', '.join(changes))
+        session.commit()
+        return jsonify({'success': True, 'padlock': padlock.to_dict()})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock padlock update error: {e}")
+        return jsonify({'error': 'Failed to update padlock'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/padlocks/<int:pk>', methods=['DELETE'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_padlocks_delete(pk):
+    """Delete a padlock."""
+    from web.models.smart_lock import SmartLockPadlock
+    session = get_session()
+    try:
+        padlock = session.query(SmartLockPadlock).get(pk)
+        if not padlock:
+            return jsonify({'error': 'Padlock not found'}), 404
+
+        pid = padlock.padlock_id
+        sid = padlock.site_id
+        session.delete(padlock)
+        _sl_audit(session, 'padlock_deleted', 'padlock', pid, site_id=sid,
+                  detail=f'Deleted padlock {pid} from site {sid}')
+        session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock padlock delete error: {e}")
+        return jsonify({'error': 'Failed to delete padlock'}), 500
+    finally:
+        session.close()
+
+
+# --- Units & Assignments ---
+
+@api_bp.route('/smart-lock/units')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_sl_units():
+    """Get units (from esa_pbi) merged with smart lock assignments (from esa_backend)."""
+    site_ids_param = request.args.get('site_ids', '')
+    if not site_ids_param:
+        return jsonify({'error': 'site_ids parameter is required'}), 400
+
+    try:
+        site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
+    except ValueError:
+        return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
+
+    if not site_ids:
+        return jsonify({'error': 'At least one site_id is required'}), 400
+
+    # 1) Fetch units from esa_pbi (reduced fields)
+    pbi_session = get_pbi_session()
+    try:
+        placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids))])
+        params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
+        query = text(f"""
+            SELECT u."SiteID", u."UnitID", u."sUnitName", u."bRentable"
+            FROM units_info u
+            WHERE u."SiteID" IN ({placeholders})
+            ORDER BY u."SiteID", u."sUnitName"
+        """)
+        rows = pbi_session.execute(query, params).fetchall()
+        units = [{'SiteID': r[0], 'UnitID': r[1], 'sUnitName': r[2], 'bRentable': r[3]} for r in rows]
+    except Exception as e:
+        current_app.logger.error(f"Smart lock units PBI query error: {e}")
+        return jsonify({'error': 'Failed to fetch units'}), 500
+    finally:
+        pbi_session.close()
+
+    # 2) Fetch assignments + keypads/padlocks from esa_backend
+    from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock
+    session = get_session()
+    try:
+        assignments = session.query(SmartLockUnitAssignment).filter(
+            SmartLockUnitAssignment.site_id.in_(site_ids)
+        ).all()
+        assign_map = {}
+        for a in assignments:
+            assign_map[(a.site_id, a.unit_id)] = a.to_dict()
+
+        # Fetch all keypads and padlocks for these sites (for dropdown population)
+        keypads = session.query(SmartLockKeypad).filter(
+            SmartLockKeypad.site_id.in_(site_ids)
+        ).order_by(SmartLockKeypad.keypad_id).all()
+
+        padlocks = session.query(SmartLockPadlock).filter(
+            SmartLockPadlock.site_id.in_(site_ids)
+        ).order_by(SmartLockPadlock.padlock_id).all()
+
+        # Merge assignments into units
+        for u in units:
+            key = (u['SiteID'], u['UnitID'])
+            u['assignment'] = assign_map.get(key)
+
+        return jsonify({
+            'units': units,
+            'count': len(units),
+            'keypads': [k.to_dict() for k in keypads],
+            'padlocks': [p.to_dict() for p in padlocks],
+        })
+    except Exception as e:
+        current_app.logger.error(f"Smart lock assignments query error: {e}")
+        return jsonify({'error': 'Failed to fetch assignments'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/assignments', methods=['PUT'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+def api_sl_assignments_upsert():
+    """Bulk upsert unit assignments. Updates keypad/padlock status accordingly."""
+    from web.models.smart_lock import (
+        SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock,
+    )
+    data = request.get_json()
+    if not data or 'assignments' not in data:
+        return jsonify({'error': 'assignments array required'}), 400
+
+    username = _sl_username()
+    session = get_session()
+    try:
+        upserted = 0
+        for item in data['assignments']:
+            sid = item.get('site_id')
+            uid = item.get('unit_id')
+            new_keypad_pk = item.get('keypad_pk')  # None to unassign
+            new_padlock_pk = item.get('padlock_pk')  # None to unassign
+
+            if not sid or not uid:
+                continue
+
+            # Validate keypad/padlock belong to the same site
+            if new_keypad_pk:
+                kp = session.query(SmartLockKeypad).get(int(new_keypad_pk))
+                if not kp or kp.site_id != int(sid):
+                    return jsonify({'error': 'Keypad does not belong to the specified site'}), 400
+            if new_padlock_pk:
+                pl = session.query(SmartLockPadlock).get(int(new_padlock_pk))
+                if not pl or pl.site_id != int(sid):
+                    return jsonify({'error': 'Padlock does not belong to the specified site'}), 400
+
+            existing = session.query(SmartLockUnitAssignment).filter_by(
+                site_id=int(sid), unit_id=int(uid)
+            ).first()
+
+            old_keypad_pk = existing.keypad_pk if existing else None
+            old_padlock_pk = existing.padlock_pk if existing else None
+
+            if existing:
+                existing.keypad_pk = int(new_keypad_pk) if new_keypad_pk else None
+                existing.padlock_pk = int(new_padlock_pk) if new_padlock_pk else None
+                existing.assigned_by = username
+                existing.updated_at = datetime.utcnow()
+            else:
+                assignment = SmartLockUnitAssignment(
+                    site_id=int(sid),
+                    unit_id=int(uid),
+                    keypad_pk=int(new_keypad_pk) if new_keypad_pk else None,
+                    padlock_pk=int(new_padlock_pk) if new_padlock_pk else None,
+                    assigned_by=username,
+                )
+                session.add(assignment)
+
+            # Update keypad status
+            if old_keypad_pk != (int(new_keypad_pk) if new_keypad_pk else None):
+                if old_keypad_pk:
+                    old_kp = session.query(SmartLockKeypad).get(old_keypad_pk)
+                    if old_kp:
+                        old_kp.status = 'not_assigned'
+                        _sl_audit(session, 'keypad_unassigned', 'assignment', old_kp.keypad_id,
+                                  site_id=int(sid), unit_id=int(uid),
+                                  detail=f'Unassigned keypad {old_kp.keypad_id} from unit {uid}')
+                if new_keypad_pk:
+                    new_kp = session.query(SmartLockKeypad).get(int(new_keypad_pk))
+                    if new_kp:
+                        new_kp.status = 'assigned'
+                        _sl_audit(session, 'keypad_assigned', 'assignment', new_kp.keypad_id,
+                                  site_id=int(sid), unit_id=int(uid),
+                                  detail=f'Assigned keypad {new_kp.keypad_id} to unit {uid}')
+
+            # Update padlock status
+            if old_padlock_pk != (int(new_padlock_pk) if new_padlock_pk else None):
+                if old_padlock_pk:
+                    old_pl = session.query(SmartLockPadlock).get(old_padlock_pk)
+                    if old_pl:
+                        old_pl.status = 'not_assigned'
+                        _sl_audit(session, 'padlock_unassigned', 'assignment', old_pl.padlock_id,
+                                  site_id=int(sid), unit_id=int(uid),
+                                  detail=f'Unassigned padlock {old_pl.padlock_id} from unit {uid}')
+                if new_padlock_pk:
+                    new_pl = session.query(SmartLockPadlock).get(int(new_padlock_pk))
+                    if new_pl:
+                        new_pl.status = 'assigned'
+                        _sl_audit(session, 'padlock_assigned', 'assignment', new_pl.padlock_id,
+                                  site_id=int(sid), unit_id=int(uid),
+                                  detail=f'Assigned padlock {new_pl.padlock_id} to unit {uid}')
+
+            upserted += 1
+
+        session.commit()
+        return jsonify({'success': True, 'upserted': upserted})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Smart lock assignments upsert error: {e}")
+        return jsonify({'error': 'Failed to save assignments'}), 500
+    finally:
+        session.close()
+
+
+# --- Audit Log ---
+
+@api_bp.route('/smart-lock/audit-log')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_sl_audit_log():
+    """Get recent smart lock audit log entries."""
+    from web.models.smart_lock import SmartLockAuditLog
+    site_id = request.args.get('site_id')
+    limit = min(int(request.args.get('limit', 100)), 500)
+
+    session = get_session()
+    try:
+        q = session.query(SmartLockAuditLog)
+        if site_id:
+            q = q.filter(SmartLockAuditLog.site_id == int(site_id))
+        entries = q.order_by(desc(SmartLockAuditLog.created_at)).limit(limit).all()
+        return jsonify({'entries': [e.to_dict() for e in entries]})
+    except Exception as e:
+        current_app.logger.error(f"Smart lock audit log error: {e}")
+        return jsonify({'error': 'Failed to fetch audit log'}), 500
+    finally:
+        session.close()

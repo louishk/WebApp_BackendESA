@@ -136,3 +136,8 @@ def ecri_manage_required(f):
 def statistics_access_required(f):
     """Decorator to require statistics access permission."""
     return require_permission('can_access_statistics')(f)
+
+
+def smart_lock_access_required(f):
+    """Decorator to require smart lock tools access permission."""
+    return require_permission('can_access_smart_lock')(f)

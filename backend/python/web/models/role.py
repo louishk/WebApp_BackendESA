@@ -30,6 +30,7 @@ class Role(Base):
     can_access_ecri = Column(Boolean, default=False)
     can_manage_ecri = Column(Boolean, default=False)
     can_access_statistics = Column(Boolean, default=False)
+    can_access_smart_lock = Column(Boolean, default=False)
 
     is_system = Column(Boolean, default=False)  # Prevent deletion of core roles
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -50,6 +51,7 @@ class Role(Base):
             'can_access_ecri': True,
             'can_manage_ecri': True,
             'can_access_statistics': True,
+            'can_access_smart_lock': True,
             'is_system': True
         },
         {
@@ -112,6 +114,8 @@ class Role(Base):
             permissions.append('ECRI Manage')
         if self.can_access_statistics:
             permissions.append('Statistics')
+        if self.can_access_smart_lock:
+            permissions.append('Smart Lock')
         return permissions
 
     def to_dict(self):
@@ -131,6 +135,7 @@ class Role(Base):
             'can_access_ecri': self.can_access_ecri,
             'can_manage_ecri': self.can_manage_ecri,
             'can_access_statistics': self.can_access_statistics,
+            'can_access_smart_lock': self.can_access_smart_lock,
             'is_system': self.is_system,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
