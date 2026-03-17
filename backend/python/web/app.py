@@ -145,6 +145,7 @@ def create_app(config=None, db_url=None):
             response.headers['Expires'] = '0'
 
         # Security headers for all responses
+        response.headers['X-Robots-Tag'] = 'noindex, nofollow'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         # X-Frame-Options removed; CSP frame-ancestors handles this
         # and supports multiple origins (X-Frame-Options ALLOW-FROM is deprecated)

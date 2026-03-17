@@ -21,6 +21,12 @@ CONTENT_TYPES = {
 }
 
 
+@main_bp.route('/robots.txt')
+def robots_txt():
+    """Block all search engine crawling — this is an internal backend."""
+    return Response("User-agent: *\nDisallow: /\n", mimetype='text/plain')
+
+
 @main_bp.route('/')
 def index():
     """Landing page - redirect to dashboard if logged in."""
