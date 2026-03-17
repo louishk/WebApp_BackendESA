@@ -4253,83 +4253,113 @@ def api_sl_assignments_upsert():
     if not data or 'assignments' not in data:
         return jsonify({'error': 'assignments array required'}), 400
 
+    assignments_list = data['assignments']
+    if not isinstance(assignments_list, list):
+        return jsonify({'error': 'assignments must be an array'}), 400
+    if len(assignments_list) > MAX_SL_BATCH_SIZE:
+        return jsonify({'error': f'Cannot save more than {MAX_SL_BATCH_SIZE} assignments at once'}), 400
+
+    # Validate and collect site_id/unit_id pairs for cross-DB check
+    parsed_items = []
+    site_ids_set = set()
+    for item in assignments_list:
+        sid = item.get('site_id')
+        uid = item.get('unit_id')
+        if not sid or not uid:
+            continue
+        try:
+            parsed_items.append((int(sid), int(uid), item.get('keypad_pk'), item.get('padlock_pk')))
+            site_ids_set.add(int(sid))
+        except (ValueError, TypeError):
+            return jsonify({'error': 'site_id and unit_id must be integers'}), 400
+
+    # Validate unit_ids exist in units_info (esa_pbi)
+    if parsed_items:
+        pbi_session = get_pbi_session()
+        try:
+            placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids_set))])
+            params = {f'sid{i}': sid for i, sid in enumerate(site_ids_set)}
+            query = text(f'SELECT "SiteID", "UnitID" FROM units_info WHERE "SiteID" IN ({placeholders})')
+            rows = pbi_session.execute(query, params).fetchall()
+            valid_units = {(r[0], r[1]) for r in rows}
+        finally:
+            pbi_session.close()
+
+        for sid, uid, _, _ in parsed_items:
+            if (sid, uid) not in valid_units:
+                return jsonify({'error': f'Unit {uid} not found at site {sid}'}), 400
+
     username = _sl_username()
     session = get_session()
     try:
         upserted = 0
-        for item in data['assignments']:
-            sid = item.get('site_id')
-            uid = item.get('unit_id')
-            new_keypad_pk = item.get('keypad_pk')  # None to unassign
-            new_padlock_pk = item.get('padlock_pk')  # None to unassign
-
-            if not sid or not uid:
-                continue
-
+        for sid, uid, new_keypad_pk, new_padlock_pk in parsed_items:
             # Validate keypad/padlock belong to the same site
             if new_keypad_pk:
                 kp = session.query(SmartLockKeypad).get(int(new_keypad_pk))
-                if not kp or kp.site_id != int(sid):
+                if not kp or kp.site_id != sid:
                     return jsonify({'error': 'Keypad does not belong to the specified site'}), 400
             if new_padlock_pk:
                 pl = session.query(SmartLockPadlock).get(int(new_padlock_pk))
-                if not pl or pl.site_id != int(sid):
+                if not pl or pl.site_id != sid:
                     return jsonify({'error': 'Padlock does not belong to the specified site'}), 400
 
             existing = session.query(SmartLockUnitAssignment).filter_by(
-                site_id=int(sid), unit_id=int(uid)
+                site_id=sid, unit_id=uid
             ).first()
 
             old_keypad_pk = existing.keypad_pk if existing else None
             old_padlock_pk = existing.padlock_pk if existing else None
+            resolved_keypad_pk = int(new_keypad_pk) if new_keypad_pk else None
+            resolved_padlock_pk = int(new_padlock_pk) if new_padlock_pk else None
 
             if existing:
-                existing.keypad_pk = int(new_keypad_pk) if new_keypad_pk else None
-                existing.padlock_pk = int(new_padlock_pk) if new_padlock_pk else None
+                existing.keypad_pk = resolved_keypad_pk
+                existing.padlock_pk = resolved_padlock_pk
                 existing.assigned_by = username
                 existing.updated_at = datetime.utcnow()
             else:
                 assignment = SmartLockUnitAssignment(
-                    site_id=int(sid),
-                    unit_id=int(uid),
-                    keypad_pk=int(new_keypad_pk) if new_keypad_pk else None,
-                    padlock_pk=int(new_padlock_pk) if new_padlock_pk else None,
+                    site_id=sid,
+                    unit_id=uid,
+                    keypad_pk=resolved_keypad_pk,
+                    padlock_pk=resolved_padlock_pk,
                     assigned_by=username,
                 )
                 session.add(assignment)
 
             # Update keypad status
-            if old_keypad_pk != (int(new_keypad_pk) if new_keypad_pk else None):
+            if old_keypad_pk != resolved_keypad_pk:
                 if old_keypad_pk:
                     old_kp = session.query(SmartLockKeypad).get(old_keypad_pk)
                     if old_kp:
                         old_kp.status = 'not_assigned'
                         _sl_audit(session, 'keypad_unassigned', 'assignment', old_kp.keypad_id,
-                                  site_id=int(sid), unit_id=int(uid),
+                                  site_id=sid, unit_id=uid,
                                   detail=f'Unassigned keypad {old_kp.keypad_id} from unit {uid}')
-                if new_keypad_pk:
-                    new_kp = session.query(SmartLockKeypad).get(int(new_keypad_pk))
+                if resolved_keypad_pk:
+                    new_kp = session.query(SmartLockKeypad).get(resolved_keypad_pk)
                     if new_kp:
                         new_kp.status = 'assigned'
                         _sl_audit(session, 'keypad_assigned', 'assignment', new_kp.keypad_id,
-                                  site_id=int(sid), unit_id=int(uid),
+                                  site_id=sid, unit_id=uid,
                                   detail=f'Assigned keypad {new_kp.keypad_id} to unit {uid}')
 
             # Update padlock status
-            if old_padlock_pk != (int(new_padlock_pk) if new_padlock_pk else None):
+            if old_padlock_pk != resolved_padlock_pk:
                 if old_padlock_pk:
                     old_pl = session.query(SmartLockPadlock).get(old_padlock_pk)
                     if old_pl:
                         old_pl.status = 'not_assigned'
                         _sl_audit(session, 'padlock_unassigned', 'assignment', old_pl.padlock_id,
-                                  site_id=int(sid), unit_id=int(uid),
+                                  site_id=sid, unit_id=uid,
                                   detail=f'Unassigned padlock {old_pl.padlock_id} from unit {uid}')
-                if new_padlock_pk:
-                    new_pl = session.query(SmartLockPadlock).get(int(new_padlock_pk))
+                if resolved_padlock_pk:
+                    new_pl = session.query(SmartLockPadlock).get(resolved_padlock_pk)
                     if new_pl:
                         new_pl.status = 'assigned'
                         _sl_audit(session, 'padlock_assigned', 'assignment', new_pl.padlock_id,
-                                  site_id=int(sid), unit_id=int(uid),
+                                  site_id=sid, unit_id=uid,
                                   detail=f'Assigned padlock {new_pl.padlock_id} to unit {uid}')
 
             upserted += 1
@@ -4354,7 +4384,10 @@ def api_sl_audit_log():
     """Get recent smart lock audit log entries."""
     from web.models.smart_lock import SmartLockAuditLog
     site_id = request.args.get('site_id')
-    limit = min(int(request.args.get('limit', 100)), 500)
+    try:
+        limit = min(int(request.args.get('limit', 100)), 500)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'limit must be an integer'}), 400
 
     session = get_session()
     try:

@@ -267,7 +267,7 @@
                 const notes = notesIdx >= 0 ? (cols[notesIdx] || '') : '';
                 if (!kid || !sc) { errors.push(`Row ${i+1}: missing data`); continue; }
                 const site = allSites.find(s => s.site_code === sc);
-                if (!site) { errors.push(`Row ${i+1}: unknown site_code "${sc}"`); continue; }
+                if (!site) { errors.push(`Row ${i+1}: unknown site_code "${esc(sc)}"`); continue; }
                 csvBatchData.push({ keypad_id: kid, site_id: site.site_id, notes });
             }
 

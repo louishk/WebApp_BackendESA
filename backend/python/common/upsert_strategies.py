@@ -7,7 +7,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Type
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects import postgresql, mysql
+from sqlalchemy.dialects import postgresql
 from sqlalchemy import insert, func, inspect as sa_inspect
 
 from .config import DatabaseType
