@@ -18,6 +18,7 @@
             <button class="btn" id="save-btn" onclick="saveAssignments()" style="display: none; background: #059669;">Save Changes</button>
         </div>
         <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
+        <span id="refresh-info" style="font-size: 0.8rem; color: #666; display: none;"></span>
     </div>
 </div>
 
@@ -49,6 +50,9 @@
         <label style="font-size: 0.8rem; cursor: pointer;">
             <input type="checkbox" id="filter-rentable" onchange="renderTable()"> Rentable only
         </label>
+        <label style="font-size: 0.8rem; cursor: pointer;">
+            <input type="checkbox" id="filter-vacant" onchange="renderTable()"> Vacant only
+        </label>
     </div>
     <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
         <thead>
@@ -57,12 +61,13 @@
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Unit ID</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Unit Name</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Rentable</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Rented</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Keypad</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Padlock</th>
             </tr>
         </thead>
         <tbody id="units-tbody">
-            <tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
+            <tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
         </tbody>
     </table>
     <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
@@ -196,6 +201,14 @@
                 }
             });
 
+            // Show last refresh time
+            if (data.last_refresh) {
+                const dt = new Date(data.last_refresh + 'Z');
+                const el = document.getElementById('refresh-info');
+                el.textContent = 'Unit data last refreshed: ' + dt.toLocaleString();
+                el.style.display = 'inline-block';
+            }
+
             document.getElementById('summary-row').style.display = 'flex';
             document.getElementById('save-btn').style.display = 'inline-block';
             renderTable();
@@ -239,13 +252,15 @@
         const tbody = document.getElementById('units-tbody');
         const search = (document.getElementById('search-input').value || '').toLowerCase();
         const rentableOnly = document.getElementById('filter-rentable').checked;
+        const vacantOnly = document.getElementById('filter-vacant').checked;
 
         let filtered = units;
         if (search) filtered = filtered.filter(u => (u.sUnitName || '').toLowerCase().includes(search));
         if (rentableOnly) filtered = filtered.filter(u => u.bRentable === true);
+        if (vacantOnly) filtered = filtered.filter(u => u.bRented !== true);
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
             document.getElementById('count-info').textContent = '';
             return;
         }
@@ -258,6 +273,9 @@
             const rentBadge = u.bRentable
                 ? '<span style="color:#059669;">Yes</span>'
                 : '<span style="color:#dc2626;">No</span>';
+            const rentedBadge = u.bRented
+                ? '<span style="color:#d97706;">Yes</span>'
+                : '<span style="color:#6b7280;">No</span>';
 
             // Build keypad dropdown
             const siteKps = siteKeypads[u.SiteID] || [];
@@ -288,6 +306,7 @@
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${u.UnitID}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${esc(u.sUnitName)}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${rentBadge}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${rentedBadge}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">
                     <select onchange="onAssignChange(${u.SiteID}, ${u.UnitID}, 'keypad_pk', this.value)"
                             style="padding:0.3rem;border:1px solid #e5e7eb;border-radius:4px;width:100%;font-size:0.8rem;">${kpOptions}</select>

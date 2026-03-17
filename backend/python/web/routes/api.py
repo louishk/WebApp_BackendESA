@@ -4181,13 +4181,20 @@ def api_sl_units():
         placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids))])
         params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
         query = text(f"""
-            SELECT u."SiteID", u."UnitID", u."sUnitName", u."bRentable"
+            SELECT u."SiteID", u."UnitID", u."sUnitName", u."bRentable", u."bRented"
             FROM units_info u
             WHERE u."SiteID" IN ({placeholders})
             ORDER BY u."SiteID", u."sUnitName"
         """)
         rows = pbi_session.execute(query, params).fetchall()
-        units = [{'SiteID': r[0], 'UnitID': r[1], 'sUnitName': r[2], 'bRentable': r[3]} for r in rows]
+        units = [{'SiteID': r[0], 'UnitID': r[1], 'sUnitName': r[2], 'bRentable': r[3], 'bRented': r[4]} for r in rows]
+
+        # Get last refresh time for the loaded sites
+        refresh_query = text(f"""
+            SELECT MAX(u.updated_at) FROM units_info u WHERE u."SiteID" IN ({placeholders})
+        """)
+        refresh_row = pbi_session.execute(refresh_query, params).fetchone()
+        last_refresh = refresh_row[0].isoformat() if refresh_row and refresh_row[0] else None
     except Exception as e:
         current_app.logger.error(f"Smart lock units PBI query error: {e}")
         return jsonify({'error': 'Failed to fetch units'}), 500
@@ -4224,6 +4231,7 @@ def api_sl_units():
             'count': len(units),
             'keypads': [k.to_dict() for k in keypads],
             'padlocks': [p.to_dict() for p in padlocks],
+            'last_refresh': last_refresh,
         })
     except Exception as e:
         current_app.logger.error(f"Smart lock assignments query error: {e}")
