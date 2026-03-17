@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Type
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects import postgresql, mysql
-from sqlalchemy import insert
+from sqlalchemy import insert, func, inspect as sa_inspect
 
 from .config import DatabaseType
 
@@ -79,9 +79,13 @@ class PostgreSQLUpsertStrategy(UpsertStrategy):
     ) -> None:
         stmt = postgresql.insert(model).values(**values)
         excluded_cols = set(constraint_columns) | self.EXCLUDED_UPDATE_COLUMNS
+        update_dict = {k: v for k, v in values.items() if k not in excluded_cols}
+        # Always refresh updated_at on conflict if the model has the column
+        if 'updated_at' in {c.key for c in sa_inspect(model).columns}:
+            update_dict['updated_at'] = func.now()
         stmt = stmt.on_conflict_do_update(
             index_elements=constraint_columns,
-            set_={k: v for k, v in values.items() if k not in excluded_cols}
+            set_=update_dict
         )
         session.execute(stmt)
         logger.debug(f"PostgreSQL upsert: {model.__tablename__}")
@@ -115,6 +119,9 @@ class PostgreSQLUpsertStrategy(UpsertStrategy):
             if k not in excluded_cols
         }
 
+        # Always refresh updated_at on conflict if the model has the column
+        if 'updated_at' in {c.key for c in sa_inspect(model).columns}:
+            update_dict['updated_at'] = func.now()
         stmt = stmt.on_conflict_do_update(
             index_elements=constraint_columns,
             set_=update_dict

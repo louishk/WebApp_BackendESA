@@ -17,8 +17,8 @@ pipelines:
       backoff_multiplier: 2
     timeout_seconds: 1200
     data_freshness:
-      table: ''
-      date_column: ''
+      table: units_info
+      date_column: updated_at
   fxrate:
     display_name: FX Rates
     description: Fetch foreign exchange rates from Yahoo Finance

@@ -15,10 +15,15 @@
         </div>
         <div style="display: flex; flex-direction: column; gap: 0.5rem;">
             <button class="btn" id="load-btn" onclick="loadUnits()">Load Units</button>
-            <button class="btn" id="save-btn" onclick="saveAssignments()" style="display: none; background: #059669;">Save Changes</button>
+            <button class="btn" id="save-btn" onclick="saveAssignments()" style="display: none; background: #059669;" title="Persist all pending dropdown changes (yellow rows) to the database">Save Changes</button>
+            <button class="btn btn-secondary" id="auto-assign-btn" onclick="autoAssignPadlocks()" style="display: none;">Auto-Assign Padlocks</button>
         </div>
         <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
-        <span id="refresh-info" style="font-size: 0.8rem; color: #666; display: none;"></span>
+        <div id="refresh-info-wrapper" style="display: none; font-size: 0.8rem; color: #666;">
+            <span id="refresh-info"></span>
+            <button class="btn btn-secondary" id="refresh-btn" onclick="refreshUnitData()" style="margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem;">Refresh Unit Data</button>
+            <span id="refresh-status" style="display: none; margin-left: 0.5rem;"></span>
+        </div>
     </div>
 </div>
 
@@ -73,6 +78,21 @@
     <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
 </div>
 
+<!-- Auto-Assign Confirmation Modal -->
+<div id="auto-assign-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:100; align-items:center; justify-content:center;">
+    <div style="background:white; border-radius:8px; padding:1.5rem; max-width:480px; width:90%; margin:auto; margin-top:15vh; box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+        <h3 style="margin-top:0; margin-bottom:0.75rem;">Auto-Assign Padlocks</h3>
+        <div style="background:#fffbeb; border:1px solid #f59e0b; border-radius:6px; padding:0.75rem; margin-bottom:1rem; font-size:0.85rem;">
+            <strong>Important:</strong> Auto-assignment is virtual only. Ensure physical padlocks match the unit mapping before saving.
+        </div>
+        <p id="auto-assign-preview" style="font-size:0.85rem; color:#374151; margin-bottom:1rem;"></p>
+        <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+            <button class="btn btn-secondary" onclick="closeAutoAssignModal()">Cancel</button>
+            <button class="btn" onclick="confirmAutoAssign()">Assign</button>
+        </div>
+    </div>
+</div>
+
 <!-- Audit Log -->
 <details style="margin-top: 1rem;">
     <summary style="cursor: pointer; font-weight: 500; padding: 0.5rem; background: #f9fafb; border-radius: 6px;">Audit Log</summary>
@@ -97,6 +117,7 @@
     const API_TOKEN = localStorage.getItem('api_token') || '';
     let allSites = [];
     let units = [];          // from API
+    let loadedSiteIds = [];  // persisted across save
 
     function esc(str) {
         if (str == null) return '';
@@ -161,10 +182,17 @@
         } catch (e) { console.error('Failed to load sites:', e); }
     }
 
-    async function loadUnits() {
-        const select = document.getElementById('site-select');
-        const siteIds = Array.from(select.selectedOptions).map(o => o.value);
+    async function loadUnits(useSiteIds) {
+        let siteIds;
+        if (useSiteIds) {
+            siteIds = useSiteIds;
+        } else {
+            const select = document.getElementById('site-select');
+            siteIds = Array.from(select.selectedOptions).map(o => o.value);
+        }
         if (siteIds.length === 0) { showStatus('Select at least one site', false); return; }
+
+        loadedSiteIds = siteIds;
 
         const btn = document.getElementById('load-btn');
         btn.disabled = true; btn.textContent = 'Loading...';
@@ -204,13 +232,13 @@
             // Show last refresh time
             if (data.last_refresh) {
                 const dt = new Date(data.last_refresh + 'Z');
-                const el = document.getElementById('refresh-info');
-                el.textContent = 'Unit data last refreshed: ' + dt.toLocaleString();
-                el.style.display = 'inline-block';
+                document.getElementById('refresh-info').textContent = 'Unit data last refreshed: ' + dt.toLocaleString();
             }
+            document.getElementById('refresh-info-wrapper').style.display = 'block';
 
             document.getElementById('summary-row').style.display = 'flex';
             document.getElementById('save-btn').style.display = 'inline-block';
+            document.getElementById('auto-assign-btn').style.display = 'inline-block';
             renderTable();
             updateStats();
         } catch (e) {
@@ -377,8 +405,13 @@
             const data = await res.json();
             if (res.ok && data.success) {
                 showStatus(`Saved ${data.upserted} assignment(s)`, true);
-                // Reload to refresh state
-                loadUnits();
+                // Merge changes into originalAssignments and clear changes
+                for (const key of changedKeys) {
+                    originalAssignments[key] = { ...changes[key] };
+                }
+                changes = {};
+                renderTable();
+                updateStats();
                 loadAuditLog();
             } else {
                 showStatus(data.error || 'Save failed', false);
@@ -407,6 +440,129 @@
                 </tr>`;
             }).join('');
         } catch (e) { console.error('Audit log error:', e); }
+    }
+
+    // Refresh Unit Data via scheduler pipeline
+    async function refreshUnitData() {
+        const btn = document.getElementById('refresh-btn');
+        const statusEl = document.getElementById('refresh-status');
+        btn.disabled = true;
+        statusEl.textContent = 'Triggering pipeline...';
+        statusEl.style.display = 'inline';
+        statusEl.style.color = '#2563eb';
+
+        try {
+            const res = await fetch('/api/jobs/unitsinfo/run-async', {
+                method: 'POST', headers: apiHeaders(),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const jobId = data.job_id;
+
+            statusEl.textContent = 'Running (this may take 1-2 minutes)...';
+
+            // Poll for completion
+            const poll = async () => {
+                try {
+                    const r = await fetch(`/api/jobs/${jobId}/status`, { headers: apiHeaders() });
+                    const d = await r.json();
+                    if (d.status === 'completed') {
+                        statusEl.textContent = 'Done! Reloading units...';
+                        statusEl.style.color = '#059669';
+                        btn.disabled = false;
+                        loadUnits(loadedSiteIds);
+                        setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+                    } else if (d.status === 'failed') {
+                        statusEl.textContent = 'Pipeline failed';
+                        statusEl.style.color = '#dc2626';
+                        btn.disabled = false;
+                    } else {
+                        setTimeout(poll, 5000);
+                    }
+                } catch (e) {
+                    setTimeout(poll, 5000);
+                }
+            };
+            setTimeout(poll, 5000);
+        } catch (e) {
+            statusEl.textContent = 'Failed to trigger';
+            statusEl.style.color = '#dc2626';
+            btn.disabled = false;
+        }
+    }
+
+    // Auto-assign padlocks
+    function autoAssignPadlocks() {
+        // Calculate how many assignments would be made
+        let totalAssigned = 0;
+        const siteIds = [...new Set(units.map(u => u.SiteID))];
+        for (const siteId of siteIds) {
+            const sitePls = sitePadlocks[siteId] || [];
+            const siteUnits = units.filter(u => u.SiteID === siteId);
+            const assignedPls = new Set();
+            // Gather already-assigned padlock pks
+            siteUnits.forEach(u => {
+                const a = getCurrentAssignment(u.SiteID, u.UnitID);
+                if (a.padlock_pk) assignedPls.add(a.padlock_pk);
+            });
+            const unassignedPadlocks = sitePls.filter(p => !assignedPls.has(p.id));
+            const unassignedUnits = siteUnits.filter(u => {
+                const a = getCurrentAssignment(u.SiteID, u.UnitID);
+                return !a.padlock_pk;
+            });
+            totalAssigned += Math.min(unassignedPadlocks.length, unassignedUnits.length);
+        }
+
+        if (totalAssigned === 0) {
+            showStatus('No unassigned padlocks or units available', false);
+            return;
+        }
+
+        document.getElementById('auto-assign-preview').textContent =
+            `This will assign ${totalAssigned} padlock(s) to unassigned units across ${siteIds.length} site(s). You must click "Save Changes" to persist.`;
+        document.getElementById('auto-assign-modal').style.display = 'block';
+    }
+
+    function closeAutoAssignModal() {
+        document.getElementById('auto-assign-modal').style.display = 'none';
+    }
+
+    function confirmAutoAssign() {
+        closeAutoAssignModal();
+        const siteIds = [...new Set(units.map(u => u.SiteID))];
+        let count = 0;
+        for (const siteId of siteIds) {
+            const sitePls = sitePadlocks[siteId] || [];
+            const siteUnits = units.filter(u => u.SiteID === siteId);
+            const assignedPls = new Set();
+            siteUnits.forEach(u => {
+                const a = getCurrentAssignment(u.SiteID, u.UnitID);
+                if (a.padlock_pk) assignedPls.add(a.padlock_pk);
+            });
+            const unassignedPadlocks = sitePls.filter(p => !assignedPls.has(p.id));
+            const unassignedUnits = siteUnits.filter(u => {
+                const a = getCurrentAssignment(u.SiteID, u.UnitID);
+                return !a.padlock_pk;
+            });
+            const toAssign = Math.min(unassignedPadlocks.length, unassignedUnits.length);
+            for (let i = 0; i < toAssign; i++) {
+                const u = unassignedUnits[i];
+                const p = unassignedPadlocks[i];
+                const key = `${u.SiteID}_${u.UnitID}`;
+                const orig = originalAssignments[key] || { keypad_pk: null, padlock_pk: null };
+                const current = changes[key] || { ...orig };
+                current.padlock_pk = p.id;
+                if (current.keypad_pk === orig.keypad_pk && current.padlock_pk === orig.padlock_pk) {
+                    delete changes[key];
+                } else {
+                    changes[key] = current;
+                }
+                count++;
+            }
+        }
+        renderTable();
+        updateStats();
+        showStatus(`Auto-assigned ${count} padlock(s) — click Save to persist`, true);
     }
 
     // Init
