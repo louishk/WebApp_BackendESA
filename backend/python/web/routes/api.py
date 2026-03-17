@@ -3328,7 +3328,7 @@ def api_discount_plans_update_simple():
 @require_auth
 @require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
-def api_discount_plans_update():
+def api_discount_plans_update_full():
     """
     Full discount plan update via DiscountPlanUpdate SOAP.
     Updates occupancy limits, dates, show-on, exclusion thresholds, etc.
