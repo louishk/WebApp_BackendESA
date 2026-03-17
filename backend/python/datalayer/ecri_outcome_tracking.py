@@ -38,6 +38,7 @@ def run(mode='auto', **kwargs):
     records_processed = 0
 
     try:
+        print("[STAGE:INIT] ECRIOutcomeTracking")
         print(f"[ECRI Outcome Tracking] Starting at {datetime.now().isoformat()}")
         print(f"[ECRI Outcome Tracking] Mode: {mode}")
 
@@ -49,6 +50,7 @@ def run(mode='auto', **kwargs):
               AND executed_at IS NOT NULL
         """)
         batches = session.execute(batches_sql).fetchall()
+        print("[STAGE:FETCH] Checking executed batches for outcomes")
         print(f"[ECRI Outcome Tracking] Found {len(batches)} executed batches")
 
         for batch_row in batches:
@@ -154,6 +156,7 @@ def run(mode='auto', **kwargs):
 
             session.commit()
 
+        print(f"[STAGE:COMPLETE] {records_processed} records")
         print(f"\n[ECRI Outcome Tracking] Complete. {records_processed} outcomes recorded.")
         return records_processed
 

@@ -479,9 +479,11 @@ def run_backfill(config: DataLayerConfig, chunk_size: int) -> Dict[str, int]:
     """Full historical load from BigQuery."""
     client = get_bq_client()
 
+    print("[STAGE:FETCH] Querying BigQuery")
     print("\nSyncing dimensions (full overwrite)...")
     dim_counts = sync_dimensions(client, config)
 
+    print("[STAGE:PUSH] Writing to PostgreSQL")
     print("\nSyncing facts (full history)...")
     fact_counts = sync_facts(client, config, date_from=None, chunk_size=chunk_size)
 
@@ -492,9 +494,11 @@ def run_auto(config: DataLayerConfig, chunk_size: int, lookback_days: int) -> Di
     """Incremental sync: dimensions full overwrite, facts last N days."""
     client = get_bq_client()
 
+    print("[STAGE:FETCH] Querying BigQuery")
     print("\nSyncing dimensions (full overwrite)...")
     dim_counts = sync_dimensions(client, config)
 
+    print("[STAGE:PUSH] Writing to PostgreSQL")
     date_from = date.today() - timedelta(days=lookback_days)
     print(f"\nSyncing facts (from {date_from.isoformat()}, {lookback_days} day lookback)...")
     fact_counts = sync_facts(client, config, date_from=date_from, chunk_size=chunk_size)
@@ -553,6 +557,7 @@ def main():
     if args.mode == 'auto':
         print(f"Lookback: {lookback_days} days")
     print("=" * 70)
+    print("[STAGE:INIT] GoogleAds")
 
     if args.mode == 'backfill':
         counts = run_backfill(config, chunk_size)
@@ -562,9 +567,10 @@ def main():
         raise ValueError(f"Unknown mode: {args.mode}")
 
     # Print summary
+    total = sum(counts.values())
+    print(f"[STAGE:COMPLETE] {total} records")
     print("\n" + "=" * 70)
     print("Pipeline completed!")
-    total = sum(counts.values())
     for table, count in counts.items():
         print(f"  {table}: {count:,} records")
     print(f"  TOTAL: {total:,} records")

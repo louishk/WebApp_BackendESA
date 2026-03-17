@@ -684,6 +684,7 @@ def process_module(
     all_records = []
     all_dimensions: Dict[str, List[Dict[str, Any]]] = {}  # Accumulate dimension records
 
+    print("[STAGE:FETCH] Fetching from SugarCRM API")
     print(f"\n  Fetching records from SugarCRM...")
 
     with tqdm(total=limit or count if isinstance(count, int) else None,
@@ -732,6 +733,7 @@ def process_module(
 
     # Push remaining records
     if all_records:
+        print("[STAGE:PUSH] Writing to PostgreSQL")
         print(f"\n  Pushing final {len(all_records)} records to database...")
         processed = push_records_to_database(all_records, model_class, config, sql_chunk_size)
         total_processed += processed
@@ -948,6 +950,7 @@ def main():
         print(f"Limit: {args.limit} records per module")
     print(f"Target: PostgreSQL - {config.databases.get('postgresql', {})}")
     print("=" * 70)
+    print("[STAGE:INIT] SugarCRM")
 
     # Run pipeline
     if args.mode == 'backfill':
@@ -981,6 +984,7 @@ def main():
         print(f"  {module}: {count:,} records")
         total_records += count
 
+    print(f"[STAGE:COMPLETE] {total_records} records")
     print(f"\n  TOTAL: {total_records:,} records")
     print("=" * 70)
 

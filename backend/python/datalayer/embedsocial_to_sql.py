@@ -271,6 +271,7 @@ def run_backfill(
     all_reviews = []
 
     # First request to get total count
+    print("[STAGE:FETCH] Fetching reviews from EmbedSocial API")
     print("\nFetching first page to determine total count...")
     items, total_count = get_items(http_client, api_key, page=1, page_size=page_size)
     print(f"Total reviews available: {total_count}")
@@ -306,6 +307,7 @@ def run_backfill(
     print(f"\nFetched {len(all_reviews)} unique reviews")
 
     # Push to database
+    print("[STAGE:PUSH] Writing to PostgreSQL")
     print(f"\nPushing {len(all_reviews)} reviews to database...")
     count = push_reviews_to_database(all_reviews, config, chunk_size)
 
@@ -434,6 +436,7 @@ def main():
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print(f"Page size: {page_size}")
     print("=" * 70)
+    print("[STAGE:INIT] EmbedSocial")
 
     if args.mode == 'backfill':
         count = run_backfill(
@@ -456,6 +459,7 @@ def main():
         raise ValueError(f"Unknown mode: {args.mode}")
 
     # Print summary
+    print(f"[STAGE:COMPLETE] {count} records")
     print("\n" + "=" * 70)
     print("Pipeline completed!")
     print(f"  Reviews processed: {count} records")

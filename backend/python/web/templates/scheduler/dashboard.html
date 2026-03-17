@@ -25,6 +25,12 @@
     </div>
 </div>
 
+<!-- Running Now — visible only when pipelines are executing -->
+<div class="card" id="running-now-card" style="display:none; border-left: 4px solid #FFC107;">
+    <h2>Running Now</h2>
+    <div id="running-now-list"></div>
+</div>
+
 <div class="card">
     <h2>Resource Usage</h2>
     <div class="stats-grid" id="resources-grid">
@@ -90,7 +96,9 @@
     </div>
 </div>
 
-<div class="refresh-notice">Auto-refresh every 45 seconds</div>
+<div class="refresh-notice" id="refresh-notice">Auto-refresh every 45 seconds</div>
+
+{% include 'scheduler/_progress_modal.html' %}
 
 <style>
 .execution-grid {
@@ -124,6 +132,35 @@
 .countdown.soon { color: #C41230; }
 .countdown.near { color: #ffc107; }
 .countdown.far { color: #28a745; }
+
+/* Running Now */
+.running-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 15px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.running-item:last-child { margin-bottom: 0; }
+.running-item:hover { background: #e9ecef; }
+.running-item .pipeline-name { font-weight: 600; color: #1A2E5A; }
+.running-item .running-meta { color: #666; font-size: 13px; margin-top: 2px; }
+.running-item .running-stage { color: #FFC107; font-weight: 500; font-size: 12px; }
+.running-item .right-side { display: flex; align-items: center; gap: 10px; }
+.pulse-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #FFC107;
+    animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Clickable running rows in recent table */
+tr.running-row { cursor: pointer; }
+tr.running-row:hover td { background: rgba(255, 193, 7, 0.08); }
 </style>
 {% endblock %}
 
@@ -139,7 +176,7 @@
 
     function formatDuration(seconds) {
         if (seconds === null || seconds === undefined || seconds === '') return '-';
-        seconds = parseFloat(seconds);  // Ensure it's a number
+        seconds = parseFloat(seconds);
         if (isNaN(seconds)) return '-';
         if (seconds < 60) return seconds.toFixed(1) + 's';
         return Math.floor(seconds / 60) + 'm ' + Math.floor(seconds % 60) + 's';
@@ -155,11 +192,39 @@
         return mins + 'm';
     }
 
+    function formatElapsed(startedAt) {
+        if (!startedAt) return '';
+        const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+        if (elapsed < 0) return '0s';
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        return mins > 0 ? mins + 'm ' + secs + 's' : secs + 's';
+    }
+
+    // Adaptive polling
+    let historyInterval = null;
+    let statusInterval = null;
+    let hasRunningJobs = false;
+
+    function setPollingRate(running) {
+        if (running === hasRunningJobs) return;
+        hasRunningJobs = running;
+
+        clearInterval(historyInterval);
+        clearInterval(statusInterval);
+
+        const rate = running ? 5000 : 45000;
+        historyInterval = setInterval(updateHistory, rate);
+        statusInterval = setInterval(updateStatus, rate);
+
+        document.getElementById('refresh-notice').textContent =
+            running ? 'Auto-refresh every 5 seconds (jobs running)' : 'Auto-refresh every 45 seconds';
+    }
+
     function updateStatus() {
         fetch('/api/status')
             .then(r => r.json())
             .then(data => {
-                // Display user-friendly status
                 let statusText = 'UNKNOWN';
                 let statusEl = document.getElementById('scheduler-status');
 
@@ -177,25 +242,21 @@
 
                 document.getElementById('uptime').textContent = formatUptime(data.uptime_seconds);
 
-                // Update running jobs count if available
                 if (data.running_jobs !== undefined) {
                     document.getElementById('jobs-running').textContent = data.running_jobs;
                 }
 
                 if (data.resources) {
-                    // DB Pool
                     const dbPool = data.resources.db_pool || {};
                     document.getElementById('db-pool-used').textContent = dbPool.in_use || 0;
                     document.getElementById('db-pool-limit').textContent = dbPool.limit || 10;
                     document.getElementById('db-pool-bar').style.width = ((dbPool.in_use || 0) / (dbPool.limit || 10) * 100) + '%';
 
-                    // SOAP API
                     const soapApi = data.resources.soap_api || {};
                     document.getElementById('soap-api-used').textContent = soapApi.in_use || 0;
                     document.getElementById('soap-api-limit').textContent = soapApi.limit || 5;
                     document.getElementById('soap-api-bar').style.width = ((soapApi.in_use || 0) / (soapApi.limit || 5) * 100) + '%';
 
-                    // HTTP API
                     const httpApi = data.resources.http_api || {};
                     document.getElementById('http-api-used').textContent = httpApi.in_use || 0;
                     document.getElementById('http-api-limit').textContent = httpApi.limit || 10;
@@ -218,29 +279,85 @@
         fetch('/api/history?limit=10')
             .then(r => r.json())
             .then(data => {
-                const tbody = document.getElementById('recent-executions');
-                if (!data.results || data.results.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">No recent executions</td></tr>';
-                    return;
+                const results = data.results || [];
+                const runningJobs = results.filter(j => j.status === 'running');
+
+                // Update "Running Now" banner
+                const runningCard = document.getElementById('running-now-card');
+                if (runningJobs.length > 0) {
+                    runningCard.style.display = 'block';
+
+                    // Fetch live stage info for web-triggered runs
+                    const stagePromises = runningJobs.map(job => {
+                        if (job.triggered_by === 'web') {
+                            return fetch('/api/executions/' + job.execution_id + '/output')
+                                .then(r => r.json())
+                                .then(d => ({ execId: job.execution_id, stage: d.status.stage || null, stageMessage: d.status.stage_message || '' }))
+                                .catch(() => ({ execId: job.execution_id, stage: null, stageMessage: '' }));
+                        }
+                        return Promise.resolve({ execId: job.execution_id, stage: null, stageMessage: '' });
+                    });
+
+                    Promise.all(stagePromises).then(stageData => {
+                        const stageMap = {};
+                        stageData.forEach(s => { stageMap[s.execId] = s; });
+
+                        document.getElementById('running-now-list').innerHTML = runningJobs.map(job => {
+                            const elapsed = formatElapsed(job.started_at);
+                            const isWeb = job.triggered_by === 'web';
+                            const stageInfo = stageMap[job.execution_id];
+                            const stageLabel = stageInfo && stageInfo.stage ? stageInfo.stage : '';
+                            const stageMsg = stageInfo && stageInfo.stageMessage ? ' - ' + stageInfo.stageMessage : '';
+
+                            return `
+                                <div class="running-item" onclick="openProgressModal('${job.pipeline_name}', '${job.execution_id}', ${isWeb})">
+                                    <div>
+                                        <div class="pipeline-name">${job.pipeline_name}</div>
+                                        <div class="running-meta">${elapsed} elapsed | Triggered by: ${job.triggered_by}</div>
+                                        ${stageLabel ? '<div class="running-stage">' + stageLabel + stageMsg + '</div>' : ''}
+                                    </div>
+                                    <div class="right-side">
+                                        <span class="status status-running">Running</span>
+                                        <div class="pulse-dot"></div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                    });
+                } else {
+                    runningCard.style.display = 'none';
                 }
 
-                let running = 0;
-                tbody.innerHTML = data.results.map(job => {
-                    if (job.status === 'running') running++;
-                    const statusClass = 'status-' + job.status;
-                    const started = formatSGT(job.started_at);
-                    return `
-                        <tr>
-                            <td>${job.pipeline_name}</td>
-                            <td><span class="status ${statusClass}">${job.status}</span></td>
-                            <td>${started}</td>
-                            <td>${formatDuration(job.duration_seconds)}</td>
-                            <td>${job.records_processed || '-'}</td>
-                        </tr>
-                    `;
-                }).join('');
+                // Update "Recent Executions" table
+                const tbody = document.getElementById('recent-executions');
+                if (results.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">No recent executions</td></tr>';
+                } else {
+                    tbody.innerHTML = results.map(job => {
+                        const statusClass = 'status-' + job.status;
+                        const started = formatSGT(job.started_at);
+                        const isRunning = job.status === 'running';
+                        const isWeb = job.triggered_by === 'web';
+                        const rowClass = isRunning ? 'running-row' : '';
+                        const rowClick = isRunning ? ` onclick="openProgressModal('${job.pipeline_name}', '${job.execution_id}', ${isWeb})"` : '';
+                        const duration = isRunning ? formatElapsed(job.started_at) : formatDuration(job.duration_seconds);
 
-                document.getElementById('jobs-running').textContent = running;
+                        return `
+                            <tr class="${rowClass}"${rowClick}>
+                                <td>${job.pipeline_name}</td>
+                                <td><span class="status ${statusClass}">${job.status}</span></td>
+                                <td>${started}</td>
+                                <td>${duration}</td>
+                                <td>${job.records_processed || '-'}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+                document.getElementById('jobs-running').textContent = runningJobs.length;
+
+                // Adaptive polling
+                setPollingRate(runningJobs.length > 0);
             })
             .catch(err => console.error('History fetch error:', err));
     }
@@ -269,7 +386,6 @@
 
                 if (dateStr) {
                     const date = new Date(dateStr);
-                    // Use Singapore timezone for consistent display
                     const nowSGT = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Singapore' }));
                     const dateSGT = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Singapore' }));
                     const diffDays = Math.floor((nowSGT - dateSGT) / (1000 * 60 * 60 * 24));
@@ -313,10 +429,9 @@
         if (mins > 0 || hours > 0 || days > 0) result += mins + 'm ';
         result += secs + 's';
 
-        // Color based on time remaining
-        let colorClass = 'far';  // Green - more than 1 hour
-        if (seconds < 3600) colorClass = 'near';  // Yellow - less than 1 hour
-        if (seconds < 600) colorClass = 'soon';   // Red - less than 10 minutes
+        let colorClass = 'far';
+        if (seconds < 3600) colorClass = 'near';
+        if (seconds < 600) colorClass = 'soon';
 
         return `<span class="countdown ${colorClass}">${result}</span>`;
     }
@@ -365,7 +480,6 @@
         `).join('');
     }
 
-    // Update countdown timers every second
     function updateCountdowns() {
         const cells = document.querySelectorAll('#upcoming-executions td[data-seconds]');
         cells.forEach(cell => {
@@ -385,13 +499,11 @@
     updateFreshness();
     updateUpcoming();
 
-    // Refresh data periodically (45 seconds)
-    setInterval(updateStatus, 45000);
-    setInterval(updateHistory, 45000);
+    // Set initial polling rates
+    historyInterval = setInterval(updateHistory, 45000);
+    statusInterval = setInterval(updateStatus, 45000);
     setInterval(updateFreshness, 45000);
-    setInterval(updateUpcoming, 60000);  // Refresh upcoming every minute
-
-    // Update countdowns every second
+    setInterval(updateUpcoming, 60000);
     setInterval(updateCountdowns, 1000);
 </script>
 {% endblock %}

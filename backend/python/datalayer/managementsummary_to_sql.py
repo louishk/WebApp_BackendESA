@@ -800,10 +800,12 @@ def main():
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print(f"Tables: {len(MODEL_CONFIG)} tables")
     print("=" * 70)
+    print("[STAGE:INIT] ManagementSummary")
 
     total_records = 0
 
     # Process each month
+    print("[STAGE:FETCH] Fetching management summary from SOAP API")
     for year, month in months:
         # Calculate first and last day of month
         first_day = datetime(year, month, 1)
@@ -826,6 +828,7 @@ def main():
         # Push to database
         total_table_records = sum(len(records) for records in all_tables.values())
         if total_table_records > 0:
+            print("[STAGE:PUSH] Upserting to PostgreSQL")
             record_counts = push_to_database(all_tables, config, year, month, status)
             total_records += sum(record_counts.values())
         else:
@@ -834,6 +837,7 @@ def main():
     # Close SOAP client
     soap_client.close()
 
+    print(f"[STAGE:COMPLETE] {total_records} records")
     print("\n" + "=" * 70)
     print(f"Pipeline completed! Total records: {total_records}")
     print("=" * 70)

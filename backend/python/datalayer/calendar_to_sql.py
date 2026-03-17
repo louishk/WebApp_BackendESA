@@ -271,6 +271,7 @@ def main():
     print(f"Mode: {args.mode.upper()}")
     print(f"Mailboxes: {len(mailboxes)}")
     print("=" * 70)
+    print("[STAGE:INIT] CalendarEvents")
 
     # Get Graph token
     print("\n[1] Acquiring Graph API token...")
@@ -289,6 +290,7 @@ def main():
 
     total_count = 0
 
+    print("[STAGE:FETCH] Fetching calendar events from Graph API")
     for idx, mailbox in enumerate(mailboxes, 1):
         print(f"\n[{idx + 1}] Processing: {mailbox}", flush=True)
 
@@ -322,12 +324,14 @@ def main():
         records = [transform_event(ev, mailbox) for ev in events]
 
         # Upsert
+        print("[STAGE:PUSH] Upserting to PostgreSQL")
         count = upsert_events(engine, records)
         print(f"    Upserted {count} records")
         total_count += count
 
     engine.dispose()
 
+    print(f"[STAGE:COMPLETE] {total_count} records")
     print("\n" + "=" * 70)
     print(f"TOTAL: {total_count} records")
     print("=" * 70)

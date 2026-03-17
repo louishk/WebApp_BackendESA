@@ -371,6 +371,13 @@ class PipelineExecutor:
                         stdout_lines.append(line)
                         _execution_outputs[exec_id_str].append(line)
 
+                        # Parse stage markers for progress tracking
+                        if line.startswith('[STAGE:'):
+                            stage_match = re.match(r'\[STAGE:(\w+)\]\s*(.*)', line)
+                            if stage_match:
+                                _execution_status[exec_id_str]['stage'] = stage_match.group(1)
+                                _execution_status[exec_id_str]['stage_message'] = stage_match.group(2)
+
             # Read any remaining output
             remaining_stdout, remaining_stderr = process.communicate()
             if remaining_stdout:
@@ -378,6 +385,11 @@ class PipelineExecutor:
                     if line.strip():
                         stdout_lines.append(line)
                         _execution_outputs[exec_id_str].append(line)
+                        if line.startswith('[STAGE:'):
+                            stage_match = re.match(r'\[STAGE:(\w+)\]\s*(.*)', line)
+                            if stage_match:
+                                _execution_status[exec_id_str]['stage'] = stage_match.group(1)
+                                _execution_status[exec_id_str]['stage_message'] = stage_match.group(2)
             if remaining_stderr:
                 for line in remaining_stderr.split('\n'):
                     if line.strip():

@@ -282,8 +282,10 @@ def main():
     print(f"Locations: {len(location_codes)} ({', '.join(location_codes[:5])}...)")
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print("=" * 70)
+    print("[STAGE:INIT] UnitsInformation")
 
     # Fetch data for all locations
+    print("[STAGE:FETCH] Retrieving units from SOAP API")
     print("\n[Fetching Units Information]")
     all_data = fetch_units_info(
         soap_client=soap_client,
@@ -292,6 +294,7 @@ def main():
 
     # Push to database
     if all_data:
+        print("[STAGE:PUSH] Upserting units to PostgreSQL")
         print(f"\n[Pushing to Database]")
         push_to_database(all_data, config)
 
@@ -316,6 +319,7 @@ def main():
     # Close SOAP client
     soap_client.close()
 
+    print(f"[STAGE:COMPLETE] {len(all_data)} records")
     print("\n" + "=" * 70)
     print(f"Pipeline completed! Total units: {len(all_data)}")
     print("=" * 70)

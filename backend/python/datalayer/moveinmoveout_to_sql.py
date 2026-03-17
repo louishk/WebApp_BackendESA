@@ -355,6 +355,7 @@ def main():
     print(f"Locations: {', '.join(location_codes)}")
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print("=" * 70)
+    print("[STAGE:INIT] MoveInMoveOut")
 
     # For auto mode, delete recent records first
     if delete_before_push:
@@ -367,6 +368,7 @@ def main():
 
     # Fetch data
     step_num = 2 if delete_before_push else 1
+    print("[STAGE:FETCH] Retrieving move-in/move-out data from SOAP API")
     print(f"\n[Step {step_num}] Fetching data from {start_date} to {end_date}")
 
     # Use today as extract_date for tracking purposes
@@ -382,6 +384,7 @@ def main():
 
     # Push to database
     step_num += 1
+    print("[STAGE:PUSH] Upserting records to PostgreSQL")
     print(f"\n[Step {step_num}] Pushing data to database")
     if all_data:
         push_to_database(all_data, config)
@@ -391,6 +394,7 @@ def main():
     # Close SOAP client
     soap_client.close()
 
+    print(f"[STAGE:COMPLETE] {len(all_data)} records")
     print("\n" + "=" * 70)
     print(f"Pipeline completed! Total records: {len(all_data)}")
     print("=" * 70)

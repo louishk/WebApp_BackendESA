@@ -313,10 +313,12 @@ def main():
     print(f"Locations: {', '.join(location_codes)}")
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print("=" * 70)
+    print("[STAGE:INIT] Discount")
 
     total_records = 0
 
     # Process each month
+    print("[STAGE:FETCH] Starting month-by-month extraction")
     for year, month in months:
         # Calculate first and last day of month
         first_day = datetime(year, month, 1)
@@ -346,6 +348,7 @@ def main():
     # Close SOAP client
     soap_client.close()
 
+    print(f"[STAGE:COMPLETE] {total_records} records")
     print("\n" + "=" * 70)
     print(f"Pipeline completed! Total records: {total_records}")
     print("=" * 70)

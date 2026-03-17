@@ -309,8 +309,10 @@ def main():
     print(f"Locations: {len(location_codes)} ({', '.join(location_codes[:5])}...)")
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print("=" * 70)
+    print("[STAGE:INIT] CCDiscountPlans")
 
     # Fetch data for all locations
+    print("[STAGE:FETCH] Fetching discount plans from SOAP API")
     print("\n[Fetching Discount Plans]")
     all_data = fetch_discount_plans(
         soap_client=soap_client,
@@ -319,6 +321,7 @@ def main():
 
     # Push to database
     if all_data:
+        print("[STAGE:PUSH] Upserting to PostgreSQL")
         print(f"\n[Pushing to Database]")
         push_to_database(all_data, config)
 
@@ -344,6 +347,7 @@ def main():
     # Close SOAP client
     soap_client.close()
 
+    print(f"[STAGE:COMPLETE] {len(all_data)} records")
     print("\n" + "=" * 70)
     print(f"Pipeline completed! Total discount plans: {len(all_data)}")
     print("=" * 70)

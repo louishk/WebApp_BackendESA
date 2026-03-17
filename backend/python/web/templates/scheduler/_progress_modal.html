@@ -1,0 +1,355 @@
+<!-- Shared Progress Modal — included by dashboard.html and jobs.html -->
+<div id="progressModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:700px;width:90%;">
+        <h3>Running: <span id="progressPipelineName"></span></h3>
+
+        <!-- Stage progress bar -->
+        <div class="stage-bar" id="stageBar">
+            <div class="stage-step" data-stage="INIT">
+                <div class="stage-dot"></div>
+                <span>Init</span>
+            </div>
+            <div class="stage-connector"></div>
+            <div class="stage-step" data-stage="FETCH">
+                <div class="stage-dot"></div>
+                <span>Fetch</span>
+            </div>
+            <div class="stage-connector"></div>
+            <div class="stage-step" data-stage="PUSH">
+                <div class="stage-dot"></div>
+                <span>Push</span>
+            </div>
+            <div class="stage-connector"></div>
+            <div class="stage-step" data-stage="COMPLETE">
+                <div class="stage-dot"></div>
+                <span>Done</span>
+            </div>
+        </div>
+        <div id="stageMessage" style="text-align:center;color:#666;font-size:12px;margin-bottom:12px;min-height:16px;"></div>
+
+        <div style="margin-bottom:10px;">
+            <span id="progressStatus" class="status status-running">Starting...</span>
+            <span id="progressElapsed" style="margin-left:15px;color:#666;"></span>
+        </div>
+        <div id="progressOutput" style="background:#1A2E5A;color:#fff;border:1px solid #0F1B36;border-radius:4px;padding:10px;height:300px;overflow-y:auto;font-family:monospace;font-size:12px;white-space:pre-wrap;"></div>
+        <div style="margin-top:15px;text-align:right;">
+            <button class="btn btn-secondary" onclick="closeProgressModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Progress Modal styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(26, 46, 90, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+.modal-content {
+    background: #fff;
+    padding: 30px;
+    border-radius: 8px;
+    min-width: 400px;
+    max-width: 500px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.modal-content h3 {
+    color: #1A2E5A;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #C41230;
+}
+
+/* Stage bar */
+.stage-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin: 10px 0 5px;
+    padding: 8px 15px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+.stage-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    min-width: 55px;
+}
+.stage-step span {
+    font-size: 11px;
+    color: #999;
+    font-weight: 500;
+}
+.stage-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ddd;
+    border: 2px solid #ccc;
+    transition: all 0.3s ease;
+}
+.stage-connector {
+    flex: 1;
+    height: 2px;
+    background: #ddd;
+    min-width: 30px;
+    margin: 0 4px;
+    margin-bottom: 18px;
+    transition: background 0.3s ease;
+}
+.stage-step.completed .stage-dot {
+    background: #28a745;
+    border-color: #28a745;
+}
+.stage-step.completed span {
+    color: #28a745;
+}
+.stage-step.active .stage-dot {
+    background: #FFC107;
+    border-color: #FFC107;
+    box-shadow: 0 0 6px rgba(255, 193, 7, 0.5);
+    animation: stagePulse 1.5s infinite;
+}
+.stage-step.active span {
+    color: #1A2E5A;
+    font-weight: 600;
+}
+.stage-step.failed .stage-dot {
+    background: #dc3545;
+    border-color: #dc3545;
+}
+.stage-step.failed span {
+    color: #dc3545;
+}
+.stage-connector.completed {
+    background: #28a745;
+}
+@keyframes stagePulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+</style>
+
+<script>
+(function() {
+    // Progress modal state
+    let _currentEventSource = null;
+    let _progressStartTime = null;
+    let _progressTimer = null;
+    let _statusPollInterval = null;
+
+    const STAGE_ORDER = ['INIT', 'FETCH', 'PUSH', 'COMPLETE'];
+
+    function _formatDurationModal(seconds) {
+        if (seconds === null || seconds === undefined || seconds === '') return '-';
+        seconds = parseFloat(seconds);
+        if (isNaN(seconds)) return '-';
+        if (seconds < 60) return seconds.toFixed(1) + 's';
+        return Math.floor(seconds / 60) + 'm ' + Math.floor(seconds % 60) + 's';
+    }
+
+    function updateStageBar(stage) {
+        if (!stage) return;
+        const stageIdx = STAGE_ORDER.indexOf(stage);
+        if (stageIdx === -1) return;
+
+        const steps = document.querySelectorAll('#stageBar .stage-step');
+        const connectors = document.querySelectorAll('#stageBar .stage-connector');
+
+        steps.forEach((step, i) => {
+            const stepStage = step.dataset.stage;
+            const stepIdx = STAGE_ORDER.indexOf(stepStage);
+            step.classList.remove('completed', 'active', 'failed');
+
+            if (stepIdx < stageIdx) {
+                step.classList.add('completed');
+            } else if (stepIdx === stageIdx) {
+                step.classList.add('active');
+            }
+        });
+
+        connectors.forEach((conn, i) => {
+            conn.classList.remove('completed');
+            if (i < stageIdx) {
+                conn.classList.add('completed');
+            }
+        });
+    }
+
+    function setStageBarFailed(stage) {
+        const steps = document.querySelectorAll('#stageBar .stage-step');
+        steps.forEach(step => {
+            if (step.classList.contains('active')) {
+                step.classList.remove('active');
+                step.classList.add('failed');
+            }
+        });
+    }
+
+    function resetStageBar() {
+        document.querySelectorAll('#stageBar .stage-step').forEach(s => s.classList.remove('completed', 'active', 'failed'));
+        document.querySelectorAll('#stageBar .stage-connector').forEach(c => c.classList.remove('completed'));
+        document.getElementById('stageMessage').textContent = '';
+    }
+
+    function appendOutput(line) {
+        const output = document.getElementById('progressOutput');
+        const div = document.createElement('div');
+
+        // Parse stage markers
+        const stageMatch = line.match(/^\[STAGE:(\w+)\]\s*(.*)/);
+        if (stageMatch) {
+            updateStageBar(stageMatch[1]);
+            document.getElementById('stageMessage').textContent = stageMatch[2];
+            div.style.color = '#FFC107';
+        } else if (line.startsWith('[ERROR]') || line.startsWith('[FAILED]')) {
+            div.style.color = '#f66';
+        } else if (line.startsWith('[DONE]')) {
+            div.style.color = '#6f6';
+        } else if (line.startsWith('[CMD]') || line.startsWith('[STDERR]')) {
+            div.style.color = '#888';
+        } else if (line.includes('Upsert') || line.includes('records')) {
+            div.style.color = '#6cf';
+        } else if (line.startsWith('[INFO]')) {
+            div.style.color = '#aaa';
+        }
+
+        div.textContent = line;
+        output.appendChild(div);
+        output.scrollTop = output.scrollHeight;
+    }
+
+    function updateElapsed() {
+        if (_progressStartTime) {
+            const elapsed = Math.floor((Date.now() - _progressStartTime) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            document.getElementById('progressElapsed').textContent = mins > 0 ? mins + 'm ' + secs + 's' : secs + 's';
+        }
+    }
+
+    function connectSSE(executionId) {
+        _currentEventSource = new EventSource('/api/executions/' + executionId + '/stream');
+
+        _currentEventSource.onmessage = function(e) {
+            appendOutput(e.data);
+        };
+
+        _currentEventSource.addEventListener('done', function(e) {
+            const status = e.data;
+            document.getElementById('progressStatus').textContent = status.charAt(0).toUpperCase() + status.slice(1);
+            document.getElementById('progressStatus').className = 'status status-' + (status === 'completed' ? 'completed' : 'failed');
+
+            if (status === 'completed') {
+                updateStageBar('COMPLETE');
+            } else {
+                setStageBarFailed();
+            }
+
+            clearInterval(_progressTimer);
+            _currentEventSource.close();
+            _currentEventSource = null;
+        });
+
+        _currentEventSource.onerror = function() {
+            appendOutput('[Connection closed]');
+            clearInterval(_progressTimer);
+            if (_currentEventSource) {
+                _currentEventSource.close();
+                _currentEventSource = null;
+            }
+        };
+    }
+
+    function startStatusPolling(executionId) {
+        appendOutput('[INFO] Live output not available for this execution');
+        appendOutput('[INFO] Showing status updates from database...');
+
+        _statusPollInterval = setInterval(function() {
+            fetch('/api/history/' + executionId)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) return;
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        const msg = data.status.toUpperCase() +
+                            (data.duration_seconds ? ' | Duration: ' + _formatDurationModal(data.duration_seconds) : '') +
+                            (data.records_processed ? ' | Records: ' + data.records_processed : '');
+                        appendOutput('[' + msg + ']');
+
+                        if (data.error_message) {
+                            appendOutput('[ERROR] ' + data.error_message);
+                        }
+
+                        document.getElementById('progressStatus').textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                        document.getElementById('progressStatus').className = 'status status-' + data.status;
+
+                        if (data.status === 'completed') {
+                            updateStageBar('COMPLETE');
+                        } else {
+                            setStageBarFailed();
+                        }
+
+                        clearInterval(_statusPollInterval);
+                        _statusPollInterval = null;
+                        clearInterval(_progressTimer);
+                    }
+                })
+                .catch(function() {});
+        }, 3000);
+    }
+
+    // Global entry point
+    window.openProgressModal = function(pipelineName, executionId, hasLiveOutput) {
+        document.getElementById('progressPipelineName').textContent = pipelineName;
+        document.getElementById('progressStatus').textContent = 'Starting...';
+        document.getElementById('progressStatus').className = 'status status-running';
+        document.getElementById('progressOutput').innerHTML = '';
+        document.getElementById('progressElapsed').textContent = '';
+        document.getElementById('progressModal').style.display = 'flex';
+
+        resetStageBar();
+        updateStageBar('INIT');
+
+        _progressStartTime = Date.now();
+        _progressTimer = setInterval(updateElapsed, 1000);
+
+        if (hasLiveOutput) {
+            connectSSE(executionId);
+        } else {
+            startStatusPolling(executionId);
+        }
+    };
+
+    window.closeProgressModal = function() {
+        document.getElementById('progressModal').style.display = 'none';
+        if (_currentEventSource) {
+            _currentEventSource.close();
+            _currentEventSource = null;
+        }
+        if (_progressTimer) {
+            clearInterval(_progressTimer);
+            _progressTimer = null;
+        }
+        if (_statusPollInterval) {
+            clearInterval(_statusPollInterval);
+            _statusPollInterval = null;
+        }
+        _progressStartTime = null;
+    };
+
+    // Close modal on background click
+    document.getElementById('progressModal').addEventListener('click', function(e) {
+        if (e.target === this) closeProgressModal();
+    });
+})();
+</script>

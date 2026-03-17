@@ -394,6 +394,7 @@ def run_backfill(
     """
     all_daily_rates = []
 
+    print("[STAGE:FETCH] Fetching FX data from Yahoo Finance")
     print(f"\nFetching FX data for {len(target_currencies)} currencies...")
 
     for currency in tqdm(target_currencies, desc="Currencies"):
@@ -419,6 +420,7 @@ def run_backfill(
         return 0, 0
 
     # Push daily rates to database
+    print("[STAGE:PUSH] Writing to PostgreSQL")
     print(f"\nPushing {len(all_daily_rates)} daily rate records to database...")
     push_daily_rates_to_database(all_daily_rates, config, chunk_size)
 
@@ -589,6 +591,7 @@ def main():
     print(f"Target Currencies: {', '.join(target_currencies)}")
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print("=" * 70)
+    print("[STAGE:INIT] FXRate")
 
     if args.mode == 'backfill':
         # Determine date range
@@ -630,6 +633,7 @@ def main():
         raise ValueError(f"Unknown mode: {args.mode}")
 
     # Print summary
+    print(f"[STAGE:COMPLETE] {daily_count + monthly_count} records")
     print("\n" + "=" * 70)
     print("Pipeline completed!")
     if daily_count > 0:
