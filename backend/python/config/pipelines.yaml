@@ -114,8 +114,8 @@ pipelines:
     data_freshness:
       table: mimo
       date_column: extract_date
-  cc_discount_plans:
-    display_name: CC Discount Plans
+  ccws_discount_plans:
+    display_name: CCWS Discount Plans
     description: Fetch discount/concession plan data from DiscountPlansRetrieve SOAP API
     module_path: datalayer.cc_discount_plans_to_sql
     enabled: true
@@ -220,6 +220,26 @@ pipelines:
     data_freshness:
       table: ecri_outcomes
       date_column: created_at
+  reservations_sync:
+    display_name: Reservations Sync
+    description: Sync active reservations from SiteLink ReservationList_v3
+    module_path: datalayer.reservations_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: "*/30 * * * *"
+    priority: 8
+    resource_group: soap_api
+    max_db_connections: 2
+    estimated_duration_seconds: 120
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 600
+    data_freshness:
+      table: api_reservations
+      date_column: soap_synced_at
   calendar:
     display_name: Outlook Calendar
     description: Extract calendar events from configured Outlook mailboxes via Microsoft Graph

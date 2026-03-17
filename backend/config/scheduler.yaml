@@ -78,7 +78,11 @@ pipelines:
     sql_chunk_size: 500
     location_codes: *location_codes
 
-  cc_discount_plans:
+  ccws_discount_plans:
+    sql_chunk_size: 500
+    location_codes: *location_codes
+
+  reservations_sync:
     sql_chunk_size: 500
     location_codes: *location_codes
 

@@ -2996,12 +2996,12 @@ def api_discount_plans_get(plan_id):
         # Optionally resolve linked concession details
         if request.args.get('include_concessions', '').lower() == 'true' and plan.linked_concessions:
             try:
-                from common.models import CCDiscount, Site
+                from common.models import CcwsDiscount, Site
                 pbi_session = get_pbi_session()
                 try:
                     details = []
                     for link in plan.linked_concessions:
-                        cc = (pbi_session.query(CCDiscount)
+                        cc = (pbi_session.query(CcwsDiscount)
                               .filter_by(SiteID=link.get('site_id'), ConcessionID=link.get('concession_id'))
                               .first())
                         if cc:
@@ -3134,22 +3134,22 @@ def api_discount_plans_update(plan_id):
 # =============================================================================
 # Discount Plan Changer Tool — Sitelink SOAP operations
 # =============================================================================
-# Read plans from cc_discount (PBI DB) and update via CallCenterWs SOAP.
+# Read plans from ccws_discount (PBI DB) and update via CallCenterWs SOAP.
 #
-# GET  /api/cc-discount-plans/<site_id>       — list plans for a site
-# POST /api/cc-discount-plans/update-simple   — enable/disable plans (simple)
-# POST /api/cc-discount-plans/update          — full plan update
+# GET  /api/discount-plans/<site_id>       — list plans for a site
+# POST /api/discount-plans/update-simple   — enable/disable plans (simple)
+# POST /api/discount-plans/update          — full plan update
 # =============================================================================
 
-@api_bp.route('/cc-discount-plans/<int:site_id>')
+@api_bp.route('/discount-plans/<int:site_id>')
 @require_auth
 @require_api_scope('scheduler:read')
-def api_cc_discount_plans(site_id):
+def api_discount_plans(site_id):
     """
-    Get discount/concession plans from cc_discount table for a site.
+    Get discount/concession plans from ccws_discount table for a site.
     Excludes deleted plans. Returns key fields for the tool UI.
     """
-    from common.models import CCDiscount, SiteInfo
+    from common.models import CcwsDiscount, SiteInfo
 
     session = get_pbi_session()
     try:
@@ -3158,12 +3158,12 @@ def api_cc_discount_plans(site_id):
             return jsonify({'error': 'Site not found'}), 404
 
         plans = (
-            session.query(CCDiscount)
+            session.query(CcwsDiscount)
             .filter(
-                CCDiscount.SiteID == site_id,
-                CCDiscount.dDeleted.is_(None),
+                CcwsDiscount.SiteID == site_id,
+                CcwsDiscount.dDeleted.is_(None),
             )
-            .order_by(CCDiscount.sPlanName)
+            .order_by(CcwsDiscount.sPlanName)
             .all()
         )
 
@@ -3209,11 +3209,11 @@ def api_cc_discount_plans(site_id):
         session.close()
 
 
-@api_bp.route('/cc-discount-plans/update-simple', methods=['POST'])
+@api_bp.route('/discount-plans/update-simple', methods=['POST'])
 @require_auth
 @require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
-def api_cc_discount_plans_update_simple():
+def api_discount_plans_update_simple():
     """
     Enable or disable discount plans via DiscountPlanUpdateSimple SOAP.
     Accepts a list of concession IDs for a single site.
@@ -3324,11 +3324,11 @@ def api_cc_discount_plans_update_simple():
         soap_client.close()
 
 
-@api_bp.route('/cc-discount-plans/update', methods=['POST'])
+@api_bp.route('/discount-plans/update', methods=['POST'])
 @require_auth
 @require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
-def api_cc_discount_plans_update():
+def api_discount_plans_update():
     """
     Full discount plan update via DiscountPlanUpdate SOAP.
     Updates occupancy limits, dates, show-on, exclusion thresholds, etc.
@@ -3685,6 +3685,80 @@ def api_unit_availability():
     except Exception as e:
         current_app.logger.error(f"Unit availability query error: {e}")
         return jsonify({'error': 'Failed to fetch available units'}), 500
+    finally:
+        pbi_session.close()
+
+
+# =============================================================================
+# GET /api/unit-availability/reservations — reservation details for reserved units
+# =============================================================================
+
+@api_bp.route('/unit-availability/reservations')
+@require_auth
+@require_api_scope('inventory:read')
+def api_unit_availability_reservations():
+    """
+    Return active reservation details from api_reservations for given sites.
+    Used by the unit availability tool to enrich reserved unit badges.
+
+    Query parameters:
+        site_codes — comma-separated site codes (required)
+    """
+    site_codes_param = request.args.get('site_codes', '')
+    if not site_codes_param:
+        return jsonify({'error': 'site_codes parameter is required'}), 400
+
+    site_codes = [s.strip() for s in site_codes_param.split(',') if s.strip()]
+    if not site_codes or len(site_codes) > 50:
+        return jsonify({'error': 'Provide 1-50 site codes'}), 400
+
+    pbi_session = get_pbi_session()
+    try:
+        placeholders = ', '.join([f':sc{i}' for i in range(len(site_codes))])
+        params = {f'sc{i}': sc for i, sc in enumerate(site_codes)}
+
+        rows = pbi_session.execute(text(f"""
+            SELECT site_code, unit_id, waiting_id, tenant_id,
+                   first_name, last_name, quoted_rate, needed_date,
+                   expires_date, status, source, source_name,
+                   reserved_at, soap_synced_at
+            FROM api_reservations
+            WHERE site_code IN ({placeholders})
+              AND status = 'created'
+            ORDER BY site_code, unit_id
+        """), params).fetchall()
+
+        reservations = {}
+        last_synced = None
+        for r in rows:
+            key = f"{r[0]}:{r[1]}"
+            synced = r[13]
+            reservations[key] = {
+                'waiting_id': r[2],
+                'tenant_id': r[3],
+                'first_name': r[4] or '',
+                'last_name': r[5] or '',
+                'quoted_rate': float(r[6]) if r[6] else 0,
+                'needed_date': r[7].isoformat() if r[7] else None,
+                'expires_date': r[8].isoformat() if r[8] else None,
+                'status': r[9],
+                'source': r[10] or '',
+                'source_name': r[11] or '',
+                'reserved_at': r[12].isoformat() if r[12] else None,
+                'soap_synced_at': synced.isoformat() if synced else None,
+            }
+            if synced and (last_synced is None or synced > last_synced):
+                last_synced = synced
+
+        return jsonify({
+            'reservations': reservations,
+            'count': len(reservations),
+            'last_synced': last_synced.isoformat() if last_synced else None,
+        })
+
+    except Exception as e:
+        current_app.logger.error(f"Reservation details query error: {e}")
+        return jsonify({'error': 'Failed to fetch reservation details'}), 500
     finally:
         pbi_session.close()
 

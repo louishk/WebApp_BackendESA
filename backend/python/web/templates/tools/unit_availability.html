@@ -153,13 +153,12 @@
                         <th style="text-align: center;">Climate</th>
                         <th style="text-align: right;">Std Rate</th>
                         <th style="text-align: right;">Promo</th>
-                        <th style="text-align: right;">Indicative</th>
                         <th>Vacant</th>
                         <th style="text-align: center;">Action</th>
                     </tr>
                 </thead>
                 <tbody id="units-tbody">
-                    <tr><td colspan="12" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
+                    <tr><td colspan="11" style="text-align: center; color: #666;">Select sites and click Load Units</td></tr>
                 </tbody>
             </table>
         </div>
@@ -594,6 +593,10 @@ select.form-select {
     let CLIMATE_CODE_LABELS = {};
     let SHAPE_LABELS = {};
 
+    // Reservation details — keyed by "site_code:unit_id"
+    let reservationMap = {};
+    let reservationLastSynced = null;
+
     function getCSRFToken() {
         const meta = document.querySelector('meta[name="csrf-token"]');
         return meta ? meta.getAttribute('content') : '';
@@ -741,9 +744,28 @@ select.form-select {
 
             document.getElementById('results-section').style.display = 'block';
             applyFilters();
+
+            // Fetch reservation details for reserved units
+            const siteCodes = [...new Set(allUnits.filter(u => u.bWaitingListReserved).map(u => u.site_code || u.sLocationCode))];
+            if (siteCodes.length > 0) fetchReservationDetails(siteCodes);
         } catch (e) {
             console.error('Failed to load units:', e);
             alert('Failed to load units. Please check your authentication.');
+        }
+    }
+
+    async function fetchReservationDetails(siteCodes) {
+        try {
+            const res = await fetch(`/api/unit-availability/reservations?site_codes=${siteCodes.join(',')}`, { headers: apiHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+            reservationMap = data.reservations || {};
+            reservationLastSynced = data.last_synced;
+            // Re-render to show reservation details
+            if (currentView === 'table') renderTableView();
+            else renderCardView();
+        } catch (e) {
+            console.error('Failed to load reservation details:', e);
         }
     }
 
@@ -885,39 +907,46 @@ select.form-select {
             const siteCode = u.site_code || (siteMap[u.SiteID] ? siteMap[u.SiteID].site_code : u.sLocationCode) || u.SiteID;
             const area = u.area ? fmt(u.area, 1) : '-';
             const catLabel = getDisplayCategory(u);
-            const typeCode = u.label_type_code || '';
+            const typeDesc = u.label_type_code ? (TYPE_CODE_LABELS[u.label_type_code] || u.label_type_code) : '';
             const stdRate = fmtRate(u.dcStdRate);
-            const promoRate = u.dcPushRate ? fmtRate(u.dcPushRate) : (u.dcWebRate ? fmtRate(u.dcWebRate) : '-');
 
-            let indicativeHtml = '-';
+            let promoHtml = '-';
             if (selectedPlan && isPlanApplicableToSite(u.SiteID)) {
                 const indic = calcIndicative(u.dcStdRate);
-                if (indic != null) indicativeHtml = `<span class="indicative-rate">${fmtRate(indic)}</span>`;
+                if (indic != null) promoHtml = `<span class="promo-rate">${fmtRate(indic)}</span>`;
             }
 
             const climateLabel = u.label_climate_code ? (CLIMATE_CODE_LABELS[u.label_climate_code] || u.label_climate_code) : (u.bClimate ? 'AC' : '-');
             const acBadge = u.label_climate_code
                 ? `<span class="badge ${u.label_climate_code === 'A' ? 'badge-ac' : u.label_climate_code === 'RF' ? 'badge-rf' : 'badge-no'}">${escHtml(climateLabel)}</span>`
                 : (u.bClimate ? '<span class="badge badge-ac">AC</span>' : '<span class="badge badge-no">-</span>');
-            const reservedFlag = u.bWaitingListReserved ? ' <span class="badge badge-reserved">Rsvd</span>' : '';
+            let reservedFlag = '';
+            if (u.bWaitingListReserved) {
+                const rKey = siteCode + ':' + u.UnitID;
+                const rInfo = reservationMap[rKey];
+                if (rInfo) {
+                    const parts = [`WID: ${rInfo.waiting_id}`];
+                    if (rInfo.first_name || rInfo.last_name) parts.push(`${rInfo.first_name} ${(rInfo.last_name || '').charAt(0)}.`.trim());
+                    if (rInfo.needed_date) parts.push(`Need: ${rInfo.needed_date}`);
+                    if (rInfo.quoted_rate) parts.push(`Rate: ${fmtRate(rInfo.quoted_rate)}`);
+                    if (rInfo.source) parts.push(`Src: ${rInfo.source}`);
+                    reservedFlag = ` <span class="badge badge-reserved" title="${escHtml(parts.join(' | '))}">Rsvd</span>`;
+                } else {
+                    reservedFlag = ' <span class="badge badge-reserved">Rsvd</span>';
+                }
+            }
             const reserveDisabled = u.bWaitingListReserved ? 'disabled title="Already reserved"' : '';
-
-            // Build extra info badges for shape/pillar
-            let extras = '';
-            if (u.label_shape && u.label_shape !== 'Regular') extras += ` <span class="badge" style="background:#e2e3e5;color:#383d41;">${escHtml(u.label_shape)}</span>`;
-            if (u.label_pillar) extras += ` <span class="badge" style="background:#fce4ec;color:#880e4f;">${escHtml(u.label_pillar)}</span>`;
 
             return `<tr class="unit-row">
                 <td>${escHtml(siteCode)}</td>
-                <td><strong>${escHtml(u.sUnitName) || '-'}</strong>${reservedFlag}${extras}</td>
+                <td><strong>${escHtml(u.sUnitName) || '-'}</strong>${reservedFlag}</td>
                 <td>${escHtml(catLabel)}</td>
-                <td>${escHtml(typeCode) || '<span style="color:#bbb">-</span>'}</td>
+                <td>${escHtml(typeDesc) || '<span style="color:#bbb">-</span>'}</td>
                 <td>${area}</td>
                 <td>${u.iFloor != null ? u.iFloor : '-'}</td>
                 <td style="text-align:center;">${acBadge}</td>
                 <td style="text-align:right;">${stdRate}</td>
-                <td style="text-align:right;">${promoRate !== '-' ? '<span class="promo-rate">' + promoRate + '</span>' : '-'}</td>
-                <td style="text-align:right;">${indicativeHtml}</td>
+                <td style="text-align:right;">${promoHtml}</td>
                 <td>${u.iDaysVacant != null ? u.iDaysVacant + 'd' : '-'}</td>
                 <td style="text-align:center;">
                     <button class="btn-reserve" ${reserveDisabled} onclick="openReserveModal(this)" data-site="${escHtml(siteCode)}" data-uid="${u.UnitID}" data-name="${escHtml(u.sUnitName)}" data-type="${escHtml(catLabel)}" data-area="${area}" data-rate="${stdRate}">Reserve</button>
@@ -933,12 +962,10 @@ select.form-select {
             const area = u.area ? fmt(u.area, 1) : '-';
             const catLabel = getDisplayCategory(u);
             const stdRate = fmtRate(u.dcStdRate);
-            const promoRate = u.dcPushRate ? fmtRate(u.dcPushRate) : (u.dcWebRate ? fmtRate(u.dcWebRate) : '-');
-
-            let indicativeHtml = '-';
+            let promoHtml = '-';
             if (selectedPlan && isPlanApplicableToSite(u.SiteID)) {
                 const indic = calcIndicative(u.dcStdRate);
-                if (indic != null) indicativeHtml = `<span class="indicative-rate">${fmtRate(indic)}</span>`;
+                if (indic != null) promoHtml = `<span class="promo-rate">${fmtRate(indic)}</span>`;
             }
 
             const badges = [];
@@ -949,16 +976,26 @@ select.form-select {
                 badges.push('<span class="badge badge-ac">AC</span>');
             }
             badges.push(u.bPower ? '<span class="badge badge-power">Power</span>' : '');
-            if (u.label_shape && u.label_shape !== 'Regular') badges.push(`<span class="badge" style="background:#e2e3e5;color:#383d41;">${escHtml(u.label_shape)}</span>`);
-            if (u.label_pillar) badges.push(`<span class="badge" style="background:#fce4ec;color:#880e4f;">${escHtml(u.label_pillar)}</span>`);
-            if (u.bWaitingListReserved) badges.push('<span class="badge badge-reserved">Reserved</span>');
+            if (u.bWaitingListReserved) {
+                const rKey = siteCode + ':' + u.UnitID;
+                const rInfo = reservationMap[rKey];
+                if (rInfo) {
+                    const parts = [`WID: ${rInfo.waiting_id}`];
+                    if (rInfo.first_name || rInfo.last_name) parts.push(`${rInfo.first_name} ${(rInfo.last_name || '').charAt(0)}.`.trim());
+                    if (rInfo.needed_date) parts.push(`Need: ${rInfo.needed_date}`);
+                    if (rInfo.quoted_rate) parts.push(`Rate: ${fmtRate(rInfo.quoted_rate)}`);
+                    badges.push(`<span class="badge badge-reserved" title="${escHtml(parts.join(' | '))}">Reserved</span>`);
+                } else {
+                    badges.push('<span class="badge badge-reserved">Reserved</span>');
+                }
+            }
 
             const reserveDisabled = u.bWaitingListReserved ? 'disabled' : '';
 
-            // Build subtitle: type code + climate code if available
+            // Build subtitle: type description + climate
             const subtitleParts = [catLabel];
-            if (u.label_type_code) subtitleParts.push(u.label_type_code);
-            if (u.label_climate_code) subtitleParts.push(u.label_climate_code);
+            if (u.label_type_code) subtitleParts.push(TYPE_CODE_LABELS[u.label_type_code] || u.label_type_code);
+            if (u.label_climate_code) subtitleParts.push(CLIMATE_CODE_LABELS[u.label_climate_code] || u.label_climate_code);
 
             return `<div class="ua-unit-card">
                 <div class="ua-unit-card-header">
@@ -979,11 +1016,7 @@ select.form-select {
                     </div>
                     <div class="ua-price-item">
                         <div class="ua-price-label">Promo</div>
-                        <div class="ua-price-val">${promoRate !== '-' ? '<span class="promo-rate">' + promoRate + '</span>' : '-'}</div>
-                    </div>
-                    <div class="ua-price-item">
-                        <div class="ua-price-label">Indicative</div>
-                        <div class="ua-price-val">${indicativeHtml}</div>
+                        <div class="ua-price-val">${promoHtml}</div>
                     </div>
                 </div>
                 <div class="ua-unit-card-actions">
