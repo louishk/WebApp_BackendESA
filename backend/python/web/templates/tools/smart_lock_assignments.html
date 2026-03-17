@@ -410,6 +410,11 @@
                     originalAssignments[key] = { ...changes[key] };
                 }
                 changes = {};
+                // Re-select the loaded sites in case DOM was reset
+                const select = document.getElementById('site-select');
+                Array.from(select.options).forEach(o => {
+                    o.selected = loadedSiteIds.includes(o.value);
+                });
                 renderTable();
                 updateStats();
                 loadAuditLog();
