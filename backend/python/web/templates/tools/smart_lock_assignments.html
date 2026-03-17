@@ -454,8 +454,12 @@
         try {
             const res = await fetch('/api/jobs/unitsinfo/run-async', {
                 method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({}),
             });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || `HTTP ${res.status}`);
+            }
             const data = await res.json();
             const jobId = data.job_id;
 
@@ -485,7 +489,7 @@
             };
             setTimeout(poll, 5000);
         } catch (e) {
-            statusEl.textContent = 'Failed to trigger';
+            statusEl.textContent = 'Failed: ' + e.message;
             statusEl.style.color = '#dc2626';
             btn.disabled = false;
         }
