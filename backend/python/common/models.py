@@ -2294,7 +2294,7 @@ class CcwsCharge(Base, BaseModel, TimestampMixin):
     )
 
 
-class CCDiscount(Base, BaseModel, TimestampMixin):
+class CcwsDiscount(Base, BaseModel, TimestampMixin):
     """
     Discount/Concession plan data from DiscountPlansRetrieve endpoint.
 
@@ -2303,7 +2303,7 @@ class CCDiscount(Base, BaseModel, TimestampMixin):
 
     Composite unique key: SiteID + ConcessionID
     """
-    __tablename__ = 'cc_discount'
+    __tablename__ = 'ccws_discount'
 
     # =========================================================================
     # Primary Key
@@ -2425,9 +2425,9 @@ class CCDiscount(Base, BaseModel, TimestampMixin):
     dcRoundTo1 = Column(Numeric(14, 4), comment="ChargeDesc round-to amount")
 
     __table_args__ = (
-        Index('idx_cc_discount_site_concession', 'SiteID', 'ConcessionID', unique=True),
-        Index('idx_cc_discount_site', 'SiteID'),
-        Index('idx_cc_discount_plan_name', 'sPlanName'),
+        Index('idx_ccws_discount_site_concession', 'SiteID', 'ConcessionID', unique=True),
+        Index('idx_ccws_discount_site', 'SiteID'),
+        Index('idx_ccws_discount_plan_name', 'sPlanName'),
     )
 
 

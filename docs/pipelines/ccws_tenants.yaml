@@ -303,7 +303,7 @@ auth:
 # Related Code
 # =============================================================================
 related:
-  models: backend/python/common/models.py (CcwsTenant, CcwsLedger, CcwsCharge, CCDiscount)
+  models: backend/python/common/models.py (CcwsTenant, CcwsLedger, CcwsCharge, CcwsDiscount)
   soap_registry: backend/python/common/soap_reports.py
   soap_client: backend/python/common/soap_client.py
   migration: backend/python/migrations/027_ccws_tenants_expand.sql

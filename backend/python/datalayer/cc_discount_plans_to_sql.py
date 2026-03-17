@@ -13,8 +13,8 @@ Usage:
     python cc_discount_plans_to_sql.py
 
 Configuration (in pipelines.yaml):
-    pipelines.cc_discount_plans.location_codes: List of location codes
-    pipelines.cc_discount_plans.sql_chunk_size: Batch size for upsert (default: 500)
+    pipelines.ccws_discount_plans.location_codes: List of location codes
+    pipelines.ccws_discount_plans.sql_chunk_size: Batch size for upsert (default: 500)
 """
 
 import sys
@@ -32,7 +32,7 @@ from common import (
     SessionManager,
     UpsertOperations,
     Base,
-    CCDiscount,
+    CcwsDiscount,
     convert_to_bool,
     convert_to_int,
     convert_to_decimal,
@@ -245,9 +245,9 @@ def push_to_database(
 
     # Create table if not exists
     with tqdm(total=1, desc="  Preparing database", bar_format='{desc}') as pbar:
-        Base.metadata.create_all(engine, tables=[CCDiscount.__table__])
+        Base.metadata.create_all(engine, tables=[CcwsDiscount.__table__])
         pbar.update(1)
-    tqdm.write("  ✓ Table 'cc_discount' ready")
+    tqdm.write("  ✓ Table 'ccws_discount' ready")
 
     session_manager = SessionManager(engine)
     num_chunks = (len(data) + chunk_size - 1) // chunk_size
@@ -260,7 +260,7 @@ def push_to_database(
                 chunk = data[i:i + chunk_size]
 
                 upsert_ops.upsert_batch(
-                    model=CCDiscount,
+                    model=CcwsDiscount,
                     records=chunk,
                     constraint_columns=['SiteID', 'ConcessionID'],
                     chunk_size=chunk_size
@@ -286,9 +286,9 @@ def main():
         raise ValueError("SOAP configuration not found. Check apis.yaml and vault secrets.")
 
     # Load location codes from unified config
-    location_codes = get_pipeline_config('cc_discount_plans', 'location_codes', [])
+    location_codes = get_pipeline_config('ccws_discount_plans', 'location_codes', [])
     if not location_codes:
-        raise ValueError("cc_discount_plans location_codes not configured in scheduler.yaml")
+        raise ValueError("ccws_discount_plans location_codes not configured in scheduler.yaml")
 
     # Initialize SOAP client for CallCenterWs
     soap_client = SOAPClient(
@@ -309,7 +309,7 @@ def main():
     print(f"Locations: {len(location_codes)} ({', '.join(location_codes[:5])}...)")
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print("=" * 70)
-    print("[STAGE:INIT] CCDiscountPlans")
+    print("[STAGE:INIT] CcwsDiscountPlans")
 
     # Fetch data for all locations
     print("[STAGE:FETCH] Fetching discount plans from SOAP API")

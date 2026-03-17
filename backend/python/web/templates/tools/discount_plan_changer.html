@@ -407,7 +407,7 @@
 
         for (const site of selectedSites) {
             try {
-                const response = await fetch(`/api/cc-discount-plans/${site.site_id}`, {
+                const response = await fetch(`/api/ccws-discount-plans/${site.site_id}`, {
                     headers: apiHeaders()
                 });
                 if (!response.ok) continue;
@@ -600,7 +600,7 @@
             updateProgress(i + 1, siteEntries.length, `${siteCode} (${concessionIds.length} plans)...`);
 
             try {
-                const response = await fetch('/api/cc-discount-plans/update-simple', {
+                const response = await fetch('/api/ccws-discount-plans/update-simple', {
                     method: 'POST',
                     headers: apiHeaders(),
                     body: JSON.stringify({
@@ -672,7 +672,7 @@
             updateProgress(i + 1, siteEntries.length, `${siteCode} (${concessionIds.length} plans)...`);
 
             try {
-                const response = await fetch('/api/cc-discount-plans/update', {
+                const response = await fetch('/api/ccws-discount-plans/update', {
                     method: 'POST',
                     headers: apiHeaders(),
                     body: JSON.stringify({
@@ -766,14 +766,14 @@
         updateSelectedCount();
     }
 
-    // Trigger cc_discount_plans pipeline sync, poll for completion, then reload from DB
+    // Trigger ccws_discount_plans pipeline sync, poll for completion, then reload from DB
     async function refreshFromSitelink() {
         const btn = document.getElementById('refresh-btn');
         btn.disabled = true;
         btn.textContent = '⟳ Syncing...';
 
         try {
-            const resp = await fetch('/api/jobs/cc_discount_plans/run-async', {
+            const resp = await fetch('/api/jobs/ccws_discount_plans/run-async', {
                 method: 'POST',
                 headers: apiHeaders(),
                 body: JSON.stringify({ mode: 'full' })

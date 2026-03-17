@@ -111,7 +111,7 @@ class DiscountPlan(Base):
     # =========================================================================
     # Sitelink Concession Linking
     # =========================================================================
-    linked_concessions = Column(JSONB, default=list, comment="Array of {site_id, concession_id} pairs linking to cc_discount")
+    linked_concessions = Column(JSONB, default=list, comment="Array of {site_id, concession_id} pairs linking to ccws_discount")
 
     # =========================================================================
     # Extensible Custom Fields

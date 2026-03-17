@@ -73,27 +73,27 @@ def _get_sites_by_country():
 
 
 def _get_sitelink_discount_names():
-    """Get distinct Sitelink discount plan names from cc_discount (PBI DB).
+    """Get distinct Sitelink discount plan names from ccws_discount (PBI DB).
     Only returns active plans (not deleted/disabled/archived) with valid periods.
     """
     try:
-        from common.models import CCDiscount
+        from common.models import CcwsDiscount
         from sqlalchemy import distinct, or_
         from datetime import datetime
         session = _get_pbi_session()
         try:
             now = datetime.utcnow()
-            rows = (session.query(distinct(CCDiscount.sPlanName))
-                    .filter(CCDiscount.sPlanName.isnot(None))
-                    .filter(CCDiscount.dDeleted.is_(None))
-                    .filter(CCDiscount.dDisabled.is_(None))
-                    .filter(CCDiscount.dArchived.is_(None))
+            rows = (session.query(distinct(CcwsDiscount.sPlanName))
+                    .filter(CcwsDiscount.sPlanName.isnot(None))
+                    .filter(CcwsDiscount.dDeleted.is_(None))
+                    .filter(CcwsDiscount.dDisabled.is_(None))
+                    .filter(CcwsDiscount.dArchived.is_(None))
                     .filter(or_(
-                        CCDiscount.dPlanEnd.is_(None),
-                        CCDiscount.bNeverExpires.is_(True),
-                        CCDiscount.dPlanEnd >= now,
+                        CcwsDiscount.dPlanEnd.is_(None),
+                        CcwsDiscount.bNeverExpires.is_(True),
+                        CcwsDiscount.dPlanEnd >= now,
                     ))
-                    .order_by(CCDiscount.sPlanName)
+                    .order_by(CcwsDiscount.sPlanName)
                     .all())
             return [r[0] for r in rows if r[0] and r[0].strip()]
         finally:
@@ -477,7 +477,7 @@ def view_brief(plan_id):
         linked_details = []
         if plan.linked_concessions:
             try:
-                from common.models import CCDiscount, Site, SiteInfo
+                from common.models import CcwsDiscount, Site, SiteInfo
                 pbi_session = _get_pbi_session()
                 try:
                     # Collect all site IDs for batch lookup
@@ -494,7 +494,7 @@ def view_brief(plan_id):
                                 sid_to_code[si.SiteID] = si.SiteCode
 
                     for link in plan.linked_concessions:
-                        cc = (pbi_session.query(CCDiscount)
+                        cc = (pbi_session.query(CcwsDiscount)
                               .filter_by(SiteID=link.get('site_id'), ConcessionID=link.get('concession_id'))
                               .first())
                         if cc:
@@ -579,7 +579,7 @@ def api_get(plan_id):
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_search_concessions():
     """
-    Search cc_discount entries by plan name.
+    Search ccws_discount entries by plan name.
     Query params: q (search text), site_id (optional filter).
     """
     q = request.args.get('q', '').strip()
@@ -589,33 +589,33 @@ def api_search_concessions():
         return jsonify([])
 
     try:
-        from common.models import CCDiscount, Site
+        from common.models import CcwsDiscount, Site
         pbi_session = _get_pbi_session()
         try:
             query = pbi_session.query(
-                CCDiscount.ConcessionID, CCDiscount.SiteID,
-                CCDiscount.sPlanName, CCDiscount.sDefPlanName,
-                CCDiscount.dcPCDiscount, CCDiscount.dPlanStrt, CCDiscount.dPlanEnd,
+                CcwsDiscount.ConcessionID, CcwsDiscount.SiteID,
+                CcwsDiscount.sPlanName, CcwsDiscount.sDefPlanName,
+                CcwsDiscount.dcPCDiscount, CcwsDiscount.dPlanStrt, CcwsDiscount.dPlanEnd,
             )
             if q:
-                query = query.filter(CCDiscount.sPlanName.ilike(f'%{q}%'))
+                query = query.filter(CcwsDiscount.sPlanName.ilike(f'%{q}%'))
             if site_id:
                 if not site_id.isdigit():
                     return jsonify({'error': 'Invalid site_id'}), 400
-                query = query.filter(CCDiscount.SiteID == int(site_id))
+                query = query.filter(CcwsDiscount.SiteID == int(site_id))
             from sqlalchemy import or_
             from datetime import datetime
             now = datetime.utcnow()
             query = (query
-                .filter(CCDiscount.dDeleted.is_(None))
-                .filter(CCDiscount.dDisabled.is_(None))
-                .filter(CCDiscount.dArchived.is_(None))
+                .filter(CcwsDiscount.dDeleted.is_(None))
+                .filter(CcwsDiscount.dDisabled.is_(None))
+                .filter(CcwsDiscount.dArchived.is_(None))
                 .filter(or_(
-                    CCDiscount.dPlanEnd.is_(None),
-                    CCDiscount.bNeverExpires.is_(True),
-                    CCDiscount.dPlanEnd >= now,
+                    CcwsDiscount.dPlanEnd.is_(None),
+                    CcwsDiscount.bNeverExpires.is_(True),
+                    CcwsDiscount.dPlanEnd >= now,
                 )))
-            results = query.order_by(CCDiscount.SiteID, CCDiscount.sPlanName).limit(50).all()
+            results = query.order_by(CcwsDiscount.SiteID, CcwsDiscount.sPlanName).limit(50).all()
 
             # Get site names
             site_ids = list({r.SiteID for r in results})
@@ -654,27 +654,27 @@ def api_concessions_by_plan_name():
         return jsonify([])
 
     try:
-        from common.models import CCDiscount, Site
+        from common.models import CcwsDiscount, Site
         pbi_session = _get_pbi_session()
         try:
             from sqlalchemy import or_
             from datetime import datetime
             now = datetime.utcnow()
             results = (pbi_session.query(
-                CCDiscount.ConcessionID, CCDiscount.SiteID,
-                CCDiscount.sPlanName, CCDiscount.sDefPlanName,
-                CCDiscount.dcPCDiscount, CCDiscount.dPlanStrt, CCDiscount.dPlanEnd,
+                CcwsDiscount.ConcessionID, CcwsDiscount.SiteID,
+                CcwsDiscount.sPlanName, CcwsDiscount.sDefPlanName,
+                CcwsDiscount.dcPCDiscount, CcwsDiscount.dPlanStrt, CcwsDiscount.dPlanEnd,
             )
-            .filter(CCDiscount.sPlanName == name)
-            .filter(CCDiscount.dDeleted.is_(None))
-            .filter(CCDiscount.dDisabled.is_(None))
-            .filter(CCDiscount.dArchived.is_(None))
+            .filter(CcwsDiscount.sPlanName == name)
+            .filter(CcwsDiscount.dDeleted.is_(None))
+            .filter(CcwsDiscount.dDisabled.is_(None))
+            .filter(CcwsDiscount.dArchived.is_(None))
             .filter(or_(
-                CCDiscount.dPlanEnd.is_(None),
-                CCDiscount.bNeverExpires.is_(True),
-                CCDiscount.dPlanEnd >= now,
+                CcwsDiscount.dPlanEnd.is_(None),
+                CcwsDiscount.bNeverExpires.is_(True),
+                CcwsDiscount.dPlanEnd >= now,
             ))
-            .order_by(CCDiscount.SiteID)
+            .order_by(CcwsDiscount.SiteID)
             .all())
 
             # Get site names + site codes via Site and SiteInfo
