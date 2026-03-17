@@ -6,7 +6,7 @@ record deduplication for batch database operations.
 """
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, List, Dict, Optional
 
 import dateutil.parser
@@ -71,8 +71,11 @@ def convert_to_decimal(value: Any) -> Optional[Decimal]:
     if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
-    except (ValueError, TypeError):
+        result = Decimal(str(value))
+        if not result.is_finite():
+            return None
+        return result
+    except (ValueError, TypeError, InvalidOperation):
         return None
 
 

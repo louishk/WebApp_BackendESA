@@ -3136,15 +3136,15 @@ def api_discount_plans_update(plan_id):
 # =============================================================================
 # Read plans from ccws_discount (PBI DB) and update via CallCenterWs SOAP.
 #
-# GET  /api/discount-plans/<site_id>       — list plans for a site
-# POST /api/discount-plans/update-simple   — enable/disable plans (simple)
-# POST /api/discount-plans/update          — full plan update
+# GET  /api/ccws-discount-plans/<site_id>       — list plans for a site
+# POST /api/ccws-discount-plans/update-simple   — enable/disable plans (simple)
+# POST /api/ccws-discount-plans/update          — full plan update
 # =============================================================================
 
-@api_bp.route('/discount-plans/<int:site_id>')
+@api_bp.route('/ccws-discount-plans/<int:site_id>')
 @require_auth
 @require_api_scope('scheduler:read')
-def api_discount_plans(site_id):
+def api_ccws_discount_plans(site_id):
     """
     Get discount/concession plans from ccws_discount table for a site.
     Excludes deleted plans. Returns key fields for the tool UI.
@@ -3209,11 +3209,11 @@ def api_discount_plans(site_id):
         session.close()
 
 
-@api_bp.route('/discount-plans/update-simple', methods=['POST'])
+@api_bp.route('/ccws-discount-plans/update-simple', methods=['POST'])
 @require_auth
 @require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
-def api_discount_plans_update_simple():
+def api_ccws_discount_plans_update_simple():
     """
     Enable or disable discount plans via DiscountPlanUpdateSimple SOAP.
     Accepts a list of concession IDs for a single site.
@@ -3324,11 +3324,11 @@ def api_discount_plans_update_simple():
         soap_client.close()
 
 
-@api_bp.route('/discount-plans/update', methods=['POST'])
+@api_bp.route('/ccws-discount-plans/update', methods=['POST'])
 @require_auth
 @require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
-def api_discount_plans_update_full():
+def api_ccws_discount_plans_update():
     """
     Full discount plan update via DiscountPlanUpdate SOAP.
     Updates occupancy limits, dates, show-on, exclusion thresholds, etc.
@@ -3721,7 +3721,9 @@ def api_unit_availability_reservations():
             SELECT site_code, unit_id, waiting_id, tenant_id,
                    first_name, last_name, quoted_rate, needed_date,
                    expires_date, status, source, source_name,
-                   reserved_at, soap_synced_at
+                   reserved_at, soap_synced_at,
+                   followup_date, inquiry_type, rental_type_id,
+                   paid_reserve_fee, reserve_fee_receipt_id, concession_id
             FROM api_reservations
             WHERE site_code IN ({placeholders})
               AND status = 'created'
@@ -3746,6 +3748,12 @@ def api_unit_availability_reservations():
                 'source_name': r[11] or '',
                 'reserved_at': r[12].isoformat() if r[12] else None,
                 'soap_synced_at': synced.isoformat() if synced else None,
+                'followup_date': r[14].isoformat() if r[14] else None,
+                'inquiry_type': r[15] or 0,
+                'rental_type_id': r[16] or 0,
+                'paid_reserve_fee': float(r[17]) if r[17] else 0,
+                'reserve_fee_receipt_id': r[18] or 0,
+                'concession_id': r[19] or 0,
             }
             if synced and (last_synced is None or synced > last_synced):
                 last_synced = synced

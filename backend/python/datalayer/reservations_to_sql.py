@@ -103,11 +103,14 @@ def transform_record(record: Dict[str, Any], location_code: str = '') -> Dict[st
 
     # Parse dates
     needed_date = parse_soap_date(record.get('dNeeded'))
+    expires_date = parse_soap_date(record.get('dExpires'))
+    followup_date = parse_soap_date(record.get('dFollowup'))
     created_at = parse_soap_datetime(record.get('dCreated')) or parse_soap_datetime(record.get('dPlaced'))
+    soap_updated_at = parse_soap_datetime(record.get('dUpdated'))
 
     # Fee paid detection
-    paid_fee = convert_to_decimal(record.get('dcPaidReserveFee')) or 0
-    fee_receipt = convert_to_int(record.get('iReserveFeeReceiptID')) or 0
+    paid_reserve_fee = convert_to_decimal(record.get('dcPaidReserveFee')) or 0
+    reserve_fee_receipt_id = convert_to_int(record.get('iReserveFeeReceiptID')) or 0
 
     # Build lifecycle dates based on status
     reserved_at = created_at
@@ -117,7 +120,7 @@ def transform_record(record: Dict[str, Any], location_code: str = '') -> Dict[st
     if status == 'moved_in':
         moved_in_at = parse_soap_datetime(record.get('dConverted_ToMoveIn')) or created_at
     elif status == 'cancelled':
-        cancelled_at = parse_soap_datetime(record.get('dUpdated')) or created_at
+        cancelled_at = soap_updated_at or created_at
 
     # Truncate comment to fit varchar(500)
     comment = (record.get('sComment') or '')[:500] or None
@@ -136,6 +139,13 @@ def transform_record(record: Dict[str, Any], location_code: str = '') -> Dict[st
         'quoted_rate': convert_to_decimal(record.get('dcRate_Quoted')) or 0,
         'concession_id': convert_to_int(record.get('ConcessionID')) or 0,
         'needed_date': needed_date,
+        'expires_date': expires_date,
+        'followup_date': followup_date,
+        'inquiry_type': convert_to_int(record.get('iInquiryType')) or 0,
+        'rental_type_id': convert_to_int(record.get('QTRentalTypeID')) or 0,
+        'paid_reserve_fee': paid_reserve_fee,
+        'reserve_fee_receipt_id': reserve_fee_receipt_id,
+        'soap_updated_at': soap_updated_at,
         'comment': comment,
         'status': status,
         'reserved_at': reserved_at,
@@ -220,16 +230,18 @@ def push_to_database(
         INSERT INTO api_reservations (
             site_code, unit_id, waiting_id, global_waiting_num, tenant_id,
             first_name, last_name, email, phone, mobile,
-            quoted_rate, concession_id, needed_date,
+            quoted_rate, concession_id, needed_date, expires_date, followup_date,
+            inquiry_type, rental_type_id, paid_reserve_fee, reserve_fee_receipt_id,
             comment, source, source_name, status,
-            reserved_at, moved_in_at, cancelled_at,
+            reserved_at, moved_in_at, cancelled_at, soap_updated_at,
             soap_synced_at
         ) VALUES (
             :site_code, :unit_id, :waiting_id, :global_waiting_num, :tenant_id,
             :first_name, :last_name, :email, :phone, :mobile,
-            :quoted_rate, :concession_id, :needed_date,
+            :quoted_rate, :concession_id, :needed_date, :expires_date, :followup_date,
+            :inquiry_type, :rental_type_id, :paid_reserve_fee, :reserve_fee_receipt_id,
             :comment, :source, :source_name, :status,
-            :reserved_at, :moved_in_at, :cancelled_at,
+            :reserved_at, :moved_in_at, :cancelled_at, :soap_updated_at,
             NOW()
         )
         ON CONFLICT (site_code, waiting_id) WHERE waiting_id IS NOT NULL
@@ -244,8 +256,15 @@ def push_to_database(
             quoted_rate   = EXCLUDED.quoted_rate,
             concession_id = EXCLUDED.concession_id,
             needed_date   = EXCLUDED.needed_date,
+            expires_date  = EXCLUDED.expires_date,
+            followup_date = EXCLUDED.followup_date,
+            inquiry_type  = EXCLUDED.inquiry_type,
+            rental_type_id = EXCLUDED.rental_type_id,
+            paid_reserve_fee = EXCLUDED.paid_reserve_fee,
+            reserve_fee_receipt_id = EXCLUDED.reserve_fee_receipt_id,
             comment       = EXCLUDED.comment,
             status        = EXCLUDED.status,
+            soap_updated_at = EXCLUDED.soap_updated_at,
             -- Preserve attribution: never overwrite if already set
             source        = COALESCE(NULLIF(api_reservations.source, 'sitelink'), EXCLUDED.source),
             source_name   = COALESCE(NULLIF(api_reservations.source_name, 'SiteLink'), EXCLUDED.source_name),
