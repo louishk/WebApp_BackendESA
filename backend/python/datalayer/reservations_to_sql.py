@@ -79,12 +79,13 @@ def parse_soap_datetime(value):
 # Record Transformation
 # =============================================================================
 
-def transform_record(record: Dict[str, Any]) -> Dict[str, Any]:
+def transform_record(record: Dict[str, Any], location_code: str = '') -> Dict[str, Any]:
     """
     Transform ReservationList_v3 record to api_reservations format.
 
     Args:
         record: Raw record from ReservationList_v3 SOAP API
+        location_code: The site code used in the SOAP call (response may not include it)
 
     Returns:
         Transformed record ready for database upsert
@@ -93,7 +94,7 @@ def transform_record(record: Dict[str, Any]) -> Dict[str, Any]:
     if not waiting_id:
         return None
 
-    site_code = record.get('sLocationCode') or ''
+    site_code = record.get('sLocationCode') or location_code or ''
     if not site_code:
         return None
 
@@ -174,7 +175,7 @@ def fetch_reservations(
 
                 count = 0
                 for record in (results or []):
-                    transformed = transform_record(record)
+                    transformed = transform_record(record, location_code=location_code.strip())
                     if transformed:
                         all_data.append(transformed)
                         count += 1
