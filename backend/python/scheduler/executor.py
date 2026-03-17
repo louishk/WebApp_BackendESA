@@ -376,7 +376,7 @@ class PipelineExecutor:
                             stage_match = re.match(r'\[STAGE:(\w+)\]\s*(.*)', line)
                             if stage_match:
                                 _execution_status[exec_id_str]['stage'] = stage_match.group(1)
-                                _execution_status[exec_id_str]['stage_message'] = stage_match.group(2)
+                                _execution_status[exec_id_str]['stage_message'] = stage_match.group(2)[:200]
 
             # Read any remaining output
             remaining_stdout, remaining_stderr = process.communicate()
@@ -389,7 +389,7 @@ class PipelineExecutor:
                             stage_match = re.match(r'\[STAGE:(\w+)\]\s*(.*)', line)
                             if stage_match:
                                 _execution_status[exec_id_str]['stage'] = stage_match.group(1)
-                                _execution_status[exec_id_str]['stage_message'] = stage_match.group(2)
+                                _execution_status[exec_id_str]['stage_message'] = stage_match.group(2)[:200]
             if remaining_stderr:
                 for line in remaining_stderr.split('\n'):
                     if line.strip():

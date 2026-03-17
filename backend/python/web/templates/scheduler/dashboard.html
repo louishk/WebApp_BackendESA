@@ -166,6 +166,11 @@ tr.running-row:hover td { background: rgba(255, 193, 7, 0.08); }
 
 {% block scripts %}
 <script>
+    // HTML escape to prevent XSS when inserting API values into innerHTML
+    function escHtml(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
     // Singapore timezone formatting
     const SGT_OPTIONS = { timeZone: 'Asia/Singapore', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' };
 
@@ -310,11 +315,11 @@ tr.running-row:hover td { background: rgba(255, 193, 7, 0.08); }
                             const stageMsg = stageInfo && stageInfo.stageMessage ? ' - ' + stageInfo.stageMessage : '';
 
                             return `
-                                <div class="running-item" onclick="openProgressModal('${job.pipeline_name}', '${job.execution_id}', ${isWeb})">
+                                <div class="running-item" data-pipeline="${escHtml(job.pipeline_name)}" data-execid="${escHtml(job.execution_id)}" data-isweb="${isWeb ? '1' : '0'}" onclick="openProgressModal(this.dataset.pipeline, this.dataset.execid, this.dataset.isweb==='1')">
                                     <div>
-                                        <div class="pipeline-name">${job.pipeline_name}</div>
-                                        <div class="running-meta">${elapsed} elapsed | Triggered by: ${job.triggered_by}</div>
-                                        ${stageLabel ? '<div class="running-stage">' + stageLabel + stageMsg + '</div>' : ''}
+                                        <div class="pipeline-name">${escHtml(job.pipeline_name)}</div>
+                                        <div class="running-meta">${escHtml(elapsed)} elapsed | Triggered by: ${escHtml(job.triggered_by)}</div>
+                                        ${stageLabel ? '<div class="running-stage">' + escHtml(stageLabel) + escHtml(stageMsg) + '</div>' : ''}
                                     </div>
                                     <div class="right-side">
                                         <span class="status status-running">Running</span>
@@ -334,18 +339,18 @@ tr.running-row:hover td { background: rgba(255, 193, 7, 0.08); }
                     tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">No recent executions</td></tr>';
                 } else {
                     tbody.innerHTML = results.map(job => {
-                        const statusClass = 'status-' + job.status;
+                        const statusClass = 'status-' + escHtml(job.status);
                         const started = formatSGT(job.started_at);
                         const isRunning = job.status === 'running';
                         const isWeb = job.triggered_by === 'web';
                         const rowClass = isRunning ? 'running-row' : '';
-                        const rowClick = isRunning ? ` onclick="openProgressModal('${job.pipeline_name}', '${job.execution_id}', ${isWeb})"` : '';
+                        const rowData = isRunning ? ` data-pipeline="${escHtml(job.pipeline_name)}" data-execid="${escHtml(job.execution_id)}" data-isweb="${isWeb ? '1' : '0'}" onclick="openProgressModal(this.dataset.pipeline, this.dataset.execid, this.dataset.isweb==='1')"` : '';
                         const duration = isRunning ? formatElapsed(job.started_at) : formatDuration(job.duration_seconds);
 
                         return `
-                            <tr class="${rowClass}"${rowClick}>
-                                <td>${job.pipeline_name}</td>
-                                <td><span class="status ${statusClass}">${job.status}</span></td>
+                            <tr class="${rowClass}"${rowData}>
+                                <td>${escHtml(job.pipeline_name)}</td>
+                                <td><span class="status ${statusClass}">${escHtml(job.status)}</span></td>
                                 <td>${started}</td>
                                 <td>${duration}</td>
                                 <td>${job.records_processed || '-'}</td>
@@ -399,7 +404,7 @@ tr.running-row:hover td { background: rgba(255, 193, 7, 0.08); }
 
                 return `
                     <div class="freshness-card ${cardClass}">
-                        <div class="pipeline">${job.display_name}</div>
+                        <div class="pipeline">${escHtml(job.display_name)}</div>
                         <div class="date">${dateDisplay}</div>
                         <div class="ago">${agoDisplay}</div>
                     </div>
@@ -472,7 +477,7 @@ tr.running-row:hover td { background: rgba(255, 193, 7, 0.08); }
 
         tbody.innerHTML = upcomingData.map(job => `
             <tr>
-                <td><strong>${job.display_name}</strong></td>
+                <td><strong>${escHtml(job.display_name)}</strong></td>
                 <td>${job.schedule_human}</td>
                 <td>${formatNextRunTime(job.next_run)}</td>
                 <td data-seconds="${job.seconds_until}">${formatCountdown(job.seconds_until)}</td>
