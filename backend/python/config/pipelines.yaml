@@ -132,8 +132,8 @@ pipelines:
       backoff_multiplier: 2
     timeout_seconds: 1200
     data_freshness:
-      table: ''
-      date_column: ''
+      table: ccws_discount
+      date_column: updated_at
   sugarcrm:
     display_name: SugarCRM
     description: Fetch CRM data (Leads, Contacts, Accounts)
