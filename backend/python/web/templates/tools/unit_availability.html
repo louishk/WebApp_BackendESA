@@ -150,7 +150,7 @@
                         <th>Type</th>
                         <th>Size</th>
                         <th>Flr</th>
-                        <th style="text-align: center;">AC</th>
+                        <th style="text-align: center;">Climate</th>
                         <th style="text-align: right;">Std Rate</th>
                         <th style="text-align: right;">Promo</th>
                         <th style="text-align: right;">Indicative</th>
@@ -440,7 +440,8 @@ select.form-select {
     font-weight: 600;
 }
 .badge-ac { background: #d4edda; color: #155724; }
-.badge-no { background: #f8d7da; color: #721c24; }
+.badge-rf { background: #cce5ff; color: #004085; }
+.badge-no { background: #e2e3e5; color: #383d41; }
 .badge-power { background: #cce5ff; color: #004085; }
 .badge-reserved { background: #fff3cd; color: #856404; }
 .promo-rate { color: var(--esa-red); font-weight: 600; }
@@ -736,7 +737,7 @@ select.form-select {
 
             document.getElementById('stat-total').textContent = allUnits.length;
             document.getElementById('stat-categories').textContent = (filters.categories || []).length;
-            document.getElementById('stat-climate').textContent = allUnits.filter(u => u.bClimate).length;
+            document.getElementById('stat-climate').textContent = allUnits.filter(u => u.label_climate_code === 'A' || (!u.label_climate_code && u.bClimate)).length;
 
             document.getElementById('results-section').style.display = 'block';
             applyFilters();
@@ -894,7 +895,10 @@ select.form-select {
                 if (indic != null) indicativeHtml = `<span class="indicative-rate">${fmtRate(indic)}</span>`;
             }
 
-            const acBadge = u.bClimate ? '<span class="badge badge-ac">AC</span>' : '<span class="badge badge-no">No</span>';
+            const climateLabel = u.label_climate_code ? (CLIMATE_CODE_LABELS[u.label_climate_code] || u.label_climate_code) : (u.bClimate ? 'AC' : '-');
+            const acBadge = u.label_climate_code
+                ? `<span class="badge ${u.label_climate_code === 'A' ? 'badge-ac' : u.label_climate_code === 'RF' ? 'badge-rf' : 'badge-no'}">${escHtml(climateLabel)}</span>`
+                : (u.bClimate ? '<span class="badge badge-ac">AC</span>' : '<span class="badge badge-no">-</span>');
             const reservedFlag = u.bWaitingListReserved ? ' <span class="badge badge-reserved">Rsvd</span>' : '';
             const reserveDisabled = u.bWaitingListReserved ? 'disabled title="Already reserved"' : '';
 
@@ -938,7 +942,12 @@ select.form-select {
             }
 
             const badges = [];
-            badges.push(u.bClimate ? '<span class="badge badge-ac">AC</span>' : '');
+            if (u.label_climate_code) {
+                const cl = CLIMATE_CODE_LABELS[u.label_climate_code] || u.label_climate_code;
+                badges.push(`<span class="badge ${u.label_climate_code === 'A' ? 'badge-ac' : u.label_climate_code === 'RF' ? 'badge-rf' : 'badge-no'}">${escHtml(cl)}</span>`);
+            } else if (u.bClimate) {
+                badges.push('<span class="badge badge-ac">AC</span>');
+            }
             badges.push(u.bPower ? '<span class="badge badge-power">Power</span>' : '');
             if (u.label_shape && u.label_shape !== 'Regular') badges.push(`<span class="badge" style="background:#e2e3e5;color:#383d41;">${escHtml(u.label_shape)}</span>`);
             if (u.label_pillar) badges.push(`<span class="badge" style="background:#fce4ec;color:#880e4f;">${escHtml(u.label_pillar)}</span>`);
