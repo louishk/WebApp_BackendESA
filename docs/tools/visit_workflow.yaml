@@ -1,0 +1,661 @@
+tool:
+  name: Visit Workflow
+  description: >
+    Walk-in and guided visit conversion workflow for front-desk staff.
+    Combines CRM lead management, unit browsing, multi-unit shortlisting,
+    best offer recommendations, and post-visit outcome tracking into a
+    single page. Replaces the manual process of looking up units in one tab,
+    searching CRM in another, and tracking visit outcomes on paper.
+  url_path: /tools/visit-workflow
+  template: backend/python/web/templates/tools/visit_workflow.html
+  access:
+    decorator: "@inventory_tools_access_required"
+    required_permission: can_access_inventory_tools
+    auth_type: session (Flask-Login)
+
+  ui:
+    layout: >
+      Two-column layout: main content area (~65%) on the left with session/customer panel
+      and unit browser; shortlist sidebar (~35%) on the right. On mobile (<820px) the sidebar
+      collapses off-screen and is toggled via a floating action button (bottom-right).
+    components:
+      - type: panel
+        name: Session Panel
+        description: Start/resume a visit session. Shows "Walk-In" and "Guided Visit" buttons when no active session exists.
+        interactions:
+          - Click "Walk-In" or "Guided Visit" to select flow type
+          - Select a site from the dropdown
+          - Click "Confirm" to create the session (POST /api/visits)
+          - On page load, auto-resumes any active session (GET /api/visits/active)
+
+      - type: panel
+        name: Customer Panel
+        description: Search for existing CRM leads or create new ones. Appears after session is started.
+        interactions:
+          - Type in search input (debounced 400ms) to search leads (GET /api/crm/leads/search)
+          - Click a search result to link the lead to the session (PATCH /api/visits/:id)
+          - Click "New Customer" to expand inline create form
+          - Submit new customer form (POST /api/crm/leads) then auto-link to session
+          - Shows lead summary card when a lead is linked (name, phone, email, status)
+
+      - type: table
+        name: Unit Browser
+        description: Filterable table of available units for the session's site. Loaded from /api/unit-availability.
+        interactions:
+          - Auto-loads units when session starts (GET /api/unit-availability?site_ids=N)
+          - Filter by category label dropdown
+          - Filter by climate code dropdown
+          - Filter by floor dropdown
+          - Filter by min/max size inputs
+          - Free-text search across unit name, category, notes
+          - Click "+ Add" to add unit to shortlist (POST /api/visits/:id/shortlist)
+          - Already-shortlisted units shown with green background and checkmark
+
+      - type: sidebar
+        name: Shortlist Sidebar
+        description: Shows units added to the current visit's shortlist. Each item is a card with unit details.
+        interactions:
+          - View shortlisted units (unit_name, category, area, floor, climate, std_rate)
+          - Click "X" to remove a unit from shortlist (DELETE /api/visits/:id/shortlist/:item_id)
+          - Edit notes for each item inline (PATCH /api/visits/:id/shortlist/:item_id)
+          - Shows item count badge
+          - "Complete Visit" button at bottom opens outcome modal
+
+      - type: modal
+        name: Outcome Modal
+        description: Set the visit outcome when completing a session.
+        interactions:
+          - Select outcome from dropdown (reserved, converted, visit_completed, lost)
+          - If "lost" is selected, a lost reason dropdown appears (required)
+          - Optional outcome notes textarea
+          - Submit calls POST /api/visits/:id/outcome
+          - On success, session is marked completed and page resets
+
+      - type: button
+        name: Mobile Shortlist Toggle (FAB)
+        description: Floating action button visible on mobile (<820px) to toggle the shortlist sidebar as a bottom drawer.
+        interactions:
+          - Click to slide sidebar in/out from the right
+
+  api_endpoints:
+    # ===== CRM Blueprint (/api/crm) =====
+    - method: GET
+      path: /api/crm/leads/search
+      purpose: Search SugarCRM leads by phone, email, or name
+      auth: session
+      rate_limit: 30/min
+      audit_event: CRM_LEAD_SEARCHED
+      parameters:
+        - name: q
+          in: query
+          type: string
+          required: true
+          description: Search query (min 2 chars, max 100). Searches phone_mobile, phone_work, email, webtolead_email1, first_name, last_name.
+          example: "91234567"
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "array of lead objects (max 20)"
+          example:
+            status: success
+            data:
+              - id: "abc-123-uuid"
+                first_name: John
+                last_name: Doe
+                full_name: John Doe
+                phone_mobile: "+85291234567"
+                email: john@example.com
+                status: New
+                lead_source: Walk-in
+                date_modified: "2026-03-18T10:30:00+08:00"
+        error:
+          - status: 400
+            message: "Search query must be at least 2 characters"
+          - status: 429
+            message: "Rate limit exceeded"
+          - status: 502
+            message: "Failed to search leads (SugarCRM error)"
+
+    - method: POST
+      path: /api/crm/leads
+      purpose: Create a new lead in SugarCRM with Walk-in source
+      auth: session
+      rate_limit: 10/min
+      audit_event: CRM_LEAD_CREATED
+      request_body:
+        content_type: application/json
+        schema:
+          first_name:
+            type: string
+            description: Lead first name
+            example: "John"
+          last_name:
+            type: string
+            required: true
+            description: Lead last name
+            example: "Doe"
+          phone_mobile:
+            type: string
+            description: Mobile phone (min 6 digits after sanitization). Required if no email.
+            example: "+85291234567"
+          email:
+            type: string
+            description: Email address. Required if no phone.
+            example: "john@example.com"
+      response:
+        success:
+          status: 201
+          schema:
+            status: success
+            data: "created lead object with SugarCRM UUID"
+        error:
+          - status: 400
+            message: "Last name is required / Either phone or email is required / Invalid email format"
+
+    - method: GET
+      path: /api/crm/leads/{lead_id}
+      purpose: Get a single lead by SugarCRM UUID
+      auth: session
+      rate_limit: 30/min
+      parameters:
+        - name: lead_id
+          in: path
+          type: string
+          required: true
+          description: SugarCRM lead UUID (36-char hex with dashes)
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "lead object"
+        error:
+          - status: 400
+            message: "Invalid lead ID format"
+          - status: 404
+            message: "Lead not found"
+
+    - method: PATCH
+      path: /api/crm/leads/{lead_id}
+      purpose: Update lead fields (whitelisted fields only)
+      auth: session
+      rate_limit: 10/min
+      audit_event: CRM_LEAD_UPDATED
+      parameters:
+        - name: lead_id
+          in: path
+          type: string
+          required: true
+          description: SugarCRM lead UUID
+      request_body:
+        content_type: application/json
+        schema:
+          description: >
+            Any subset of whitelisted fields: first_name, last_name, phone_mobile,
+            phone_work, phone_home, email, webtolead_email1, status, lead_source,
+            description, primary_address_street, primary_address_city, primary_address_country
+        example:
+          status: Contacted
+          description: "Visited L004 on 2026-03-18"
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "updated lead object"
+        error:
+          - status: 400
+            message: "No valid fields to update"
+          - status: 404
+            message: "Lead not found"
+
+    # ===== Visits Blueprint (/api/visits) =====
+    - method: POST
+      path: /api/visits
+      purpose: Create a new visit session (one active per user enforced)
+      auth: session
+      rate_limit: 10/min
+      audit_event: VISIT_SESSION_CREATED
+      request_body:
+        content_type: application/json
+        schema:
+          site_code:
+            type: string
+            required: true
+            description: Site code for the visit (max 10 chars, auto-uppercased)
+            example: "L004"
+          flow_type:
+            type: string
+            required: false
+            description: "Visit type: walk_in (default) or guided"
+            example: "walk_in"
+          lead_id:
+            type: string
+            required: false
+            description: SugarCRM lead UUID (validated as 36-char UUID)
+            example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      response:
+        success:
+          status: 201
+          schema:
+            status: success
+            data: "session object with empty shortlist_items array"
+        error:
+          - status: 400
+            message: "site_code is required / site_code too long / Invalid lead_id format"
+          - status: 409
+            message: "You already have an active visit session (returns existing session in data)"
+
+    - method: GET
+      path: /api/visits/active
+      purpose: Get the current user's active session (if any)
+      auth: session
+      rate_limit: 30/min
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "session object with shortlist_items, or null if no active session"
+
+    - method: GET
+      path: /api/visits/{session_id}
+      purpose: Get a specific session with its shortlist items
+      auth: session (own sessions only)
+      rate_limit: 30/min
+      parameters:
+        - name: session_id
+          in: path
+          type: integer
+          required: true
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "session object"
+        error:
+          - status: 404
+            message: "Session not found (or not owned by current user)"
+
+    - method: PATCH
+      path: /api/visits/{session_id}
+      purpose: Update session — link lead, change status
+      auth: session (own sessions only)
+      rate_limit: 10/min
+      audit_event: VISIT_SESSION_UPDATED
+      request_body:
+        content_type: application/json
+        schema:
+          lead_id:
+            type: string
+            description: SugarCRM lead UUID to link (UUID-validated)
+          status:
+            type: string
+            description: "New status: active, completed, cancelled"
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "updated session object"
+        error:
+          - status: 400
+            message: "Invalid lead_id format / Invalid status"
+
+    - method: POST
+      path: /api/visits/{session_id}/shortlist
+      purpose: Add a unit to the session shortlist
+      auth: session (active sessions only)
+      rate_limit: 30/min
+      request_body:
+        content_type: application/json
+        schema:
+          site_id:
+            type: integer
+            required: true
+            description: Site ID from the units API
+          unit_id:
+            type: integer
+            required: true
+            description: Unit ID from the units API
+          unit_name:
+            type: string
+            description: Unit display name (truncated to 50 chars)
+            example: "B-3012"
+          category_label:
+            type: string
+            description: Category label (truncated to 100 chars)
+            example: "Medium Locker"
+          area:
+            type: number
+            description: Unit area in sqft
+            example: 25.5
+          floor:
+            type: integer
+            description: Floor number
+            example: 3
+          climate_code:
+            type: string
+            description: Climate code (truncated to 5 chars)
+            example: "A"
+          std_rate:
+            type: number
+            description: Standard monthly rate
+            example: 1500.00
+          indicative_rate:
+            type: number
+            description: Indicative rate after discount
+          discount_plan_id:
+            type: integer
+            description: Discount plan ID if a plan is applied
+          concession_id:
+            type: integer
+            description: Concession ID for the applied plan (default 0)
+          notes:
+            type: string
+            description: Staff notes for this unit
+      response:
+        success:
+          status: 201
+          schema:
+            status: success
+            data: "shortlist item object"
+        error:
+          - status: 404
+            message: "Active session not found"
+          - status: 409
+            message: "Unit already in shortlist (unique constraint on session_id + site_id + unit_id)"
+
+    - method: DELETE
+      path: /api/visits/{session_id}/shortlist/{item_id}
+      purpose: Remove a unit from the shortlist
+      auth: session (own sessions only, verified via join)
+      rate_limit: 30/min
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+        error:
+          - status: 404
+            message: "Item not found"
+
+    - method: PATCH
+      path: /api/visits/{session_id}/shortlist/{item_id}
+      purpose: Update shortlist item (notes, discount plan, sort order)
+      auth: session (own sessions only)
+      rate_limit: 10/min
+      request_body:
+        content_type: application/json
+        schema:
+          notes:
+            type: string
+            description: Staff notes
+          discount_plan_id:
+            type: integer
+            description: Discount plan ID
+          concession_id:
+            type: integer
+            description: Concession ID
+          indicative_rate:
+            type: number
+            description: Indicative rate after discount
+          sort_order:
+            type: integer
+            description: Display sort order
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "updated shortlist item"
+
+    - method: GET
+      path: /api/visits/recommend-offers
+      purpose: Recommend top discount plans for a site/unit combination
+      auth: session
+      rate_limit: 30/min
+      parameters:
+        - name: site_code
+          in: query
+          type: string
+          required: true
+          description: Site code (e.g. L004)
+          example: "L004"
+        - name: area
+          in: query
+          type: number
+          required: false
+          description: Unit area in sqft (0 < area <= 100000)
+          example: 50
+        - name: std_rate
+          in: query
+          type: number
+          required: false
+          description: Standard monthly rate (0 < std_rate <= 1000000). Used to calculate indicative rates.
+          example: 3000
+        - name: tenancy_months
+          in: query
+          type: integer
+          required: false
+          description: Intended tenancy length (1-120). Reserved for future scoring.
+          example: 6
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "array of up to 3 offer recommendations"
+          example:
+            status: success
+            data:
+              - plan_id: 12
+                plan_name: "Prepaid 6M"
+                plan_type: "Evergreen"
+                discount_type: "percentage"
+                discount_value: "15%"
+                discount_numeric: 15.0
+                indicative_rate: 2550.00
+                has_concession_for_site: true
+        error:
+          - status: 400
+            message: "site_code is required / area out of valid range / std_rate out of valid range"
+
+    - method: POST
+      path: /api/visits/{session_id}/outcome
+      purpose: Set visit outcome and complete the session
+      auth: session (active sessions only)
+      rate_limit: 10/min
+      audit_event: VISIT_SESSION_COMPLETED
+      request_body:
+        content_type: application/json
+        schema:
+          outcome:
+            type: string
+            required: true
+            description: "One of: reserved, converted, visit_completed, lost"
+            example: "lost"
+          outcome_notes:
+            type: string
+            description: Optional notes (truncated to 1000 chars)
+            example: "Customer preferred competitor pricing"
+          lost_reason:
+            type: string
+            description: Required when outcome is 'lost' (max 100 chars)
+            example: "Price too high"
+      response:
+        success:
+          status: 200
+          schema:
+            status: success
+            data: "completed session object"
+        error:
+          - status: 400
+            message: "outcome must be one of: ... / lost_reason is required when outcome is lost / lost_reason exceeds maximum length"
+          - status: 404
+            message: "Active session not found"
+
+    # ===== Existing endpoints used by this tool =====
+    - method: GET
+      path: /api/sites
+      purpose: Load available sites for the session site selector
+      note: "Existing endpoint in api.py — not part of this feature"
+
+    - method: GET
+      path: /api/unit-availability
+      purpose: Load available units for a site
+      note: "Existing endpoint in api.py — not part of this feature"
+
+    - method: GET
+      path: /api/discount-plans
+      purpose: Load active discount plans
+      note: "Existing endpoint in api.py — not part of this feature"
+
+  data_sources:
+    - type: external_api
+      name: SugarCRM REST API (v11)
+      description: Lead search, create, get, and update via OAuth2-authenticated REST calls
+      key_fields:
+        - id: SugarCRM lead UUID (36-char)
+        - first_name: Lead first name
+        - last_name: Lead last name
+        - phone_mobile: Mobile phone number
+        - email: Primary email address
+        - status: Lead status (New, Contacted, Qualified, etc.)
+        - lead_source: How the lead was acquired (Walk-in, Web, etc.)
+
+    - type: database
+      name: visit_sessions
+      database: esa_backend
+      description: Persisted visit sessions linking staff user, site, lead, and outcome
+      key_fields:
+        - id: Auto-increment PK
+        - lead_id: SugarCRM lead UUID (nullable)
+        - site_code: Site code (VARCHAR 10)
+        - staff_user_id: FK to users.id (CASCADE delete)
+        - flow_type: "walk_in or guided"
+        - status: "active, completed, or cancelled"
+        - outcome: "reserved, converted, visit_completed, or lost"
+        - lost_reason: Mandatory when outcome is lost (VARCHAR 100)
+
+    - type: database
+      name: visit_shortlist_items
+      database: esa_backend
+      description: Units shortlisted within a visit session
+      key_fields:
+        - id: Auto-increment PK
+        - session_id: FK to visit_sessions.id (CASCADE delete)
+        - site_id: Site ID from esa_pbi
+        - unit_id: Unit ID from esa_pbi
+        - unit_name: Display name (VARCHAR 50)
+        - std_rate: Standard monthly rate
+        - indicative_rate: Rate after discount
+        - discount_plan_id: Applied discount plan
+        - concession_id: Sitelink concession ID
+      constraints:
+        - "UNIQUE(session_id, site_id, unit_id) — prevents duplicate units in same session"
+
+    - type: database
+      name: discount_plans
+      database: esa_backend
+      description: Discount plans used by the Best Offer Engine for scoring and recommendations
+      key_fields:
+        - applicable_sites: JSONB mapping site_code to boolean
+        - discount_type: percentage, fixed_amount, free_period, none
+        - discount_numeric: Numeric discount value for calculations
+        - linked_concessions: JSONB array of site_id/concession_id pairs
+        - hidden_rate: Whether the plan is hidden from public (lower score)
+        - plan_type: Evergreen, Tactical, Seasonal (Evergreen gets score bonus)
+
+  business_logic:
+    - step: Session lifecycle
+      details: >
+        Staff starts a visit by selecting flow type (walk-in or guided) and site.
+        One active session per user enforced. Session persists across page reloads.
+        Session moves from active → completed when an outcome is set, or → cancelled.
+
+    - step: CRM lead linking
+      details: >
+        Staff searches for existing leads by phone/email/name. If found, lead is
+        linked to the session via PATCH. If not found, staff creates a new lead
+        which is auto-set to status=New, lead_source=Walk-in. Lead link is optional —
+        session can proceed without a CRM lead.
+
+    - step: Unit shortlisting
+      details: >
+        Staff browses available units for the session's site. Units are filtered
+        by category, climate, floor, size, and text search. Adding a unit to the
+        shortlist persists it in visit_shortlist_items with unit metadata snapshot
+        (name, area, rate, etc.). Duplicate units prevented by unique constraint.
+        Sort order auto-increments.
+
+    - step: Best Offer Engine scoring
+      details: >
+        When recommend-offers is called, the engine loads all active discount plans,
+        filters by site applicability (applicable_sites JSONB) and date validity
+        (period_start/end, booking_period_start/end), then scores each plan.
+        Score = discount_numeric + 5 (if public) + 2 (if Evergreen).
+        Indicative rate calculated as std_rate * (1 - discount/100) for percentage,
+        or std_rate - discount for fixed_amount. Returns top 3 by score.
+
+    - step: Visit outcome
+      details: >
+        Staff sets one of four outcomes: reserved, converted, visit_completed, or lost.
+        Lost requires a reason (max 100 chars). Session is marked completed with timestamp.
+        Outcome is audit-logged. Future phases will integrate CRM status updates and
+        SOAP reservation flow on outcome.
+
+  security:
+    - CSRF protection enabled (session auth, not exempt)
+    - All routes require @login_required + @inventory_tools_access_required
+    - Rate limiting on all endpoints (10-30/min)
+    - Lead ID validated as UUID format
+    - Input length caps on all VARCHAR fields
+    - Field whitelist on lead updates (UPDATABLE_LEAD_FIELDS)
+    - Generic error messages to client, real errors to logger
+    - Ownership enforced — staff can only access their own sessions
+    - Thread-safe SugarCRM client initialization (double-checked locking)
+    - XSS prevention — lead search results use data attributes + addEventListener, not inline onclick
+    - All audit events logged (CRM_LEAD_SEARCHED, CRM_LEAD_CREATED, CRM_LEAD_UPDATED, VISIT_SESSION_CREATED, VISIT_SESSION_UPDATED, VISIT_SESSION_COMPLETED)
+
+  migration:
+    file: backend/python/migrations/034_visit_sessions.sql
+    database: esa_backend
+    tables_created:
+      - visit_sessions
+      - visit_shortlist_items
+    indexes:
+      - idx_visit_sessions_staff_status (staff_user_id, status)
+      - idx_visit_shortlist_session (session_id)
+    constraints:
+      - "visit_sessions.staff_user_id FK → users.id ON DELETE CASCADE"
+      - "visit_shortlist_items.session_id FK → visit_sessions.id ON DELETE CASCADE"
+      - "UNIQUE(session_id, site_id, unit_id)"
+
+  related:
+    - tool: Unit Availability (unit_availability.html) — original unit browsing tool, shares the same data source
+    - module: common/sugarcrm_client.py — SugarCRM REST client used by CRM endpoints
+    - module: web/services/offer_engine.py — Best Offer scoring engine
+    - model: web/models/discount_plan.py — DiscountPlan model used by offer engine
+    - model: web/models/visit_session.py — VisitSession and VisitShortlistItem models
+    - script: datalayer/leads_status_migration.py — one-time CRM status migration (Phase 5)
+
+  known_issues:
+    - >
+      Best Offer Engine cannot match concessions by site_code directly — it checks
+      if any linked_concession entry exists (has_concession_for_site is best-effort).
+      A site_code→site_id mapping would be needed for exact matching.
+    - >
+      SugarCRM error detection uses string inspection ('404' in str(error)) which is
+      fragile — a structured error type from the client would be more reliable.
+    - >
+      The outcome endpoint does not yet trigger SOAP reservation or CRM status update —
+      these are planned for Phase 3 completion (CRM status mapping requires Phase 5
+      migration of SugarCRM statuses first).
+    - >
+      area_sqft and tenancy_months parameters in recommend-offers are reserved for
+      future scoring enhancements but not currently used in the scoring algorithm.
