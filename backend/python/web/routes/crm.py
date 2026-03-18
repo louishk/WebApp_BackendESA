@@ -38,7 +38,7 @@ def _get_sugar_client():
 
 # Fields to return from lead queries (limit data exposure)
 LEAD_FIELDS = [
-    'id', 'first_name', 'last_name', 'full_name',
+    'id', 'salutation', 'first_name', 'last_name', 'full_name',
     'phone_mobile', 'phone_work', 'phone_home',
     'email', 'webtolead_email1',
     'status', 'lead_source', 'description',
@@ -46,6 +46,10 @@ LEAD_FIELDS = [
     'primary_address_country',
     'date_entered', 'date_modified',
     'assigned_user_name',
+    # ESA custom fields
+    'es_storage_type_c', 'es_storage_duration_c',
+    'es_storage_size_c', 'es_storage_location_c',
+    'tbot_note_c', 'ai_inferred_type_of_goods_c',
 ]
 
 # Allowed fields for lead update (whitelist to prevent overwriting sensitive fields)
@@ -56,6 +60,9 @@ UPDATABLE_LEAD_FIELDS = {
     'status', 'lead_source', 'description',
     'primary_address_street', 'primary_address_city',
     'primary_address_country',
+    # ESA custom fields
+    'es_storage_type_c', 'es_storage_duration_c',
+    'es_storage_size_c', 'es_storage_location_c',
 }
 
 # Valid UUID pattern for SugarCRM IDs
@@ -171,9 +178,6 @@ def create_lead():
     try:
         client = _get_sugar_client()
 
-        description = (data.get('description') or '').strip()
-        address_city = (data.get('primary_address_city') or '').strip()
-
         fields = {
             'first_name': first_name,
             'last_name': last_name,
@@ -184,10 +188,13 @@ def create_lead():
             fields['phone_mobile'] = phone_mobile
         if email:
             fields['email'] = [{'email_address': email, 'primary_address': True}]
-        if description:
-            fields['description'] = description[:2000]
-        if address_city:
-            fields['primary_address_city'] = address_city[:100]
+
+        # ESA custom fields — pass through if provided
+        for es_field in ('es_storage_type_c', 'es_storage_duration_c',
+                         'es_storage_size_c', 'es_storage_location_c'):
+            val = (data.get(es_field) or '').strip()
+            if val:
+                fields[es_field] = val
 
         record, error = client.create_record('Leads', fields)
         if error:
