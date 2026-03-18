@@ -60,17 +60,14 @@ def create_session():
 
     db = current_app.get_db_session()
     try:
-        # Enforce one active session per user
-        existing = db.query(VisitSession).filter_by(
+        # Cap at 10 concurrent active sessions to prevent abuse
+        active_count = db.query(VisitSession).filter_by(
             staff_user_id=current_user.id,
             status='active',
-        ).first()
+        ).count()
 
-        if existing:
-            return jsonify({
-                'error': 'You already have an active visit session',
-                'data': existing.to_dict(),
-            }), 409
+        if active_count >= 10:
+            return jsonify({'error': 'Too many active sessions (max 10)'}), 409
 
         session = VisitSession(
             site_code=site_code,
@@ -100,19 +97,19 @@ def create_session():
 @login_required
 @inventory_tools_access_required
 @rate_limit_api(max_requests=30, window_seconds=60)
-def get_active_session():
-    """Get the current user's active session (if any)."""
+def get_active_sessions():
+    """Get all of the current user's active sessions."""
     db = current_app.get_db_session()
     try:
-        session = db.query(VisitSession).filter_by(
+        sessions = db.query(VisitSession).filter_by(
             staff_user_id=current_user.id,
             status='active',
-        ).first()
+        ).order_by(VisitSession.created_at.desc()).all()
 
-        if not session:
-            return jsonify({'status': 'success', 'data': None})
-
-        return jsonify({'status': 'success', 'data': session.to_dict()})
+        return jsonify({
+            'status': 'success',
+            'data': [s.to_dict() for s in sessions],
+        })
 
     except Exception:
         logger.exception("Failed to get active visit session")
