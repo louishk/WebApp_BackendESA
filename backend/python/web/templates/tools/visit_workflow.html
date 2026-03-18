@@ -137,43 +137,55 @@
         <!-- LEFT: Unit Browser -->
         <div class="vw-main">
 
-            <!-- Filters -->
+            <!-- Filters (mirrors unit_availability) -->
             <div class="card">
                 <h2>Browse Units</h2>
                 <div class="ua-filter-grid" style="margin-top: 0.5rem;">
                     <div class="form-group">
-                        <label>Category</label>
+                        <label>Category Label</label>
                         <select id="vw-filter-category" class="form-select" onchange="applyUnitFilters()">
-                            <option value="">All</option>
+                            <option value="">All Categories</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Climate</label>
+                        <label>Type Code</label>
+                        <select id="vw-filter-type-code" class="form-select" onchange="applyUnitFilters()">
+                            <option value="">All Types</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Climate Code</label>
                         <select id="vw-filter-climate" class="form-select" onchange="applyUnitFilters()">
-                            <option value="">All</option>
+                            <option value="">All Climate</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Shape</label>
+                        <select id="vw-filter-shape" class="form-select" onchange="applyUnitFilters()">
+                            <option value="">All Shapes</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label>Floor</label>
                         <select id="vw-filter-floor" class="form-select" onchange="applyUnitFilters()">
-                            <option value="">All</option>
+                            <option value="">All Floors</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label>Min Size (sqft)</label>
-                        <input type="number" id="vw-filter-min-size" class="form-select" placeholder="0" onchange="applyUnitFilters()" min="0">
+                        <input type="number" id="vw-filter-min-size" class="form-select" placeholder="0" onchange="applyUnitFilters()" step="1" min="0">
                     </div>
                     <div class="form-group">
                         <label>Max Size (sqft)</label>
-                        <input type="number" id="vw-filter-max-size" class="form-select" placeholder="Any" onchange="applyUnitFilters()" min="0">
+                        <input type="number" id="vw-filter-max-size" class="form-select" placeholder="Any" onchange="applyUnitFilters()" step="1" min="0">
                     </div>
                     <div class="form-group" style="grid-column: 1 / -1;">
                         <label>Search</label>
-                        <input type="text" id="vw-filter-search" class="form-select" placeholder="Unit name, category..." oninput="applyUnitFilters()" style="max-width: 100%;">
+                        <input type="text" id="vw-filter-search" class="form-select" placeholder="Search unit name, category, notes..." oninput="applyUnitFilters()" style="max-width: 100%;">
                     </div>
                 </div>
                 <div style="margin-top: 0.5rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="resetUnitFilters()">Reset</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="resetUnitFilters()">Reset Filters</button>
                     <span id="vw-unit-count" style="font-size: 0.82rem; color: #666;"></span>
                 </div>
             </div>
@@ -191,12 +203,13 @@
                         <thead>
                             <tr>
                                 <th>Unit</th>
-                                <th>Category</th>
+                                <th>Category Label</th>
+                                <th>Type</th>
                                 <th>Size</th>
                                 <th>Flr</th>
                                 <th style="text-align: center;">Climate</th>
                                 <th style="text-align: right;">Std Rate</th>
-                                <th style="text-align: right;">Vacant</th>
+                                <th>Vacant</th>
                                 <th style="text-align: center; min-width: 80px;"></th>
                             </tr>
                         </thead>
@@ -627,6 +640,20 @@ select.form-select {
     let shortlistItems = [];   // shortlist items from session
     let pendingFlowType = null;
 
+    // Code → description lookups (populated from API label_lookups)
+    let TYPE_CODE_LABELS = {};
+    let CLIMATE_CODE_LABELS = {};
+    let SHAPE_LABELS = {};
+
+    function fmt(val, decimals) {
+        if (val == null) return '-';
+        return Number(val).toLocaleString('en-US', { minimumFractionDigits: decimals || 0, maximumFractionDigits: decimals || 0 });
+    }
+
+    function getDisplayCategory(u) {
+        return u.category_label || u.sTypeName || '-';
+    }
+
     // ===================== INIT =====================
     async function init() {
         await loadSites();
@@ -1048,6 +1075,12 @@ select.form-select {
             const data = await res.json();
             allUnits = data.units || [];
 
+            // Populate label lookups from dim tables (same as unit_availability)
+            const lookups = data.label_lookups || {};
+            if (lookups.type_codes) TYPE_CODE_LABELS = lookups.type_codes;
+            if (lookups.climate_codes) CLIMATE_CODE_LABELS = lookups.climate_codes;
+            if (lookups.shapes) SHAPE_LABELS = lookups.shapes;
+
             const filters = data.filters || {};
             const populateSel = (id, items, defaultLabel, labelFn) => {
                 const sel = document.getElementById(id);
@@ -1059,9 +1092,11 @@ select.form-select {
                     sel.appendChild(opt);
                 });
             };
-            populateSel('vw-filter-category', filters.categories, 'All');
-            populateSel('vw-filter-climate', filters.climate_codes, 'All');
-            populateSel('vw-filter-floor', filters.floors, 'All', f => `Floor ${f}`);
+            populateSel('vw-filter-category', filters.categories, 'All Categories');
+            populateSel('vw-filter-type-code', filters.type_codes, 'All Types', c => TYPE_CODE_LABELS[c] || c);
+            populateSel('vw-filter-climate', filters.climate_codes, 'All Climate', c => CLIMATE_CODE_LABELS[c] || c);
+            populateSel('vw-filter-shape', filters.shapes, 'All Shapes', c => SHAPE_LABELS[c] || c);
+            populateSel('vw-filter-floor', filters.floors, 'All Floors', f => `Floor ${f}`);
 
             document.getElementById('vw-units-loading').style.display = 'none';
             applyUnitFilters();
@@ -1073,26 +1108,28 @@ select.form-select {
 
     function applyUnitFilters() {
         const category = document.getElementById('vw-filter-category').value;
-        const climate = document.getElementById('vw-filter-climate').value;
+        const typeCode = document.getElementById('vw-filter-type-code').value;
+        const climateCode = document.getElementById('vw-filter-climate').value;
+        const shape = document.getElementById('vw-filter-shape').value;
         const floor = document.getElementById('vw-filter-floor').value;
         const minSize = parseFloat(document.getElementById('vw-filter-min-size').value) || 0;
         const maxSize = parseFloat(document.getElementById('vw-filter-max-size').value) || Infinity;
         const search = document.getElementById('vw-filter-search').value.toLowerCase().trim();
 
         filteredUnits = allUnits.filter(u => {
-            const catLabel = u.category_label || u.sTypeName || '';
-            if (category && catLabel !== category) return false;
-            if (climate && u.label_climate_code !== climate) return false;
-            const uFloor = u.iFloor != null ? u.iFloor : u.floor;
-            if (floor && uFloor !== parseInt(floor)) return false;
-            const area = u.area || u.area_sqft || 0;
-            if (area && area < minSize) return false;
-            if (area && area > maxSize) return false;
+            if (category && getDisplayCategory(u) !== category) return false;
+            if (typeCode && u.label_type_code !== typeCode) return false;
+            if (climateCode && u.label_climate_code !== climateCode) return false;
+            if (shape && u.label_shape !== shape) return false;
+            if (floor && u.iFloor !== parseInt(floor)) return false;
+            if (u.area && u.area < minSize) return false;
+            if (u.area && u.area > maxSize) return false;
             if (search) {
-                const hay = [u.sUnitName, u.sTypeName, u.category_label,
-                    u.label_climate_code, u.sUnitNote, u.sUnitDesc]
+                const haystack = [u.sUnitName, u.sTypeName, u.category_label,
+                    u.label_type_code, u.label_climate_code, u.label_shape,
+                    u.sUnitNote, u.sUnitDesc, u.sLocationCode]
                     .filter(Boolean).join(' ').toLowerCase();
-                if (!hay.includes(search)) return false;
+                if (!haystack.includes(search)) return false;
             }
             return true;
         });
@@ -1104,7 +1141,7 @@ select.form-select {
     }
 
     function resetUnitFilters() {
-        ['vw-filter-category', 'vw-filter-climate', 'vw-filter-floor'].forEach(id => {
+        ['vw-filter-category', 'vw-filter-type-code', 'vw-filter-climate', 'vw-filter-shape', 'vw-filter-floor'].forEach(id => {
             document.getElementById(id).value = '';
         });
         document.getElementById('vw-filter-min-size').value = '';
@@ -1115,14 +1152,6 @@ select.form-select {
 
     function isInShortlist(unitId) {
         return shortlistItems.some(i => i.unit_id == unitId);
-    }
-
-    function climateBadge(code) {
-        if (!code) return '';
-        const c = (code || '').toUpperCase();
-        if (c === 'A' || c === 'AC') return '<span class="badge badge-ac">AC</span>';
-        if (c === 'RF') return '<span class="badge badge-rf">RF</span>';
-        return '<span class="badge badge-nc">NC</span>';
     }
 
     function renderUnitsTable() {
@@ -1140,17 +1169,21 @@ select.form-select {
         tableWrap.style.display = 'block';
 
         tbody.innerHTML = filteredUnits.map(u => {
-            const unitName = u.sUnitName || u.unit_name || '';
-            const unitId = u.UnitID || u.unit_id || u.iUnitID;
-            const siteId = u.SiteID || u.site_id;
-            const catLabel = u.category_label || u.sTypeName || '-';
-            const area = u.area || u.area_sqft;
-            const areaStr = area ? Number(area).toLocaleString() + ' sqft' : '-';
-            const floor = u.iFloor != null ? u.iFloor : (u.floor != null ? u.floor : '-');
-            const climateCode = u.label_climate_code || u.climate_code || '';
-            const stdRate = u.dcStdRate || u.std_rate;
-            const vacantDays = u.iDaysVacant != null ? u.iDaysVacant : u.vacant_days;
-            const vacantStr = vacantDays != null ? vacantDays + 'd' : '-';
+            const siteCode = u.site_code || (siteMap[u.SiteID] ? siteMap[u.SiteID].site_code : u.sLocationCode) || u.SiteID;
+            const unitName = u.sUnitName || '';
+            const unitId = u.UnitID;
+            const siteId = u.SiteID;
+            const catLabel = getDisplayCategory(u);
+            const typeDesc = u.label_type_code ? (TYPE_CODE_LABELS[u.label_type_code] || u.label_type_code) : '';
+            const area = u.area ? fmt(u.area, 1) : '-';
+            const stdRate = fmtRate(u.dcStdRate);
+            const climateCode = u.label_climate_code || '';
+
+            const climateLabel = climateCode ? (CLIMATE_CODE_LABELS[climateCode] || climateCode) : (u.bClimate ? 'AC' : '-');
+            const acBadge = climateCode
+                ? `<span class="badge ${climateCode === 'A' ? 'badge-ac' : climateCode === 'RF' ? 'badge-rf' : 'badge-no'}">${escHtml(climateLabel)}</span>`
+                : (u.bClimate ? '<span class="badge badge-ac">AC</span>' : '<span class="badge badge-no">-</span>');
+
             const inList = isInShortlist(unitId);
 
             const unitData = encodeURIComponent(JSON.stringify({
@@ -1158,20 +1191,21 @@ select.form-select {
                 unit_id: unitId,
                 unit_name: unitName,
                 category_label: catLabel,
-                area: area,
-                floor: floor,
+                area: u.area,
+                floor: u.iFloor,
                 climate_code: climateCode,
-                std_rate: stdRate
+                std_rate: u.dcStdRate
             }));
 
             return `<tr class="unit-row${inList ? ' vw-in-shortlist' : ''}">
-                <td style="font-weight:600;">${escHtml(unitName)}</td>
+                <td style="font-weight:600;">${escHtml(unitName) || '-'}</td>
                 <td>${escHtml(catLabel)}</td>
-                <td>${escHtml(areaStr)}</td>
-                <td>${escHtml(String(floor))}</td>
-                <td style="text-align:center;">${climateBadge(climateCode)}</td>
-                <td style="text-align:right;">${fmtRate(stdRate)}</td>
-                <td style="text-align:right;">${escHtml(vacantStr)}</td>
+                <td>${escHtml(typeDesc) || '<span style="color:#bbb">-</span>'}</td>
+                <td>${area}</td>
+                <td>${u.iFloor != null ? u.iFloor : '-'}</td>
+                <td style="text-align:center;">${acBadge}</td>
+                <td style="text-align:right;">${stdRate}</td>
+                <td>${u.iDaysVacant != null ? u.iDaysVacant + 'd' : '-'}</td>
                 <td style="text-align:center;">
                     <button type="button"
                         class="btn-add-shortlist${inList ? ' in-list' : ''}"
