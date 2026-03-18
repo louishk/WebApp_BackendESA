@@ -195,6 +195,8 @@ def create_app(config=None, db_url=None):
     from web.routes.api_keys import api_keys_bp
     from web.routes.admin_siteinfo import admin_siteinfo_bp
     from web.routes.reservations import reservations_bp
+    from web.routes.crm import crm_bp
+    from web.routes.visits import visits_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
@@ -208,10 +210,14 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(api_keys_bp)
     app.register_blueprint(admin_siteinfo_bp)
     app.register_blueprint(reservations_bp)
+    app.register_blueprint(crm_bp)
+    app.register_blueprint(visits_bp)
 
-    # Exempt API routes from CSRF (they use JWT authentication)
+    # Exempt API routes from CSRF (they use JWT authentication or JSON-only)
     csrf.exempt(api_bp)
     csrf.exempt(reservations_bp)
+    csrf.exempt(crm_bp)
+    csrf.exempt(visits_bp)
 
     # Backward compatibility: also mount health check at root
     @app.route('/health')

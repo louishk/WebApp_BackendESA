@@ -318,6 +318,7 @@
         {% if current_user.can_access_inventory_tools() %}
         <a href="{{ url_for('tools.inventory_checker') }}" class="{{ 'active' if request.endpoint == 'tools.inventory_checker' else '' }}">Inventory Checker</a>
         <a href="{{ url_for('tools.unit_availability') }}" class="{{ 'active' if request.endpoint == 'tools.unit_availability' else '' }}">Unit Availability</a>
+        <a href="{{ url_for('tools.visit_workflow') }}" class="{{ 'active' if request.endpoint == 'tools.visit_workflow' else '' }}">Visit Workflow</a>
         {% endif %}
         {% if current_user.can_access_smart_lock() %}
         <a href="{{ url_for('tools.smart_lock_keypads') }}" class="{{ 'active' if request.endpoint and 'smart_lock' in request.endpoint else '' }}">Smart Lock</a>

@@ -1,0 +1,1323 @@
+{% extends "base.html" %}
+
+{% block title %}Visit Workflow - ESA Backend{% endblock %}
+
+{% block content %}
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+<div class="page-header">
+    <h1>Visit Workflow</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Walk-in and guided visit conversion workflow — find a customer, browse units, build a shortlist</p>
+</div>
+
+<!-- Session & Customer Panel -->
+<div class="card" id="session-panel">
+    <div id="no-session-view">
+        <h2>Start a Visit</h2>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem;">
+            <button type="button" class="btn vw-btn-start" onclick="startSession('walk_in')">
+                <i class="fas fa-walking" style="margin-right: 0.4rem;"></i> Walk-In
+            </button>
+            <button type="button" class="btn btn-secondary vw-btn-start" onclick="startSession('guided_visit')">
+                <i class="fas fa-clipboard-list" style="margin-right: 0.4rem;"></i> Guided Visit
+            </button>
+        </div>
+        <div id="session-start-site" style="margin-top: 1rem; display: none;">
+            <div class="form-group" style="max-width: 360px; margin-bottom: 0;">
+                <label>Site <span style="color: var(--esa-red);">*</span></label>
+                <select id="session-site-select" class="form-select" style="max-width: 100%;">
+                    <option value="">Select site...</option>
+                </select>
+            </div>
+            <div style="display: flex; gap: 0.75rem; margin-top: 0.75rem; flex-wrap: wrap;">
+                <button type="button" class="btn" id="confirm-start-btn" onclick="confirmStartSession()">
+                    <i class="fas fa-play" style="margin-right: 0.4rem;"></i> Begin Session
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="cancelStartSession()">Cancel</button>
+            </div>
+        </div>
+        <div id="session-start-error" style="display: none; color: var(--esa-red); margin-top: 0.5rem; font-size: 0.85rem;"></div>
+    </div>
+
+    <div id="active-session-view" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+                <h2 style="margin-bottom: 0;">
+                    <span id="session-type-label" class="vw-session-badge"></span>
+                    <span id="session-site-label" style="margin-left: 0.5rem; font-size: 1rem; color: #555; font-weight: normal;"></span>
+                </h2>
+                <div style="font-size: 0.8rem; color: #888; margin-top: 0.25rem;">Session ID: <span id="session-id-label"></span></div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="endSession()" id="end-session-btn">
+                <i class="fas fa-times" style="margin-right: 0.3rem;"></i> End Session
+            </button>
+        </div>
+
+        <!-- Customer search -->
+        <div style="margin-top: 1rem; border-top: 1px solid var(--esa-gray-dark); padding-top: 1rem;">
+            <h3 style="font-size: 0.95rem; color: var(--esa-navy); margin-bottom: 0.75rem;">Customer</h3>
+            <div id="no-lead-view">
+                <div style="display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap;">
+                    <div class="form-group" style="flex: 1; min-width: 200px; max-width: 340px; margin-bottom: 0;">
+                        <label>Search existing leads</label>
+                        <input type="text" id="lead-search-input" class="form-select" style="max-width: 100%;"
+                               placeholder="Name, phone, or email..."
+                               oninput="onLeadSearchInput()"
+                               onkeydown="if(event.key==='Enter'){searchLeads();}">
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" style="min-height: 44px;" onclick="searchLeads()">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+                <div id="lead-search-results" style="display: none; background: #fff; border: 1px solid var(--esa-gray-dark); border-radius: 6px; margin-top: 0.25rem; max-width: 400px; max-height: 200px; overflow-y: auto; box-shadow: 0 4px 12px rgba(0,0,0,0.12); position: relative; z-index: 10;"></div>
+                <div id="lead-search-status" style="font-size: 0.8rem; color: #888; margin-top: 0.3rem;"></div>
+                <button type="button" class="btn btn-secondary btn-sm" style="margin-top: 0.5rem;" onclick="showCreateLeadForm()">
+                    <i class="fas fa-user-plus" style="margin-right: 0.3rem;"></i> New Customer
+                </button>
+            </div>
+
+            <!-- Create lead form (hidden by default) -->
+            <div id="create-lead-form" style="display: none; background: #f8f9fa; border-radius: 8px; padding: 1rem; margin-top: 0.5rem; max-width: 420px;">
+                <h4 style="margin: 0 0 0.75rem; font-size: 0.9rem; color: var(--esa-navy);">New Customer</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                        <label>First Name <span style="color: var(--esa-red);">*</span></label>
+                        <input type="text" id="new-lead-first" class="form-select" style="max-width: 100%;" maxlength="80">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                        <label>Last Name <span style="color: var(--esa-red);">*</span></label>
+                        <input type="text" id="new-lead-last" class="form-select" style="max-width: 100%;" maxlength="80">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0.5rem;">
+                    <label>Phone</label>
+                    <input type="tel" id="new-lead-phone" class="form-select" style="max-width: 100%;" maxlength="40">
+                </div>
+                <div class="form-group" style="margin-bottom: 0.75rem;">
+                    <label>Email</label>
+                    <input type="email" id="new-lead-email" class="form-select" style="max-width: 100%;" maxlength="150">
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" class="btn btn-sm" onclick="createLead()">
+                        <i class="fas fa-check" style="margin-right: 0.3rem;"></i> Create
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="hideCreateLeadForm()">Cancel</button>
+                </div>
+                <div id="create-lead-error" style="display: none; color: var(--esa-red); font-size: 0.8rem; margin-top: 0.5rem;"></div>
+            </div>
+
+            <!-- Lead summary card -->
+            <div id="lead-summary-card" style="display: none; background: #f0f4ff; border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; max-width: 420px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div>
+                        <div style="font-weight: 600; color: var(--esa-navy); font-size: 0.95rem;" id="lead-card-name"></div>
+                        <div style="font-size: 0.82rem; color: #555; margin-top: 0.2rem;" id="lead-card-phone"></div>
+                        <div style="font-size: 0.82rem; color: #555;" id="lead-card-email"></div>
+                        <div style="font-size: 0.78rem; color: #888; margin-top: 0.2rem;" id="lead-card-status"></div>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" style="flex-shrink: 0;" onclick="clearLead()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Main 2-column layout: unit browser + shortlist -->
+<div id="visit-workspace" style="display: none;">
+    <div class="vw-workspace">
+
+        <!-- LEFT: Unit Browser -->
+        <div class="vw-main">
+
+            <!-- Filters -->
+            <div class="card">
+                <h2>Browse Units</h2>
+                <div class="ua-filter-grid" style="margin-top: 0.5rem;">
+                    <div class="form-group">
+                        <label>Category</label>
+                        <select id="vw-filter-category" class="form-select" onchange="applyUnitFilters()">
+                            <option value="">All</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Climate</label>
+                        <select id="vw-filter-climate" class="form-select" onchange="applyUnitFilters()">
+                            <option value="">All</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Floor</label>
+                        <select id="vw-filter-floor" class="form-select" onchange="applyUnitFilters()">
+                            <option value="">All</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Min Size (sqft)</label>
+                        <input type="number" id="vw-filter-min-size" class="form-select" placeholder="0" onchange="applyUnitFilters()" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Size (sqft)</label>
+                        <input type="number" id="vw-filter-max-size" class="form-select" placeholder="Any" onchange="applyUnitFilters()" min="0">
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label>Search</label>
+                        <input type="text" id="vw-filter-search" class="form-select" placeholder="Unit name, category..." oninput="applyUnitFilters()" style="max-width: 100%;">
+                    </div>
+                </div>
+                <div style="margin-top: 0.5rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="resetUnitFilters()">Reset</button>
+                    <span id="vw-unit-count" style="font-size: 0.82rem; color: #666;"></span>
+                </div>
+            </div>
+
+            <!-- Units table -->
+            <div class="card" style="padding: 0;">
+                <div id="vw-units-loading" style="padding: 2rem; text-align: center; color: #888;">
+                    <i class="fas fa-spinner fa-spin" style="margin-right: 0.4rem;"></i> Loading units...
+                </div>
+                <div id="vw-units-empty" style="display: none; padding: 2rem; text-align: center; color: #888;">
+                    No available units match your filters.
+                </div>
+                <div id="vw-units-table-wrap" style="display: none; overflow-x: auto; -webkit-overflow-scrolling: touch;">
+                    <table id="vw-units-table" style="font-size: 0.82rem;">
+                        <thead>
+                            <tr>
+                                <th>Unit</th>
+                                <th>Category</th>
+                                <th>Size</th>
+                                <th>Flr</th>
+                                <th style="text-align: center;">Climate</th>
+                                <th style="text-align: right;">Std Rate</th>
+                                <th style="text-align: right;">Vacant</th>
+                                <th style="text-align: center; min-width: 80px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="vw-units-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT: Shortlist Sidebar -->
+        <div class="vw-sidebar" id="vw-sidebar">
+            <div class="card" style="position: sticky; top: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2 style="margin-bottom: 0;">Shortlist <span id="shortlist-count-badge" class="vw-count-badge">0</span></h2>
+                    <button type="button" class="vw-sidebar-toggle btn btn-secondary btn-sm" id="sidebar-toggle-btn" onclick="toggleSidebar()" style="display: none;">
+                        <i class="fas fa-chevron-up"></i>
+                    </button>
+                </div>
+                <div id="shortlist-empty-msg" style="margin-top: 0.75rem; color: #888; font-size: 0.85rem;">
+                    Add units from the browser to build your shortlist.
+                </div>
+                <div id="shortlist-items"></div>
+                <div id="shortlist-actions" style="display: none; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--esa-gray-dark);">
+                    <button type="button" class="btn" style="width: 100%;" onclick="openOutcomeModal()">
+                        <i class="fas fa-flag-checkered" style="margin-right: 0.4rem;"></i> Complete Visit
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Mobile shortlist drawer toggle -->
+<div id="mobile-shortlist-fab" style="display: none; position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 200;">
+    <button type="button" class="btn" style="border-radius: 50px; padding: 0.7rem 1.2rem; box-shadow: 0 4px 16px rgba(0,0,0,0.2);" onclick="toggleMobileSidebar()">
+        <i class="fas fa-list" style="margin-right: 0.3rem;"></i>
+        Shortlist <span id="fab-count-badge" class="vw-count-badge" style="background: #fff; color: var(--esa-red);">0</span>
+    </button>
+</div>
+
+<!-- Outcome Modal -->
+<div id="outcome-modal" class="ua-modal" style="display: none;">
+    <div class="ua-modal-content" style="max-width: 480px;">
+        <div class="ua-modal-header">
+            <h3>Complete Visit</h3>
+            <button type="button" class="ua-modal-close" onclick="closeOutcomeModal()">&times;</button>
+        </div>
+        <div class="form-group">
+            <label>Outcome <span style="color: var(--esa-red);">*</span></label>
+            <select id="outcome-select" class="form-select" onchange="onOutcomeChange()" style="max-width: 100%;">
+                <option value="">Select outcome...</option>
+                <option value="reserved">Reserved</option>
+                <option value="converted">Converted</option>
+                <option value="visit_completed">Visit Completed</option>
+                <option value="lost">Lost</option>
+            </select>
+        </div>
+        <div id="lost-reason-group" class="form-group" style="display: none;">
+            <label>Lost Reason <span style="color: var(--esa-red);">*</span></label>
+            <select id="lost-reason-select" class="form-select" style="max-width: 100%;">
+                <option value="">Select reason...</option>
+                <option value="price_too_high">Price too high</option>
+                <option value="size_not_suitable">Size not suitable</option>
+                <option value="location_not_convenient">Location not convenient</option>
+                <option value="competitor_chosen">Competitor chosen</option>
+                <option value="just_browsing">Just browsing</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Notes</label>
+            <textarea id="outcome-notes" class="form-select" rows="3" maxlength="500"
+                      style="max-width: 100%; resize: vertical;" placeholder="Optional notes..."></textarea>
+        </div>
+        <div id="outcome-modal-error" style="display: none; color: var(--esa-red); font-size: 0.85rem; margin-bottom: 0.75rem;"></div>
+        <div class="ua-modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeOutcomeModal()">Cancel</button>
+            <button type="button" class="btn" id="outcome-submit-btn" onclick="submitOutcome()">Submit</button>
+        </div>
+    </div>
+</div>
+
+<!-- Item notes/discount edit modal -->
+<div id="item-edit-modal" class="ua-modal" style="display: none;">
+    <div class="ua-modal-content" style="max-width: 420px;">
+        <div class="ua-modal-header">
+            <h3>Edit Shortlist Item</h3>
+            <button type="button" class="ua-modal-close" onclick="closeItemEditModal()">&times;</button>
+        </div>
+        <div id="item-edit-unit-info" style="background: #f0f4ff; border-radius: 6px; padding: 0.6rem 0.85rem; margin-bottom: 1rem; font-size: 0.85rem;"></div>
+        <div class="form-group">
+            <label>Notes</label>
+            <textarea id="item-edit-notes" class="form-select" rows="3" maxlength="500"
+                      style="max-width: 100%; resize: vertical;" placeholder="Notes for this unit..."></textarea>
+        </div>
+        <div id="item-edit-error" style="display: none; color: var(--esa-red); font-size: 0.8rem; margin-bottom: 0.5rem;"></div>
+        <div class="ua-modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeItemEditModal()">Cancel</button>
+            <button type="button" class="btn" onclick="saveItemEdit()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Generic message modal -->
+<div id="msg-modal" class="ua-modal" style="display: none;">
+    <div class="ua-modal-content" style="max-width: 380px; text-align: center;">
+        <div class="ua-modal-header" style="justify-content: center; margin-bottom: 0.5rem;">
+            <h3 id="msg-modal-title">Notice</h3>
+        </div>
+        <p id="msg-modal-body" style="color: #444; font-size: 0.95rem; margin: 0.75rem 0 1.25rem;"></p>
+        <button type="button" class="btn" onclick="document.getElementById('msg-modal').style.display='none'">OK</button>
+    </div>
+</div>
+
+<style>
+/* ========== FORM ELEMENTS ========== */
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; margin-bottom: 0.35rem; font-weight: 500; font-size: 0.85rem; }
+.form-select {
+    width: 100%; max-width: 400px;
+    padding: 0.55rem 0.75rem;
+    font-size: 16px;
+    border: 1px solid var(--esa-gray-dark);
+    border-radius: 6px;
+    background: #fff;
+    -webkit-appearance: none;
+    appearance: none;
+}
+select.form-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
+}
+.form-select:focus { outline: none; border-color: var(--esa-navy); box-shadow: 0 0 0 2px rgba(26,58,92,0.15); }
+
+/* ========== SESSION ========== */
+.vw-btn-start { min-height: 48px; min-width: 140px; font-size: 1rem; }
+.vw-session-badge {
+    display: inline-block;
+    padding: 0.2rem 0.65rem;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--esa-navy);
+    color: #fff;
+    vertical-align: middle;
+}
+.vw-session-badge.walk-in { background: #28A745; }
+.vw-session-badge.guided { background: #17a2b8; }
+
+/* ========== WORKSPACE ========== */
+.vw-workspace {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 1.5rem;
+    align-items: start;
+}
+.vw-sidebar .card { border-left: 3px solid var(--esa-red); }
+
+/* ========== UNIT TABLE ========== */
+#vw-units-table { width: 100%; border-collapse: collapse; }
+#vw-units-table th {
+    white-space: nowrap; padding: 0.55rem 0.5rem;
+    font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.02em; background: var(--esa-gray);
+    color: var(--esa-navy); font-weight: 600;
+    border-bottom: 1px solid var(--esa-gray-dark);
+}
+#vw-units-table td {
+    padding: 0.5rem 0.5rem;
+    white-space: nowrap;
+    border-bottom: 1px solid #eee;
+    font-size: 0.82rem;
+}
+#vw-units-table tr.unit-row:hover { background: rgba(26,58,92,0.05); }
+#vw-units-table tr.vw-in-shortlist { background: rgba(40,167,69,0.07); }
+#vw-units-table tr.vw-in-shortlist:hover { background: rgba(40,167,69,0.12); }
+
+/* ========== BADGES ========== */
+.badge {
+    display: inline-block;
+    padding: 0.2rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+.badge-ac { background: #d4edda; color: #155724; }
+.badge-rf { background: #cce5ff; color: #004085; }
+.badge-nc { background: #e2e3e5; color: #383d41; }
+
+/* ========== ADD TO SHORTLIST BUTTON ========== */
+.btn-add-shortlist {
+    padding: 0.3rem 0.65rem;
+    font-size: 0.78rem;
+    background: var(--esa-navy);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    min-height: 32px;
+    touch-action: manipulation;
+    white-space: nowrap;
+}
+.btn-add-shortlist:hover { opacity: 0.85; }
+.btn-add-shortlist:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-add-shortlist.in-list {
+    background: #28A745;
+}
+
+/* ========== SHORTLIST ITEMS ========== */
+.vw-shortlist-item {
+    background: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin-top: 0.75rem;
+}
+.vw-shortlist-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+.vw-shortlist-item-header h4 {
+    margin: 0;
+    font-size: 0.88rem;
+    color: var(--esa-navy);
+    font-weight: 600;
+}
+.vw-shortlist-item-meta {
+    font-size: 0.78rem;
+    color: #666;
+    margin-top: 0.3rem;
+    line-height: 1.5;
+}
+.vw-shortlist-item-rate {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--esa-navy);
+    margin-top: 0.3rem;
+}
+.vw-shortlist-item-notes {
+    font-size: 0.78rem;
+    color: #555;
+    margin-top: 0.35rem;
+    font-style: italic;
+    border-top: 1px solid #e8e8e8;
+    padding-top: 0.3rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.vw-item-actions {
+    display: flex;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+.vw-item-btn {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    min-height: 30px;
+    min-width: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.vw-item-btn-edit { background: #e9ecef; color: #333; }
+.vw-item-btn-remove { background: #fdecea; color: var(--esa-red); }
+.vw-item-btn:hover { opacity: 0.8; }
+
+/* ========== COUNT BADGE ========== */
+.vw-count-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    background: var(--esa-red);
+    color: #fff;
+    margin-left: 0.25rem;
+    vertical-align: middle;
+}
+
+/* ========== MODAL ========== */
+.ua-modal {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.ua-modal-content {
+    background: #fff;
+    padding: 1.5rem;
+    border-radius: 12px;
+    width: 100%;
+    max-width: 520px;
+    margin: auto;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+}
+.ua-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+.ua-modal-header h3 { margin: 0; color: var(--esa-navy); font-size: 1.1rem; }
+.ua-modal-close {
+    background: none; border: none; font-size: 1.6rem; color: #999;
+    cursor: pointer; padding: 0 0.25rem; line-height: 1;
+    min-width: 44px; min-height: 44px;
+    display: flex; align-items: center; justify-content: center;
+}
+.ua-modal-close:hover { color: #333; }
+.ua-modal-actions {
+    display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.25rem;
+}
+.ua-modal-actions .btn { min-height: 44px; min-width: 90px; }
+
+/* ========== FILTER GRID ========== */
+.ua-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+}
+.ua-filter-grid .form-select { max-width: 100%; }
+
+/* ========== MOBILE DRAWER ========== */
+@media (max-width: 820px) {
+    .vw-workspace { grid-template-columns: 1fr; }
+
+    .vw-sidebar {
+        display: none;
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        z-index: 150;
+        padding: 0 1rem 1.5rem;
+        background: transparent;
+        max-height: 70vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .vw-sidebar.mobile-open {
+        display: block;
+    }
+    .vw-sidebar .card {
+        position: static;
+        border-radius: 12px 12px 0 0;
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+        max-height: none;
+    }
+    #mobile-shortlist-fab { display: block !important; }
+    .ua-filter-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 500px) {
+    .ua-filter-grid { grid-template-columns: 1fr; }
+    .ua-modal-content { padding: 1.25rem 1rem; }
+    .ua-modal-actions { flex-direction: column-reverse; }
+    .ua-modal-actions .btn { width: 100%; }
+}
+
+@media (min-width: 821px) and (max-width: 1100px) {
+    .vw-workspace { grid-template-columns: 1fr 280px; }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    clearTimeout(window.autoRefreshTimeout);
+
+    const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+    function apiHeaders() {
+        return { 'Content-Type': 'application/json', 'X-CSRFToken': csrf };
+    }
+
+    function escHtml(str) {
+        if (!str) return '';
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    function fmtRate(val) {
+        if (val == null || val === 0) return '-';
+        return Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function showMsg(title, body) {
+        document.getElementById('msg-modal-title').textContent = title;
+        document.getElementById('msg-modal-body').textContent = body;
+        document.getElementById('msg-modal').style.display = 'flex';
+    }
+
+    // ===================== STATE =====================
+    let siteMap = {};          // site_id → site object
+    let allUnits = [];         // all available units for session site
+    let filteredUnits = [];
+    let currentSession = null;
+    let shortlistItems = [];   // shortlist items from session
+    let pendingFlowType = null;
+
+    // ===================== INIT =====================
+    async function init() {
+        await loadSites();
+        await checkActiveSession();
+    }
+
+    async function loadSites() {
+        try {
+            const res = await fetch('/api/sites', { headers: apiHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+            siteMap = {};
+            const sel = document.getElementById('session-site-select');
+            sel.innerHTML = '<option value="">Select site...</option>';
+            (data.sites || []).forEach(s => {
+                siteMap[s.site_id] = s;
+                const opt = document.createElement('option');
+                opt.value = s.site_code;
+                opt.textContent = `${s.site_code} - ${s.name}`;
+                sel.appendChild(opt);
+            });
+        } catch (e) {
+            console.error('Failed to load sites:', e);
+        }
+    }
+
+    async function checkActiveSession() {
+        try {
+            const res = await fetch('/api/visits/active', { headers: apiHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.status === 'success' && data.data) {
+                currentSession = data.data;
+                shortlistItems = currentSession.shortlist_items || [];
+                showActiveSession();
+                await loadUnitsForSession();
+            }
+        } catch (e) {
+            console.error('Failed to check active session:', e);
+        }
+    }
+
+    // ===================== SESSION MANAGEMENT =====================
+    function startSession(flowType) {
+        pendingFlowType = flowType;
+        document.getElementById('session-start-site').style.display = 'block';
+        document.getElementById('session-start-error').style.display = 'none';
+        // update confirm button label
+        const label = flowType === 'walk_in' ? 'Walk-In' : 'Guided Visit';
+        document.getElementById('confirm-start-btn').innerHTML =
+            `<i class="fas fa-play" style="margin-right:0.4rem;"></i> Begin ${label}`;
+    }
+
+    function cancelStartSession() {
+        pendingFlowType = null;
+        document.getElementById('session-start-site').style.display = 'none';
+        document.getElementById('session-start-error').style.display = 'none';
+    }
+
+    async function confirmStartSession() {
+        const siteCode = document.getElementById('session-site-select').value;
+        const errEl = document.getElementById('session-start-error');
+        errEl.style.display = 'none';
+
+        if (!siteCode) {
+            errEl.textContent = 'Please select a site.';
+            errEl.style.display = 'block';
+            return;
+        }
+
+        const btn = document.getElementById('confirm-start-btn');
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('/api/visits', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify({ site_code: siteCode, flow_type: pendingFlowType })
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                errEl.textContent = data.error || 'Failed to start session.';
+                errEl.style.display = 'block';
+                return;
+            }
+            currentSession = data.data;
+            shortlistItems = currentSession.shortlist_items || [];
+            showActiveSession();
+            await loadUnitsForSession();
+        } catch (e) {
+            errEl.textContent = 'Network error. Please try again.';
+            errEl.style.display = 'block';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    function showActiveSession() {
+        document.getElementById('no-session-view').style.display = 'none';
+        document.getElementById('active-session-view').style.display = 'block';
+        document.getElementById('visit-workspace').style.display = 'block';
+
+        const badge = document.getElementById('session-type-label');
+        badge.textContent = currentSession.flow_type === 'walk_in' ? 'Walk-In' : 'Guided Visit';
+        badge.className = 'vw-session-badge ' + (currentSession.flow_type === 'walk_in' ? 'walk-in' : 'guided');
+
+        document.getElementById('session-site-label').textContent = currentSession.site_code || '';
+        document.getElementById('session-id-label').textContent = currentSession.id || '';
+
+        // Restore lead if session has one
+        if (currentSession.lead_id) {
+            fetchAndShowLead(currentSession.lead_id);
+        }
+
+        renderShortlist();
+    }
+
+    async function endSession() {
+        if (!currentSession) return;
+        if (!confirm('End this visit session? You can still record an outcome first.')) return;
+
+        const btn = document.getElementById('end-session-btn');
+        btn.disabled = true;
+
+        try {
+            // Just clear state locally — session remains in DB until outcome is submitted
+            currentSession = null;
+            shortlistItems = [];
+            allUnits = [];
+            filteredUnits = [];
+
+            // Reset UI
+            document.getElementById('no-session-view').style.display = 'block';
+            document.getElementById('active-session-view').style.display = 'none';
+            document.getElementById('visit-workspace').style.display = 'none';
+            document.getElementById('session-start-site').style.display = 'none';
+            document.getElementById('lead-summary-card').style.display = 'none';
+            document.getElementById('no-lead-view').style.display = 'block';
+            document.getElementById('lead-search-input').value = '';
+            document.getElementById('lead-search-results').style.display = 'none';
+            document.getElementById('session-site-select').value = '';
+            renderShortlist();
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // ===================== CUSTOMER / LEAD =====================
+    let leadSearchTimeout = null;
+
+    function onLeadSearchInput() {
+        clearTimeout(leadSearchTimeout);
+        const q = document.getElementById('lead-search-input').value.trim();
+        if (q.length < 2) {
+            document.getElementById('lead-search-results').style.display = 'none';
+            document.getElementById('lead-search-status').textContent = '';
+            return;
+        }
+        leadSearchTimeout = setTimeout(searchLeads, 400);
+    }
+
+    async function searchLeads() {
+        const q = document.getElementById('lead-search-input').value.trim();
+        if (!q) return;
+
+        const statusEl = document.getElementById('lead-search-status');
+        const resultsEl = document.getElementById('lead-search-results');
+        statusEl.textContent = 'Searching...';
+        resultsEl.style.display = 'none';
+
+        try {
+            const res = await fetch(`/api/crm/leads/search?q=${encodeURIComponent(q)}`, { headers: apiHeaders() });
+            const data = await res.json();
+            const leads = data.data || [];
+
+            if (leads.length === 0) {
+                statusEl.textContent = 'No leads found.';
+                resultsEl.style.display = 'none';
+                return;
+            }
+
+            statusEl.textContent = `${leads.length} result${leads.length === 1 ? '' : 's'}`;
+            resultsEl.innerHTML = leads.map(l => `
+                <div class="vw-lead-result" onclick="selectLead(${escHtml(JSON.stringify(l).replace(/'/g, '&#39;'))})"
+                     data-lead-id="${escHtml(String(l.id))}"
+                     style="padding: 0.6rem 0.85rem; cursor: pointer; border-bottom: 1px solid #f0f0f0;">
+                    <div style="font-weight: 600; font-size: 0.88rem;">${escHtml(l.full_name || (l.first_name + ' ' + l.last_name))}</div>
+                    <div style="font-size: 0.78rem; color: #666;">${escHtml(l.phone_mobile || '')}${l.phone_mobile && l.email ? ' · ' : ''}${escHtml(l.email || '')}</div>
+                    <div style="font-size: 0.72rem; color: #999;">${escHtml(l.status || '')}${l.lead_source ? ' · ' + escHtml(l.lead_source) : ''}</div>
+                </div>
+            `).join('');
+            resultsEl.style.display = 'block';
+
+            // hover highlight
+            resultsEl.querySelectorAll('.vw-lead-result').forEach(el => {
+                el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
+                el.addEventListener('mouseleave', () => el.style.background = '');
+            });
+        } catch (e) {
+            statusEl.textContent = 'Search failed.';
+        }
+    }
+
+    async function selectLead(leadOrId) {
+        const lead = typeof leadOrId === 'object' ? leadOrId : null;
+        document.getElementById('lead-search-results').style.display = 'none';
+        document.getElementById('lead-search-status').textContent = '';
+
+        if (lead) {
+            showLeadCard(lead);
+            await linkLeadToSession(lead.id);
+        }
+    }
+
+    async function fetchAndShowLead(leadId) {
+        try {
+            const res = await fetch(`/api/crm/leads/${leadId}`, { headers: apiHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.data) showLeadCard(data.data);
+        } catch (e) {
+            console.error('Failed to fetch lead:', e);
+        }
+    }
+
+    function showLeadCard(lead) {
+        document.getElementById('no-lead-view').style.display = 'none';
+        document.getElementById('create-lead-form').style.display = 'none';
+
+        document.getElementById('lead-card-name').textContent = lead.full_name || ((lead.first_name || '') + ' ' + (lead.last_name || '')).trim();
+        document.getElementById('lead-card-phone').textContent = lead.phone_mobile ? 'Phone: ' + lead.phone_mobile : '';
+        document.getElementById('lead-card-email').textContent = lead.email ? 'Email: ' + lead.email : '';
+        document.getElementById('lead-card-status').textContent = lead.status ? 'Status: ' + lead.status : '';
+        document.getElementById('lead-summary-card').style.display = 'block';
+    }
+
+    async function linkLeadToSession(leadId) {
+        if (!currentSession) return;
+        try {
+            const res = await fetch(`/api/visits/${currentSession.id}`, {
+                method: 'PATCH',
+                headers: apiHeaders(),
+                body: JSON.stringify({ lead_id: leadId })
+            });
+            const data = await res.json();
+            if (data.data) currentSession = data.data;
+        } catch (e) {
+            console.error('Failed to link lead to session:', e);
+        }
+    }
+
+    function clearLead() {
+        document.getElementById('lead-summary-card').style.display = 'none';
+        document.getElementById('no-lead-view').style.display = 'block';
+        document.getElementById('lead-search-input').value = '';
+    }
+
+    function showCreateLeadForm() {
+        document.getElementById('create-lead-form').style.display = 'block';
+        document.getElementById('create-lead-error').style.display = 'none';
+        document.getElementById('new-lead-first').focus();
+    }
+
+    function hideCreateLeadForm() {
+        document.getElementById('create-lead-form').style.display = 'none';
+    }
+
+    async function createLead() {
+        const first = document.getElementById('new-lead-first').value.trim();
+        const last = document.getElementById('new-lead-last').value.trim();
+        const phone = document.getElementById('new-lead-phone').value.trim();
+        const email = document.getElementById('new-lead-email').value.trim();
+        const errEl = document.getElementById('create-lead-error');
+        errEl.style.display = 'none';
+
+        if (!first || !last) {
+            errEl.textContent = 'First and last name are required.';
+            errEl.style.display = 'block';
+            return;
+        }
+
+        const body = { first_name: first, last_name: last };
+        if (phone) body.phone_mobile = phone;
+        if (email) body.email = email;
+
+        try {
+            const res = await fetch('/api/crm/leads', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                errEl.textContent = data.error || 'Failed to create lead.';
+                errEl.style.display = 'block';
+                return;
+            }
+            hideCreateLeadForm();
+            showLeadCard(data.data);
+            await linkLeadToSession(data.data.id);
+        } catch (e) {
+            errEl.textContent = 'Network error. Please try again.';
+            errEl.style.display = 'block';
+        }
+    }
+
+    // ===================== UNIT BROWSER =====================
+    async function loadUnitsForSession() {
+        if (!currentSession) return;
+
+        // Find site_id by site_code
+        const siteCode = currentSession.site_code;
+        const siteEntry = Object.values(siteMap).find(s => s.site_code === siteCode);
+        if (!siteEntry) {
+            document.getElementById('vw-units-loading').textContent = 'Site not found.';
+            return;
+        }
+
+        document.getElementById('vw-units-loading').style.display = 'block';
+        document.getElementById('vw-units-table-wrap').style.display = 'none';
+        document.getElementById('vw-units-empty').style.display = 'none';
+
+        try {
+            const res = await fetch(`/api/unit-availability?site_ids=${siteEntry.site_id}`, { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            allUnits = data.units || [];
+
+            const filters = data.filters || {};
+            const populateSel = (id, items, defaultLabel, labelFn) => {
+                const sel = document.getElementById(id);
+                sel.innerHTML = `<option value="">${defaultLabel}</option>`;
+                (items || []).forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item;
+                    opt.textContent = labelFn ? labelFn(item) : item;
+                    sel.appendChild(opt);
+                });
+            };
+            populateSel('vw-filter-category', filters.categories, 'All');
+            populateSel('vw-filter-climate', filters.climate_codes, 'All');
+            populateSel('vw-filter-floor', filters.floors, 'All', f => `Floor ${f}`);
+
+            document.getElementById('vw-units-loading').style.display = 'none';
+            applyUnitFilters();
+        } catch (e) {
+            document.getElementById('vw-units-loading').textContent = 'Failed to load units.';
+            console.error('Failed to load units:', e);
+        }
+    }
+
+    function applyUnitFilters() {
+        const category = document.getElementById('vw-filter-category').value;
+        const climate = document.getElementById('vw-filter-climate').value;
+        const floor = document.getElementById('vw-filter-floor').value;
+        const minSize = parseFloat(document.getElementById('vw-filter-min-size').value) || 0;
+        const maxSize = parseFloat(document.getElementById('vw-filter-max-size').value) || Infinity;
+        const search = document.getElementById('vw-filter-search').value.toLowerCase().trim();
+
+        filteredUnits = allUnits.filter(u => {
+            const catLabel = u.category_label || u.sTypeName || '';
+            if (category && catLabel !== category) return false;
+            if (climate && u.label_climate_code !== climate) return false;
+            if (floor && u.iFloor !== parseInt(floor)) return false;
+            const area = u.area || u.area_sqft || 0;
+            if (area && area < minSize) return false;
+            if (area && area > maxSize) return false;
+            if (search) {
+                const hay = [u.sUnitName, u.unit_name, u.sTypeName, u.category_label,
+                    u.label_climate_code, u.sUnitNote]
+                    .filter(Boolean).join(' ').toLowerCase();
+                if (!hay.includes(search)) return false;
+            }
+            return true;
+        });
+
+        document.getElementById('vw-unit-count').textContent =
+            `${filteredUnits.length} of ${allUnits.length} units`;
+
+        renderUnitsTable();
+    }
+
+    function resetUnitFilters() {
+        ['vw-filter-category', 'vw-filter-climate', 'vw-filter-floor'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('vw-filter-min-size').value = '';
+        document.getElementById('vw-filter-max-size').value = '';
+        document.getElementById('vw-filter-search').value = '';
+        applyUnitFilters();
+    }
+
+    function isInShortlist(unitId) {
+        return shortlistItems.some(i => i.unit_id === unitId);
+    }
+
+    function climateBadge(code) {
+        if (!code) return '';
+        const c = (code || '').toUpperCase();
+        if (c === 'A' || c === 'AC') return '<span class="badge badge-ac">AC</span>';
+        if (c === 'RF') return '<span class="badge badge-rf">RF</span>';
+        return '<span class="badge badge-nc">NC</span>';
+    }
+
+    function renderUnitsTable() {
+        const tableWrap = document.getElementById('vw-units-table-wrap');
+        const empty = document.getElementById('vw-units-empty');
+        const tbody = document.getElementById('vw-units-tbody');
+
+        if (filteredUnits.length === 0) {
+            tableWrap.style.display = 'none';
+            empty.style.display = 'block';
+            return;
+        }
+
+        empty.style.display = 'none';
+        tableWrap.style.display = 'block';
+
+        tbody.innerHTML = filteredUnits.map(u => {
+            const unitName = u.unit_name || u.sUnitName || '';
+            const unitId = u.unit_id || u.iUnitID;
+            const siteId = u.site_id;
+            const catLabel = u.category_label || u.sTypeName || '-';
+            const area = u.area || u.area_sqft;
+            const areaStr = area ? area.toLocaleString() + ' sqft' : '-';
+            const floor = u.floor != null ? u.floor : (u.iFloor != null ? u.iFloor : '-');
+            const climateCode = u.label_climate_code || u.climate_code || '';
+            const stdRate = u.std_rate;
+            const vacantDays = u.vacant_days;
+            const vacantStr = vacantDays != null ? vacantDays + 'd' : '-';
+            const inList = isInShortlist(unitId);
+
+            const unitData = encodeURIComponent(JSON.stringify({
+                site_id: siteId,
+                unit_id: unitId,
+                unit_name: unitName,
+                category_label: catLabel,
+                area: area,
+                floor: floor,
+                climate_code: climateCode,
+                std_rate: stdRate
+            }));
+
+            return `<tr class="unit-row${inList ? ' vw-in-shortlist' : ''}">
+                <td style="font-weight:600;">${escHtml(unitName)}</td>
+                <td>${escHtml(catLabel)}</td>
+                <td>${escHtml(areaStr)}</td>
+                <td>${escHtml(String(floor))}</td>
+                <td style="text-align:center;">${climateBadge(climateCode)}</td>
+                <td style="text-align:right;">${fmtRate(stdRate)}</td>
+                <td style="text-align:right;">${escHtml(vacantStr)}</td>
+                <td style="text-align:center;">
+                    <button type="button"
+                        class="btn-add-shortlist${inList ? ' in-list' : ''}"
+                        ${inList ? 'disabled' : `onclick="addToShortlist('${unitData}')"`}>
+                        ${inList ? '<i class="fas fa-check"></i>' : '+ Add'}
+                    </button>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    // ===================== SHORTLIST =====================
+    async function addToShortlist(encodedData) {
+        if (!currentSession) return;
+        let unitData;
+        try {
+            unitData = JSON.parse(decodeURIComponent(encodedData));
+        } catch (e) {
+            return;
+        }
+
+        try {
+            const body = {
+                site_id: unitData.site_id,
+                unit_id: unitData.unit_id,
+                unit_name: unitData.unit_name,
+                category_label: unitData.category_label,
+                area: unitData.area,
+                floor: unitData.floor,
+                climate_code: unitData.climate_code,
+                std_rate: unitData.std_rate
+            };
+            const res = await fetch(`/api/visits/${currentSession.id}/shortlist`, {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                showMsg('Error', data.error || 'Failed to add to shortlist.');
+                return;
+            }
+            shortlistItems.push(data.data);
+            renderShortlist();
+            renderUnitsTable(); // re-render to mark as in-list
+        } catch (e) {
+            showMsg('Error', 'Network error. Please try again.');
+        }
+    }
+
+    async function removeFromShortlist(itemId) {
+        if (!currentSession) return;
+        try {
+            const res = await fetch(`/api/visits/${currentSession.id}/shortlist/${itemId}`, {
+                method: 'DELETE',
+                headers: apiHeaders()
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                showMsg('Error', data.error || 'Failed to remove item.');
+                return;
+            }
+            shortlistItems = shortlistItems.filter(i => i.id !== itemId);
+            renderShortlist();
+            renderUnitsTable();
+        } catch (e) {
+            showMsg('Error', 'Network error. Please try again.');
+        }
+    }
+
+    let editingItemId = null;
+
+    function openItemEditModal(itemId) {
+        const item = shortlistItems.find(i => i.id === itemId);
+        if (!item) return;
+        editingItemId = itemId;
+
+        document.getElementById('item-edit-unit-info').innerHTML =
+            `<strong>${escHtml(item.unit_name)}</strong> — ${escHtml(item.category_label || '')} · ${escHtml(item.area ? item.area + ' sqft' : '')}`;
+        document.getElementById('item-edit-notes').value = item.notes || '';
+        document.getElementById('item-edit-error').style.display = 'none';
+        document.getElementById('item-edit-modal').style.display = 'flex';
+    }
+
+    function closeItemEditModal() {
+        editingItemId = null;
+        document.getElementById('item-edit-modal').style.display = 'none';
+    }
+
+    async function saveItemEdit() {
+        if (!editingItemId || !currentSession) return;
+        const notes = document.getElementById('item-edit-notes').value.trim();
+        const errEl = document.getElementById('item-edit-error');
+        errEl.style.display = 'none';
+
+        try {
+            const res = await fetch(`/api/visits/${currentSession.id}/shortlist/${editingItemId}`, {
+                method: 'PATCH',
+                headers: apiHeaders(),
+                body: JSON.stringify({ notes })
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                errEl.textContent = data.error || 'Failed to save.';
+                errEl.style.display = 'block';
+                return;
+            }
+            const idx = shortlistItems.findIndex(i => i.id === editingItemId);
+            if (idx !== -1) shortlistItems[idx] = data.data;
+            closeItemEditModal();
+            renderShortlist();
+        } catch (e) {
+            errEl.textContent = 'Network error.';
+            errEl.style.display = 'block';
+        }
+    }
+
+    function renderShortlist() {
+        const container = document.getElementById('shortlist-items');
+        const emptyMsg = document.getElementById('shortlist-empty-msg');
+        const actions = document.getElementById('shortlist-actions');
+        const countBadge = document.getElementById('shortlist-count-badge');
+        const fabBadge = document.getElementById('fab-count-badge');
+
+        const count = shortlistItems.length;
+        countBadge.textContent = count;
+        fabBadge.textContent = count;
+
+        if (count === 0) {
+            emptyMsg.style.display = 'block';
+            actions.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+
+        emptyMsg.style.display = 'none';
+        actions.style.display = 'block';
+
+        container.innerHTML = shortlistItems.map(item => `
+            <div class="vw-shortlist-item">
+                <div class="vw-shortlist-item-header">
+                    <h4>${escHtml(item.unit_name)}</h4>
+                    <div class="vw-item-actions">
+                        <button type="button" class="vw-item-btn vw-item-btn-edit" title="Edit notes"
+                                onclick="openItemEditModal(${item.id})">
+                            <i class="fas fa-pencil-alt"></i>
+                        </button>
+                        <button type="button" class="vw-item-btn vw-item-btn-remove" title="Remove"
+                                onclick="removeFromShortlist(${item.id})">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="vw-shortlist-item-meta">
+                    ${escHtml(item.category_label || '')}
+                    ${item.area ? ' · ' + escHtml(String(item.area)) + ' sqft' : ''}
+                    ${item.floor != null ? ' · Floor ' + escHtml(String(item.floor)) : ''}
+                    ${item.climate_code ? ' · ' + climateBadge(item.climate_code) : ''}
+                </div>
+                <div class="vw-shortlist-item-rate">
+                    ${item.std_rate ? fmtRate(item.std_rate) : '-'}
+                    ${item.indicative_rate ? ` <span style="color:#28A745;">(${fmtRate(item.indicative_rate)})</span>` : ''}
+                </div>
+                ${item.notes ? `<div class="vw-shortlist-item-notes">${escHtml(item.notes)}</div>` : ''}
+            </div>
+        `).join('');
+    }
+
+    // ===================== MOBILE SIDEBAR =====================
+    function toggleMobileSidebar() {
+        const sidebar = document.getElementById('vw-sidebar');
+        sidebar.classList.toggle('mobile-open');
+    }
+
+    function toggleSidebar() {
+        toggleMobileSidebar();
+    }
+
+    // ===================== OUTCOME MODAL =====================
+    function openOutcomeModal() {
+        if (!currentSession) return;
+        document.getElementById('outcome-select').value = '';
+        document.getElementById('lost-reason-group').style.display = 'none';
+        document.getElementById('lost-reason-select').value = '';
+        document.getElementById('outcome-notes').value = '';
+        document.getElementById('outcome-modal-error').style.display = 'none';
+        document.getElementById('outcome-modal').style.display = 'flex';
+    }
+
+    function closeOutcomeModal() {
+        document.getElementById('outcome-modal').style.display = 'none';
+    }
+
+    function onOutcomeChange() {
+        const outcome = document.getElementById('outcome-select').value;
+        document.getElementById('lost-reason-group').style.display =
+            outcome === 'lost' ? 'block' : 'none';
+    }
+
+    async function submitOutcome() {
+        if (!currentSession) return;
+        const outcome = document.getElementById('outcome-select').value;
+        const notes = document.getElementById('outcome-notes').value.trim();
+        const lostReason = document.getElementById('lost-reason-select').value;
+        const errEl = document.getElementById('outcome-modal-error');
+        errEl.style.display = 'none';
+
+        if (!outcome) {
+            errEl.textContent = 'Please select an outcome.';
+            errEl.style.display = 'block';
+            return;
+        }
+        if (outcome === 'lost' && !lostReason) {
+            errEl.textContent = 'Please select a lost reason.';
+            errEl.style.display = 'block';
+            return;
+        }
+
+        const btn = document.getElementById('outcome-submit-btn');
+        btn.disabled = true;
+
+        const body = { outcome };
+        if (notes) body.outcome_notes = notes;
+        if (outcome === 'lost' && lostReason) body.lost_reason = lostReason;
+
+        try {
+            const res = await fetch(`/api/visits/${currentSession.id}/outcome`, {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) {
+                errEl.textContent = data.error || 'Failed to submit outcome.';
+                errEl.style.display = 'block';
+                return;
+            }
+            closeOutcomeModal();
+            // Reset entire page state
+            currentSession = null;
+            shortlistItems = [];
+            allUnits = [];
+            filteredUnits = [];
+            document.getElementById('no-session-view').style.display = 'block';
+            document.getElementById('active-session-view').style.display = 'none';
+            document.getElementById('visit-workspace').style.display = 'none';
+            document.getElementById('session-start-site').style.display = 'none';
+            document.getElementById('lead-summary-card').style.display = 'none';
+            document.getElementById('no-lead-view').style.display = 'block';
+            document.getElementById('lead-search-input').value = '';
+            renderShortlist();
+            showMsg('Visit Complete', 'Visit outcome recorded successfully.');
+        } catch (e) {
+            errEl.textContent = 'Network error. Please try again.';
+            errEl.style.display = 'block';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // ===================== STARTUP =====================
+    init();
+</script>
+{% endblock %}

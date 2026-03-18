@@ -45,6 +45,14 @@ def unit_availability():
     return render_template('tools/unit_availability.html')
 
 
+@tools_bp.route('/visit-workflow')
+@login_required
+@inventory_tools_access_required
+def visit_workflow():
+    """Walk-in / guided visit conversion workflow page."""
+    return render_template('tools/visit_workflow.html')
+
+
 @tools_bp.route('/smart-lock/keypads')
 @login_required
 @smart_lock_access_required
