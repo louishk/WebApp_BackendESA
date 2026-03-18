@@ -592,9 +592,12 @@ select.form-select {
     clearTimeout(window.autoRefreshTimeout);
 
     const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    const API_TOKEN = localStorage.getItem('api_token') || '';
 
     function apiHeaders() {
-        return { 'Content-Type': 'application/json', 'X-CSRFToken': csrf };
+        const h = { 'Content-Type': 'application/json', 'X-CSRFToken': csrf };
+        if (API_TOKEN) h['Authorization'] = `Bearer ${API_TOKEN}`;
+        return h;
     }
 
     function escHtml(str) {
