@@ -171,6 +171,9 @@ def create_lead():
     try:
         client = _get_sugar_client()
 
+        description = (data.get('description') or '').strip()
+        address_city = (data.get('primary_address_city') or '').strip()
+
         fields = {
             'first_name': first_name,
             'last_name': last_name,
@@ -181,6 +184,10 @@ def create_lead():
             fields['phone_mobile'] = phone_mobile
         if email:
             fields['email'] = [{'email_address': email, 'primary_address': True}]
+        if description:
+            fields['description'] = description[:2000]
+        if address_city:
+            fields['primary_address_city'] = address_city[:100]
 
         record, error = client.create_record('Leads', fields)
         if error:

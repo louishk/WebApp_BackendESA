@@ -99,9 +99,23 @@
                     <label>Phone</label>
                     <input type="tel" id="new-lead-phone" class="form-select" style="max-width: 100%;" maxlength="40">
                 </div>
-                <div class="form-group" style="margin-bottom: 0.75rem;">
+                <div class="form-group" style="margin-bottom: 0.5rem;">
                     <label>Email</label>
                     <input type="email" id="new-lead-email" class="form-select" style="max-width: 100%;" maxlength="150">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                        <label>Preferred Site</label>
+                        <input type="text" id="new-lead-site-pref" class="form-select" style="max-width: 100%;" maxlength="100" placeholder="e.g. Eunos, Balestier">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0.5rem;">
+                        <label>Storage Size/Type</label>
+                        <input type="text" id="new-lead-size-pref" class="form-select" style="max-width: 100%;" maxlength="100" placeholder="e.g. 50 sqft locker">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0.75rem;">
+                    <label>Duration</label>
+                    <input type="text" id="new-lead-duration" class="form-select" style="max-width: 100%;" maxlength="50" placeholder="e.g. 6 months">
                 </div>
                 <div style="display: flex; gap: 0.5rem;">
                     <button type="button" class="btn btn-sm" onclick="createLead()">
@@ -113,15 +127,22 @@
             </div>
 
             <!-- Lead summary card -->
-            <div id="lead-summary-card" style="display: none; background: #f0f4ff; border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem; max-width: 420px;">
+            <div id="lead-summary-card" style="display: none; background: #f0f4ff; border-radius: 8px; padding: 0.75rem 1rem; margin-top: 0.5rem;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                    <div>
+                    <div style="flex: 1; min-width: 0;">
                         <div style="font-weight: 600; color: var(--esa-navy); font-size: 0.95rem;" id="lead-card-name"></div>
-                        <div style="font-size: 0.82rem; color: #555; margin-top: 0.2rem;" id="lead-card-phone"></div>
-                        <div style="font-size: 0.82rem; color: #555;" id="lead-card-email"></div>
-                        <div style="font-size: 0.78rem; color: #888; margin-top: 0.2rem;" id="lead-card-status"></div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.15rem 1rem; margin-top: 0.35rem; font-size: 0.82rem; color: #555;">
+                            <div id="lead-card-phone"></div>
+                            <div id="lead-card-email"></div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.15rem 1rem; margin-top: 0.35rem; font-size: 0.8rem; color: #666;">
+                            <div id="lead-card-site-pref"></div>
+                            <div id="lead-card-size-pref"></div>
+                            <div id="lead-card-duration"></div>
+                        </div>
+                        <div style="font-size: 0.75rem; color: #888; margin-top: 0.3rem;" id="lead-card-status"></div>
                     </div>
-                    <button type="button" class="btn btn-secondary btn-sm" style="flex-shrink: 0;" onclick="clearLead()">
+                    <button type="button" class="btn btn-secondary btn-sm" style="flex-shrink: 0; margin-left: 0.5rem;" onclick="clearLead()">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
@@ -932,7 +953,7 @@ select.form-select {
                      data-lead-id="${escHtml(String(l.id))}"
                      style="padding: 0.6rem 0.85rem; cursor: pointer; border-bottom: 1px solid #f0f0f0;">
                     <div style="font-weight: 600; font-size: 0.88rem;">${escHtml(l.full_name || (l.first_name + ' ' + l.last_name))}</div>
-                    <div style="font-size: 0.78rem; color: #666;">${escHtml(l.phone_mobile || '')}${l.phone_mobile && l.email ? ' · ' : ''}${escHtml(l.email || '')}</div>
+                    <div style="font-size: 0.78rem; color: #666;">${escHtml(l.phone_mobile || '')}${l.phone_mobile && extractEmail(l.email) ? ' · ' : ''}${escHtml(extractEmail(l.email))}</div>
                     <div style="font-size: 0.72rem; color: #999;">${escHtml(l.status || '')}${l.lead_source ? ' · ' + escHtml(l.lead_source) : ''}</div>
                 </div>
             `).join('');
@@ -972,15 +993,55 @@ select.form-select {
         }
     }
 
+    function extractEmail(emailField) {
+        // SugarCRM returns email as array of {email_address, primary_address} objects
+        if (!emailField) return '';
+        if (typeof emailField === 'string') return emailField;
+        if (Array.isArray(emailField)) {
+            const primary = emailField.find(e => e.primary_address) || emailField[0];
+            return primary ? (primary.email_address || '') : '';
+        }
+        if (typeof emailField === 'object' && emailField.email_address) return emailField.email_address;
+        return '';
+    }
+
     function showLeadCard(lead) {
         document.getElementById('no-lead-view').style.display = 'none';
         document.getElementById('create-lead-form').style.display = 'none';
 
+        const email = extractEmail(lead.email) || extractEmail(lead.webtolead_email1);
+
         document.getElementById('lead-card-name').textContent = lead.full_name || ((lead.first_name || '') + ' ' + (lead.last_name || '')).trim();
-        document.getElementById('lead-card-phone').textContent = lead.phone_mobile ? 'Phone: ' + lead.phone_mobile : '';
-        document.getElementById('lead-card-email').textContent = lead.email ? 'Email: ' + lead.email : '';
-        document.getElementById('lead-card-status').textContent = lead.status ? 'Status: ' + lead.status : '';
+        document.getElementById('lead-card-phone').textContent = lead.phone_mobile ? 'Mobile: ' + lead.phone_mobile : '';
+        document.getElementById('lead-card-email').textContent = email ? 'Email: ' + email : '';
+
+        // Storage preferences (from SugarCRM custom fields or description)
+        const sitePref = lead.primary_address_city || '';
+        document.getElementById('lead-card-site-pref').textContent = sitePref ? 'Location: ' + sitePref : '';
+
+        // Size/type preference — check description for structured data
+        const desc = lead.description || '';
+        const sizePref = extractPref(desc, 'size') || extractPref(desc, 'type');
+        document.getElementById('lead-card-size-pref').textContent = sizePref ? 'Storage: ' + sizePref : '';
+
+        const durationPref = extractPref(desc, 'duration') || extractPref(desc, 'months');
+        document.getElementById('lead-card-duration').textContent = durationPref ? 'Duration: ' + durationPref : '';
+
+        // Status + source
+        const statusParts = [];
+        if (lead.status) statusParts.push(lead.status);
+        if (lead.lead_source) statusParts.push(lead.lead_source);
+        document.getElementById('lead-card-status').textContent = statusParts.join(' · ');
+
         document.getElementById('lead-summary-card').style.display = 'block';
+    }
+
+    function extractPref(description, keyword) {
+        // Extract "keyword: value" from description text
+        if (!description) return '';
+        const regex = new RegExp(keyword + '\\s*[:=]\\s*(.+)', 'i');
+        const match = description.match(regex);
+        return match ? match[1].split('\n')[0].trim() : '';
     }
 
     async function linkLeadToSession(leadId) {
@@ -1028,9 +1089,21 @@ select.form-select {
             return;
         }
 
+        const sitePref = document.getElementById('new-lead-site-pref').value.trim();
+        const sizePref = document.getElementById('new-lead-size-pref').value.trim();
+        const duration = document.getElementById('new-lead-duration').value.trim();
+
         const body = { first_name: first, last_name: last };
         if (phone) body.phone_mobile = phone;
         if (email) body.email = email;
+        if (sitePref) body.primary_address_city = sitePref;
+
+        // Store storage preferences in description
+        const descParts = [];
+        if (sizePref) descParts.push('Size: ' + sizePref);
+        if (duration) descParts.push('Duration: ' + duration);
+        if (sitePref) descParts.push('Site: ' + sitePref);
+        if (descParts.length > 0) body.description = descParts.join('\n');
 
         try {
             const res = await fetch('/api/crm/leads', {
