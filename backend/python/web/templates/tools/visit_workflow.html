@@ -281,9 +281,15 @@
                 </div>
                 <div id="shortlist-items"></div>
                 <div id="shortlist-actions" style="display: none; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--esa-gray-dark);">
-                    <button type="button" class="btn" style="width: 100%;" onclick="openOutcomeModal()">
-                        <i class="fas fa-flag-checkered" style="margin-right: 0.4rem;"></i> Complete Visit
+                    <button type="button" class="btn" style="width: 100%; margin-bottom: 0.5rem;" onclick="openOutcomeModal()">
+                        <i class="fas fa-flag-checkered" style="margin-right: 0.4rem;"></i> Record Outcome
                     </button>
+                    <button type="button" class="btn btn-secondary" style="width: 100%; font-size: 0.82rem;" onclick="saveAndClose()">
+                        <i class="fas fa-save" style="margin-right: 0.3rem;"></i> Save & Close
+                    </button>
+                    <p style="font-size: 0.72rem; color: #888; margin-top: 0.4rem; text-align: center;">
+                        Save keeps the session active — come back to record the outcome later.
+                    </p>
                 </div>
             </div>
         </div>
@@ -303,7 +309,7 @@
 <div id="outcome-modal" class="ua-modal" style="display: none;">
     <div class="ua-modal-content" style="max-width: 480px;">
         <div class="ua-modal-header">
-            <h3>Complete Visit</h3>
+            <h3>Record Visit Outcome</h3>
             <button type="button" class="ua-modal-close" onclick="closeOutcomeModal()">&times;</button>
         </div>
         <div class="form-group">
@@ -465,21 +471,28 @@ select.form-select {
 
 /* ========== ADD TO SHORTLIST BUTTON ========== */
 .btn-add-shortlist {
-    padding: 0.3rem 0.65rem;
-    font-size: 0.78rem;
-    background: var(--esa-navy);
-    color: #fff;
-    border: none;
-    border-radius: 5px;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: #fff;
+    color: var(--esa-navy);
+    border: 2px solid var(--esa-navy);
+    border-radius: 6px;
     cursor: pointer;
-    min-height: 32px;
+    min-height: 34px;
     touch-action: manipulation;
     white-space: nowrap;
+    transition: all 0.15s;
 }
-.btn-add-shortlist:hover { opacity: 0.85; }
-.btn-add-shortlist:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-add-shortlist:hover { background: var(--esa-navy); color: #fff; }
+.btn-add-shortlist:active { transform: scale(0.96); }
+.btn-add-shortlist:disabled { opacity: 0.5; cursor: not-allowed; border-color: #ccc; color: #999; }
+.btn-add-shortlist:disabled:hover { background: #fff; color: #999; }
 .btn-add-shortlist.in-list {
-    background: #28A745;
+    background: #d4edda;
+    border-color: #28A745;
+    color: #155724;
+    font-size: 0.75rem;
 }
 
 /* ========== SHORTLIST ITEMS ========== */
@@ -908,6 +921,12 @@ select.form-select {
         renderActiveSessionsList();
     }
 
+    function saveAndClose() {
+        // Session stays active in DB with shortlist preserved — just navigate away from it
+        showMsg('Session Saved', `Session #${currentSession.id} saved. You can resume it from the Active Sessions list.`);
+        backToSessionList();
+    }
+
     async function endSession() {
         if (!currentSession) return;
         if (!confirm('End this visit session? You can still record an outcome first.')) return;
@@ -1051,23 +1070,21 @@ select.form-select {
         const fullName = salutation + (lead.full_name || ((lead.first_name || '') + ' ' + (lead.last_name || '')).trim());
 
         document.getElementById('lead-card-name').textContent = fullName;
-        document.getElementById('lead-card-phone').textContent = lead.phone_mobile ? 'Mobile: ' + lead.phone_mobile : '';
-        document.getElementById('lead-card-email').textContent = email ? 'Email: ' + email : '';
+        document.getElementById('lead-card-phone').textContent = 'Mobile: ' + (lead.phone_mobile || '—');
+        document.getElementById('lead-card-email').textContent = 'Email: ' + (email || '—');
 
-        // ES custom fields
-        const esFields = [];
-        if (lead.es_storage_type_c) esFields.push('<div>Type: ' + escHtml(lead.es_storage_type_c) + '</div>');
-        if (lead.es_storage_size_c) esFields.push('<div>Size: ' + escHtml(lead.es_storage_size_c) + '</div>');
-        if (lead.es_storage_duration_c) esFields.push('<div>Duration: ' + escHtml(lead.es_storage_duration_c) + '</div>');
-        if (lead.es_storage_location_c) {
-            const siteName = siteMap[lead.es_storage_location_c]
-                ? siteMap[lead.es_storage_location_c].name
-                : lead.es_storage_location_c;
-            esFields.push('<div>Location: ' + escHtml(lead.es_storage_location_c + (siteName !== lead.es_storage_location_c ? ' - ' + siteName : '')) + '</div>');
-        }
-        const esContainer = document.getElementById('lead-card-es-fields');
-        esContainer.innerHTML = esFields.join('');
-        esContainer.style.display = esFields.length ? 'grid' : 'none';
+        // ES custom fields — always show all, use — for empty
+        const locCode = lead.es_storage_location_c || '';
+        const locSite = Object.values(siteMap).find(s => s.site_code === locCode);
+        const locLabel = locCode ? (locSite ? locCode + ' - ' + locSite.name : locCode) : '—';
+
+        document.getElementById('lead-card-es-fields').innerHTML = `
+            <div>Type: <strong>${escHtml(lead.es_storage_type_c || '—')}</strong></div>
+            <div>Size: <strong>${escHtml(lead.es_storage_size_c || '—')}</strong></div>
+            <div>Duration: <strong>${escHtml(lead.es_storage_duration_c || '—')}</strong></div>
+            <div>Location: <strong>${escHtml(locLabel)}</strong></div>
+        `;
+        document.getElementById('lead-card-es-fields').style.display = 'grid';
 
         // Chatbot note
         const noteEl = document.getElementById('lead-card-chatbot-note');
@@ -1078,7 +1095,7 @@ select.form-select {
             noteEl.style.display = 'none';
         }
 
-        // Status + source
+        // Status + source + assigned
         const statusParts = [];
         if (lead.status) statusParts.push(lead.status);
         if (lead.lead_source) statusParts.push(lead.lead_source);
@@ -1324,7 +1341,7 @@ select.form-select {
                     <button type="button"
                         class="btn-add-shortlist${inList ? ' in-list' : ''}"
                         ${inList ? 'disabled' : `onclick="addToShortlist('${unitData}')"`}>
-                        ${inList ? '<i class="fas fa-check"></i>' : '+ Add'}
+                        ${inList ? '<i class="fas fa-check"></i> Added' : '<i class="fas fa-plus" style="margin-right:0.25rem;"></i> Shortlist'}
                     </button>
                 </td>
             </tr>`;
