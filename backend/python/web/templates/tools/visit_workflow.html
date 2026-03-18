@@ -18,7 +18,7 @@
             <button type="button" class="btn vw-btn-start" onclick="startSession('walk_in')">
                 <i class="fas fa-walking" style="margin-right: 0.4rem;"></i> Walk-In
             </button>
-            <button type="button" class="btn btn-secondary vw-btn-start" onclick="startSession('guided_visit')">
+            <button type="button" class="btn btn-secondary vw-btn-start" onclick="startSession('guided')">
                 <i class="fas fa-clipboard-list" style="margin-right: 0.4rem;"></i> Guided Visit
             </button>
         </div>
@@ -975,13 +975,14 @@ select.form-select {
             const catLabel = u.category_label || u.sTypeName || '';
             if (category && catLabel !== category) return false;
             if (climate && u.label_climate_code !== climate) return false;
-            if (floor && u.iFloor !== parseInt(floor)) return false;
+            const uFloor = u.iFloor != null ? u.iFloor : u.floor;
+            if (floor && uFloor !== parseInt(floor)) return false;
             const area = u.area || u.area_sqft || 0;
             if (area && area < minSize) return false;
             if (area && area > maxSize) return false;
             if (search) {
-                const hay = [u.sUnitName, u.unit_name, u.sTypeName, u.category_label,
-                    u.label_climate_code, u.sUnitNote]
+                const hay = [u.sUnitName, u.sTypeName, u.category_label,
+                    u.label_climate_code, u.sUnitNote, u.sUnitDesc]
                     .filter(Boolean).join(' ').toLowerCase();
                 if (!hay.includes(search)) return false;
             }
@@ -1005,7 +1006,7 @@ select.form-select {
     }
 
     function isInShortlist(unitId) {
-        return shortlistItems.some(i => i.unit_id === unitId);
+        return shortlistItems.some(i => i.unit_id == unitId);
     }
 
     function climateBadge(code) {
@@ -1031,16 +1032,16 @@ select.form-select {
         tableWrap.style.display = 'block';
 
         tbody.innerHTML = filteredUnits.map(u => {
-            const unitName = u.unit_name || u.sUnitName || '';
-            const unitId = u.unit_id || u.iUnitID;
-            const siteId = u.site_id;
+            const unitName = u.sUnitName || u.unit_name || '';
+            const unitId = u.UnitID || u.unit_id || u.iUnitID;
+            const siteId = u.SiteID || u.site_id;
             const catLabel = u.category_label || u.sTypeName || '-';
             const area = u.area || u.area_sqft;
-            const areaStr = area ? area.toLocaleString() + ' sqft' : '-';
-            const floor = u.floor != null ? u.floor : (u.iFloor != null ? u.iFloor : '-');
+            const areaStr = area ? Number(area).toLocaleString() + ' sqft' : '-';
+            const floor = u.iFloor != null ? u.iFloor : (u.floor != null ? u.floor : '-');
             const climateCode = u.label_climate_code || u.climate_code || '';
-            const stdRate = u.std_rate;
-            const vacantDays = u.vacant_days;
+            const stdRate = u.dcStdRate || u.std_rate;
+            const vacantDays = u.iDaysVacant != null ? u.iDaysVacant : u.vacant_days;
             const vacantStr = vacantDays != null ? vacantDays + 'd' : '-';
             const inList = isInShortlist(unitId);
 
