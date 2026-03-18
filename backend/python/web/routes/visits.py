@@ -6,6 +6,7 @@ Manages visit sessions, shortlist items, and visit outcomes.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request, current_app
@@ -16,6 +17,8 @@ from web.auth.decorators import inventory_tools_access_required
 from web.models.visit_session import VisitSession, VisitShortlistItem
 from web.utils.rate_limit import rate_limit_api
 from web.utils.audit import audit_log, AuditEvent
+
+_UUID_PATTERN = re.compile(r'^[a-f0-9\-]{36}$', re.IGNORECASE)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,12 @@ def create_session():
 
     if not site_code:
         return jsonify({'error': 'site_code is required'}), 400
+
+    if len(site_code) > 10:
+        return jsonify({'error': 'site_code too long'}), 400
+
+    if lead_id and not _UUID_PATTERN.match(lead_id):
+        return jsonify({'error': 'Invalid lead_id format'}), 400
 
     if flow_type not in VALID_FLOW_TYPES:
         return jsonify({'error': f'flow_type must be one of: {", ".join(VALID_FLOW_TYPES)}'}), 400
@@ -159,7 +168,10 @@ def update_session(session_id):
 
         # Update allowed fields
         if 'lead_id' in data:
-            session.lead_id = (data['lead_id'] or '').strip() or None
+            val = (data['lead_id'] or '').strip() or None
+            if val and not _UUID_PATTERN.match(val):
+                return jsonify({'error': 'Invalid lead_id format'}), 400
+            session.lead_id = val
 
         if 'status' in data:
             new_status = data['status']
@@ -228,11 +240,11 @@ def add_shortlist_item(session_id):
             session_id=session_id,
             site_id=int(site_id),
             unit_id=int(unit_id),
-            unit_name=(data.get('unit_name') or '').strip() or None,
-            category_label=(data.get('category_label') or '').strip() or None,
+            unit_name=(data.get('unit_name') or '').strip()[:50] or None,
+            category_label=(data.get('category_label') or '').strip()[:100] or None,
             area=data.get('area'),
             floor=data.get('floor'),
-            climate_code=(data.get('climate_code') or '').strip() or None,
+            climate_code=(data.get('climate_code') or '').strip()[:5] or None,
             std_rate=data.get('std_rate'),
             indicative_rate=data.get('indicative_rate'),
             discount_plan_id=data.get('discount_plan_id'),
@@ -355,6 +367,13 @@ def recommend_offers():
     if not site_code:
         return jsonify({'error': 'site_code is required'}), 400
 
+    if area is not None and (area <= 0 or area > 100000):
+        return jsonify({'error': 'area out of valid range'}), 400
+    if std_rate is not None and (std_rate <= 0 or std_rate > 1000000):
+        return jsonify({'error': 'std_rate out of valid range'}), 400
+    if tenancy_months is not None and (tenancy_months < 1 or tenancy_months > 120):
+        return jsonify({'error': 'tenancy_months out of valid range'}), 400
+
     db = current_app.get_db_session()
     try:
         from web.services.offer_engine import recommend_offers as _recommend
@@ -381,8 +400,11 @@ def set_outcome(session_id):
     if outcome not in VALID_OUTCOMES:
         return jsonify({'error': f'outcome must be one of: {", ".join(VALID_OUTCOMES)}'}), 400
 
-    if outcome == 'lost' and not (data.get('lost_reason') or '').strip():
+    lost_reason = (data.get('lost_reason') or '').strip()
+    if outcome == 'lost' and not lost_reason:
         return jsonify({'error': 'lost_reason is required when outcome is lost'}), 400
+    if lost_reason and len(lost_reason) > 100:
+        return jsonify({'error': 'lost_reason exceeds maximum length'}), 400
 
     db = current_app.get_db_session()
     try:
@@ -396,8 +418,8 @@ def set_outcome(session_id):
             return jsonify({'error': 'Active session not found'}), 404
 
         session.outcome = outcome
-        session.outcome_notes = (data.get('outcome_notes') or '').strip() or None
-        session.lost_reason = (data.get('lost_reason') or '').strip() or None
+        session.outcome_notes = (data.get('outcome_notes') or '').strip()[:1000] or None
+        session.lost_reason = lost_reason or None
         session.status = 'completed'
         session.completed_at = datetime.now(timezone.utc)
         session.updated_at = datetime.now(timezone.utc)

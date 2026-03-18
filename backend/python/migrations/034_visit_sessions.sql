@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS visit_sessions (
     id SERIAL PRIMARY KEY,
     lead_id VARCHAR(36),                -- SugarCRM lead UUID (nullable initially)
     site_code VARCHAR(10) NOT NULL,
-    staff_user_id INTEGER NOT NULL,     -- references users.id
+    staff_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     flow_type VARCHAR(20) NOT NULL DEFAULT 'walk_in',  -- walk_in / guided
     status VARCHAR(30) NOT NULL DEFAULT 'active',
     outcome VARCHAR(30),                -- reserved / converted / visit_completed / lost

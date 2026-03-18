@@ -99,7 +99,6 @@ def recommend_offers(
             'discount_numeric': discount_numeric if plan.discount_numeric is not None else None,
             'indicative_rate': indicative_rate,
             'has_concession_for_site': has_concession_for_site,
-            'linked_concessions': concessions,
             '_score': score,
         })
 

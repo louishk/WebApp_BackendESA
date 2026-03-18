@@ -788,8 +788,12 @@ select.form-select {
             }
 
             statusEl.textContent = `${leads.length} result${leads.length === 1 ? '' : 's'}`;
+            // Store leads in a lookup for safe event binding (avoid inline onclick XSS)
+            const leadLookup = {};
+            leads.forEach(l => { leadLookup[String(l.id)] = l; });
+
             resultsEl.innerHTML = leads.map(l => `
-                <div class="vw-lead-result" onclick="selectLead(${escHtml(JSON.stringify(l).replace(/'/g, '&#39;'))})"
+                <div class="vw-lead-result"
                      data-lead-id="${escHtml(String(l.id))}"
                      style="padding: 0.6rem 0.85rem; cursor: pointer; border-bottom: 1px solid #f0f0f0;">
                     <div style="font-weight: 600; font-size: 0.88rem;">${escHtml(l.full_name || (l.first_name + ' ' + l.last_name))}</div>
@@ -799,8 +803,10 @@ select.form-select {
             `).join('');
             resultsEl.style.display = 'block';
 
-            // hover highlight
+            // Attach click handlers via data attributes (not inline onclick)
             resultsEl.querySelectorAll('.vw-lead-result').forEach(el => {
+                const lead = leadLookup[el.dataset.leadId];
+                if (lead) el.addEventListener('click', () => selectLead(lead));
                 el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
                 el.addEventListener('mouseleave', () => el.style.background = '');
             });

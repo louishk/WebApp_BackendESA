@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, Integer, String, Numeric, Text, DateTime, ForeignKey, UniqueConstraint,
+    Column, Integer, String, Numeric, Text, DateTime, ForeignKey, UniqueConstraint, Index,
 )
 from sqlalchemy.orm import relationship
 
@@ -15,7 +15,7 @@ class VisitSession(Base):
     id = Column(Integer, primary_key=True)
     lead_id = Column(String(36), nullable=True)
     site_code = Column(String(10), nullable=False)
-    staff_user_id = Column(Integer, nullable=False)
+    staff_user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     flow_type = Column(String(20), nullable=False, default='walk_in')
     status = Column(String(30), nullable=False, default='active')
     outcome = Column(String(30), nullable=True)

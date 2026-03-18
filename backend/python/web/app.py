@@ -213,11 +213,11 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(crm_bp)
     app.register_blueprint(visits_bp)
 
-    # Exempt API routes from CSRF (they use JWT authentication or JSON-only)
+    # Exempt API routes from CSRF (they use JWT authentication, not session cookies)
     csrf.exempt(api_bp)
     csrf.exempt(reservations_bp)
-    csrf.exempt(crm_bp)
-    csrf.exempt(visits_bp)
+    # crm_bp and visits_bp use session auth — CSRF protection stays enabled
+    # (the frontend sends X-CSRFToken header via apiHeaders())
 
     # Backward compatibility: also mount health check at root
     @app.route('/health')

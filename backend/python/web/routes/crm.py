@@ -7,6 +7,7 @@ Exposes lead search, create, get, and update operations.
 
 import logging
 import re
+import threading
 
 from flask import Blueprint, jsonify, request, current_app
 from flask_login import current_user, login_required
@@ -21,14 +22,17 @@ crm_bp = Blueprint('crm', __name__, url_prefix='/api/crm')
 
 # Lazy-initialized SugarCRM client (shared across requests within a worker)
 _sugar_client = None
+_sugar_client_lock = threading.Lock()
 
 
 def _get_sugar_client():
-    """Get or create SugarCRM client instance."""
+    """Get or create SugarCRM client instance (thread-safe)."""
     global _sugar_client
     if _sugar_client is None:
-        from common.sugarcrm_client import SugarCRMClient
-        _sugar_client = SugarCRMClient.from_env()
+        with _sugar_client_lock:
+            if _sugar_client is None:
+                from common.sugarcrm_client import SugarCRMClient
+                _sugar_client = SugarCRMClient.from_env()
     return _sugar_client
 
 

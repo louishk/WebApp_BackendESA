@@ -46,9 +46,7 @@ def setup_audit_logging(app):
 
 
 def get_client_ip():
-    """Get the real client IP, handling proxies."""
-    if request.headers.get('X-Forwarded-For'):
-        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    """Get the real client IP. ProxyFix middleware already resolves the correct IP."""
     return request.remote_addr or 'unknown'
 
 
