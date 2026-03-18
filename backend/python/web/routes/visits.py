@@ -388,7 +388,7 @@ def recommend_offers():
 @inventory_tools_access_required
 @rate_limit_api(max_requests=10, window_seconds=60)
 def set_outcome(session_id):
-    """Set visit outcome and complete the session (Phase 3 logic placeholder)."""
+    """Set visit outcome, complete the session, and update SugarCRM lead status."""
     data = request.get_json(silent=True)
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -423,12 +423,19 @@ def set_outcome(session_id):
 
         db.commit()
 
+        # Update SugarCRM lead status (best-effort, don't fail the outcome)
+        crm_status = None
+        if session.lead_id:
+            crm_status = _update_crm_lead_status(session.lead_id, outcome, lost_reason)
+
         audit_log(
             AuditEvent.VISIT_SESSION_COMPLETED,
-            f"Visit session completed: id={session_id}, outcome={outcome}",
+            f"Visit session completed: id={session_id}, outcome={outcome}, crm_update={crm_status}",
         )
 
-        return jsonify({'status': 'success', 'data': session.to_dict()})
+        result = session.to_dict()
+        result['crm_status_update'] = crm_status
+        return jsonify({'status': 'success', 'data': result})
 
     except Exception:
         db.rollback()
@@ -436,3 +443,39 @@ def set_outcome(session_id):
         return jsonify({'error': 'Failed to set visit outcome'}), 500
     finally:
         db.close()
+
+
+# Outcome → SugarCRM lead status mapping
+_OUTCOME_TO_CRM_STATUS = {
+    'reserved': 'Reserved',
+    'converted': 'Signed Up',
+    'visit_completed': 'Visit completed',
+    'lost': 'Lost',
+}
+
+
+def _update_crm_lead_status(lead_id, outcome, lost_reason=None):
+    """Update SugarCRM lead status based on visit outcome. Returns status string or None."""
+    crm_status = _OUTCOME_TO_CRM_STATUS.get(outcome)
+    if not crm_status:
+        return None
+
+    try:
+        from web.routes.crm import _get_sugar_client
+        client = _get_sugar_client()
+
+        fields = {'status': crm_status}
+        if outcome == 'lost' and lost_reason:
+            fields['description'] = f"Visit lost: {lost_reason}"
+
+        record, error = client.update_record('Leads', lead_id, fields)
+        if error:
+            logger.error("CRM lead status update failed for %s: %s", lead_id, error)
+            return 'failed'
+
+        logger.info("CRM lead %s status updated to %s", lead_id, crm_status)
+        return crm_status
+
+    except Exception:
+        logger.exception("CRM lead status update error for %s", lead_id)
+        return 'error'

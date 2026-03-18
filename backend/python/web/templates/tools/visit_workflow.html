@@ -537,26 +537,32 @@ select.form-select {
     white-space: pre-wrap;
     word-break: break-word;
 }
-.vw-item-actions {
-    display: flex;
-    gap: 0.4rem;
-    flex-shrink: 0;
-}
 .vw-item-btn {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.72rem;
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    min-height: 30px;
-    min-width: 30px;
+    min-height: 26px;
+    min-width: 26px;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
 }
-.vw-item-btn-edit { background: #e9ecef; color: #333; }
-.vw-item-btn-remove { background: #fdecea; color: var(--esa-red); }
-.vw-item-btn:hover { opacity: 0.8; }
+.vw-item-btn-remove { background: none; color: #ccc; }
+.vw-item-btn-remove:hover { color: var(--esa-red); }
+.vw-shortlist-item-notes-row { margin-top: 0.35rem; }
+.vw-inline-notes {
+    width: 100%;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.78rem;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background: #fafafa;
+    color: #333;
+}
+.vw-inline-notes:focus { border-color: var(--esa-navy); outline: none; background: #fff; }
 
 /* ========== COUNT BADGE ========== */
 .vw-count-badge {
@@ -1387,6 +1393,27 @@ select.form-select {
         }
     }
 
+    let _notesTimers = {};
+    function updateItemNotes(itemId, value) {
+        // Debounce — save 600ms after last keystroke
+        clearTimeout(_notesTimers[itemId]);
+        _notesTimers[itemId] = setTimeout(async () => {
+            if (!currentSession) return;
+            try {
+                await fetch(`/api/visits/${currentSession.id}/shortlist/${itemId}`, {
+                    method: 'PATCH',
+                    headers: apiHeaders(),
+                    body: JSON.stringify({ notes: value })
+                });
+                // Update local state
+                const item = shortlistItems.find(i => i.id === itemId);
+                if (item) item.notes = value;
+            } catch (e) {
+                console.error('Failed to save notes:', e);
+            }
+        }, 600);
+    }
+
     async function removeFromShortlist(itemId) {
         if (!currentSession) return;
         try {
@@ -1479,28 +1506,27 @@ select.form-select {
             <div class="vw-shortlist-item">
                 <div class="vw-shortlist-item-header">
                     <h4>${escHtml(item.unit_name)}</h4>
-                    <div class="vw-item-actions">
-                        <button type="button" class="vw-item-btn vw-item-btn-edit" title="Edit notes"
-                                onclick="openItemEditModal(${item.id})">
-                            <i class="fas fa-pencil-alt"></i>
-                        </button>
-                        <button type="button" class="vw-item-btn vw-item-btn-remove" title="Remove"
-                                onclick="removeFromShortlist(${item.id})">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
+                    <button type="button" class="vw-item-btn vw-item-btn-remove" title="Remove"
+                            onclick="removeFromShortlist(${item.id})">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
                 </div>
                 <div class="vw-shortlist-item-meta">
                     ${escHtml(item.category_label || '')}
                     ${item.area ? ' · ' + escHtml(String(item.area)) + ' sqft' : ''}
-                    ${item.floor != null ? ' · Floor ' + escHtml(String(item.floor)) : ''}
+                    ${item.floor != null ? ' · Flr ' + escHtml(String(item.floor)) : ''}
                     ${item.climate_code ? ' · ' + escHtml(CLIMATE_CODE_LABELS[item.climate_code] || item.climate_code) : ''}
                 </div>
                 <div class="vw-shortlist-item-rate">
-                    ${item.std_rate ? fmtRate(item.std_rate) : '-'}
+                    ${item.std_rate ? fmtRate(item.std_rate) + '/mo' : '-'}
                     ${item.indicative_rate ? ` <span style="color:#28A745;">(${fmtRate(item.indicative_rate)})</span>` : ''}
                 </div>
-                ${item.notes ? `<div class="vw-shortlist-item-notes">${escHtml(item.notes)}</div>` : ''}
+                <div class="vw-shortlist-item-notes-row">
+                    <input type="text" class="vw-inline-notes" placeholder="Notes..."
+                           value="${escHtml(item.notes || '')}"
+                           onchange="updateItemNotes(${item.id}, this.value)"
+                           maxlength="500">
+                </div>
             </div>
         `).join('');
     }
