@@ -62,6 +62,7 @@ CREATE OR REPLACE VIEW units_info_enriched AS
     cl.pillar AS label_pillar,
     cl.final_label AS category_label,
     cl.published_at AS label_published_at,
+    u.deleted_at,
     (u."SiteID"::text || '_'::text) || u."sUnitName"::text AS mimo_id
    FROM units_info u
      LEFT JOIN unit_category_labels cl ON cl.site_id = u."SiteID" AND cl.unit_id = u."UnitID";
