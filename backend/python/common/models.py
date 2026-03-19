@@ -974,6 +974,11 @@ class UnitsInfo(Base, BaseModel, TimestampMixin):
     bPreferredIsPushRate = Column(Boolean, comment="Preferred rate is push rate flag")
 
     # ========================================================================
+    # Lifecycle
+    # ========================================================================
+    deleted_at = Column(Date, comment="Date unit was deleted from SiteLink")
+
+    # ========================================================================
     # Indexes and Constraints
     # ========================================================================
     __table_args__ = (

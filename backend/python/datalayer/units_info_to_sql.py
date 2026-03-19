@@ -42,6 +42,7 @@ from common import (
     deduplicate_records,
 )
 from common.config import get_pipeline_config
+from sqlalchemy import text
 
 
 # =============================================================================
@@ -245,6 +246,69 @@ def push_to_database(
     tqdm.write(f"  ✓ Upserted {len(data)} records to PostgreSQL")
 
 
+def mark_deleted_units(
+    fetched_data: List[Dict[str, Any]],
+    config: DataLayerConfig,
+) -> None:
+    """
+    Detect units no longer returned by SOAP and mark them as deleted.
+
+    Compares fetched (SiteID, UnitID) pairs against units_info to find
+    active units (deleted_at IS NULL) that weren't in the latest fetch.
+    Sets deleted_at = current date on those rows.
+
+    Also backfills any orphan UnitIDs found in rentroll but missing from
+    units_info entirely.
+    """
+    db_config = config.databases.get('postgresql')
+    if not db_config:
+        return
+
+    engine = create_engine_from_config(db_config)
+    session_manager = SessionManager(engine)
+
+    # Build set of fetched keys
+    fetched_keys = {(r['SiteID'], r['UnitID']) for r in fetched_data}
+
+    with session_manager.session_scope() as session:
+        # Mark active units not in fetch as deleted
+        if fetched_keys:
+            # Get all active units
+            active = session.execute(
+                text('SELECT "SiteID", "UnitID" FROM units_info WHERE deleted_at IS NULL')
+            ).fetchall()
+
+            to_delete = [(s, u) for s, u in active if (s, u) not in fetched_keys]
+
+            if to_delete:
+                for site_id, unit_id in to_delete:
+                    session.execute(
+                        text('UPDATE units_info SET deleted_at = CURRENT_DATE WHERE "SiteID" = :sid AND "UnitID" = :uid AND deleted_at IS NULL'),
+                        {'sid': site_id, 'uid': unit_id}
+                    )
+                tqdm.write(f"  ✓ Marked {len(to_delete)} units as deleted")
+
+        # Backfill orphans from rentroll
+        result = session.execute(text("""
+            INSERT INTO units_info (
+                "UnitID", "SiteID", "sUnitName", "sTypeName",
+                "dcWidth", "dcLength", "iFloor", "UnitTypeID",
+                "bRentable", deleted_at, created_at, updated_at
+            )
+            SELECT DISTINCT ON (r."UnitID", r."SiteID")
+                r."UnitID", r."SiteID", r."sUnitName", r."sTypeName",
+                r."dcWidth", r."dcLength", r."iFloor", r."UnitTypeID",
+                false, CURRENT_DATE, NOW(), NOW()
+            FROM rentroll r
+            LEFT JOIN units_info ui ON r."UnitID" = ui."UnitID" AND r."SiteID" = ui."SiteID"
+            WHERE ui."UnitID" IS NULL
+            ORDER BY r."UnitID", r."SiteID", r.extract_date DESC
+            ON CONFLICT ("SiteID", "UnitID") DO NOTHING
+        """))
+        if result.rowcount > 0:
+            tqdm.write(f"  ✓ Backfilled {result.rowcount} orphan units from rentroll")
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -313,6 +377,9 @@ def main():
             print(f"  {type_name}: {count}")
         if len(type_counts) > 15:
             print(f"  ... and {len(type_counts) - 15} more types")
+        # Detect deleted units and backfill orphans
+        print("\n[Detecting Deleted Units]")
+        mark_deleted_units(all_data, config)
     else:
         print("\n⚠ No data found for any location")
 
