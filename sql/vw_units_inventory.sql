@@ -74,7 +74,9 @@ SELECT DISTINCT ON (up."UnitID")
     cl.shape               AS label_shape,
     cl.pillar              AS label_pillar,
     cl.final_label         AS category_label,
-    cl.published_at        AS label_published_at
+    cl.published_at        AS label_published_at,
+
+    up.deleted_at
 
 FROM unit_parsed up
 JOIN siteinfo s ON s."SiteID" = up."SiteID"
