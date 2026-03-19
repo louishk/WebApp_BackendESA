@@ -1,6 +1,11 @@
--- View: mimo_enriched
+-- Migration 036: mimo_enriched — add UnitName_clean, is_transfer, fix mimo_id
 -- Target database: esa_pbi
--- Auto-exported from pg_get_viewdef on 2026-03-05
+-- Adds:
+--   UnitName_clean: strips * and trailing X for clean joins to units_info
+--   is_transfer: flags transfer journal entries (MoveIn=0 AND MoveOut=0)
+--   mimo_id: now uses cleaned UnitName for accurate joins
+
+DROP VIEW IF EXISTS mimo_enriched;
 
 CREATE OR REPLACE VIEW mimo_enriched AS
  SELECT m."SiteID",
