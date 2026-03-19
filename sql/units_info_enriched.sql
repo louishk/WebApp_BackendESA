@@ -65,4 +65,5 @@ CREATE OR REPLACE VIEW units_info_enriched AS
     u.deleted_at,
     (u."SiteID"::text || '_'::text) || u."sUnitName"::text AS mimo_id
    FROM units_info u
-     LEFT JOIN unit_category_labels cl ON cl.site_id = u."SiteID" AND cl.unit_id = u."UnitID";
+     LEFT JOIN unit_category_labels cl ON cl.site_id = u."SiteID" AND cl.unit_id = u."UnitID"
+   WHERE u.deleted_at IS NULL;
