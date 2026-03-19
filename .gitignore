@@ -42,6 +42,7 @@ planar-beach-*.json
 # Temp
 *.tmp
 *.bak
+temp/
 /Temp/
 
 # Legacy vault (decommissioned — secrets now in DB app_secrets table)

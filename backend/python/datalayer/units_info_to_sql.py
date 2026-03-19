@@ -19,10 +19,13 @@ Configuration (in scheduler.yaml):
     pipelines.unitsinfo.sql_chunk_size: Batch size for upsert (default: 500)
 """
 
+import logging
 import sys
 from pathlib import Path
 from typing import List, Dict, Any
 from tqdm import tqdm
+
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -180,9 +183,10 @@ def fetch_units_info(
                 pbar.update(1)
 
             except Exception as e:
+                logger.debug("SOAP fetch failed for %s", location_code, exc_info=True)
                 pbar.set_postfix({"location": location_code, "status": "ERROR"})
                 pbar.update(1)
-                tqdm.write(f"  ✗ {location_code}: Error - {str(e)}")
+                tqdm.write(f"  ✗ {location_code}: SOAP fetch failed")
                 continue
 
     # Deduplicate by primary key (SiteID, UnitID)
@@ -281,11 +285,19 @@ def mark_deleted_units(
             to_delete = [(s, u) for s, u in active if (s, u) not in fetched_keys]
 
             if to_delete:
-                for site_id, unit_id in to_delete:
-                    session.execute(
-                        text('UPDATE units_info SET deleted_at = CURRENT_DATE WHERE "SiteID" = :sid AND "UnitID" = :uid AND deleted_at IS NULL'),
-                        {'sid': site_id, 'uid': unit_id}
-                    )
+                site_ids = [s for s, u in to_delete]
+                unit_ids = [u for s, u in to_delete]
+                session.execute(
+                    text("""
+                        UPDATE units_info
+                        SET deleted_at = CURRENT_DATE
+                        WHERE ("SiteID", "UnitID") IN (
+                            SELECT unnest(:site_ids::int[]), unnest(:unit_ids::int[])
+                        )
+                        AND deleted_at IS NULL
+                    """),
+                    {'site_ids': site_ids, 'unit_ids': unit_ids}
+                )
                 tqdm.write(f"  ✓ Marked {len(to_delete)} units as deleted")
 
         # Backfill orphans from rentroll

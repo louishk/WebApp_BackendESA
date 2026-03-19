@@ -64,7 +64,7 @@ DECIMAL_FIELDS = {'dcWidth', 'dcLength', 'dcMapTheta', 'dcPushRate', 'dcStdRate'
 BOOL_FIELDS = {'bMapReversWL', 'bPower', 'bClimate', 'bInside', 'bAlarm',
                'bRentable', 'bRented', 'bCorporate', 'bMobile', 'bExcludeFromWebsite'}
 DATE_FIELDS = {'deleted_at'}
-STRING_FIELDS = {'sUnitName', 'sUnitNote', 'sUnitDesc'}
+STRING_FIELDS = {'sUnitName': 100, 'sUnitNote': 500, 'sUnitDesc': 500}
 
 
 def parse_value(field_name, raw_value):
@@ -95,8 +95,9 @@ def parse_value(field_name, raw_value):
         except (ValueError, TypeError):
             return None
 
-    # String fields
-    return raw if raw else None
+    # String fields — cap to model max length
+    max_len = STRING_FIELDS.get(field_name, 500)
+    return raw[:max_len] if raw else None
 
 
 def main():
