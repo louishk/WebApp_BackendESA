@@ -197,6 +197,7 @@ def create_app(config=None, db_url=None):
     from web.routes.reservations import reservations_bp
     from web.routes.crm import crm_bp
     from web.routes.visits import visits_bp
+    from web.routes.revenue import revenue_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
@@ -212,6 +213,7 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(reservations_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(visits_bp)
+    app.register_blueprint(revenue_bp)
 
     # Exempt API routes from CSRF (they use JWT authentication, not session cookies)
     csrf.exempt(api_bp)

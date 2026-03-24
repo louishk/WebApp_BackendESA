@@ -287,9 +287,13 @@
                 {% if current_user.can_access_statistics() %}
                     <a href="{{ url_for('statistics.dashboard') }}" class="{{ 'active' if request.endpoint and 'statistics' in request.endpoint else '' }}">Statistics</a>
                 {% endif %}
-                {% set has_any_tool = current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_discount_tools() or current_user.can_access_smart_lock() or current_user.can_access_scheduler() or current_user.can_access_ecri() or current_user.can_manage_configs() %}
+                {% set has_revenue = current_user.can_access_revenue_tools() or current_user.can_access_ecri() or current_user.can_access_discount_tools() %}
+                {% if has_revenue %}
+                    <a href="{{ url_for('revenue.dashboard') if current_user.can_access_revenue_tools() else (url_for('ecri.dashboard') if current_user.can_access_ecri() else url_for('discount_plans.list_plans')) }}" class="{{ 'active' if request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'discount_plans' in request.endpoint) else '' }}">Revenue</a>
+                {% endif %}
+                {% set has_any_tool = current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_smart_lock() or current_user.can_access_scheduler() or current_user.can_manage_configs() %}
                 {% if has_any_tool %}
-                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else (url_for('tools.discount_plan_changer') if current_user.can_access_discount_tools() else (url_for('tools.inventory_checker') if current_user.can_access_inventory_tools() else (url_for('scheduler.dashboard') if current_user.can_access_scheduler() else (url_for('ecri.dashboard') if current_user.can_access_ecri() else (url_for('discount_plans.list_plans') if current_user.can_manage_configs() else url_for('tools.smart_lock_keypads')))))) }}" class="{{ 'active' if (request.endpoint and ('tools' in request.endpoint or 'scheduler' in request.endpoint or 'ecri' in request.endpoint or 'discount_plans' in request.endpoint)) else '' }}">Tools</a>
+                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else (url_for('tools.inventory_checker') if current_user.can_access_inventory_tools() else (url_for('scheduler.dashboard') if current_user.can_access_scheduler() else url_for('tools.smart_lock_keypads'))) }}" class="{{ 'active' if (request.endpoint and ('tools' in request.endpoint or 'scheduler' in request.endpoint) and 'revenue' not in request.endpoint) else '' }}">Tools</a>
                 {% endif %}
                 {% if current_user.can_manage_users() or current_user.can_manage_roles() %}
                     <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and ('admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint or 'api_key' in request.endpoint)) or (request.endpoint and 'api_keys' in request.endpoint) else '' }}">User Management</a>
@@ -306,7 +310,24 @@
         </nav>
     </div>
 
-    {% set _in_tools = request.endpoint and ('tools' in request.endpoint or 'scheduler' in request.endpoint or 'ecri' in request.endpoint or 'discount_plans' in request.endpoint) %}
+    {# --- Revenue sub-navbar --- #}
+    {% set _in_revenue = request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'discount_plans' in request.endpoint) %}
+    {% if _in_revenue %}
+    <div class="sub-navbar">
+        {% if current_user.can_access_revenue_tools() %}
+        <a href="{{ url_for('revenue.dashboard') }}" class="{{ 'active' if request.endpoint and 'revenue' in request.endpoint else '' }}">Revenue Analysis</a>
+        {% endif %}
+        {% if current_user.can_access_ecri() %}
+        <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
+        {% endif %}
+        {% if current_user.can_manage_configs() or current_user.can_access_billing_tools() or current_user.can_access_discount_tools() %}
+        <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint and 'discount_plans' in request.endpoint else '' }}">Discount Plans</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# --- Tools sub-navbar --- #}
+    {% set _in_tools = request.endpoint and ('tools' in request.endpoint or 'scheduler' in request.endpoint) and not _in_revenue %}
     {% if _in_tools %}
     <div class="sub-navbar">
         {% if current_user.can_access_billing_tools() %}
@@ -325,12 +346,6 @@
         {% endif %}
         {% if current_user.can_access_scheduler() %}
         <a href="{{ url_for('scheduler.dashboard') }}" class="{{ 'active' if request.endpoint and 'scheduler' in request.endpoint else '' }}">Scheduler</a>
-        {% endif %}
-        {% if current_user.can_access_ecri() %}
-        <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
-        {% endif %}
-        {% if current_user.can_manage_configs() or current_user.can_access_billing_tools() %}
-        <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint and 'discount_plans' in request.endpoint else '' }}">Discount Plans</a>
         {% endif %}
     </div>
     {# --- Level 2: Smart Lock --- #}

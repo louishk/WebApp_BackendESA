@@ -138,6 +138,14 @@
                         <p style="color: #666; font-size: 0.85rem; margin: 0;">Manage keypads, padlocks, and unit assignments</p>
                     </div>
                 </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_access_revenue_tools" {% if role and role.can_access_revenue_tools %}checked{% endif %}>
+                    <div>
+                        <strong>Revenue Tools</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Access revenue management, rate benchmarking, and demand analysis</p>
+                    </div>
+                </label>
             </div>
         </div>
 

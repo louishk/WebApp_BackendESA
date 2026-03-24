@@ -31,6 +31,7 @@ class Role(Base):
     can_manage_ecri = Column(Boolean, default=False)
     can_access_statistics = Column(Boolean, default=False)
     can_access_smart_lock = Column(Boolean, default=False)
+    can_access_revenue_tools = Column(Boolean, default=False)
 
     is_system = Column(Boolean, default=False)  # Prevent deletion of core roles
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -52,6 +53,7 @@ class Role(Base):
             'can_manage_ecri': True,
             'can_access_statistics': True,
             'can_access_smart_lock': True,
+            'can_access_revenue_tools': True,
             'is_system': True
         },
         {
@@ -116,6 +118,8 @@ class Role(Base):
             permissions.append('Statistics')
         if self.can_access_smart_lock:
             permissions.append('Smart Lock')
+        if self.can_access_revenue_tools:
+            permissions.append('Revenue Tools')
         return permissions
 
     def to_dict(self):
@@ -136,6 +140,7 @@ class Role(Base):
             'can_manage_ecri': self.can_manage_ecri,
             'can_access_statistics': self.can_access_statistics,
             'can_access_smart_lock': self.can_access_smart_lock,
+            'can_access_revenue_tools': self.can_access_revenue_tools,
             'is_system': self.is_system,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

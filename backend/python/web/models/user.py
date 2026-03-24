@@ -93,6 +93,10 @@ class User(Base, UserMixin):
         """Check if user can access smart lock management tools."""
         return any(r.can_access_smart_lock for r in self.roles)
 
+    def can_access_revenue_tools(self):
+        """Check if user can access revenue management tools."""
+        return any(r.can_access_revenue_tools for r in self.roles)
+
     def has_role(self, role_names):
         """Check if user has one of the specified role names."""
         if isinstance(role_names, str):

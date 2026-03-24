@@ -1,0 +1,911 @@
+{% extends "base.html" %}
+
+{% block title %}Revenue Management - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Revenue Management</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Rate benchmarking, demand analysis, and pricing intelligence</p>
+</div>
+
+<!-- Site Selector -->
+<div class="card">
+    <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: end;">
+        <div class="form-group" style="flex: 1; min-width: 250px;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Site</label>
+            <select id="site-select" class="form-select" onchange="loadSite()">
+                <option value="">Select a site...</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<!-- Budget Guidance Bar (shown after site loads) -->
+<div id="budget-guidance-bar" style="display: none; margin-bottom: 1rem;">
+    <div class="card" style="padding: 1rem;">
+        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: start;">
+            <!-- Current Month Budget Card -->
+            <div style="flex: 1; min-width: 220px; padding: 0.75rem 1rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #17a2b8;">
+                <div style="font-weight: 600; font-size: 0.85rem; color: #555; margin-bottom: 0.5rem;">Current Month Budget</div>
+                <div style="font-size: 0.85rem; line-height: 2;">
+                    <span>ARR/sqft target: <strong id="bud-cur-arr">-</strong></span>
+                    &nbsp;|&nbsp;
+                    <span>Occ: <strong id="bud-cur-occ">-</strong></span>
+                </div>
+                <div id="bud-cur-gap" style="font-size: 0.82rem; margin-top: 0.25rem;"></div>
+            </div>
+            <!-- Year-End Budget Card -->
+            <div style="flex: 1; min-width: 220px; padding: 0.75rem 1rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #6f42c1;">
+                <div style="font-weight: 600; font-size: 0.85rem; color: #555; margin-bottom: 0.5rem;">Year-End Budget</div>
+                <div style="font-size: 0.85rem; line-height: 2;">
+                    <span>ARR/sqft target: <strong id="bud-ye-arr">-</strong></span>
+                    &nbsp;|&nbsp;
+                    <span>Occ: <strong id="bud-ye-occ">-</strong></span>
+                </div>
+                <div id="bud-ye-gap" style="font-size: 0.82rem; margin-top: 0.25rem;"></div>
+            </div>
+            <!-- Discount Reference -->
+            <div id="disc-ref-card" style="display: none; flex: 1; min-width: 200px; padding: 0.75rem 1rem; background: #f8f9fa; border-radius: 6px; border-left: 4px solid #ffc107;">
+                <div style="font-weight: 600; font-size: 0.85rem; color: #555; margin-bottom: 0.5rem;">Discount Reference</div>
+                <div style="font-size: 0.85rem;">
+                    Market ref: <strong id="disc-ref-pct">-</strong>
+                    <span style="color: #888; font-size: 0.78rem; display: block; margin-top: 0.2rem;">(lowest active plan)</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tab Bar -->
+<div id="tab-bar" style="display: none;">
+    <div style="display: flex; gap: 0; border-bottom: 2px solid #dee2e6; margin-bottom: 1rem;">
+        <button class="tab-btn active" data-tab="benchmarking" onclick="switchTab('benchmarking')">Rate Benchmarking</button>
+        <button class="tab-btn" data-tab="demand" onclick="switchTab('demand')">Demand &amp; Movement</button>
+        <button class="tab-btn" disabled style="opacity:0.45; cursor:not-allowed;" title="Phase 2 — coming soon">Site Intelligence</button>
+        <button class="tab-btn" disabled style="opacity:0.45; cursor:not-allowed;" title="Phase 2 — coming soon">Competitors</button>
+        <button class="tab-btn" disabled style="opacity:0.45; cursor:not-allowed;" title="Phase 3 — coming soon">Recommendations</button>
+    </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- TAB 1: Rate Benchmarking -->
+<!-- ========================================================================= -->
+<div id="tab-benchmarking" class="tab-content" style="display: none;">
+
+    <!-- Summary Cards -->
+    <div class="stats-grid" style="margin-bottom: 1rem;">
+        <div class="stat-card">
+            <div class="value" id="bench-occ-count">0</div>
+            <div class="label">Occupied Units</div>
+        </div>
+        <div class="stat-card" style="background: #17a2b8;">
+            <div class="value" id="bench-occ-arr">-</div>
+            <div class="label">Occupied ARR/sqft</div>
+        </div>
+        <div class="stat-card" style="background: #C41230;">
+            <div class="value" id="bench-vac-count">0</div>
+            <div class="label">Vacant Units</div>
+        </div>
+        <div class="stat-card" style="background: #6f42c1;">
+            <div class="value" id="bench-vac-std">-</div>
+            <div class="label">Vacant Std/sqft</div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card" style="margin-bottom: 1rem;">
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+            <div class="form-group" style="min-width: 120px;">
+                <label style="display: block; margin-bottom: 0.25rem; font-size: 0.8rem;">Type</label>
+                <select id="filter-type" class="form-select" onchange="applyFilters()" style="font-size: 0.85rem;">
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 120px;">
+                <label style="display: block; margin-bottom: 0.25rem; font-size: 0.8rem;">Climate</label>
+                <select id="filter-climate" class="form-select" onchange="applyFilters()" style="font-size: 0.85rem;">
+                    <option value="">All</option>
+                </select>
+            </div>
+            <div class="form-group" style="min-width: 120px;">
+                <label style="display: block; margin-bottom: 0.25rem; font-size: 0.8rem;">Size</label>
+                <select id="filter-size" class="form-select" onchange="applyFilters()" style="font-size: 0.85rem;">
+                    <option value="">All</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Benchmarking Table -->
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="max-height: 600px; overflow: auto;">
+            <table id="bench-table" style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                <thead id="bench-thead"></thead>
+                <tbody id="bench-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Customer Segments -->
+    <h3 style="margin-bottom: 0.75rem;">Customer Segments by Tenure</h3>
+    <div class="card">
+        <div style="max-height: 400px; overflow: auto;">
+            <table id="seg-table" style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                <thead id="seg-thead"></thead>
+                <tbody id="seg-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ========================================================================= -->
+<!-- TAB 2: Demand & Movement -->
+<!-- ========================================================================= -->
+<div id="tab-demand" class="tab-content" style="display: none;">
+
+    <!-- Occupancy Snapshot Cards -->
+    <div class="stats-grid" style="margin-bottom: 1rem;">
+        <div class="stat-card">
+            <div class="value" id="demand-occ-now">-</div>
+            <div class="label">Current Occupancy</div>
+        </div>
+        <div class="stat-card" style="background: #17a2b8;">
+            <div class="value" id="demand-delta-7d">-</div>
+            <div class="label">vs D-7</div>
+        </div>
+        <div class="stat-card" style="background: #6f42c1;">
+            <div class="value" id="demand-delta-30d">-</div>
+            <div class="label">vs D-30</div>
+        </div>
+        <div class="stat-card" style="background: #C41230;">
+            <div class="value" id="demand-delta-90d">-</div>
+            <div class="label">vs D-90</div>
+        </div>
+    </div>
+
+    <!-- Lead Volume -->
+    <div id="leads-bar" style="display: none; margin-bottom: 1rem;">
+        <div class="card" style="padding: 0.75rem 1rem; font-size: 0.85rem;">
+            <strong>Lead Volume:</strong>
+            <span style="margin-left: 0.75rem;" id="leads-text"></span>
+        </div>
+    </div>
+
+    <!-- Movement Table -->
+    <h3 style="margin-bottom: 0.75rem;">Book Movement by Category</h3>
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="max-height: 500px; overflow: auto;">
+            <table id="movement-table" style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                <thead id="movement-thead"></thead>
+                <tbody id="movement-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Vacancy Distribution -->
+    <h3 style="margin-bottom: 0.75rem;">Vacancy Duration Distribution</h3>
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="max-height: 400px; overflow: auto;">
+            <table id="vacancy-table" style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                <thead id="vacancy-thead"></thead>
+                <tbody id="vacancy-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Occupancy Trend Chart -->
+    <h3 style="margin-bottom: 0.75rem;">90-Day Occupancy Trend</h3>
+    <div class="card">
+        <div style="position: relative; height: 300px;">
+            <canvas id="occ-trend-chart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Loading -->
+<div id="loading" style="display: none; text-align: center; padding: 2rem;">
+    <div class="spinner"></div>
+    <p style="color: #666; margin-top: 1rem;">Loading revenue data...</p>
+</div>
+
+<style>
+.tab-btn {
+    padding: 0.6rem 1.2rem;
+    border: none;
+    background: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    color: #666;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+.tab-btn:hover:not([disabled]) {
+    color: #333;
+    border-bottom-color: #ccc;
+}
+.tab-btn.active {
+    color: #C41230;
+    border-bottom-color: #C41230;
+    font-weight: 600;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+const API_TOKEN = localStorage.getItem('api_token') || '';
+
+// ============================================================================
+// State
+// ============================================================================
+let allCategories = [];
+let filteredCategories = [];
+let budgetData = {};
+let discountRef = {};
+let segmentsData = [];
+let demandData = null;
+let trendChart = null;
+let activeTab = 'benchmarking';
+
+let benchLoaded = false;
+let demandLoaded = false;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function getCSRFToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute('content') : '';
+}
+
+function apiHeaders() {
+    const headers = { 'Content-Type': 'application/json' };
+    if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+    const csrf = getCSRFToken();
+    if (csrf) headers['X-CSRFToken'] = csrf;
+    return headers;
+}
+
+function esc(v) {
+    if (v == null) return '-';
+    return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmt(v, decimals = 2) {
+    if (v == null) return '-';
+    return Number(v).toFixed(decimals);
+}
+
+function fmtPct(v, decimals = 1) {
+    if (v == null) return '-';
+    return Number(v).toFixed(decimals) + '%';
+}
+
+function fmtDelta(current, previous) {
+    if (current == null || previous == null) return '-';
+    const d = current - previous;
+    const sign = d >= 0 ? '+' : '';
+    const color = d >= 0 ? '#28a745' : '#dc3545';
+    return `<span style="color:${color}; font-weight:600;">${sign}${d.toFixed(1)}pp</span>`;
+}
+
+function sizeRangeSort(a, b) {
+    const na = parseFloat((a || '0').replace(/[^0-9.]/g, ''));
+    const nb = parseFloat((b || '0').replace(/[^0-9.]/g, ''));
+    return (isNaN(na) ? 9999 : na) - (isNaN(nb) ? 9999 : nb);
+}
+
+function fillSelect(id, values) {
+    const sel = document.getElementById(id);
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All</option>';
+    values.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        sel.appendChild(opt);
+    });
+    if (current) sel.value = current;
+}
+
+// ============================================================================
+// Tab switching
+// ============================================================================
+
+function switchTab(tab) {
+    activeTab = tab;
+    document.querySelectorAll('.tab-btn[data-tab]').forEach(b => b.classList.remove('active'));
+    const activeBtn = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+    if (activeBtn) activeBtn.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+    const panel = document.getElementById(`tab-${tab}`);
+    if (panel) panel.style.display = 'block';
+
+    const siteId = document.getElementById('site-select').value;
+    if (!siteId) return;
+
+    if (tab === 'demand' && !demandLoaded) loadDemandTab(siteId);
+}
+
+// ============================================================================
+// Site selector
+// ============================================================================
+
+async function loadSites() {
+    try {
+        const response = await fetch('/api/sites', { headers: apiHeaders() });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const select = document.getElementById('site-select');
+        const grouped = {};
+        data.sites.forEach(site => {
+            const country = site.country || 'Other';
+            if (!grouped[country]) grouped[country] = [];
+            grouped[country].push(site);
+        });
+        Object.keys(grouped).sort().forEach(country => {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = country;
+            grouped[country].forEach(site => {
+                const opt = document.createElement('option');
+                opt.value = site.site_id;
+                opt.textContent = `${site.site_code} - ${site.name}`;
+                optgroup.appendChild(opt);
+            });
+            select.appendChild(optgroup);
+        });
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('site_id')) {
+            select.value = params.get('site_id');
+            loadSite();
+        }
+    } catch (e) {
+        console.error('Failed to load sites:', e);
+    }
+}
+
+async function loadSite() {
+    const siteId = document.getElementById('site-select').value;
+    if (!siteId) return;
+
+    // Update URL
+    const url = new URL(window.location);
+    url.searchParams.set('site_id', siteId);
+    history.replaceState(null, '', url);
+
+    // Reset state
+    benchLoaded = false;
+    demandLoaded = false;
+    allCategories = [];
+    filteredCategories = [];
+    budgetData = {};
+    discountRef = {};
+    segmentsData = [];
+
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('tab-bar').style.display = 'none';
+    document.getElementById('budget-guidance-bar').style.display = 'none';
+    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+
+    try {
+        const [benchRes, segRes] = await Promise.all([
+            fetch(`/revenue/api/rate-benchmarking?site_id=${siteId}`, { headers: apiHeaders() }),
+            fetch(`/revenue/api/customer-segments?site_id=${siteId}`, { headers: apiHeaders() }),
+        ]);
+
+        if (!benchRes.ok) throw new Error(`Benchmarking HTTP ${benchRes.status}`);
+        if (!segRes.ok) throw new Error(`Segments HTTP ${segRes.status}`);
+
+        const benchJson = await benchRes.json();
+        const segJson = await segRes.json();
+
+        if (benchJson.error) throw new Error(benchJson.error);
+        if (segJson.error) throw new Error(segJson.error);
+
+        allCategories = benchJson.data.categories;
+        budgetData = benchJson.data.budget;
+        discountRef = benchJson.data.discount_reference;
+        segmentsData = segJson.data.segments;
+
+        updateBudgetGuidanceBar();
+        populateFilters();
+        applyFilters();
+        renderSegments();
+        benchLoaded = true;
+
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('budget-guidance-bar').style.display = 'block';
+        document.getElementById('tab-bar').style.display = 'block';
+
+        // Show the active tab panel
+        switchTab(activeTab);
+
+    } catch (e) {
+        document.getElementById('loading').style.display = 'none';
+        console.error('Failed to load site data:', e);
+        alert('Failed to load revenue data. Please try again.');
+    }
+}
+
+// ============================================================================
+// Budget guidance bar
+// ============================================================================
+
+function updateBudgetGuidanceBar() {
+    const cur = budgetData.current_month || {};
+    const ye = budgetData.year_end || {};
+
+    document.getElementById('bud-cur-arr').textContent = cur.avr_rental_rate != null ? fmt(cur.avr_rental_rate) : 'N/A';
+    document.getElementById('bud-cur-occ').textContent = cur.occupancy_pct != null ? fmtPct(cur.occupancy_pct * 100) : 'N/A';
+    document.getElementById('bud-ye-arr').textContent = ye.avr_rental_rate != null ? fmt(ye.avr_rental_rate) : 'N/A';
+    document.getElementById('bud-ye-occ').textContent = ye.occupancy_pct != null ? fmtPct(ye.occupancy_pct * 100) : 'N/A';
+
+    // Compute actual ARR/sqft for gap display
+    let occRent = 0, occArea = 0;
+    allCategories.forEach(c => {
+        occRent += c.occupied.total_rent || 0;
+        occArea += c.occupied.total_area || 0;
+    });
+    const occArr = occArea > 0 ? occRent / occArea : null;
+
+    const curGapEl = document.getElementById('bud-cur-gap');
+    const yeGapEl = document.getElementById('bud-ye-gap');
+
+    if (occArr != null && cur.avr_rental_rate) {
+        const gap = ((occArr - cur.avr_rental_rate) / cur.avr_rental_rate * 100);
+        const color = gap >= 0 ? '#28a745' : '#dc3545';
+        curGapEl.innerHTML = `Actual: ${fmt(occArr)} &nbsp;<strong style="color:${color}">(${gap >= 0 ? '+' : ''}${fmt(gap, 1)}%)</strong>`;
+    } else {
+        curGapEl.textContent = '';
+    }
+
+    if (occArr != null && ye.avr_rental_rate) {
+        const gap = ((occArr - ye.avr_rental_rate) / ye.avr_rental_rate * 100);
+        const color = gap >= 0 ? '#28a745' : '#dc3545';
+        yeGapEl.innerHTML = `Actual: ${fmt(occArr)} &nbsp;<strong style="color:${color}">(${gap >= 0 ? '+' : ''}${fmt(gap, 1)}%)</strong>`;
+    } else {
+        yeGapEl.textContent = '';
+    }
+
+    // Discount reference
+    if (discountRef.min_pct_discount != null) {
+        document.getElementById('disc-ref-pct').textContent = fmtPct(discountRef.min_pct_discount);
+        document.getElementById('disc-ref-card').style.display = 'block';
+    } else {
+        document.getElementById('disc-ref-card').style.display = 'none';
+    }
+}
+
+// ============================================================================
+// Tab 1: Rate Benchmarking — filters and table
+// ============================================================================
+
+function populateFilters() {
+    const types = [...new Set(allCategories.map(c => c.type_code).filter(Boolean))].sort();
+    const climates = [...new Set(allCategories.map(c => c.climate_code).filter(Boolean))].sort();
+    const sizes = [...new Set(allCategories.map(c => c.size_range).filter(Boolean))].sort(sizeRangeSort);
+
+    fillSelect('filter-type', types);
+    fillSelect('filter-climate', climates);
+    fillSelect('filter-size', sizes);
+}
+
+function applyFilters() {
+    const fType = document.getElementById('filter-type').value;
+    const fClimate = document.getElementById('filter-climate').value;
+    const fSize = document.getElementById('filter-size').value;
+
+    filteredCategories = allCategories.filter(c => {
+        if (fType && c.type_code !== fType) return false;
+        if (fClimate && c.climate_code !== fClimate) return false;
+        if (fSize && c.size_range !== fSize) return false;
+        return true;
+    });
+
+    filteredCategories.sort((a, b) => {
+        if (a.type_code !== b.type_code) return (a.type_code || '').localeCompare(b.type_code || '');
+        if (a.climate_code !== b.climate_code) return (a.climate_code || '').localeCompare(b.climate_code || '');
+        return sizeRangeSort(a.size_range, b.size_range);
+    });
+
+    renderBenchTable();
+    updateBenchSummary();
+}
+
+function updateBenchSummary() {
+    let occCount = 0, occRent = 0, occArea = 0;
+    let vacCount = 0, vacStdTotal = 0, vacArea = 0;
+
+    filteredCategories.forEach(c => {
+        occCount += c.occupied.count || 0;
+        occRent += c.occupied.total_rent || 0;
+        occArea += c.occupied.total_area || 0;
+        vacCount += c.vacant.count || 0;
+        vacStdTotal += c.vacant.total_std_rate || 0;
+        vacArea += c.vacant.total_area || 0;
+    });
+
+    const occArr = occArea > 0 ? occRent / occArea : null;
+    const vacStdSqft = vacArea > 0 ? vacStdTotal / vacArea : null;
+
+    document.getElementById('bench-occ-count').textContent = occCount;
+    document.getElementById('bench-occ-arr').textContent = occArr != null ? fmt(occArr) : '-';
+    document.getElementById('bench-vac-count').textContent = vacCount;
+    document.getElementById('bench-vac-std').textContent = vacStdSqft != null ? fmt(vacStdSqft) : '-';
+}
+
+function renderBenchTable() {
+    const thead = document.getElementById('bench-thead');
+    const tbody = document.getElementById('bench-tbody');
+    const minDiscPct = discountRef.min_pct_discount;
+
+    thead.innerHTML = `<tr style="background:#f8f9fa; position:sticky; top:0; z-index:1;">
+        <th style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Type</th>
+        <th style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Climate</th>
+        <th style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6; white-space:nowrap;">Size</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#e8f5e9; white-space:nowrap;">Occ #</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#e8f5e9; white-space:nowrap;">Occ Rate/sqft</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#e8f5e9; white-space:nowrap;">Occ Std/sqft</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#e8f5e9; white-space:nowrap;">Disc %</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#e8f5e9; white-space:nowrap;">Disc #</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff8e1; white-space:nowrap;">Mkt Ref/sqft</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff8e1; white-space:nowrap;">Vac #</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff8e1; white-space:nowrap;">Vac Std/sqft</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff8e1; white-space:nowrap;">Web/sqft</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff8e1; white-space:nowrap;">Push/sqft</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff8e1; white-space:nowrap;">Days Vac</th>
+    </tr>`;
+
+    let html = '';
+    let prevGroup = '';
+
+    filteredCategories.forEach(c => {
+        const group = `${c.type_code || ''}|${c.climate_code || ''}`;
+        const newGroup = group !== prevGroup;
+        prevGroup = group;
+        const borderTop = newGroup ? 'border-top: 2px solid #dee2e6;' : '';
+
+        // Market reference rate: vac_std * (1 - min_discount/100)
+        let mktRef = null;
+        if (c.vacant.std_rate_sqft != null && minDiscPct != null) {
+            mktRef = c.vacant.std_rate_sqft * (1 - minDiscPct / 100);
+        }
+
+        // Color code Occ Rate/sqft vs Mkt Ref/sqft
+        let rateStyle = 'font-weight:bold;';
+        if (c.occupied.avg_rate_sqft != null && mktRef != null) {
+            if (c.occupied.avg_rate_sqft >= mktRef) {
+                rateStyle += ' background:#d4edda; color:#155724;';
+            } else {
+                rateStyle += ' background:#f8d7da; color:#721c24;';
+            }
+        } else {
+            rateStyle += ' background:#f8fdf8;';
+        }
+
+        html += `<tr style="${borderTop}">
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; ${newGroup ? 'font-weight:600;' : ''}">${esc(c.type_code)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee;">${esc(c.climate_code)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee;">${esc(c.size_range)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#f8fdf8;">${c.occupied.count || 0}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; ${rateStyle}">${fmt(c.occupied.avg_rate_sqft)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#f8fdf8;">${fmt(c.occupied.avg_std_sqft)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#f8fdf8;">${c.occupied.avg_discount_pct != null ? fmt(c.occupied.avg_discount_pct, 1) : '-'}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#f8fdf8;">${c.occupied.discounted_count || 0}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#fffef5; font-style:italic; color:#888;">${mktRef != null ? fmt(mktRef) : '-'}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#fffef5; ${c.vacant.count > 0 ? 'color:#C41230;' : ''}">${c.vacant.count || 0}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#fffef5;">${fmt(c.vacant.std_rate_sqft)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#fffef5;">${fmt(c.vacant.web_rate_sqft)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#fffef5;">${fmt(c.vacant.push_rate_sqft)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; background:#fffef5;">${c.vacant.avg_days_vacant != null ? Math.round(c.vacant.avg_days_vacant) : '-'}</td>
+        </tr>`;
+    });
+
+    tbody.innerHTML = html || '<tr><td colspan="14" style="padding:1.5rem; text-align:center; color:#999;">No categories match the current filters</td></tr>';
+}
+
+function renderSegments() {
+    const thead = document.getElementById('seg-thead');
+    const tbody = document.getElementById('seg-tbody');
+
+    thead.innerHTML = `<tr style="background:#f8f9fa; position:sticky; top:0; z-index:1;">
+        <th style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6;">LOS Range</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">Tenants</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">Total Area</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">Avg Rate/sqft</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">Avg Std/sqft</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">Disc %</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">Disc #</th>
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">Total Rent</th>
+    </tr>`;
+
+    let html = '';
+    segmentsData.forEach(s => {
+        html += `<tr>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; font-weight:500;">${esc(s.los_range) || 'Unknown'}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right;">${s.tenant_count}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right;">${fmt(s.total_area, 0)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right; font-weight:bold;">${fmt(s.avg_rate_sqft)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right;">${fmt(s.avg_std_sqft)}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right;">${s.avg_discount_pct != null ? fmt(s.avg_discount_pct, 1) : '-'}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right;">${s.discounted_count}</td>
+            <td style="padding:5px 8px; border-bottom:1px solid #eee; text-align:right;">${fmt(s.total_rent, 0)}</td>
+        </tr>`;
+    });
+
+    tbody.innerHTML = html || '<tr><td colspan="8" style="padding:1.5rem; text-align:center; color:#999;">No segment data</td></tr>';
+}
+
+// ============================================================================
+// Tab 2: Demand & Movement
+// ============================================================================
+
+async function loadDemandTab(siteId) {
+    document.getElementById('loading').style.display = 'block';
+
+    try {
+        const [demandRes, trendRes] = await Promise.all([
+            fetch(`/revenue/api/demand-analysis?site_id=${siteId}`, { headers: apiHeaders() }),
+            fetch(`/revenue/api/occupancy-trend?site_id=${siteId}&days=90`, { headers: apiHeaders() }),
+        ]);
+
+        if (!demandRes.ok) throw new Error(`Demand HTTP ${demandRes.status}`);
+        if (!trendRes.ok) throw new Error(`Trend HTTP ${trendRes.status}`);
+
+        const demandJson = await demandRes.json();
+        const trendJson = await trendRes.json();
+
+        if (demandJson.error) throw new Error(demandJson.error);
+        if (trendJson.error) throw new Error(trendJson.error);
+
+        demandData = demandJson.data;
+        const trendData = trendJson.data;
+
+        renderOccSnapshots();
+        renderLeadVolume();
+        renderMovementTable();
+        renderVacancyTable();
+        renderOccTrendChart(trendData.trend || []);
+        demandLoaded = true;
+
+    } catch (e) {
+        console.error('Failed to load demand data:', e);
+        alert('Failed to load demand data. Please try again.');
+    } finally {
+        document.getElementById('loading').style.display = 'none';
+    }
+}
+
+function renderOccSnapshots() {
+    const snaps = demandData.occupancy_snapshots || [];
+    if (snaps.length === 0) return;
+
+    const current = snaps[0]; // DESC order — most recent first
+    document.getElementById('demand-occ-now').textContent = current.unit_occupancy != null ? fmtPct(current.unit_occupancy) : '-';
+
+    function findSnapBefore(daysAgo) {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - daysAgo);
+        return snaps.find((s, i) => i > 0 && new Date(s.date) <= cutoff) || null;
+    }
+
+    const s7 = findSnapBefore(7);
+    const s30 = findSnapBefore(30);
+    const s90 = findSnapBefore(90);
+
+    document.getElementById('demand-delta-7d').innerHTML = s7 ? fmtDelta(current.unit_occupancy, s7.unit_occupancy) : '-';
+    document.getElementById('demand-delta-30d').innerHTML = s30 ? fmtDelta(current.unit_occupancy, s30.unit_occupancy) : '-';
+    document.getElementById('demand-delta-90d').innerHTML = s90 ? fmtDelta(current.unit_occupancy, s90.unit_occupancy) : '-';
+}
+
+function renderLeadVolume() {
+    const leads = demandData.lead_volume || {};
+    const hasData = Object.values(leads).some(v => v > 0);
+    if (!hasData) {
+        document.getElementById('leads-bar').style.display = 'none';
+        return;
+    }
+
+    document.getElementById('leads-text').innerHTML =
+        `7d: <strong>${leads['7d'] || 0}</strong> &nbsp;|&nbsp; ` +
+        `14d: <strong>${leads['14d'] || 0}</strong> &nbsp;|&nbsp; ` +
+        `30d: <strong>${leads['30d'] || 0}</strong> &nbsp;|&nbsp; ` +
+        `60d: <strong>${leads['60d'] || 0}</strong> &nbsp;|&nbsp; ` +
+        `90d: <strong>${leads['90d'] || 0}</strong>`;
+    document.getElementById('leads-bar').style.display = 'block';
+}
+
+function renderMovementTable() {
+    const data = demandData.movement || [];
+    const thead = document.getElementById('movement-thead');
+    const tbody = document.getElementById('movement-tbody');
+
+    thead.innerHTML = `<tr style="background:#f8f9fa; position:sticky; top:0; z-index:1;">
+        <th rowspan="2" style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6; vertical-align:bottom;">Type</th>
+        <th rowspan="2" style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6; vertical-align:bottom;">Climate</th>
+        <th rowspan="2" style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6; vertical-align:bottom;">Size</th>
+        <th colspan="3" style="padding:4px 6px; text-align:center; border-bottom:1px solid #dee2e6; background:#e3f2fd; white-space:nowrap;">7d</th>
+        <th colspan="3" style="padding:4px 6px; text-align:center; border-bottom:1px solid #dee2e6; background:#e8f5e9; white-space:nowrap;">30d</th>
+        <th colspan="3" style="padding:4px 6px; text-align:center; border-bottom:1px solid #dee2e6; background:#fff3e0; white-space:nowrap;">90d</th>
+        <th rowspan="2" style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; vertical-align:bottom; white-space:nowrap;">MI Rate/sqft</th>
+        <th rowspan="2" style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6; vertical-align:bottom; white-space:nowrap;">Avg Vac Days</th>
+    </tr>
+    <tr style="background:#f8f9fa; font-size:0.75rem; position:sticky; top:30px; z-index:1;">
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#e3f2fd;">MI</th>
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#e3f2fd;">MO</th>
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#e3f2fd;">Net</th>
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#e8f5e9;">MI</th>
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#e8f5e9;">MO</th>
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#e8f5e9;">Net</th>
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff3e0;">MI</th>
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff3e0;">MO</th>
+        <th style="padding:3px 6px; text-align:right; border-bottom:2px solid #dee2e6; background:#fff3e0;">Net</th>
+    </tr>`;
+
+    const netStyle = (v) => v > 0 ? 'color:#28a745; font-weight:bold;' : v < 0 ? 'color:#dc3545; font-weight:bold;' : 'color:#666;';
+
+    let html = '';
+    data.forEach(row => {
+        const p = row.periods;
+        const mp = row.move_in_pricing || {};
+
+        html += `<tr>
+            <td style="padding:4px 8px; border-bottom:1px solid #eee;">${esc(row.type_code)}</td>
+            <td style="padding:4px 8px; border-bottom:1px solid #eee;">${esc(row.climate_code)}</td>
+            <td style="padding:4px 8px; border-bottom:1px solid #eee;">${esc(row.size_range)}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#f5f9ff;">${p['7d'].mi}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#f5f9ff;">${p['7d'].mo}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#f5f9ff; ${netStyle(p['7d'].net)}">${p['7d'].net >= 0 ? '+' : ''}${p['7d'].net}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#f5fdf5;">${p['30d'].mi}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#f5fdf5;">${p['30d'].mo}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#f5fdf5; ${netStyle(p['30d'].net)}">${p['30d'].net >= 0 ? '+' : ''}${p['30d'].net}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#fffbf5;">${p['90d'].mi}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#fffbf5;">${p['90d'].mo}</td>
+            <td style="padding:4px 6px; text-align:right; border-bottom:1px solid #eee; background:#fffbf5; ${netStyle(p['90d'].net)}">${p['90d'].net >= 0 ? '+' : ''}${p['90d'].net}</td>
+            <td style="padding:4px 8px; text-align:right; border-bottom:1px solid #eee;">${fmt(mp.avg_rate_sqft_30d)}</td>
+            <td style="padding:4px 8px; text-align:right; border-bottom:1px solid #eee;">${mp.avg_days_vacant_30d != null ? Math.round(mp.avg_days_vacant_30d) : '-'}</td>
+        </tr>`;
+    });
+
+    tbody.innerHTML = html || '<tr><td colspan="15" style="padding:1.5rem; text-align:center; color:#999;">No movement data</td></tr>';
+}
+
+function renderVacancyTable() {
+    const data = demandData.vacancy_distribution || [];
+    const thead = document.getElementById('vacancy-thead');
+    const tbody = document.getElementById('vacancy-tbody');
+
+    const buckets = ['0-7d', '8-14d', '15-30d', '31-60d', '61-90d', '90d+'];
+
+    // Pivot rows: group by type/climate/size
+    const grouped = {};
+    data.forEach(row => {
+        const key = `${esc(row.type_code)}|${esc(row.climate_code)}|${esc(row.size_range)}`;
+        if (!grouped[key]) grouped[key] = {
+            type_code: row.type_code,
+            climate_code: row.climate_code,
+            size_range: row.size_range,
+            buckets: {}
+        };
+        grouped[key].buckets[row.bucket] = row.count;
+    });
+
+    thead.innerHTML = `<tr style="background:#f8f9fa; position:sticky; top:0; z-index:1;">
+        <th style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6;">Type</th>
+        <th style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6;">Climate</th>
+        <th style="padding:6px 8px; text-align:left; border-bottom:2px solid #dee2e6;">Size</th>
+        ${buckets.map(b => `<th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">${b}</th>`).join('')}
+        <th style="padding:6px 8px; text-align:right; border-bottom:2px solid #dee2e6;">Total</th>
+    </tr>`;
+
+    let html = '';
+    Object.values(grouped).forEach(g => {
+        let total = 0;
+        const cells = buckets.map(b => {
+            const cnt = g.buckets[b] || 0;
+            total += cnt;
+            const agingStyle = cnt > 0 && (b === '61-90d' || b === '90d+') ? 'background:#f8d7da; color:#721c24;' : '';
+            return `<td style="padding:4px 8px; text-align:right; border-bottom:1px solid #eee; ${agingStyle}">${cnt > 0 ? cnt : '-'}</td>`;
+        }).join('');
+        html += `<tr>
+            <td style="padding:4px 8px; border-bottom:1px solid #eee;">${esc(g.type_code)}</td>
+            <td style="padding:4px 8px; border-bottom:1px solid #eee;">${esc(g.climate_code)}</td>
+            <td style="padding:4px 8px; border-bottom:1px solid #eee;">${esc(g.size_range)}</td>
+            ${cells}
+            <td style="padding:4px 8px; text-align:right; border-bottom:1px solid #eee; font-weight:bold;">${total}</td>
+        </tr>`;
+    });
+
+    tbody.innerHTML = html || '<tr><td colspan="10" style="padding:1.5rem; text-align:center; color:#999;">No vacant units</td></tr>';
+}
+
+function renderOccTrendChart(trend) {
+    if (trendChart) {
+        trendChart.destroy();
+        trendChart = null;
+    }
+
+    if (!trend || trend.length === 0) return;
+
+    const ctx = document.getElementById('occ-trend-chart').getContext('2d');
+    const labels = trend.map(t => t.date);
+
+    trendChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Unit Occupancy %',
+                    data: trend.map(t => t.unit_occupancy),
+                    borderColor: '#17a2b8',
+                    backgroundColor: 'rgba(23, 162, 184, 0.08)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                },
+                {
+                    label: 'Area Occupancy %',
+                    data: trend.map(t => t.area_occupancy),
+                    borderColor: '#6f42c1',
+                    borderDash: [5, 3],
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 1.5,
+                },
+                {
+                    label: 'Economic Occupancy %',
+                    data: trend.map(t => t.economic_occupancy),
+                    borderColor: '#28a745',
+                    borderDash: [2, 2],
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 1.5,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { usePointStyle: true, padding: 15, font: { size: 12 } },
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(1) + '%' : 'N/A'}`,
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    ticks: { maxTicksLimit: 12, font: { size: 10 } },
+                    grid: { display: false },
+                },
+                y: {
+                    min: 0,
+                    max: 100,
+                    ticks: {
+                        callback: v => v + '%',
+                        font: { size: 11 },
+                    },
+                    grid: { color: 'rgba(0,0,0,0.05)' },
+                },
+            },
+        },
+    });
+}
+
+// ============================================================================
+// Init
+// ============================================================================
+loadSites();
+</script>
+{% endblock %}
