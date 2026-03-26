@@ -17,6 +17,9 @@ Usage:
     # Auto mode - incremental: fetch recent, stop when existing found
     python embedsocial_to_sql.py --mode auto
 
+    # Diagnose mode - read-only comparison of API vs DB state
+    python embedsocial_to_sql.py --mode diagnose
+
 Configuration (in scheduler.yaml):
     pipelines.embedsocial.sql_chunk_size: SQL upsert chunk size (default: 500)
     pipelines.embedsocial.page_size: API page size (default: 50)
@@ -69,7 +72,7 @@ def get_items(
     api_key: str,
     page: int = 1,
     page_size: int = 50,
-    sort: str = 'originalCreatedOn_desc'
+    sort: str = '-originalCreatedOn,-id'
 ) -> Tuple[List[Dict[str, Any]], int]:
     """
     Fetch items from EmbedSocial GetItems API.
@@ -336,7 +339,7 @@ def run_auto(
         items, total_count = get_items(
             http_client, api_key,
             page=page, page_size=page_size,
-            sort='originalCreatedOn_desc'
+            sort='-originalCreatedOn,-id'
         )
 
         if not items:
@@ -345,6 +348,10 @@ def run_auto(
 
         if page == 1:
             print(f"  Total reviews available: {total_count}")
+            # Log newest review date from API for monitoring
+            if items:
+                newest_date = items[0].get('originalCreatedOn', 'unknown')
+                logger.info("API newest review originalCreatedOn: %s", newest_date)
 
         # Check which reviews already exist
         page_review_ids = [str(item.get('id', '')) for item in items]
@@ -371,6 +378,24 @@ def run_auto(
     new_reviews = list(seen.values())
 
     if not new_reviews:
+        # Safety net: warn if API reports more reviews than DB has
+        try:
+            db_config = config.databases.get('postgresql')
+            if db_config and total_count > 0:
+                engine = create_engine_from_config(db_config)
+                sm = SessionManager(engine)
+                with sm.session_scope() as session:
+                    db_count = session.query(EmbedSocialReview).count()
+                if total_count > db_count:
+                    logger.warning(
+                        "Auto found 0 new reviews but API total (%d) > DB count (%d). "
+                        "Gap of %d reviews — consider running --mode backfill",
+                        total_count, db_count, total_count - db_count
+                    )
+                else:
+                    logger.info("DB count (%d) >= API total (%d), fully synced", db_count, total_count)
+        except Exception as e:
+            logger.debug("Could not compare API vs DB counts: %s", e)
         print("\nNo new reviews to sync")
         return 0
 
@@ -378,6 +403,62 @@ def run_auto(
     count = push_reviews_to_database(new_reviews, config, chunk_size)
 
     return count
+
+
+def run_diagnose(
+    api_key: str,
+    config: DataLayerConfig,
+    page_size: int
+) -> int:
+    """
+    Diagnose mode: read-only check comparing API state vs DB state.
+    No DB writes.
+    """
+    http_client = HTTPClient()
+
+    print("\n[DIAGNOSE] Fetching page 1 from API (newest first)...")
+    items, total_count = get_items(http_client, api_key, page=1, page_size=page_size)
+    print(f"  API total_count: {total_count}")
+    print(f"  Items on page 1: {len(items)}")
+
+    if items:
+        print(f"\n  Newest 5 reviews from API:")
+        for item in items[:5]:
+            print(f"    id={item.get('id')}  date={item.get('originalCreatedOn')}  "
+                  f"rating={item.get('rating')}  author={item.get('authorName', '')[:30]}")
+
+    # Compare with DB
+    db_config = config.databases.get('postgresql')
+    if db_config:
+        engine = create_engine_from_config(db_config)
+        sm = SessionManager(engine)
+        try:
+            with sm.session_scope() as session:
+                db_count = session.query(EmbedSocialReview).count()
+                newest_db = session.query(EmbedSocialReview.original_created_on).order_by(
+                    EmbedSocialReview.original_created_on.desc()
+                ).first()
+            print(f"\n  DB review count: {db_count}")
+            if newest_db and newest_db[0]:
+                print(f"  DB newest review date: {newest_db[0].isoformat()}")
+            gap = total_count - db_count
+            if gap > 0:
+                print(f"\n  GAP: {gap} reviews in API not in DB")
+            elif gap == 0:
+                print(f"\n  DB is in sync with API")
+            else:
+                print(f"\n  DB has {abs(gap)} more records than API total (possible duplicates or deletions)")
+        except Exception as e:
+            logger.debug("Could not query DB for diagnose: %s", e)
+
+    # Check if page 1 items exist in DB
+    if items and db_config:
+        page_ids = [str(item.get('id', '')) for item in items]
+        existing = get_existing_review_ids(config, page_ids)
+        new_on_page1 = len(page_ids) - len(existing)
+        print(f"\n  Page 1: {new_on_page1} new, {len(existing)} already in DB")
+
+    return 0
 
 
 # =============================================================================
@@ -396,14 +477,17 @@ Examples:
 
   # Auto mode - incremental sync (newest first, stop when caught up)
   python embedsocial_to_sql.py --mode auto
+
+  # Diagnose mode - read-only check of API vs DB state
+  python embedsocial_to_sql.py --mode diagnose
         """
     )
 
     parser.add_argument(
         '--mode',
-        choices=['backfill', 'auto'],
+        choices=['backfill', 'auto', 'diagnose'],
         required=True,
-        help='Extraction mode: backfill (all reviews), auto (incremental)'
+        help='Extraction mode: backfill (all reviews), auto (incremental), diagnose (read-only check)'
     )
 
     return parser.parse_args()
@@ -453,6 +537,13 @@ def main():
             page_size=page_size,
             chunk_size=chunk_size,
             max_pages=incremental_pages
+        )
+
+    elif args.mode == 'diagnose':
+        count = run_diagnose(
+            api_key=api_key,
+            config=config,
+            page_size=page_size
         )
 
     else:
