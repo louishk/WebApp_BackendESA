@@ -542,14 +542,26 @@ const API_ENDPOINTS = {
             },
             {
                 "method": "GET", "path": "/api/unit-availability", "scope": "inventory:read",
-                "description": "Get available units with pricing and labels",
+                "description": "Get available (vacant, rentable) units with enriched label data and pricing",
                 "params": {
-                    "site_code": {"type": "string",  "required": true,  "description": "Location code"},
-                    "category":  {"type": "string",  "required": false, "description": "Filter by category"},
-                    "climate":   {"type": "string",  "required": false, "description": "Filter by climate code"},
-                    "floor":     {"type": "integer", "required": false, "description": "Filter by floor"}
+                    "site_ids":     {"type": "string",  "required": true,  "description": "Comma-separated site IDs"},
+                    "category":     {"type": "string",  "required": false, "description": "Filter by category_label"},
+                    "type_code":    {"type": "string",  "required": false, "description": "Filter by label_type_code"},
+                    "climate_code": {"type": "string",  "required": false, "description": "Filter by label_climate_code (A/NC/RF)"},
+                    "floor":        {"type": "integer", "required": false, "description": "Filter by iFloor"},
+                    "shape":        {"type": "string",  "required": false, "description": "Filter by label_shape"},
+                    "min_size":     {"type": "number",  "required": false, "description": "Minimum area (sqft)"},
+                    "max_size":     {"type": "number",  "required": false, "description": "Maximum area (sqft)"}
                 },
                 "example_response": {"units": ["..."], "count": 42}
+            },
+            {
+                "method": "GET", "path": "/api/unit-availability/reservations", "scope": "inventory:read",
+                "description": "Get active reservations for sites (enriches unit availability with reserved status)",
+                "params": {
+                    "site_codes": {"type": "string", "required": true, "description": "Comma-separated site codes (max 50)"}
+                },
+                "example_response": {"reservations": {"L001:1234": {"waiting_id": 5678, "first_name": "John", "quoted_rate": 250.0}}, "count": 3}
             },
             {
                 "method": "GET", "path": "/api/inventory/units", "scope": "inventory:read",
