@@ -676,6 +676,102 @@ const API_ENDPOINTS = {
                 "example_response": {"services": ["..."]}
             }
         ]
+    },
+    "Smart Lock": {
+        "read_scope": "smart_lock:read",
+        "write_scope": "smart_lock:write",
+        "endpoints": [
+            {
+                "method": "GET", "path": "/api/smart-lock/assignments", "scope": "smart_lock:read",
+                "description": "List assignments for a site (with keypad/padlock IDs)",
+                "params": {
+                    "site_id":  {"type": "integer", "required": true,  "description": "Site ID"},
+                    "unit_ids": {"type": "string",  "required": false, "description": "Comma-separated unit IDs"}
+                },
+                "example_response": {"assignments": [{"site_id": 123, "unit_id": 12345, "keypad_id": "KP-001", "padlock_id": "PL-003", "assigned_by": "louis", "updated_at": "2026-03-17T04:00:00"}], "count": 1}
+            },
+            {
+                "method": "PUT", "path": "/api/smart-lock/assignments", "scope": "smart_lock:write",
+                "description": "Bulk upsert unit assignments (max 500). Keypads many-to-many, padlocks 1:1.",
+                "body": {
+                    "assignments": {"type": "array", "required": true, "description": "Array of {site_id, unit_id, keypad_pk, padlock_pk}"}
+                },
+                "example_response": {"success": true, "upserted": 2}
+            },
+            {
+                "method": "GET", "path": "/api/smart-lock/keypads", "scope": "smart_lock:read",
+                "description": "List keypads, optionally filtered by site",
+                "params": {
+                    "site_id": {"type": "integer", "required": false, "description": "Filter by site ID"}
+                },
+                "example_response": {"keypads": [{"id": 5, "keypad_id": "KP-001", "site_id": 123, "status": "assigned"}]}
+            },
+            {
+                "method": "POST", "path": "/api/smart-lock/keypads", "scope": "smart_lock:write",
+                "description": "Create a keypad",
+                "body": {
+                    "keypad_id": {"type": "string",  "required": true, "description": "Keypad identifier (max 50 chars)"},
+                    "site_id":   {"type": "integer", "required": true, "description": "Site ID"},
+                    "notes":     {"type": "string",  "required": false, "description": "Optional notes"}
+                },
+                "example_response": {"success": true, "id": 5}
+            },
+            {
+                "method": "POST", "path": "/api/smart-lock/keypads/batch", "scope": "smart_lock:write",
+                "description": "Batch create keypads (max 500, skips duplicates)",
+                "body": {
+                    "items": {"type": "array", "required": true, "description": "Array of {keypad_id, site_id, notes}"}
+                },
+                "example_response": {"success": true, "created": 10, "skipped": 2}
+            },
+            {
+                "method": "DELETE", "path": "/api/smart-lock/keypads/<id>", "scope": "smart_lock:write",
+                "description": "Delete a keypad (unlinks from assigned units)",
+                "params": {},
+                "example_response": {"success": true}
+            },
+            {
+                "method": "GET", "path": "/api/smart-lock/padlocks", "scope": "smart_lock:read",
+                "description": "List padlocks, optionally filtered by site",
+                "params": {
+                    "site_id": {"type": "integer", "required": false, "description": "Filter by site ID"}
+                },
+                "example_response": {"padlocks": [{"id": 12, "padlock_id": "PL-003", "site_id": 123, "status": "assigned"}]}
+            },
+            {
+                "method": "POST", "path": "/api/smart-lock/padlocks", "scope": "smart_lock:write",
+                "description": "Create a padlock",
+                "body": {
+                    "padlock_id": {"type": "string",  "required": true, "description": "Padlock identifier (max 50 chars)"},
+                    "site_id":    {"type": "integer", "required": true, "description": "Site ID"},
+                    "notes":      {"type": "string",  "required": false, "description": "Optional notes"}
+                },
+                "example_response": {"success": true, "id": 12}
+            },
+            {
+                "method": "POST", "path": "/api/smart-lock/padlocks/batch", "scope": "smart_lock:write",
+                "description": "Batch create padlocks (max 500, skips duplicates)",
+                "body": {
+                    "items": {"type": "array", "required": true, "description": "Array of {padlock_id, site_id, notes}"}
+                },
+                "example_response": {"success": true, "created": 10, "skipped": 2}
+            },
+            {
+                "method": "DELETE", "path": "/api/smart-lock/padlocks/<id>", "scope": "smart_lock:write",
+                "description": "Delete a padlock (unlinks from assigned units)",
+                "params": {},
+                "example_response": {"success": true}
+            },
+            {
+                "method": "GET", "path": "/api/smart-lock/audit-log", "scope": "smart_lock:read",
+                "description": "Get recent audit log entries",
+                "params": {
+                    "site_id": {"type": "integer", "required": false, "description": "Filter by site"},
+                    "limit":   {"type": "integer", "required": false, "description": "Max entries (default 100, max 500)"}
+                },
+                "example_response": {"entries": [{"action": "keypad_assigned", "detail": "Assigned KP-001 to unit 12345", "username": "louis"}]}
+            }
+        ]
     }
 };
 
