@@ -25,6 +25,8 @@ API_SCOPES = {
     'reservations:read': 'Read reservations, notes, and fees',
     'reservations:write': 'Create/update/cancel reservations and tenants',
     'reservations:track': 'Push external reservation tracking records and lifecycle events',
+    'smart_lock:read': 'Read smart lock assignments, keypads, and padlocks',
+    'smart_lock:write': 'Create/update smart lock assignments and devices',
 }
 
 # Defaults
