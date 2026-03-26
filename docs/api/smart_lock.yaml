@@ -1,0 +1,623 @@
+openapi: 3.0.3
+
+info:
+  title: ESA Backend — Smart Lock API
+  description: >
+    Smart lock management endpoints for keypad and padlock assignment to storage units.
+    All routes are under the `api` Flask blueprint with URL prefix `/api/smart-lock`.
+
+    **Authentication**: Bearer JWT (`Authorization` header) or API key (`X-API-Key` header).
+    Session-authenticated web UI users are also supported.
+
+    **Scopes**: `smart_lock:read` for GET endpoints, `smart_lock:write` for mutations.
+
+    **RBAC**: Session users require `can_access_smart_lock` role permission.
+
+    **Key concepts**:
+    - **Keypads** are site-scoped and can be assigned to multiple units (many-to-many).
+    - **Padlocks** are site-scoped and assigned 1:1 to units.
+    - Assignments link a unit (site_id + unit_id) to optional keypad and/or padlock.
+
+  version: "1.0.0"
+  contact:
+    name: ESA Backend
+
+servers:
+  - url: https://app.extraspaceasia.com.sg
+    description: Production (Azure VM)
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        HS256-signed JWT issued by `POST /api/auth/token`.
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        API key in format `esa_{key_id}.{secret}`. Requires `smart_lock:read`
+        or `smart_lock:write` scope.
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "site_id parameter is required"
+
+    Keypad:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Internal primary key
+          example: 5
+        keypad_id:
+          type: string
+          description: Human-readable keypad identifier
+          example: "KP-001"
+        site_id:
+          type: integer
+          example: 123
+        status:
+          type: string
+          enum: [assigned, not_assigned]
+          example: "assigned"
+        notes:
+          type: string
+          nullable: true
+          example: "Floor 3 zone keypad"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Padlock:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 12
+        padlock_id:
+          type: string
+          example: "PL-003"
+        site_id:
+          type: integer
+          example: 123
+        status:
+          type: string
+          enum: [assigned, not_assigned]
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Assignment:
+      type: object
+      properties:
+        site_id:
+          type: integer
+          example: 123
+        unit_id:
+          type: integer
+          example: 12345
+        keypad_pk:
+          type: integer
+          nullable: true
+          description: Internal PK of assigned keypad (null if none)
+          example: 5
+        keypad_id:
+          type: string
+          nullable: true
+          description: Human-readable keypad identifier
+          example: "KP-001"
+        padlock_pk:
+          type: integer
+          nullable: true
+          description: Internal PK of assigned padlock (null if none)
+          example: 12
+        padlock_id:
+          type: string
+          nullable: true
+          description: Human-readable padlock identifier
+          example: "PL-003"
+        assigned_by:
+          type: string
+          nullable: true
+          example: "louis"
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    AssignmentUpsertItem:
+      type: object
+      required: [site_id, unit_id]
+      properties:
+        site_id:
+          type: integer
+          example: 123
+        unit_id:
+          type: integer
+          example: 12345
+        keypad_pk:
+          type: integer
+          nullable: true
+          description: PK of keypad to assign, or null to unassign
+        padlock_pk:
+          type: integer
+          nullable: true
+          description: PK of padlock to assign, or null to unassign
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # Assignments
+  # ---------------------------------------------------------------------------
+
+  /api/smart-lock/assignments:
+    get:
+      summary: List assignments for a site
+      description: >
+        Returns all unit assignments for the specified site, with human-readable
+        keypad and padlock identifiers. Optionally filter by specific unit IDs.
+      operationId: listAssignments
+      tags: [Assignments]
+      parameters:
+        - name: site_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Site ID to fetch assignments for
+          example: 123
+        - name: unit_ids
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Comma-separated unit IDs to filter (optional)
+          example: "1001,1002,1003"
+      responses:
+        "200":
+          description: Assignments list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Assignment"
+                  count:
+                    type: integer
+                    example: 42
+        "400":
+          description: Missing or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden — insufficient scope or role
+
+    put:
+      summary: Bulk upsert assignments
+      description: >
+        Create or update unit assignments in bulk. Each item specifies a unit
+        and its keypad/padlock assignment. Set keypad_pk or padlock_pk to null
+        to unassign.
+
+        Validates that keypads/padlocks belong to the specified site and that
+        unit IDs exist in `units_info`. Maximum 500 items per request.
+
+        Keypad and padlock status fields are automatically updated.
+        Keypads can be assigned to multiple units; padlocks are 1:1.
+      operationId: upsertAssignments
+      tags: [Assignments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignments]
+              properties:
+                assignments:
+                  type: array
+                  maxItems: 500
+                  items:
+                    $ref: "#/components/schemas/AssignmentUpsertItem"
+            example:
+              assignments:
+                - site_id: 123
+                  unit_id: 12345
+                  keypad_pk: 5
+                  padlock_pk: 12
+                - site_id: 123
+                  unit_id: 12346
+                  keypad_pk: 5
+                  padlock_pk: null
+      responses:
+        "200":
+          description: Assignments saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  upserted:
+                    type: integer
+                    example: 2
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden — insufficient scope or role
+
+  # ---------------------------------------------------------------------------
+  # Keypads
+  # ---------------------------------------------------------------------------
+
+  /api/smart-lock/keypads:
+    get:
+      summary: List keypads
+      description: List all keypads, optionally filtered by site_id.
+      operationId: listKeypads
+      tags: [Keypads]
+      parameters:
+        - name: site_id
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Keypads list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keypads:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Keypad"
+
+    post:
+      summary: Create a keypad
+      operationId: createKeypad
+      tags: [Keypads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keypad_id, site_id]
+              properties:
+                keypad_id:
+                  type: string
+                  maxLength: 50
+                  example: "KP-001"
+                site_id:
+                  type: integer
+                  example: 123
+                notes:
+                  type: string
+                  maxLength: 255
+      responses:
+        "200":
+          description: Keypad created
+        "400":
+          description: Validation error or duplicate
+
+  /api/smart-lock/keypads/batch:
+    post:
+      summary: Batch create keypads
+      description: Create multiple keypads from a list. Skips duplicates. Max 500 items.
+      operationId: batchCreateKeypads
+      tags: [Keypads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [keypad_id, site_id]
+                    properties:
+                      keypad_id:
+                        type: string
+                      site_id:
+                        type: integer
+                      notes:
+                        type: string
+      responses:
+        "200":
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  created:
+                    type: integer
+                  skipped:
+                    type: integer
+
+  /api/smart-lock/keypads/{id}:
+    delete:
+      summary: Delete a keypad
+      description: Deletes the keypad and unlinks it from any assigned units.
+      operationId: deleteKeypad
+      tags: [Keypads]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Keypad deleted
+        "404":
+          description: Keypad not found
+
+  # ---------------------------------------------------------------------------
+  # Padlocks
+  # ---------------------------------------------------------------------------
+
+  /api/smart-lock/padlocks:
+    get:
+      summary: List padlocks
+      operationId: listPadlocks
+      tags: [Padlocks]
+      parameters:
+        - name: site_id
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Padlocks list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  padlocks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Padlock"
+
+    post:
+      summary: Create a padlock
+      operationId: createPadlock
+      tags: [Padlocks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [padlock_id, site_id]
+              properties:
+                padlock_id:
+                  type: string
+                  maxLength: 50
+                site_id:
+                  type: integer
+                notes:
+                  type: string
+                  maxLength: 255
+      responses:
+        "200":
+          description: Padlock created
+        "400":
+          description: Validation error or duplicate
+
+  /api/smart-lock/padlocks/batch:
+    post:
+      summary: Batch create padlocks
+      description: Max 500 items. Skips duplicates.
+      operationId: batchCreatePadlocks
+      tags: [Padlocks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [padlock_id, site_id]
+                    properties:
+                      padlock_id:
+                        type: string
+                      site_id:
+                        type: integer
+                      notes:
+                        type: string
+      responses:
+        "200":
+          description: Batch result
+
+  /api/smart-lock/padlocks/{id}:
+    delete:
+      summary: Delete a padlock
+      operationId: deletePadlock
+      tags: [Padlocks]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Padlock deleted
+        "404":
+          description: Padlock not found
+
+  # ---------------------------------------------------------------------------
+  # Units (read-only, from esa_pbi)
+  # ---------------------------------------------------------------------------
+
+  /api/smart-lock/units:
+    get:
+      summary: List units with assignments
+      description: >
+        Returns unit data from `units_info` (esa_pbi) merged with assignment
+        data from `smart_lock_unit_assignments` (esa_backend). Also returns
+        all keypads and padlocks for the requested sites (for dropdown population).
+      operationId: listUnitsWithAssignments
+      tags: [Units]
+      parameters:
+        - name: site_ids
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated site IDs
+          example: "123,456"
+      responses:
+        "200":
+          description: Units with assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  units:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        SiteID:
+                          type: integer
+                        UnitID:
+                          type: integer
+                        sUnitName:
+                          type: string
+                        bRentable:
+                          type: boolean
+                        bRented:
+                          type: boolean
+                        assignment:
+                          type: object
+                          nullable: true
+                  count:
+                    type: integer
+                  keypads:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Keypad"
+                  padlocks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Padlock"
+                  last_refresh:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Most recent updated_at from units_info for loaded sites
+
+  # ---------------------------------------------------------------------------
+  # Audit Log
+  # ---------------------------------------------------------------------------
+
+  /api/smart-lock/audit-log:
+    get:
+      summary: Get audit log entries
+      operationId: getAuditLog
+      tags: [Audit]
+      parameters:
+        - name: site_id
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+            maximum: 500
+      responses:
+        "200":
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        action:
+                          type: string
+                          example: "keypad_assigned"
+                        entity_type:
+                          type: string
+                          example: "assignment"
+                        entity_id:
+                          type: string
+                          nullable: true
+                        site_id:
+                          type: integer
+                          nullable: true
+                        unit_id:
+                          type: integer
+                          nullable: true
+                        detail:
+                          type: string
+                          nullable: true
+                        username:
+                          type: string
+                        created_at:
+                          type: string
+                          format: date-time
