@@ -4410,12 +4410,19 @@ def api_sl_assignments_upsert():
                 )
                 session.add(assignment)
 
-            # Update keypad status
+            # Update keypad status (keypads can be assigned to multiple units)
             if old_keypad_pk != resolved_keypad_pk:
                 if old_keypad_pk:
                     old_kp = session.query(SmartLockKeypad).get(old_keypad_pk)
                     if old_kp:
-                        old_kp.status = 'not_assigned'
+                        # Only set not_assigned if no other unit still references this keypad
+                        other_ref = session.query(SmartLockUnitAssignment).filter(
+                            SmartLockUnitAssignment.keypad_pk == old_keypad_pk,
+                            SmartLockUnitAssignment.site_id == sid,
+                            SmartLockUnitAssignment.unit_id != uid,
+                        ).first()
+                        if not other_ref:
+                            old_kp.status = 'not_assigned'
                         _sl_audit(session, 'keypad_unassigned', 'assignment', old_kp.keypad_id,
                                   site_id=sid, unit_id=uid,
                                   detail=f'Unassigned keypad {old_kp.keypad_id} from unit {uid}')
@@ -4452,6 +4459,76 @@ def api_sl_assignments_upsert():
         session.rollback()
         current_app.logger.error(f"Smart lock assignments upsert error: {e}")
         return jsonify({'error': 'Failed to save assignments'}), 500
+    finally:
+        session.close()
+
+
+# --- Assignments Read API (external) ---
+
+@api_bp.route('/smart-lock/assignments', methods=['GET'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_sl_assignments_list():
+    """List assignments with human-readable keypad/padlock IDs. Requires site_id."""
+    from web.models.smart_lock import (
+        SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock,
+    )
+    site_id = request.args.get('site_id')
+    if not site_id:
+        return jsonify({'error': 'site_id parameter is required'}), 400
+    try:
+        site_id = int(site_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'site_id must be an integer'}), 400
+
+    unit_ids_param = request.args.get('unit_ids', '')
+
+    session = get_session()
+    try:
+        q = session.query(SmartLockUnitAssignment).filter(
+            SmartLockUnitAssignment.site_id == site_id
+        )
+        if unit_ids_param:
+            try:
+                unit_ids = [int(u.strip()) for u in unit_ids_param.split(',') if u.strip()]
+            except ValueError:
+                return jsonify({'error': 'unit_ids must be comma-separated integers'}), 400
+            q = q.filter(SmartLockUnitAssignment.unit_id.in_(unit_ids))
+
+        assignments = q.order_by(SmartLockUnitAssignment.unit_id).all()
+
+        # Build keypad/padlock ID lookup maps
+        keypad_pks = {a.keypad_pk for a in assignments if a.keypad_pk}
+        padlock_pks = {a.padlock_pk for a in assignments if a.padlock_pk}
+
+        kp_map = {}
+        if keypad_pks:
+            for kp in session.query(SmartLockKeypad).filter(SmartLockKeypad.id.in_(keypad_pks)).all():
+                kp_map[kp.id] = kp.keypad_id
+
+        pl_map = {}
+        if padlock_pks:
+            for pl in session.query(SmartLockPadlock).filter(SmartLockPadlock.id.in_(padlock_pks)).all():
+                pl_map[pl.id] = pl.padlock_id
+
+        result = []
+        for a in assignments:
+            result.append({
+                'site_id': a.site_id,
+                'unit_id': a.unit_id,
+                'keypad_pk': a.keypad_pk,
+                'keypad_id': kp_map.get(a.keypad_pk),
+                'padlock_pk': a.padlock_pk,
+                'padlock_id': pl_map.get(a.padlock_pk),
+                'assigned_by': a.assigned_by,
+                'updated_at': a.updated_at.isoformat() if a.updated_at else None,
+            })
+
+        return jsonify({'assignments': result, 'count': len(result)})
+    except Exception as e:
+        current_app.logger.error(f"Smart lock assignments list error: {e}")
+        return jsonify({'error': 'Failed to fetch assignments'}), 500
     finally:
         session.close()
 

@@ -255,17 +255,6 @@
         return originalAssignments[key] || { keypad_pk: null, padlock_pk: null };
     }
 
-    function getAssignedKeypadPks(siteId, excludeUnitId) {
-        // Collect all keypad_pks currently assigned to units in this site
-        const assigned = new Set();
-        units.filter(u => u.SiteID === siteId).forEach(u => {
-            if (u.UnitID === excludeUnitId) return;
-            const a = getCurrentAssignment(u.SiteID, u.UnitID);
-            if (a.keypad_pk) assigned.add(a.keypad_pk);
-        });
-        return assigned;
-    }
-
     function getAssignedPadlockPks(siteId, excludeUnitId) {
         const assigned = new Set();
         units.filter(u => u.SiteID === siteId).forEach(u => {
@@ -305,15 +294,11 @@
                 ? '<span style="color:#d97706;">Yes</span>'
                 : '<span style="color:#6b7280;">No</span>';
 
-            // Build keypad dropdown
+            // Build keypad dropdown (keypads can be assigned to multiple units)
             const siteKps = siteKeypads[u.SiteID] || [];
-            const assignedKps = getAssignedKeypadPks(u.SiteID, u.UnitID);
             let kpOptions = '<option value="">— None —</option>';
             siteKps.forEach(k => {
-                const isCurrently = current.keypad_pk === k.id;
-                const isTaken = assignedKps.has(k.id);
-                if (isTaken && !isCurrently) return; // hide taken
-                const sel = isCurrently ? 'selected' : '';
+                const sel = current.keypad_pk === k.id ? 'selected' : '';
                 kpOptions += `<option value="${k.id}" ${sel}>${esc(k.keypad_id)}</option>`;
             });
 
@@ -363,7 +348,8 @@
             changes[key] = current;
         }
 
-        // Re-render to update dropdowns (remove taken items from other rows)
+        // Padlock changes need full re-render to update 1:1 taken filter in other dropdowns
+        // Keypad changes don't need re-render (many-to-many), but we do it for row highlight
         renderTable();
         updateStats();
     }
@@ -410,12 +396,10 @@
                     originalAssignments[key] = { ...changes[key] };
                 }
                 changes = {};
-                // Re-select the loaded sites in case DOM was reset
-                const select = document.getElementById('site-select');
-                Array.from(select.options).forEach(o => {
-                    o.selected = loadedSiteIds.includes(o.value);
+                // Clear yellow highlights without rebuilding the table
+                document.querySelectorAll('#units-tbody tr').forEach(row => {
+                    row.style.background = '';
                 });
-                renderTable();
                 updateStats();
                 loadAuditLog();
             } else {
