@@ -65,6 +65,8 @@ RSYNC_EXCLUDES = [
     'node_modules',
     '.DS_Store',
     '*.log',
+    'logs/',          # Preserve VM log dir ownership (www-data)
+    '.vault/',        # Preserve VM vault secrets
 ]
 
 
@@ -241,6 +243,12 @@ def step_update_code_rsync(credentials: dict, dry_run: bool = False, verbose: bo
                 {temp_dir}/ {VM_BACKEND_PATH}/
 
             sudo chown -R www-data:www-data {VM_BACKEND_PATH}
+
+            # Ensure logs directory exists with correct ownership
+            sudo mkdir -p {VM_PYTHON_PATH}/logs
+            sudo chown -R www-data:www-data {VM_PYTHON_PATH}/logs
+            sudo chmod 755 {VM_PYTHON_PATH}/logs
+
             rm -rf {temp_dir}
             echo "Code deployed to {VM_BACKEND_PATH}"
         """
