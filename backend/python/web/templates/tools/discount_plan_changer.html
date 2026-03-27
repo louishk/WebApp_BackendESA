@@ -329,7 +329,6 @@
 {% block scripts %}
 <script>
     // Disable auto-refresh for this tool page
-    clearTimeout(window.autoRefreshTimeout);
 
     const API_TOKEN = localStorage.getItem('api_token') || '';
     let plansData = [];

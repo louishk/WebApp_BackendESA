@@ -669,7 +669,6 @@ select.form-select {
 
 {% block scripts %}
 <script>
-    clearTimeout(window.autoRefreshTimeout);
 
     const csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
     const API_TOKEN = localStorage.getItem('api_token') || '';
