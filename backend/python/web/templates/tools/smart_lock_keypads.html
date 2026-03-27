@@ -15,6 +15,12 @@
         </div>
         <button class="btn" onclick="loadKeypads()">Load</button>
         <button class="btn btn-secondary" onclick="loadKeypads('')" title="Show all sites">Show All</button>
+        <div style="display: flex; gap: 0.25rem; align-items: center; margin-left: 0.5rem;">
+            <span style="font-size: 0.8rem; color: #6b7280; margin-right: 0.25rem;">Status:</span>
+            <button class="btn btn-sm status-filter-btn active" data-filter="all" onclick="setStatusFilter('all')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">All</button>
+            <button class="btn btn-sm status-filter-btn" data-filter="assigned" onclick="setStatusFilter('assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Assigned</button>
+            <button class="btn btn-sm status-filter-btn" data-filter="not_assigned" onclick="setStatusFilter('not_assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Not Assigned</button>
+        </div>
         <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
     </div>
 </div>
@@ -94,6 +100,15 @@
     let allSites = [];
     let allKeypads = [];
     let csvBatchData = null;
+    let statusFilter = 'all';
+
+    function setStatusFilter(filter) {
+        statusFilter = filter;
+        document.querySelectorAll('.status-filter-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.filter === filter);
+        });
+        renderTable();
+    }
 
     function esc(str) {
         if (str == null) return '';
@@ -154,12 +169,16 @@
 
     function renderTable() {
         const tbody = document.getElementById('keypads-tbody');
-        if (allKeypads.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">No keypads found</td></tr>';
+        let filtered = allKeypads;
+        if (statusFilter === 'assigned') filtered = filtered.filter(k => k.status === 'assigned');
+        else if (statusFilter === 'not_assigned') filtered = filtered.filter(k => k.status !== 'assigned');
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">No keypads match filter</td></tr>';
             document.getElementById('count-info').textContent = '';
             return;
         }
-        tbody.innerHTML = allKeypads.map(k => {
+        tbody.innerHTML = filtered.map(k => {
             const statusBadge = k.status === 'assigned'
                 ? '<span style="background:#d1fae5;color:#059669;padding:0.15rem 0.5rem;border-radius:9999px;font-size:0.75rem;">Assigned</span>'
                 : '<span style="background:#f3f4f6;color:#6b7280;padding:0.15rem 0.5rem;border-radius:9999px;font-size:0.75rem;">Not Assigned</span>';
@@ -175,7 +194,7 @@
                 </td>
             </tr>`;
         }).join('');
-        document.getElementById('count-info').textContent = `${allKeypads.length} keypad(s)`;
+        document.getElementById('count-info').textContent = `${filtered.length} of ${allKeypads.length} keypad(s)`;
     }
 
     async function addKeypad() {

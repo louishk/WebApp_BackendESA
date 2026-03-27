@@ -59,6 +59,18 @@
         <label style="font-size: 0.8rem; cursor: pointer;">
             <input type="checkbox" id="filter-vacant" onchange="renderTable()"> Vacant only
         </label>
+        <div style="display: flex; gap: 0.25rem; align-items: center; margin-left: 0.5rem; border-left: 1px solid #e5e7eb; padding-left: 0.75rem;">
+            <span style="font-size: 0.8rem; color: #6b7280; margin-right: 0.25rem;">Keypad:</span>
+            <button class="btn btn-sm kp-filter-btn active" data-filter="all" onclick="setKpFilter('all')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">All</button>
+            <button class="btn btn-sm kp-filter-btn" data-filter="assigned" onclick="setKpFilter('assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Assigned</button>
+            <button class="btn btn-sm kp-filter-btn" data-filter="not_assigned" onclick="setKpFilter('not_assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Not Assigned</button>
+        </div>
+        <div style="display: flex; gap: 0.25rem; align-items: center; margin-left: 0.5rem; border-left: 1px solid #e5e7eb; padding-left: 0.75rem;">
+            <span style="font-size: 0.8rem; color: #6b7280; margin-right: 0.25rem;">Padlock:</span>
+            <button class="btn btn-sm pl-filter-btn active" data-filter="all" onclick="setPlFilter('all')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">All</button>
+            <button class="btn btn-sm pl-filter-btn" data-filter="assigned" onclick="setPlFilter('assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Assigned</button>
+            <button class="btn btn-sm pl-filter-btn" data-filter="not_assigned" onclick="setPlFilter('not_assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Not Assigned</button>
+        </div>
     </div>
     <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
         <thead>
@@ -131,6 +143,8 @@
     let sitePadlocks = {};   // site_id -> [{id, padlock_id, status, ...}]
     let changes = {};        // "siteId_unitId" -> {keypad_pk, padlock_pk}
     let originalAssignments = {}; // "siteId_unitId" -> {keypad_pk, padlock_pk}
+    let kpFilter = 'all';  // keypad assignment filter
+    let plFilter = 'all';  // padlock assignment filter
 
     function getCSRFToken() {
         const meta = document.querySelector('meta[name="csrf-token"]');
@@ -246,6 +260,22 @@
         return assigned;
     }
 
+    function setKpFilter(filter) {
+        kpFilter = filter;
+        document.querySelectorAll('.kp-filter-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.filter === filter);
+        });
+        renderTable();
+    }
+
+    function setPlFilter(filter) {
+        plFilter = filter;
+        document.querySelectorAll('.pl-filter-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.filter === filter);
+        });
+        renderTable();
+    }
+
     function renderTable() {
         const tbody = document.getElementById('units-tbody');
         const search = (document.getElementById('search-input').value || '').toLowerCase();
@@ -256,6 +286,22 @@
         if (search) filtered = filtered.filter(u => (u.sUnitName || '').toLowerCase().includes(search));
         if (rentableOnly) filtered = filtered.filter(u => u.bRentable === true);
         if (vacantOnly) filtered = filtered.filter(u => u.bRented !== true);
+        if (kpFilter === 'assigned') filtered = filtered.filter(u => {
+            const a = getCurrentAssignment(u.SiteID, u.UnitID);
+            return a.keypad_pk != null;
+        });
+        else if (kpFilter === 'not_assigned') filtered = filtered.filter(u => {
+            const a = getCurrentAssignment(u.SiteID, u.UnitID);
+            return a.keypad_pk == null;
+        });
+        if (plFilter === 'assigned') filtered = filtered.filter(u => {
+            const a = getCurrentAssignment(u.SiteID, u.UnitID);
+            return a.padlock_pk != null;
+        });
+        else if (plFilter === 'not_assigned') filtered = filtered.filter(u => {
+            const a = getCurrentAssignment(u.SiteID, u.UnitID);
+            return a.padlock_pk == null;
+        });
 
         if (filtered.length === 0) {
             tbody.innerHTML = '<tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
