@@ -71,7 +71,13 @@ def create_app(config=None, db_url=None):
     def get_db_session():
         nonlocal _db_engine, _session_factory
         if _db_engine is None:
-            _db_engine = create_engine(app.db_url)
+            _db_engine = create_engine(
+                app.db_url,
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True,
+                pool_recycle=300,
+            )
             _session_factory = sessionmaker(bind=_db_engine)
         return _session_factory()
 
@@ -170,9 +176,9 @@ def create_app(config=None, db_url=None):
         ]
         response.headers['Content-Security-Policy'] = '; '.join(csp_directives)
 
-        # HSTS - only enable in production with HTTPS
-        # Uncomment when deployed with HTTPS:
-        # response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        # HSTS - enforce HTTPS in production
+        if not app.config.get('DEBUG', False):
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
 
         return response
 
@@ -228,6 +234,38 @@ def create_app(config=None, db_url=None):
             'status': 'healthy',
             'timestamp': datetime.now().isoformat()
         })
+
+    # Global error handlers — prevent stack trace leaks
+    import logging as _logging
+    _error_logger = _logging.getLogger(__name__)
+
+    @app.errorhandler(404)
+    def not_found(e):
+        if request.path.startswith('/api/'):
+            return jsonify({'error': 'Not found'}), 404
+        from flask import render_template
+        return render_template('errors/404.html') if _template_exists('errors/404.html') else (jsonify({'error': 'Not found'}), 404)
+
+    @app.errorhandler(405)
+    def method_not_allowed(e):
+        return jsonify({'error': 'Method not allowed'}), 405
+
+    @app.errorhandler(500)
+    def internal_error(e):
+        _error_logger.error(f"Internal server error: {e}", exc_info=True)
+        return jsonify({'error': 'Internal server error'}), 500
+
+    @app.errorhandler(Exception)
+    def unhandled_exception(e):
+        _error_logger.error(f"Unhandled exception: {e}", exc_info=True)
+        return jsonify({'error': 'Internal server error'}), 500
+
+    def _template_exists(name):
+        try:
+            app.jinja_env.get_template(name)
+            return True
+        except Exception:
+            return False
 
     return app
 

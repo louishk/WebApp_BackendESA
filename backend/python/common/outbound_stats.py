@@ -161,7 +161,7 @@ def init_outbound_stats(app):
     try:
         from web.models.external_api_statistic import ExternalApiStatistic
         from sqlalchemy import create_engine
-        engine = create_engine(app.db_url)
+        engine = create_engine(app.db_url, pool_pre_ping=True, pool_recycle=300)
         ExternalApiStatistic.__table__.create(engine, checkfirst=True)
         engine.dispose()
         logger.info("External API statistics table verified")
@@ -179,7 +179,7 @@ def init_outbound_stats_standalone():
         from common.config_loader import get_database_url
         from sqlalchemy import create_engine
         db_url = get_database_url('backend')
-        _standalone_engine = create_engine(db_url)
+        _standalone_engine = create_engine(db_url, pool_pre_ping=True, pool_recycle=300)
 
         from web.models.external_api_statistic import ExternalApiStatistic
         ExternalApiStatistic.__table__.create(_standalone_engine, checkfirst=True)

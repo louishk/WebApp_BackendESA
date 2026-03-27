@@ -126,7 +126,7 @@ def init_api_stats(app):
     try:
         from web.models.api_statistic import ApiStatistic
         from sqlalchemy import create_engine
-        engine = create_engine(app.db_url)
+        engine = create_engine(app.db_url, pool_pre_ping=True, pool_recycle=300)
         ApiStatistic.__table__.create(engine, checkfirst=True)
         engine.dispose()
         logger.info("API statistics table verified")

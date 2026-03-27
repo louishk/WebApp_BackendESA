@@ -31,7 +31,7 @@ def _get_pbi_engine():
         from common.config_loader import get_database_url
         from sqlalchemy import create_engine
         pbi_url = get_database_url('pbi')
-        _pbi_engine = create_engine(pbi_url, pool_size=5, max_overflow=10)
+        _pbi_engine = create_engine(pbi_url, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=300)
     return _pbi_engine
 
 

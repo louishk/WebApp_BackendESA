@@ -34,7 +34,13 @@ def get_pbi_session():
         from common.config_loader import get_database_url
         from sqlalchemy import create_engine
         pbi_url = get_database_url('pbi')
-        _pbi_engine = create_engine(pbi_url)
+        _pbi_engine = create_engine(
+            pbi_url,
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True,
+            pool_recycle=300,
+        )
         _pbi_session_factory = sessionmaker(bind=_pbi_engine)
     return _pbi_session_factory()
 

@@ -125,7 +125,13 @@ def get_pbi_session():
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         pbi_url = get_database_url('pbi')
-        _pbi_engine = create_engine(pbi_url)
+        _pbi_engine = create_engine(
+            pbi_url,
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True,
+            pool_recycle=300,
+        )
         _pbi_session_factory = sessionmaker(bind=_pbi_engine)
     return _pbi_session_factory()
 
@@ -266,6 +272,7 @@ def api_get_job(pipeline):
 @api_bp.route('/jobs/<pipeline>', methods=['PUT'])
 @require_auth
 @require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=20, window_seconds=60)
 def api_update_job(pipeline):
     """Update pipeline schedule/settings."""
     from scheduler.config import SchedulerConfig
@@ -295,7 +302,8 @@ def api_update_job(pipeline):
             from croniter import croniter
             croniter(cron)
         except Exception as e:
-            return jsonify({'error': f'Invalid cron expression: {e}'}), 400
+            current_app.logger.warning(f"Invalid cron expression '{cron}': {e}")
+            return jsonify({'error': 'Invalid cron expression'}), 400
 
     success = config.update_pipeline_schedule(
         pipeline_name=pipeline,
@@ -323,6 +331,7 @@ def api_update_job(pipeline):
 @api_bp.route('/jobs/<pipeline>/enable', methods=['POST'])
 @require_auth
 @require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=10, window_seconds=60)
 def api_enable_job(pipeline):
     """Enable a pipeline."""
     from scheduler.config import SchedulerConfig
@@ -338,6 +347,7 @@ def api_enable_job(pipeline):
 @api_bp.route('/jobs/<pipeline>/disable', methods=['POST'])
 @require_auth
 @require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=10, window_seconds=60)
 def api_disable_job(pipeline):
     """Disable a pipeline."""
     from scheduler.config import SchedulerConfig
@@ -749,7 +759,10 @@ def api_get_execution(execution_id):
             return jsonify({'error': 'Execution not found'}), 404
 
         data = record.to_dict()
-        data['error_traceback'] = record.error_traceback
+        # Only expose tracebacks to session/JWT users, not API key consumers
+        auth_method = getattr(g, 'current_user', {}).get('auth_method')
+        if auth_method != 'api_key':
+            data['error_traceback'] = record.error_traceback
         return jsonify(data)
     finally:
         session.close()
@@ -825,7 +838,7 @@ def api_get_history_detail(history_id):
             'duration_seconds': job.duration_seconds,
             'records_processed': job.records_processed,
             'error_message': job.error_message,
-            'error_traceback': job.error_traceback,
+            'error_traceback': job.error_traceback if getattr(g, 'current_user', {}).get('auth_method') != 'api_key' else None,
             'mode': job.mode,
             'parameters': job.parameters,
             'triggered_by': job.triggered_by,
@@ -1173,6 +1186,7 @@ def api_stop_mcp():
 @api_bp.route('/services/<service>/restart', methods=['POST'])
 @require_auth
 @require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=5, window_seconds=60)
 def api_restart_service(service):
     """Restart a scheduler service."""
     if service == 'scheduler':
@@ -1878,6 +1892,7 @@ def api_inventory_get_type_mappings():
 @api_bp.route('/inventory/type-mappings', methods=['PUT'])
 @require_auth
 @require_api_scope('inventory:write')
+@rate_limit_api(max_requests=20, window_seconds=60)
 def api_inventory_upsert_type_mappings():
     """Bulk upsert type mappings. Requires config management permission."""
     from flask_login import current_user as session_user
@@ -1966,6 +1981,7 @@ def api_inventory_get_overrides():
 @api_bp.route('/inventory/overrides', methods=['PUT'])
 @require_auth
 @require_api_scope('inventory:write')
+@rate_limit_api(max_requests=20, window_seconds=60)
 def api_inventory_upsert_overrides():
     """Bulk upsert per-unit overrides."""
     from web.models.inventory import InventoryUnitOverride
@@ -3859,6 +3875,7 @@ def api_sl_keypads_list():
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_keypads_create():
     """Add a single keypad."""
     from web.models.smart_lock import SmartLockKeypad
@@ -3910,6 +3927,7 @@ def api_sl_keypads_create():
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_keypads_batch():
     """Batch create keypads from CSV upload."""
     from web.models.smart_lock import SmartLockKeypad
@@ -3963,6 +3981,7 @@ def api_sl_keypads_batch():
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_keypads_update(pk):
     """Update a keypad (notes, site_id)."""
     from web.models.smart_lock import SmartLockKeypad
@@ -4002,6 +4021,7 @@ def api_sl_keypads_update(pk):
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_keypads_delete(pk):
     """Delete a keypad."""
     from web.models.smart_lock import SmartLockKeypad
@@ -4070,6 +4090,7 @@ def api_sl_padlocks_list():
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_padlocks_create():
     """Add a single padlock."""
     from web.models.smart_lock import SmartLockPadlock
@@ -4121,6 +4142,7 @@ def api_sl_padlocks_create():
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_padlocks_batch():
     """Batch create padlocks from CSV upload."""
     from web.models.smart_lock import SmartLockPadlock
@@ -4174,6 +4196,7 @@ def api_sl_padlocks_batch():
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_padlocks_update(pk):
     """Update a padlock (notes, site_id)."""
     from web.models.smart_lock import SmartLockPadlock
@@ -4213,6 +4236,7 @@ def api_sl_padlocks_update(pk):
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_padlocks_delete(pk):
     """Delete a padlock."""
     from web.models.smart_lock import SmartLockPadlock
@@ -4326,6 +4350,7 @@ def api_sl_units():
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_assignments_upsert():
     """Bulk upsert unit assignments. Updates keypad/padlock status accordingly."""
     from web.models.smart_lock import (
