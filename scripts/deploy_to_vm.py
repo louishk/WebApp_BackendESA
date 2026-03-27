@@ -574,7 +574,7 @@ def step_determine_restart_scope(credentials: dict, force: bool = False, verbose
         print("    No service restart needed (template/static/docs changes only)")
     else:
         for svc in sorted(scope['services']):
-            restart_type = "full restart" if svc in scope['full_restart_services'] else "graceful reload" if svc == 'esa-backend' else "restart"
+            restart_type = "full restart" if svc in scope['full_restart_services'] else "restart"
             file_reasons = scope['reasons'].get(svc, [])
             # Show up to 3 reasons
             shown = file_reasons[:3]
@@ -657,16 +657,11 @@ def step_restart_services(credentials: dict, scope: dict, verbose: bool = True) 
                 sudo systemctl start esa-backend
             """)
         else:
-            # Graceful reload via HUP — zero downtime
+            # Restart gunicorn — HUP reload is broken (gunicorn exits code 3)
             parts.append("""
-                echo "esa-backend: graceful reload (HUP)..."
+                echo "esa-backend: restarting..."
                 if sudo systemctl is-active --quiet esa-backend; then
-                    sudo systemctl reload esa-backend
-                    RELOAD_EXIT=$?
-                    if [ $RELOAD_EXIT -ne 0 ]; then
-                        echo "WARNING: reload failed (exit $RELOAD_EXIT), falling back to restart"
-                        sudo systemctl restart esa-backend
-                    fi
+                    sudo systemctl restart esa-backend
                 else
                     echo "esa-backend was not running, starting..."
                     sudo systemctl enable esa-backend
