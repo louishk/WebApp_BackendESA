@@ -39,7 +39,7 @@ from common import (
     convert_to_int,
     deduplicate_records,
 )
-from common.config import get_pipeline_config
+from common.config import get_pipeline_config, DatabaseType
 from common.gate_access_crypto import get_gate_crypto
 from common.config_loader import get_database_url
 from sqlalchemy import create_engine, text
@@ -168,7 +168,7 @@ def push_to_database(
     num_chunks = (len(data) + chunk_size - 1) // chunk_size
 
     with session_manager.session_scope() as session:
-        upsert_ops = UpsertOperations(session, 'postgresql')
+        upsert_ops = UpsertOperations(session, DatabaseType.POSTGRESQL)
 
         with tqdm(total=len(data), desc="  Upserting records", unit="rec") as pbar:
             for i in range(0, len(data), chunk_size):
