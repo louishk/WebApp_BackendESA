@@ -308,7 +308,7 @@
             const codeCell = hasCode
                 ? `<span class="gate-code-masked" id="gc-${u.UnitID}">••••••••</span>
                    <button class="btn btn-sm btn-outline-secondary ms-1 gate-reveal-btn"
-                           onclick="revealGateCode('${u.gate_access.location_code}', ${u.UnitID}, this)"
+                           onclick="revealGateCode('${u.gate_access.location_code}', ${u.UnitID}, ${u.gate_access.site_id}, this)"
                            title="Reveal access code"
                            style="padding:0.1rem 0.3rem;font-size:0.7rem;border:1px solid #d1d5db;border-radius:3px;background:transparent;cursor:pointer;">
                        <i class="bi bi-eye"></i>
@@ -563,7 +563,7 @@
     }
 
     // Reveal gate access code
-    async function revealGateCode(locationCode, unitId, btn) {
+    async function revealGateCode(locationCode, unitId, siteId, btn) {
         const span = document.getElementById(`gc-${unitId}`);
         if (!span) return;
 
@@ -580,7 +580,7 @@
 
         try {
             const res = await fetch(
-                `/api/smart-lock/gate-code?location_code=${encodeURIComponent(locationCode)}&unit_id=${unitId}`,
+                `/api/smart-lock/gate-code?location_code=${encodeURIComponent(locationCode)}&unit_id=${unitId}&site_id=${siteId}`,
                 { headers: apiHeaders() }
             );
             if (!res.ok) throw new Error('Failed to fetch');
@@ -592,12 +592,12 @@
             span.dataset.revealed = 'true';
             btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
 
-            // Auto-hide after 10 seconds
+            // Auto-hide after 5 seconds
             setTimeout(() => {
                 span.textContent = '••••••••';
                 span.dataset.revealed = 'false';
                 btn.innerHTML = '<i class="bi bi-eye"></i>';
-            }, 10000);
+            }, 5000);
         } catch (e) {
             span.textContent = 'Error';
             setTimeout(() => { span.textContent = '••••••••'; }, 3000);

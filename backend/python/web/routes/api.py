@@ -4291,6 +4291,7 @@ def api_sl_padlocks_delete(pk):
 @require_auth
 @_require_sl_session_access
 @require_api_scope('smart_lock:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_units():
     """Get units (from esa_pbi) merged with smart lock assignments (from esa_backend)."""
     site_ids_param = request.args.get('site_ids', '')
@@ -4352,7 +4353,7 @@ def api_sl_units():
         gate_data = session.query(GateAccessData).filter(
             GateAccessData.site_id.in_(site_ids)
         ).all()
-        gate_map = {g.unit_id: g.to_dict() for g in gate_data}
+        gate_map = {(g.site_id, g.unit_id): g.to_dict() for g in gate_data}
 
         # gate data last refresh
         gate_refresh = None
@@ -4367,7 +4368,7 @@ def api_sl_units():
         for u in units:
             key = (u['SiteID'], u['UnitID'])
             u['assignment'] = assign_map.get(key)
-            u['gate_access'] = gate_map.get(u['UnitID'])
+            u['gate_access'] = gate_map.get(key)
 
         return jsonify({
             'units': units,
@@ -4637,6 +4638,7 @@ def api_sl_gate_code():
     from web.models.smart_lock import GateAccessData
     unit_id = request.args.get('unit_id', type=int)
     location_code = request.args.get('location_code', '')
+    site_id = request.args.get('site_id', type=int)
 
     if not unit_id or not location_code:
         return jsonify({'error': 'unit_id and location_code required'}), 400
@@ -4650,6 +4652,10 @@ def api_sl_gate_code():
         if not record:
             return jsonify({'error': 'No gate access data for this unit'}), 404
 
+        # Site-scoping: verify caller-supplied site_id matches the record
+        if site_id and record.site_id != site_id:
+            return jsonify({'error': 'Forbidden'}), 403
+
         from common.gate_access_crypto import get_gate_crypto
         crypto = get_gate_crypto()
 
@@ -4659,7 +4665,7 @@ def api_sl_gate_code():
         # Audit the reveal
         _sl_audit(
             session, 'gate_code_viewed', 'gate_access', str(unit_id),
-            site_id=location_code, unit_id=unit_id,
+            site_id=record.site_id, unit_id=unit_id,
             detail=f"Access code revealed for unit {record.unit_name}",
         )
 
