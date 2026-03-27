@@ -759,9 +759,12 @@ def api_get_execution(execution_id):
             return jsonify({'error': 'Execution not found'}), 404
 
         data = record.to_dict()
-        # Only expose tracebacks to session/JWT users, not API key consumers
-        auth_method = getattr(g, 'current_user', {}).get('auth_method')
-        if auth_method != 'api_key':
+        # Redact internal error details for API key consumers
+        is_api_key = g.current_user.get('auth_method') == 'api_key'
+        if is_api_key:
+            if data.get('error_message'):
+                data['error_message'] = 'Pipeline execution failed'
+        else:
             data['error_traceback'] = record.error_traceback
         return jsonify(data)
     finally:
@@ -837,8 +840,8 @@ def api_get_history_detail(history_id):
             'completed_at': job.completed_at.isoformat() if job.completed_at else None,
             'duration_seconds': job.duration_seconds,
             'records_processed': job.records_processed,
-            'error_message': job.error_message,
-            'error_traceback': job.error_traceback if getattr(g, 'current_user', {}).get('auth_method') != 'api_key' else None,
+            'error_message': ('Pipeline execution failed' if job.error_message else None) if g.current_user.get('auth_method') == 'api_key' else job.error_message,
+            'error_traceback': None if g.current_user.get('auth_method') == 'api_key' else job.error_traceback,
             'mode': job.mode,
             'parameters': job.parameters,
             'triggered_by': job.triggered_by,

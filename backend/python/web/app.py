@@ -3,6 +3,7 @@ Flask Web Application for ESA Backend.
 Provides REST API, scheduler dashboard, user/page management.
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -178,7 +179,7 @@ def create_app(config=None, db_url=None):
 
         # HSTS - enforce HTTPS in production
         if not app.config.get('DEBUG', False):
-            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000'
 
         return response
 
@@ -236,15 +237,17 @@ def create_app(config=None, db_url=None):
         })
 
     # Global error handlers — prevent stack trace leaks
-    import logging as _logging
-    _error_logger = _logging.getLogger(__name__)
+    _error_logger = logging.getLogger(__name__)
 
     @app.errorhandler(404)
     def not_found(e):
         if request.path.startswith('/api/'):
             return jsonify({'error': 'Not found'}), 404
         from flask import render_template
-        return render_template('errors/404.html') if _template_exists('errors/404.html') else (jsonify({'error': 'Not found'}), 404)
+        try:
+            return render_template('errors/404.html'), 404
+        except Exception:
+            return jsonify({'error': 'Not found'}), 404
 
     @app.errorhandler(405)
     def method_not_allowed(e):
@@ -259,13 +262,6 @@ def create_app(config=None, db_url=None):
     def unhandled_exception(e):
         _error_logger.error(f"Unhandled exception: {e}", exc_info=True)
         return jsonify({'error': 'Internal server error'}), 500
-
-    def _template_exists(name):
-        try:
-            app.jinja_env.get_template(name)
-            return True
-        except Exception:
-            return False
 
     return app
 

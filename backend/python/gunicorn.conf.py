@@ -1,7 +1,8 @@
 """
 Gunicorn configuration for ESA Backend.
 
-Usage: gunicorn -c gunicorn.conf.py wsgi:app
+For local development: gunicorn -c gunicorn.conf.py wsgi:app
+Production uses systemd/esa-backend.service (CLI flags take precedence).
 """
 
 # Server socket
@@ -9,7 +10,8 @@ bind = "127.0.0.1:5000"
 
 # Worker processes
 workers = 4
-worker_class = "sync"
+threads = 2
+worker_class = "gthread"
 
 # Timeouts
 timeout = 120          # Kill worker if request takes >120s
@@ -26,6 +28,3 @@ loglevel = "info"
 
 # Process naming
 proc_name = "esa-backend"
-
-# Preload app for faster worker spawning (shares app code across forks)
-preload_app = True
