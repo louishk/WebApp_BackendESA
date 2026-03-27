@@ -165,12 +165,15 @@ window.SiteFilter = (function () {
         // Select All
         document.getElementById(inst.id + '-select-all').addEventListener('click', () => {
             const search = (inst.searchEl.value || '').toLowerCase();
-            inst.sites.forEach(s => {
-                if (!search || s.site_code.toLowerCase().includes(search) || s.name.toLowerCase().includes(search)) {
-                    if (inst.mode === 'single') inst.selected.clear();
-                    inst.selected.add(s.site_id);
-                }
-            });
+            const matching = inst.sites.filter(s =>
+                !search || s.site_code.toLowerCase().includes(search) || s.name.toLowerCase().includes(search)
+            );
+            if (inst.mode === 'single') {
+                inst.selected.clear();
+                if (matching.length) inst.selected.add(matching[0].site_id);
+            } else {
+                matching.forEach(s => inst.selected.add(s.site_id));
+            }
             _renderList(inst);
             _fireChange(inst);
         });
