@@ -31,6 +31,6 @@ pbi:
 
 # Redis cache (optional)
 redis:
-  enabled: false
+  enabled: true
   url: "redis://localhost:6379/0"
   default_ttl: 3600
