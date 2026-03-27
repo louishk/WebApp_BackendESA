@@ -244,7 +244,8 @@ def extract_dimensions(record: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]
 
 def push_dimensions_to_database(
     dimensions: Dict[str, List[Dict[str, Any]]],
-    config: DataLayerConfig
+    config: DataLayerConfig,
+    engine=None
 ) -> Dict[str, int]:
     """
     Push dimension records to database.
@@ -252,6 +253,7 @@ def push_dimensions_to_database(
     Args:
         dimensions: Dict of table_name -> list of records
         config: Database configuration
+        engine: Optional pre-created engine (avoids creating a new one per call)
 
     Returns:
         Dict of table_name -> records upserted
@@ -263,7 +265,8 @@ def push_dimensions_to_database(
     if not db_config:
         raise ValueError("PostgreSQL configuration not found")
 
-    engine = create_engine_from_config(db_config)
+    if engine is None:
+        engine = create_engine_from_config(db_config)
     session_manager = SessionManager(engine)
     results = {}
 
@@ -439,7 +442,7 @@ def transform_record(
                 email_value = value
 
                 # Parse string representation if needed
-                if isinstance(value, str) and value.startswith('['):
+                if isinstance(value, str) and value.startswith('[') and len(value) <= 4096:
                     try:
                         import ast
                         email_value = ast.literal_eval(value)
@@ -547,9 +550,16 @@ def sync_table_schema(engine, model_class: Type) -> List[str]:
     if not missing:
         return []
 
+    import re
+    _SAFE_IDENT = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]{0,62}$')
+
     added = []
     with engine.begin() as conn:
         for col_name, col in missing:
+            # Validate identifier to prevent DDL injection from API metadata
+            if not _SAFE_IDENT.match(col_name) or not _SAFE_IDENT.match(table_name):
+                logger.warning(f"Skipping unsafe identifier: {table_name}.{col_name!r}")
+                continue
             # Map SQLAlchemy type to a safe SQL type string
             col_type = col.type.compile(dialect=engine.dialect)
             stmt = f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type} NULL'
@@ -564,7 +574,8 @@ def push_records_to_database(
     records: List[Dict[str, Any]],
     model_class: Type,
     config: DataLayerConfig,
-    chunk_size: int = DEFAULT_SQL_CHUNK_SIZE
+    chunk_size: int = DEFAULT_SQL_CHUNK_SIZE,
+    engine=None
 ) -> int:
     """
     Push records to PostgreSQL database using upsert.
@@ -574,6 +585,7 @@ def push_records_to_database(
         model_class: SQLAlchemy model class
         config: Database configuration
         chunk_size: Records per upsert chunk
+        engine: Optional pre-created engine (avoids creating a new one per call)
 
     Returns:
         Number of records processed
@@ -585,7 +597,8 @@ def push_records_to_database(
     if not db_config:
         raise ValueError("PostgreSQL configuration not found in .env")
 
-    engine = create_engine_from_config(db_config)
+    if engine is None:
+        engine = create_engine_from_config(db_config)
 
     # Create table if not exists, then add any missing columns
     DynamicBase.metadata.create_all(engine, tables=[model_class.__table__])
@@ -669,6 +682,15 @@ def process_module(
     else:
         print(f"  Total records: {count:,}")
 
+    # Adapt batch parameters for large datasets
+    from common.data_utils import adaptive_batch_params
+    params = adaptive_batch_params(count, batch_size, sql_chunk_size)
+    if params.is_large:
+        print(f"  Large dataset detected ({count:,} records) — scaling batch parameters")
+        batch_size = params.api_batch_size
+        sql_chunk_size = params.sql_chunk_size
+        client.timeout = params.client_timeout
+
     if limit and isinstance(count, int) and count > limit:
         print(f"  Limiting to {limit:,} records (--limit)")
 
@@ -679,6 +701,12 @@ def process_module(
     valid_columns = set(c.name for c in model_class.__table__.columns)
     logger.debug(f"Valid columns for {module}: {len(valid_columns)}")
 
+    # Create engine once for the entire module run
+    db_config = config.databases.get('postgresql')
+    if not db_config:
+        raise ValueError("PostgreSQL configuration not found in .env")
+    engine = create_engine_from_config(db_config)
+
     # Fetch and process records in batches
     total_processed = 0
     all_records = []
@@ -687,63 +715,67 @@ def process_module(
     print("[STAGE:FETCH] Fetching from SugarCRM API")
     print(f"\n  Fetching records from SugarCRM...")
 
-    with tqdm(total=limit or count if isinstance(count, int) else None,
-              desc=f"  Fetching {module}", unit="rec") as pbar:
+    try:
+        with tqdm(total=limit or count if isinstance(count, int) else None,
+                  desc=f"  Fetching {module}", unit="rec") as pbar:
 
-        for batch in client.fetch_all_records(
-            module=module,
-            filter_expr=filter_expr,
-            fields=None,  # Get all fields
-            batch_size=batch_size,
-            order_by='date_modified:ASC'
-        ):
-            # Transform batch
-            for record in batch:
-                # Extract dimensions from raw record (before transformation)
-                dims = extract_dimensions(record)
-                for table_name, dim_records in dims.items():
-                    if table_name not in all_dimensions:
-                        all_dimensions[table_name] = []
-                    all_dimensions[table_name].extend(dim_records)
+            for batch in client.fetch_all_records(
+                module=module,
+                filter_expr=filter_expr,
+                fields=None,  # Get all fields
+                batch_size=batch_size,
+                order_by='date_modified:ASC'
+            ):
+                # Transform batch
+                for record in batch:
+                    # Extract dimensions from raw record (before transformation)
+                    dims = extract_dimensions(record)
+                    for table_name, dim_records in dims.items():
+                        if table_name not in all_dimensions:
+                            all_dimensions[table_name] = []
+                        all_dimensions[table_name].extend(dim_records)
 
-                # Transform for main table
-                transformed = transform_record(record, field_defs, valid_columns)
-                all_records.append(transformed)
-                pbar.update(1)
+                    # Transform for main table
+                    transformed = transform_record(record, field_defs, valid_columns)
+                    all_records.append(transformed)
+                    pbar.update(1)
 
-                if limit and len(all_records) >= limit:
+                    if limit and len(all_records) >= limit:
+                        break
+
+                # Push to database periodically when buffer is full
+                if len(all_records) >= params.push_threshold:
+                    print(f"\n  Pushing {len(all_records)} records to database...")
+                    processed = push_records_to_database(all_records, model_class, config, sql_chunk_size, engine=engine)
+                    total_processed += processed
+                    all_records = []
+
+                    # Push dimensions periodically too
+                    if all_dimensions:
+                        dim_results = push_dimensions_to_database(all_dimensions, config, engine=engine)
+                        for tbl, cnt in dim_results.items():
+                            tqdm.write(f"    Dimension {tbl}: {cnt} records")
+                        all_dimensions = {}
+
+                if limit and total_processed + len(all_records) >= limit:
                     break
 
-            # Push to database periodically (every 5000 records)
-            if len(all_records) >= 5000:
-                print(f"\n  Pushing {len(all_records)} records to database...")
-                processed = push_records_to_database(all_records, model_class, config, sql_chunk_size)
-                total_processed += processed
-                all_records = []
+        # Push remaining records
+        if all_records:
+            print("[STAGE:PUSH] Writing to PostgreSQL")
+            print(f"\n  Pushing final {len(all_records)} records to database...")
+            processed = push_records_to_database(all_records, model_class, config, sql_chunk_size, engine=engine)
+            total_processed += processed
 
-                # Push dimensions periodically too
-                if all_dimensions:
-                    dim_results = push_dimensions_to_database(all_dimensions, config)
-                    for tbl, cnt in dim_results.items():
-                        tqdm.write(f"    Dimension {tbl}: {cnt} records")
-                    all_dimensions = {}
+        # Push remaining dimensions
+        if all_dimensions:
+            print(f"\n  Pushing dimension tables...")
+            dim_results = push_dimensions_to_database(all_dimensions, config, engine=engine)
+            for tbl, cnt in dim_results.items():
+                print(f"    {tbl}: {cnt} unique records")
 
-            if limit and total_processed + len(all_records) >= limit:
-                break
-
-    # Push remaining records
-    if all_records:
-        print("[STAGE:PUSH] Writing to PostgreSQL")
-        print(f"\n  Pushing final {len(all_records)} records to database...")
-        processed = push_records_to_database(all_records, model_class, config, sql_chunk_size)
-        total_processed += processed
-
-    # Push remaining dimensions
-    if all_dimensions:
-        print(f"\n  Pushing dimension tables...")
-        dim_results = push_dimensions_to_database(all_dimensions, config)
-        for tbl, cnt in dim_results.items():
-            print(f"    {tbl}: {cnt} unique records")
+    finally:
+        engine.dispose()
 
     print(f"\n  Completed {module}: {total_processed:,} records processed")
     return total_processed

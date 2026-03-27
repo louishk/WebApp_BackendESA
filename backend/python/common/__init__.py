@@ -98,6 +98,9 @@ from .soap_reports import SOAPReportClient, ReportConfig, REPORT_REGISTRY
 # SugarCRM client
 from .sugarcrm_client import SugarCRMClient
 
+# Pipeline DB helper
+from .pipeline_db import PipelineDB
+
 # Date utilities
 from .date_utils import (
     get_first_day_of_month,
@@ -112,6 +115,8 @@ from .date_utils import (
 
 # Data utilities
 from .data_utils import (
+    AdaptiveBatchParams,
+    adaptive_batch_params,
     convert_to_bool,
     convert_to_int,
     convert_to_decimal,
@@ -210,6 +215,9 @@ __all__ = [
     # SugarCRM Client
     'SugarCRMClient',
 
+    # Pipeline DB helper
+    'PipelineDB',
+
     # Date utilities
     'get_first_day_of_month',
     'get_last_day_of_month',
@@ -221,6 +229,8 @@ __all__ = [
     'parse_date_string',
 
     # Data utilities
+    'AdaptiveBatchParams',
+    'adaptive_batch_params',
     'convert_to_bool',
     'convert_to_int',
     'convert_to_decimal',

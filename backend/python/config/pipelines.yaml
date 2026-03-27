@@ -147,12 +147,12 @@ pipelines:
     priority: 4
     resource_group: http_api
     max_db_connections: 3
-    estimated_duration_seconds: 1800
+    estimated_duration_seconds: 10800
     retry:
       max_attempts: 5
       delay_seconds: 600
       backoff_multiplier: 2
-    timeout_seconds: 7200
+    timeout_seconds: 14400
     data_freshness:
       table: sugarcrm_leads
       date_column: synced_at

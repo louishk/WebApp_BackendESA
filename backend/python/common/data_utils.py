@@ -5,11 +5,66 @@ Provides type conversion functions for API response data and
 record deduplication for batch database operations.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, List, Dict, Optional
 
 import dateutil.parser
+
+
+@dataclass
+class AdaptiveBatchParams:
+    """Batch parameters auto-tuned based on dataset size."""
+    api_batch_size: int
+    sql_chunk_size: int
+    push_threshold: int    # records to buffer before DB write
+    client_timeout: int    # API request timeout in seconds
+    is_large: bool         # whether large-dataset mode activated
+
+
+LARGE_DATASET_THRESHOLD = 50_000
+
+
+def adaptive_batch_params(
+    record_count,
+    base_api_batch: int = 200,
+    base_sql_chunk: int = 500,
+    base_push_threshold: int = 5000,
+    base_timeout: int = 120,
+    threshold: int = LARGE_DATASET_THRESHOLD,
+) -> AdaptiveBatchParams:
+    """
+    Return batch parameters scaled to dataset size.
+
+    Below threshold: returns base values unchanged.
+    Above threshold: scales up for throughput.
+    """
+    if not isinstance(record_count, int):
+        # Unknown count — use large-mode push_threshold to avoid OOM,
+        # but keep base API/SQL sizes since we can't confirm volume
+        return AdaptiveBatchParams(
+            api_batch_size=base_api_batch,
+            sql_chunk_size=base_sql_chunk,
+            push_threshold=2000,
+            client_timeout=base_timeout,
+            is_large=False,
+        )
+    if record_count <= threshold:
+        return AdaptiveBatchParams(
+            api_batch_size=base_api_batch,
+            sql_chunk_size=base_sql_chunk,
+            push_threshold=base_push_threshold,
+            client_timeout=base_timeout,
+            is_large=False,
+        )
+    return AdaptiveBatchParams(
+        api_batch_size=max(base_api_batch, 1000),
+        sql_chunk_size=max(base_sql_chunk, 2000),
+        push_threshold=2000,
+        client_timeout=max(base_timeout, 180),
+        is_large=True,
+    )
 
 
 def convert_to_bool(value: Any) -> bool:
