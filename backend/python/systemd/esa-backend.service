@@ -9,12 +9,14 @@ Group=www-data
 WorkingDirectory=/var/www/backend/backend/python
 Environment="PATH=/var/www/backend/backend/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=-/var/www/backend/backend/python/.env
+PIDFile=/run/esa-backend.pid
 
 # Run with Gunicorn for production
 ExecStart=/var/www/backend/backend/python/venv/bin/gunicorn \
     --workers 4 \
     --threads 2 \
     --bind 127.0.0.1:5000 \
+    --pid /run/esa-backend.pid \
     --access-logfile /var/log/esa-backend/access.log \
     --error-logfile /var/log/esa-backend/error.log \
     --capture-output \
@@ -37,7 +39,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/log/esa-backend /var/www/backend/backend/python
+ReadWritePaths=/var/log/esa-backend /var/www/backend/backend/python /run
 
 [Install]
 WantedBy=multi-user.target
