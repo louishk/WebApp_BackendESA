@@ -29,6 +29,7 @@ Configuration (from .env):
 
 import argparse
 import json
+import re
 import sys
 import subprocess
 from pathlib import Path
@@ -242,6 +243,13 @@ def run_ssh_command(credentials: dict, command: str, verbose: bool = True, timeo
         client.close()
 
 
+def _validate_sha(sha: str) -> str:
+    """Validate a git SHA is a 40-char hex string. Returns empty string if invalid."""
+    if sha and re.fullmatch(r'[0-9a-f]{40}', sha):
+        return sha
+    return ''
+
+
 def get_local_git_sha() -> str:
     """Get current git commit SHA from local repo."""
     try:
@@ -250,7 +258,7 @@ def get_local_git_sha() -> str:
             capture_output=True, text=True,
             cwd=str(project_root),
         )
-        return result.stdout.strip() if result.returncode == 0 else ''
+        return _validate_sha(result.stdout.strip())
     except Exception:
         return ''
 
@@ -262,7 +270,7 @@ def get_deployed_sha(credentials: dict) -> str:
         f"cat {VM_DEPLOY_MANIFEST} 2>/dev/null || echo ''",
         verbose=False,
     )
-    return stdout.strip()
+    return _validate_sha(stdout.strip())
 
 
 def write_deploy_manifest(credentials: dict, sha: str) -> None:
