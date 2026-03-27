@@ -6,6 +6,8 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="robots" content="noindex, nofollow">
     <title>{% block title %}ESA Backend{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/site-filter.css') }}">
+    <script src="{{ url_for('static', filename='js/site-filter.js') }}"></script>
     <style>
         :root {
             --esa-red: #C41230;
@@ -426,8 +428,6 @@
         Extra Space Asia - Data Engineering Team
     </div>
 
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/site-filter.css') }}">
-    <script src="{{ url_for('static', filename='js/site-filter.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
