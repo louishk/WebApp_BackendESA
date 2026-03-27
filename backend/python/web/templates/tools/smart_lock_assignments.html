@@ -400,6 +400,12 @@
                 document.querySelectorAll('#units-tbody tr').forEach(row => {
                     row.style.background = '';
                 });
+                // Ensure site selection is preserved
+                const select = document.getElementById('site-select');
+                loadedSiteIds.forEach(id => {
+                    const opt = select.querySelector(`option[value="${id}"]`);
+                    if (opt) opt.selected = true;
+                });
                 updateStats();
                 loadAuditLog();
             } else {
