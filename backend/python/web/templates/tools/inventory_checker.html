@@ -69,8 +69,7 @@
     <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
         <div class="form-group" style="flex: 1; min-width: 250px;">
             <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Sites</label>
-            <select id="site-select" class="form-select" multiple style="height: auto; min-height: 42px;"></select>
-            <p style="color: #666; font-size: 0.8rem; margin-top: 0.25rem;">Hold Ctrl/Cmd to select multiple</p>
+            <div id="site-filter"></div>
         </div>
         <div class="form-group">
             <button type="button" class="btn" id="load-btn" onclick="loadUnits()">Load Units</button>
@@ -450,41 +449,9 @@
     }
 
     // --- Data Loading ---
-    async function loadSites() {
-        try {
-            const response = await fetch('/api/sites', { headers: apiHeaders() });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            const select = document.getElementById('site-select');
-            select.innerHTML = '';
-            const grouped = {};
-            data.sites.forEach(site => {
-                const country = site.country || 'Other';
-                if (!grouped[country]) grouped[country] = [];
-                grouped[country].push(site);
-            });
-            Object.keys(grouped).forEach(country => {
-                const group = document.createElement('optgroup');
-                group.label = country;
-                grouped[country].forEach(site => {
-                    const option = document.createElement('option');
-                    option.value = site.site_id;
-                    option.dataset.code = site.site_code;
-                    option.textContent = `${site.site_code} - ${site.name}`;
-                    group.appendChild(option);
-                });
-                select.appendChild(group);
-            });
-        } catch (error) {
-            console.error('Failed to load sites:', error);
-            alert('Failed to load sites. Please check your authentication.');
-        }
-    }
-
     async function loadUnits() {
-        const select = document.getElementById('site-select');
-        const options = Array.from(select.selectedOptions);
-        if (options.length === 0) {
+        const siteIds = SiteFilter.getSelected('site-filter').join(',');
+        if (!siteIds) {
             alert('Please select at least one site.');
             return;
         }
@@ -492,8 +459,6 @@
         const btn = document.getElementById('load-btn');
         btn.disabled = true;
         btn.textContent = 'Loading...';
-
-        const siteIds = options.map(o => o.value).join(',');
 
         try {
             // Fetch units, type mappings, and overrides in parallel
@@ -1277,6 +1242,6 @@
     }
 
     // --- Init ---
-    loadSites();
+    SiteFilter.init('site-filter', { mode: 'multi' });
 </script>
 {% endblock %}

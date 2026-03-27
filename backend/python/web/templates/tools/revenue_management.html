@@ -13,9 +13,7 @@
     <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: end;">
         <div class="form-group" style="flex: 1; min-width: 250px;">
             <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Site</label>
-            <select id="site-select" class="form-select" onchange="loadSite()">
-                <option value="">Select a site...</option>
-            </select>
+            <div id="site-filter"></div>
         </div>
     </div>
 </div>
@@ -324,7 +322,7 @@ function switchTab(tab) {
     const panel = document.getElementById(`tab-${tab}`);
     if (panel) panel.style.display = 'block';
 
-    const siteId = document.getElementById('site-select').value;
+    const siteId = SiteFilter.getSelected('site-filter')[0];
     if (!siteId) return;
 
     if (tab === 'demand' && !demandLoaded) loadDemandTab(siteId);
@@ -334,41 +332,8 @@ function switchTab(tab) {
 // Site selector
 // ============================================================================
 
-async function loadSites() {
-    try {
-        const response = await fetch('/api/sites', { headers: apiHeaders() });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        const select = document.getElementById('site-select');
-        const grouped = {};
-        data.sites.forEach(site => {
-            const country = site.country || 'Other';
-            if (!grouped[country]) grouped[country] = [];
-            grouped[country].push(site);
-        });
-        Object.keys(grouped).sort().forEach(country => {
-            const optgroup = document.createElement('optgroup');
-            optgroup.label = country;
-            grouped[country].forEach(site => {
-                const opt = document.createElement('option');
-                opt.value = site.site_id;
-                opt.textContent = `${site.site_code} - ${site.name}`;
-                optgroup.appendChild(opt);
-            });
-            select.appendChild(optgroup);
-        });
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('site_id')) {
-            select.value = params.get('site_id');
-            loadSite();
-        }
-    } catch (e) {
-        console.error('Failed to load sites:', e);
-    }
-}
-
 async function loadSite() {
-    const siteId = document.getElementById('site-select').value;
+    const siteId = SiteFilter.getSelected('site-filter')[0];
     if (!siteId) return;
 
     // Update URL
@@ -906,6 +871,15 @@ function renderOccTrendChart(trend) {
 // ============================================================================
 // Init
 // ============================================================================
-loadSites();
+const _rmParams = new URLSearchParams(window.location.search);
+SiteFilter.init('site-filter', {
+    mode: 'single',
+    onChange: () => loadSite()
+}).then(() => {
+    if (_rmParams.get('site_id')) {
+        SiteFilter.setSelected('site-filter', [parseInt(_rmParams.get('site_id'))]);
+        loadSite();
+    }
+});
 </script>
 {% endblock %}

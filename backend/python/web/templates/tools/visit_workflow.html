@@ -25,9 +25,7 @@
         <div id="session-start-site" style="margin-top: 1rem; display: none;">
             <div class="form-group" style="max-width: 360px; margin-bottom: 0;">
                 <label>Site <span style="color: var(--esa-red);">*</span></label>
-                <select id="session-site-select" class="form-select" style="max-width: 100%;">
-                    <option value="">Select site...</option>
-                </select>
+                <div id="session-site-filter"></div>
             </div>
             <div style="display: flex; gap: 0.75rem; margin-top: 0.75rem; flex-wrap: wrap;">
                 <button type="button" class="btn" id="confirm-start-btn" onclick="confirmStartSession()">
@@ -722,38 +720,19 @@ select.form-select {
 
     // ===================== INIT =====================
     async function init() {
-        await loadSites();
+        await SiteFilter.init('session-site-filter', { mode: 'single' });
+        // Build siteMap and populate the storage location dropdown from cached sites
+        siteMap = {};
+        const locSel = document.getElementById('new-lead-storage-location');
+        locSel.innerHTML = '<option value="">—</option>';
+        (SiteFilter.getSites('session-site-filter') || []).forEach(s => {
+            siteMap[s.site_id] = s;
+            const locOpt = document.createElement('option');
+            locOpt.value = s.site_code;
+            locOpt.textContent = `${s.site_code} - ${s.name}`;
+            locSel.appendChild(locOpt);
+        });
         await checkActiveSession();
-    }
-
-    async function loadSites() {
-        try {
-            const res = await fetch('/api/sites', { headers: apiHeaders() });
-            if (!res.ok) return;
-            const data = await res.json();
-            siteMap = {};
-            const sel = document.getElementById('session-site-select');
-            sel.innerHTML = '<option value="">Select site...</option>';
-            // Also populate the storage location dropdown for new leads
-            const locSel = document.getElementById('new-lead-storage-location');
-            locSel.innerHTML = '<option value="">—</option>';
-
-            (data.sites || []).forEach(s => {
-                siteMap[s.site_id] = s;
-                // Session site selector
-                const opt = document.createElement('option');
-                opt.value = s.site_code;
-                opt.textContent = `${s.site_code} - ${s.name}`;
-                sel.appendChild(opt);
-                // Location dropdown
-                const locOpt = document.createElement('option');
-                locOpt.value = s.site_code;
-                locOpt.textContent = `${s.site_code} - ${s.name}`;
-                locSel.appendChild(locOpt);
-            });
-        } catch (e) {
-            console.error('Failed to load sites:', e);
-        }
     }
 
     async function checkActiveSession() {
@@ -845,7 +824,8 @@ select.form-select {
     }
 
     async function confirmStartSession() {
-        const siteCode = document.getElementById('session-site-select').value;
+        const _siteId = SiteFilter.getSelected('session-site-filter')[0] || '';
+        const siteCode = _siteId ? (siteMap[_siteId] ? siteMap[_siteId].site_code : '') : '';
         const errEl = document.getElementById('session-start-error');
         errEl.style.display = 'none';
 
@@ -875,7 +855,7 @@ select.form-select {
             await switchToSession(newSession);
             // Reset the start form
             document.getElementById('session-start-site').style.display = 'none';
-            document.getElementById('session-site-select').value = '';
+            SiteFilter.setSelected('session-site-filter', []);
         } catch (e) {
             errEl.textContent = 'Network error. Please try again.';
             errEl.style.display = 'block';
@@ -962,7 +942,7 @@ select.form-select {
             document.getElementById('no-lead-view').style.display = 'block';
             document.getElementById('lead-search-input').value = '';
             document.getElementById('lead-search-results').style.display = 'none';
-            document.getElementById('session-site-select').value = '';
+            SiteFilter.setSelected('session-site-filter', []);
             renderShortlist();
             renderActiveSessionsList();
         } finally {

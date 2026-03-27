@@ -13,9 +13,7 @@
     <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: end;">
         <div class="form-group" style="flex: 1; min-width: 250px;">
             <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Site</label>
-            <select id="site-select" class="form-select" onchange="loadSite()">
-                <option value="">Select a site...</option>
-            </select>
+            <div id="site-filter"></div>
         </div>
         <div id="budget-display" style="display: none; font-size: 0.85rem; line-height: 1.8;">
             <div>Budget Mar: <strong id="budget-mar-arr">-</strong>/sqft | Occ: <strong id="budget-mar-occ">-</strong></div>
@@ -156,45 +154,9 @@
         document.getElementById('slider-value').textContent = document.getElementById('discount-slider').value;
     }
 
-    // --- Load sites dropdown ---
-    async function loadSites() {
-        try {
-            const response = await fetch('/api/sites', { headers: apiHeaders() });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            const select = document.getElementById('site-select');
-            const grouped = {};
-            data.sites.forEach(site => {
-                const country = site.country || 'Other';
-                if (!grouped[country]) grouped[country] = [];
-                grouped[country].push(site);
-            });
-            Object.keys(grouped).sort().forEach(country => {
-                const optgroup = document.createElement('optgroup');
-                optgroup.label = country;
-                grouped[country].forEach(site => {
-                    const opt = document.createElement('option');
-                    opt.value = site.site_id;
-                    opt.textContent = `${site.site_code} - ${site.name}`;
-                    optgroup.appendChild(opt);
-                });
-                select.appendChild(optgroup);
-            });
-
-            // Auto-select from URL param
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('site_id')) {
-                select.value = params.get('site_id');
-                loadSite();
-            }
-        } catch (e) {
-            console.error('Failed to load sites:', e);
-        }
-    }
-
     // --- Load site data ---
     async function loadSite() {
-        const siteId = document.getElementById('site-select').value;
+        const siteId = SiteFilter.getSelected('site-filter')[0];
         if (!siteId) return;
 
         document.getElementById('loading').style.display = 'block';
@@ -440,6 +402,15 @@
     }
 
     // Init
-    loadSites();
+    const _prParams = new URLSearchParams(window.location.search);
+    SiteFilter.init('site-filter', {
+        mode: 'single',
+        onChange: () => loadSite()
+    }).then(() => {
+        if (_prParams.get('site_id')) {
+            SiteFilter.setSelected('site-filter', [parseInt(_prParams.get('site_id'))]);
+            loadSite();
+        }
+    });
 </script>
 {% endblock %}

@@ -11,7 +11,7 @@
     <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
         <div>
             <label style="display: block; font-weight: 500; margin-bottom: 0.25rem; font-size: 0.85rem;">Site</label>
-            <select id="site-select" style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; min-width: 220px;"></select>
+            <div id="site-filter" style="min-width: 220px;"></div>
         </div>
         <button class="btn" onclick="loadPadlocks()">Load</button>
         <button class="btn btn-secondary" onclick="loadPadlocks('')" title="Show all sites">Show All</button>
@@ -29,7 +29,7 @@
         </div>
         <div>
             <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem;">Site</label>
-            <select id="add-site-select" style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; min-width: 200px;"></select>
+            <div id="add-site-filter" style="min-width: 200px;"></div>
         </div>
         <div>
             <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem;">Notes</label>
@@ -127,40 +127,8 @@
         return s ? `${s.site_code} - ${s.name}` : `Site ${siteId}`;
     }
 
-    async function loadSites() {
-        try {
-            const res = await fetch('/api/sites', { headers: apiHeaders() });
-            const data = await res.json();
-            allSites = data.sites || [];
-
-            [document.getElementById('site-select'), document.getElementById('add-site-select')].forEach(select => {
-                select.innerHTML = '<option value="">-- All --</option>';
-                const grouped = {};
-                allSites.forEach(s => {
-                    const c = s.country || 'Other';
-                    if (!grouped[c]) grouped[c] = [];
-                    grouped[c].push(s);
-                });
-                Object.keys(grouped).sort().forEach(country => {
-                    const og = document.createElement('optgroup');
-                    og.label = country;
-                    grouped[country].forEach(s => {
-                        const opt = document.createElement('option');
-                        opt.value = s.site_id;
-                        opt.textContent = `${s.site_code} - ${s.name}`;
-                        opt.dataset.code = s.site_code;
-                        og.appendChild(opt);
-                    });
-                    select.appendChild(og);
-                });
-            });
-        } catch (e) {
-            console.error('Failed to load sites:', e);
-        }
-    }
-
     async function loadPadlocks(forceSiteId) {
-        const siteId = forceSiteId !== undefined ? forceSiteId : document.getElementById('site-select').value;
+        const siteId = forceSiteId !== undefined ? forceSiteId : (SiteFilter.getSelected('site-filter')[0] || '');
         const url = siteId ? `/api/smart-lock/padlocks?site_id=${siteId}` : '/api/smart-lock/padlocks';
         try {
             const res = await fetch(url, { headers: apiHeaders() });
@@ -201,7 +169,7 @@
 
     async function addPadlock() {
         const padlock_id = document.getElementById('add-padlock-id').value.trim();
-        const site_id = document.getElementById('add-site-select').value;
+        const site_id = SiteFilter.getSelected('add-site-filter')[0] || '';
         const notes = document.getElementById('add-notes').value.trim();
         if (!padlock_id || !site_id) { showStatus('Padlock ID and Site required', false); return; }
 
@@ -345,6 +313,8 @@
     }
 
     // Init
-    loadSites().then(() => { loadAuditLog(); });
+    SiteFilter.init('site-filter', { mode: 'single' }).then(() => { allSites = SiteFilter.getSites('site-filter'); });
+    SiteFilter.init('add-site-filter', { mode: 'single' });
+    loadAuditLog();
 </script>
 {% endblock %}
