@@ -182,6 +182,14 @@
         } catch (e) { console.error('Failed to load sites:', e); }
     }
 
+    function restoreSiteSelection() {
+        if (!loadedSiteIds.length) return;
+        const select = document.getElementById('site-select');
+        Array.from(select.options).forEach(o => {
+            o.selected = loadedSiteIds.includes(o.value);
+        });
+    }
+
     async function loadUnits(useSiteIds) {
         let siteIds;
         if (useSiteIds) {
@@ -241,6 +249,7 @@
             document.getElementById('auto-assign-btn').style.display = 'inline-block';
             renderTable();
             updateStats();
+            restoreSiteSelection();
         } catch (e) {
             showStatus('Failed to load units', false);
             console.error(e);
@@ -352,6 +361,7 @@
         // Keypad changes don't need re-render (many-to-many), but we do it for row highlight
         renderTable();
         updateStats();
+        restoreSiteSelection();
     }
 
     function updateStats() {
@@ -400,13 +410,8 @@
                 document.querySelectorAll('#units-tbody tr').forEach(row => {
                     row.style.background = '';
                 });
-                // Ensure site selection is preserved
-                const select = document.getElementById('site-select');
-                loadedSiteIds.forEach(id => {
-                    const opt = select.querySelector(`option[value="${id}"]`);
-                    if (opt) opt.selected = true;
-                });
                 updateStats();
+                restoreSiteSelection();
                 loadAuditLog();
             } else {
                 showStatus(data.error || 'Save failed', false);
