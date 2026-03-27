@@ -268,6 +268,15 @@ def create_app(config=None, db_url=None):
     # Backward compatibility: also mount health check at root (unauthenticated — used by load balancers)
     @app.route('/health')
     def health():
+        from web.utils.rate_limit import api_limiter, get_client_ip
+        ip = get_client_ip()
+        is_limited, retry_after = api_limiter.is_rate_limited(f"api:{ip}:health", 30, 60)
+        if is_limited:
+            resp = jsonify({'error': 'Rate limit exceeded', 'retry_after': retry_after})
+            resp.status_code = 429
+            resp.headers['Retry-After'] = str(retry_after)
+            return resp
+        api_limiter.record_attempt(f"api:{ip}:health", 60)
         from web.utils.health import run_health_checks
         body, status = run_health_checks()
         return jsonify(body), status

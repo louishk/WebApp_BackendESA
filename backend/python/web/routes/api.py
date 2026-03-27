@@ -196,6 +196,7 @@ def api_status():
 
 
 @api_bp.route('/health')
+@rate_limit_api(max_requests=30, window_seconds=60)
 def health():
     """Health check endpoint with dependency probes."""
     from web.utils.health import run_health_checks

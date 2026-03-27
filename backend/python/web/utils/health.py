@@ -5,22 +5,36 @@ Shared health check probes for /health and /api/health endpoints.
 import logging
 import time
 from datetime import datetime, timezone
+from threading import Lock
 
 from flask import current_app
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
+# Cache the last health result to avoid hammering DB on every request
+_health_cache = {'body': None, 'status': None, 'expires_at': 0.0}
+_health_cache_lock = Lock()
+_HEALTH_CACHE_TTL = 5  # seconds
+
 
 def run_health_checks():
     """
     Run dependency probes and return (response_dict, http_status).
+
+    Results are cached for 5 seconds to prevent DB overload from
+    repeated health check calls (endpoints are unauthenticated).
 
     Rules:
       - backend_db down  → status "unhealthy", HTTP 503
       - pbi_db down      → status "degraded",  HTTP 200
       - redis unavailable → no effect on overall status
     """
+    now = time.monotonic()
+    with _health_cache_lock:
+        if _health_cache['body'] is not None and now < _health_cache['expires_at']:
+            return _health_cache['body'], _health_cache['status']
+
     checks = {}
 
     # ------------------------------------------------------------------
@@ -113,4 +127,10 @@ def run_health_checks():
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'checks': checks,
     }
+
+    with _health_cache_lock:
+        _health_cache['body'] = body
+        _health_cache['status'] = http_status
+        _health_cache['expires_at'] = time.monotonic() + _HEALTH_CACHE_TTL
+
     return body, http_status
