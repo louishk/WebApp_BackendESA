@@ -18,6 +18,10 @@ from sqlalchemy import desc, func, case, text
 
 from web.auth.jwt_auth import require_auth, require_api_scope
 from web.utils.rate_limit import rate_limit_api
+from web.utils.validators import (
+    parse_site_ids, parse_pagination, parse_date_param, validate_array_size,
+    MAX_SITE_IDS, MAX_ARRAY_SIZE,
+)
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -193,11 +197,10 @@ def api_status():
 
 @api_bp.route('/health')
 def health():
-    """Health check endpoint."""
-    return jsonify({
-        'status': 'healthy',
-        'timestamp': now_sgt().isoformat()
-    })
+    """Health check endpoint with dependency probes."""
+    from web.utils.health import run_health_checks
+    body, status = run_health_checks()
+    return jsonify(body), status
 
 
 # =============================================================================
@@ -710,9 +713,19 @@ def api_list_history():
 
     pipeline = request.args.get('pipeline')
     status = request.args.get('status')
-    limit = int(request.args.get('limit', 50))
-    offset = int(request.args.get('offset', 0))
+
+    try:
+        limit, offset = parse_pagination(request.args)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
     since = request.args.get('since')
+    since_date = None
+    if since:
+        try:
+            since_date = parse_date_param(since, 'since')
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
 
     session = get_session()
     try:
@@ -722,8 +735,7 @@ def api_list_history():
             query = query.filter(JobHistory.pipeline_name == pipeline)
         if status:
             query = query.filter(JobHistory.status == status)
-        if since:
-            since_date = datetime.fromisoformat(since)
+        if since_date:
             query = query.filter(JobHistory.scheduled_at >= since_date)
 
         total = query.count()
@@ -1775,12 +1787,9 @@ def api_inventory_units():
         return jsonify({'error': 'site_ids parameter is required'}), 400
 
     try:
-        site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
-    except ValueError:
-        return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
-
-    if not site_ids:
-        return jsonify({'error': 'At least one site_id is required'}), 400
+        site_ids = parse_site_ids(site_ids_param)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     session = get_pbi_session()
     try:
@@ -1842,9 +1851,9 @@ def api_inventory_distinct_types():
         site_ids_param = request.args.get('site_ids', '')
         if site_ids_param:
             try:
-                site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
-            except ValueError:
-                return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
+                site_ids = parse_site_ids(site_ids_param)
+            except ValueError as e:
+                return jsonify({'error': str(e)}), 400
 
             placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids))])
             params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
@@ -1911,6 +1920,13 @@ def api_inventory_upsert_type_mappings():
         return jsonify({'error': 'mappings array is required'}), 400
 
     mappings_data = data['mappings']
+    if not isinstance(mappings_data, list):
+        return jsonify({'error': 'mappings must be an array'}), 400
+    try:
+        validate_array_size(mappings_data, 'mappings')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
     username = g.current_user.get('sub', 'unknown') if hasattr(g, 'current_user') and g.current_user else 'unknown'
 
     session = get_session()
@@ -1965,9 +1981,9 @@ def api_inventory_get_overrides():
         return jsonify({'error': 'site_ids parameter is required'}), 400
 
     try:
-        site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
-    except ValueError:
-        return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
+        site_ids = parse_site_ids(site_ids_param)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     session = get_session()
     try:
@@ -1994,6 +2010,13 @@ def api_inventory_upsert_overrides():
         return jsonify({'error': 'overrides array is required'}), 400
 
     overrides_data = data['overrides']
+    if not isinstance(overrides_data, list):
+        return jsonify({'error': 'overrides must be an array'}), 400
+    try:
+        validate_array_size(overrides_data, 'overrides')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
     username = g.current_user.get('sub', 'unknown') if hasattr(g, 'current_user') and g.current_user else 'unknown'
 
     session = get_session()
@@ -3519,12 +3542,9 @@ def api_unit_availability():
         return jsonify({'error': 'site_ids parameter is required'}), 400
 
     try:
-        site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
-    except ValueError:
-        return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
-
-    if not site_ids:
-        return jsonify({'error': 'At least one site_id is required'}), 400
+        site_ids = parse_site_ids(site_ids_param)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     # Optional filters
     category = request.args.get('category', '').strip()
@@ -4277,12 +4297,9 @@ def api_sl_units():
         return jsonify({'error': 'site_ids parameter is required'}), 400
 
     try:
-        site_ids = [int(s.strip()) for s in site_ids_param.split(',') if s.strip()]
-    except ValueError:
-        return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
-
-    if not site_ids:
-        return jsonify({'error': 'At least one site_id is required'}), 400
+        site_ids = parse_site_ids(site_ids_param)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     # 1) Fetch units from esa_pbi (reduced fields)
     pbi_session = get_pbi_session()

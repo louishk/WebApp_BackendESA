@@ -6,6 +6,7 @@ Provides REST API, scheduler dashboard, user/page management.
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from datetime import datetime
 from flask import Flask, g, request, jsonify
@@ -130,6 +131,10 @@ def create_app(config=None, db_url=None):
     # Track web UI start time
     app.web_started_at = datetime.now()
 
+    # Initialize rate limiter (Redis if available, in-memory fallback)
+    from web.utils.rate_limit import init_rate_limiter
+    init_rate_limiter(app)
+
     # Initialize audit logging
     from web.utils.audit import setup_audit_logging
     setup_audit_logging(app)
@@ -142,9 +147,41 @@ def create_app(config=None, db_url=None):
     from common.outbound_stats import init_outbound_stats
     init_outbound_stats(app)
 
+    # -----------------------------------------------------------------------
+    # Request correlation IDs
+    # -----------------------------------------------------------------------
+    class _RequestIDFilter(logging.Filter):
+        """Inject g.request_id into every log record emitted during a request."""
+        def filter(self, record):
+            try:
+                record.request_id = g.request_id
+            except RuntimeError:
+                # Outside of a request context
+                record.request_id = '-'
+            return True
+
+    _request_id_filter = _RequestIDFilter()
+
+    # Attach filter once at startup so all log records get request_id
+    _root_logger = logging.getLogger()
+    if _request_id_filter not in _root_logger.filters:
+        _root_logger.addFilter(_request_id_filter)
+
+    @app.before_request
+    def assign_request_id():
+        request_id = request.headers.get('X-Request-ID')
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        g.request_id = request_id
+
     # Add security headers and prevent caching of API responses
     @app.after_request
     def add_security_headers(response):
+        # Echo the correlation ID back to the caller
+        request_id = getattr(g, 'request_id', None)
+        if request_id:
+            response.headers['X-Request-ID'] = request_id
+
         # Cache control for API endpoints
         if '/api/' in request.path:
             response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -228,13 +265,12 @@ def create_app(config=None, db_url=None):
     # crm_bp and visits_bp use session auth — CSRF protection stays enabled
     # (the frontend sends X-CSRFToken header via apiHeaders())
 
-    # Backward compatibility: also mount health check at root
+    # Backward compatibility: also mount health check at root (unauthenticated — used by load balancers)
     @app.route('/health')
     def health():
-        return jsonify({
-            'status': 'healthy',
-            'timestamp': datetime.now().isoformat()
-        })
+        from web.utils.health import run_health_checks
+        body, status = run_health_checks()
+        return jsonify(body), status
 
     # Global error handlers — prevent stack trace leaks
     _error_logger = logging.getLogger(__name__)
