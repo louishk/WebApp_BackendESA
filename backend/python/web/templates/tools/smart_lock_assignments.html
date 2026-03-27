@@ -11,7 +11,7 @@
     <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
         <div>
             <label style="display: block; font-weight: 500; margin-bottom: 0.25rem; font-size: 0.85rem;">Sites</label>
-            <select id="site-select" multiple style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; min-width: 260px; min-height: 80px;"></select>
+            <div id="site-filter" style="min-width: 260px;"></div>
         </div>
         <div style="display: flex; flex-direction: column; gap: 0.5rem;">
             <button class="btn" id="load-btn" onclick="loadUnits()">Load Units</button>
@@ -155,49 +155,8 @@
         return s ? s.site_code : `${siteId}`;
     }
 
-    async function loadSites() {
-        try {
-            const res = await fetch('/api/sites', { headers: apiHeaders() });
-            const data = await res.json();
-            allSites = data.sites || [];
-            const select = document.getElementById('site-select');
-            select.innerHTML = '';
-            const grouped = {};
-            allSites.forEach(s => {
-                const c = s.country || 'Other';
-                if (!grouped[c]) grouped[c] = [];
-                grouped[c].push(s);
-            });
-            Object.keys(grouped).sort().forEach(country => {
-                const og = document.createElement('optgroup');
-                og.label = country;
-                grouped[country].forEach(s => {
-                    const opt = document.createElement('option');
-                    opt.value = s.site_id;
-                    opt.textContent = `${s.site_code} - ${s.name}`;
-                    og.appendChild(opt);
-                });
-                select.appendChild(og);
-            });
-        } catch (e) { console.error('Failed to load sites:', e); }
-    }
-
-    function restoreSiteSelection() {
-        if (!loadedSiteIds.length) return;
-        const select = document.getElementById('site-select');
-        Array.from(select.options).forEach(o => {
-            o.selected = loadedSiteIds.includes(o.value);
-        });
-    }
-
     async function loadUnits(useSiteIds) {
-        let siteIds;
-        if (useSiteIds) {
-            siteIds = useSiteIds;
-        } else {
-            const select = document.getElementById('site-select');
-            siteIds = Array.from(select.selectedOptions).map(o => o.value);
-        }
+        const siteIds = useSiteIds || SiteFilter.getSelected('site-filter');
         if (siteIds.length === 0) { showStatus('Select at least one site', false); return; }
 
         loadedSiteIds = siteIds;
@@ -247,9 +206,9 @@
             document.getElementById('summary-row').style.display = 'flex';
             document.getElementById('save-btn').style.display = 'inline-block';
             document.getElementById('auto-assign-btn').style.display = 'inline-block';
+            allSites = SiteFilter.getSites('site-filter');
             renderTable();
             updateStats();
-            restoreSiteSelection();
         } catch (e) {
             showStatus('Failed to load units', false);
             console.error(e);
@@ -361,7 +320,6 @@
         // Keypad changes don't need re-render (many-to-many), but we do it for row highlight
         renderTable();
         updateStats();
-        restoreSiteSelection();
     }
 
     function updateStats() {
@@ -411,7 +369,6 @@
                     row.style.background = '';
                 });
                 updateStats();
-                restoreSiteSelection();
                 loadAuditLog();
             } else {
                 showStatus(data.error || 'Save failed', false);
@@ -570,6 +527,7 @@
     }
 
     // Init
-    loadSites().then(() => { loadAuditLog(); });
+    SiteFilter.init('site-filter', { mode: 'multi' });
+    loadAuditLog();
 </script>
 {% endblock %}

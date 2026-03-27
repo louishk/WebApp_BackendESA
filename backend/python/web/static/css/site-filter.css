@@ -1,0 +1,65 @@
+/* SiteFilter — PBI-slicer-style site selector */
+.sf-container { position: relative; display: inline-block; min-width: 260px; }
+.sf-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: 0.5rem 0.75rem;
+    background: #fff; border: 2px solid #e5e7eb; border-radius: 6px;
+    cursor: pointer; font-size: 0.85rem; color: #374151;
+    text-align: left;
+}
+.sf-toggle:hover { border-color: #d1d5db; }
+.sf-toggle:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+.sf-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sf-arrow { margin-left: 0.5rem; font-size: 0.7rem; color: #9ca3af; }
+
+.sf-panel {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12); z-index: 50;
+    min-width: 300px; max-height: 420px; display: flex; flex-direction: column;
+}
+
+.sf-search-row { padding: 0.5rem; border-bottom: 1px solid #f1f5f9; }
+.sf-search {
+    width: 100%; padding: 0.4rem 0.6rem; border: 1px solid #e5e7eb;
+    border-radius: 4px; font-size: 0.8rem; box-sizing: border-box;
+}
+.sf-search:focus { outline: none; border-color: #2563eb; }
+
+.sf-actions {
+    display: flex; gap: 0.5rem; padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid #f1f5f9;
+}
+.sf-btn {
+    padding: 0.2rem 0.5rem; font-size: 0.75rem; cursor: pointer;
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;
+    color: #475569;
+}
+.sf-btn:hover { background: #e2e8f0; }
+
+.sf-list { overflow-y: auto; max-height: 320px; padding: 0.25rem 0; }
+
+.sf-country { padding: 0 0.5rem; }
+.sf-country-label {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.35rem 0; cursor: pointer; font-size: 0.8rem; color: #1e293b;
+    border-bottom: 1px solid #f8fafc;
+}
+.sf-country-label:hover { background: #f8fafc; }
+.sf-country-count { color: #94a3b8; font-weight: normal; font-size: 0.75rem; }
+
+.sf-sites { padding-left: 1.25rem; }
+.sf-site-label {
+    display: flex; align-items: center; gap: 0.35rem;
+    padding: 0.25rem 0.25rem; cursor: pointer; font-size: 0.8rem;
+    border-radius: 3px;
+}
+.sf-site-label:hover { background: #f1f5f9; }
+.sf-site-code { color: #2563eb; font-weight: 500; min-width: 45px; }
+.sf-site-name { color: #64748b; }
+
+.sf-country-cb, .sf-site-cb {
+    accent-color: #2563eb; width: 14px; height: 14px; cursor: pointer;
+}
+
+.sf-empty { padding: 1rem; text-align: center; color: #94a3b8; font-size: 0.8rem; }
