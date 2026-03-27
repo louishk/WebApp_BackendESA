@@ -569,6 +569,9 @@
         showStatus(`Auto-assigned ${count} padlock(s) — click Save to persist`, true);
     }
 
+    // Disable auto-refresh from base.html — this page has in-progress state
+    if (window.autoRefreshTimeout) clearTimeout(window.autoRefreshTimeout);
+
     // Init
     loadSites().then(() => { loadAuditLog(); });
 </script>
