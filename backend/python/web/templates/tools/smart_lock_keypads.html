@@ -128,13 +128,24 @@
     }
 
     async function loadKeypads(forceSiteId) {
-        const siteId = forceSiteId !== undefined ? forceSiteId : (SiteFilter.getSelected('site-filter')[0] || '');
-        const url = siteId ? `/api/smart-lock/keypads?site_id=${siteId}` : '/api/smart-lock/keypads';
+        const siteIds = forceSiteId !== undefined ? [forceSiteId] : SiteFilter.getSelected('site-filter');
         try {
-            const res = await fetch(url, { headers: apiHeaders() });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            allKeypads = data.keypads || [];
+            if (siteIds.length === 0 || (siteIds.length === 1 && siteIds[0] === '')) {
+                // No filter — load all
+                const res = await fetch('/api/smart-lock/keypads', { headers: apiHeaders() });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                allKeypads = data.keypads || [];
+            } else {
+                // Fetch per site and merge
+                allKeypads = [];
+                for (const sid of siteIds) {
+                    const res = await fetch(`/api/smart-lock/keypads?site_id=${sid}`, { headers: apiHeaders() });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    allKeypads.push(...(data.keypads || []));
+                }
+            }
             renderTable();
         } catch (e) {
             showStatus('Failed to load keypads', false);
@@ -313,7 +324,7 @@
     }
 
     // Init
-    SiteFilter.init('site-filter', { mode: 'single' }).then(() => { allSites = SiteFilter.getSites('site-filter'); });
+    SiteFilter.init('site-filter', { mode: 'multi' }).then(() => { allSites = SiteFilter.getSites('site-filter'); });
     SiteFilter.init('add-site-filter', { mode: 'single' });
     loadAuditLog();
 </script>

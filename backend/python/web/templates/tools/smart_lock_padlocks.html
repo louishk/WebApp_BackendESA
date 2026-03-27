@@ -128,13 +128,22 @@
     }
 
     async function loadPadlocks(forceSiteId) {
-        const siteId = forceSiteId !== undefined ? forceSiteId : (SiteFilter.getSelected('site-filter')[0] || '');
-        const url = siteId ? `/api/smart-lock/padlocks?site_id=${siteId}` : '/api/smart-lock/padlocks';
+        const siteIds = forceSiteId !== undefined ? [forceSiteId] : SiteFilter.getSelected('site-filter');
         try {
-            const res = await fetch(url, { headers: apiHeaders() });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            allPadlocks = data.padlocks || [];
+            if (siteIds.length === 0 || (siteIds.length === 1 && siteIds[0] === '')) {
+                const res = await fetch('/api/smart-lock/padlocks', { headers: apiHeaders() });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                allPadlocks = data.padlocks || [];
+            } else {
+                allPadlocks = [];
+                for (const sid of siteIds) {
+                    const res = await fetch(`/api/smart-lock/padlocks?site_id=${sid}`, { headers: apiHeaders() });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    allPadlocks.push(...(data.padlocks || []));
+                }
+            }
             renderTable();
         } catch (e) {
             showStatus('Failed to load padlocks', false);
@@ -313,7 +322,7 @@
     }
 
     // Init
-    SiteFilter.init('site-filter', { mode: 'single' }).then(() => { allSites = SiteFilter.getSites('site-filter'); });
+    SiteFilter.init('site-filter', { mode: 'multi' }).then(() => { allSites = SiteFilter.getSites('site-filter'); });
     SiteFilter.init('add-site-filter', { mode: 'single' });
     loadAuditLog();
 </script>
