@@ -261,3 +261,24 @@ pipelines:
     data_freshness:
       table: calendar_events
       date_column: synced_at
+  gateaccess:
+    display_name: Gate Access Data
+    description: Fetch gate access data (lock codes, lock status) from SOAP API
+    module_path: datalayer.gate_access_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 2 * * *
+    priority: 8
+    resource_group: soap_api
+    max_db_connections: 2
+    estimated_duration_seconds: 300
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 1200
+    data_freshness:
+      table: gate_access_data
+      date_column: updated_at
+      database: backend

@@ -86,6 +86,10 @@ pipelines:
     sql_chunk_size: 500
     location_codes: *location_codes
 
+  gateaccess:
+    sql_chunk_size: 500
+    location_codes: *location_codes
+
   fxrate:
     sql_chunk_size: 1000
     target_currencies:

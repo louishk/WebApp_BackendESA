@@ -3,6 +3,7 @@
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey, UniqueConstraint,
+    Boolean, Text,
 )
 from sqlalchemy.orm import relationship
 
@@ -134,3 +135,42 @@ class SmartLockAuditLog(Base):
 
     def __repr__(self):
         return f"<SmartLockAuditLog {self.action} by {self.username}>"
+
+
+class GateAccessData(Base):
+    """Gate access data from SMD GateAccessData SOAP endpoint.
+    Access codes are Fernet-encrypted at rest."""
+    __tablename__ = 'gate_access_data'
+
+    id = Column(Integer, primary_key=True)
+    location_code = Column(String(10), nullable=False)
+    site_id = Column(Integer, nullable=False)
+    unit_id = Column(Integer, nullable=False)
+    unit_name = Column(String(50), nullable=False)
+    is_rented = Column(Boolean, nullable=False, default=False)
+    access_code_enc = Column(Text)
+    access_code2_enc = Column(Text)
+    is_gate_locked = Column(Boolean, nullable=False, default=False)
+    is_overlocked = Column(Boolean, nullable=False, default=False)
+    keypad_zone = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('location_code', 'unit_id', name='uq_gate_access_loc_unit'),
+    )
+
+    def to_dict(self):
+        return {
+            'location_code': self.location_code,
+            'site_id': self.site_id,
+            'unit_id': self.unit_id,
+            'unit_name': self.unit_name,
+            'is_rented': self.is_rented,
+            'is_gate_locked': self.is_gate_locked,
+            'is_overlocked': self.is_overlocked,
+            'keypad_zone': self.keypad_zone,
+            'has_access_code': bool(self.access_code_enc),
+            'has_access_code2': bool(self.access_code2_enc),
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

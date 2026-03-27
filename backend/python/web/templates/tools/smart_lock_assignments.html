@@ -22,6 +22,7 @@
         <div id="refresh-info-wrapper" style="display: none; font-size: 0.8rem; color: #666;">
             <span id="refresh-info"></span>
             <button class="btn btn-secondary" id="refresh-btn" onclick="refreshUnitData()" style="margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem;">Refresh Unit Data</button>
+            <button id="refresh-gate-btn" class="btn btn-secondary" onclick="refreshGateData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #f59e0b; color: #d97706;"><i class="bi bi-shield-lock"></i> Refresh Gate Data</button>
             <span id="refresh-status" style="display: none; margin-left: 0.5rem;"></span>
         </div>
     </div>
@@ -69,10 +70,13 @@
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Rented</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Keypad</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Padlock</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Gate</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Overlock</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Access Code</th>
             </tr>
         </thead>
         <tbody id="units-tbody">
-            <tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
+            <tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
         </tbody>
     </table>
     <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
@@ -197,11 +201,20 @@
             });
 
             // Show last refresh time
+            let refreshText = '';
             if (data.last_refresh) {
                 const dt = new Date(data.last_refresh + 'Z');
-                document.getElementById('refresh-info').textContent = 'Unit data last refreshed: ' + dt.toLocaleString();
+                refreshText = 'Unit data: ' + dt.toLocaleString();
+            }
+            if (data.gate_refresh) {
+                const gdt = new Date(data.gate_refresh + 'Z');
+                refreshText += (refreshText ? ' · ' : '') + 'Gate data: ' + gdt.toLocaleString();
+            }
+            if (refreshText) {
+                document.getElementById('refresh-info').textContent = refreshText;
             }
             document.getElementById('refresh-info-wrapper').style.display = 'block';
+            document.getElementById('refresh-gate-btn').style.display = '';
 
             document.getElementById('summary-row').style.display = 'flex';
             document.getElementById('save-btn').style.display = 'inline-block';
@@ -245,7 +258,7 @@
         if (vacantOnly) filtered = filtered.filter(u => u.bRented !== true);
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
             document.getElementById('count-info').textContent = '';
             return;
         }
@@ -282,6 +295,26 @@
                 plOptions += `<option value="${p.id}" ${sel}>${esc(p.padlock_id)}</option>`;
             });
 
+            // Gate access cells
+            const gateLocked = u.gate_access && u.gate_access.is_gate_locked;
+            const gateBadge = gateLocked
+                ? '<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">Locked</span>'
+                : '<span style="background:#d1fae5;color:#059669;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">OK</span>';
+            const overlocked = u.gate_access && u.gate_access.is_overlocked;
+            const overlockBadge = overlocked
+                ? '<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">Overlocked</span>'
+                : '';
+            const hasCode = u.gate_access && u.gate_access.has_access_code;
+            const codeCell = hasCode
+                ? `<span class="gate-code-masked" id="gc-${u.UnitID}">••••••••</span>
+                   <button class="btn btn-sm btn-outline-secondary ms-1 gate-reveal-btn"
+                           onclick="revealGateCode('${u.gate_access.location_code}', ${u.UnitID}, this)"
+                           title="Reveal access code"
+                           style="padding:0.1rem 0.3rem;font-size:0.7rem;border:1px solid #d1d5db;border-radius:3px;background:transparent;cursor:pointer;">
+                       <i class="bi bi-eye"></i>
+                   </button>`
+                : '<span style="color:#999;">—</span>';
+
             return `<tr style="${rowBg}">
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteCode(u.SiteID))}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${u.UnitID}</td>
@@ -296,6 +329,9 @@
                     <select onchange="onAssignChange(${u.SiteID}, ${u.UnitID}, 'padlock_pk', this.value)"
                             style="padding:0.3rem;border:1px solid #e5e7eb;border-radius:4px;width:100%;font-size:0.8rem;">${plOptions}</select>
                 </td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${u.gate_access ? gateBadge : '<span style="color:#999;">—</span>'}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${u.gate_access ? overlockBadge : ''}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${codeCell}</td>
             </tr>`;
         }).join('');
 
@@ -524,6 +560,88 @@
         renderTable();
         updateStats();
         showStatus(`Auto-assigned ${count} padlock(s) — click Save to persist`, true);
+    }
+
+    // Reveal gate access code
+    async function revealGateCode(locationCode, unitId, btn) {
+        const span = document.getElementById(`gc-${unitId}`);
+        if (!span) return;
+
+        // Toggle off if already revealed
+        if (span.dataset.revealed === 'true') {
+            span.textContent = '••••••••';
+            span.dataset.revealed = 'false';
+            btn.innerHTML = '<i class="bi bi-eye"></i>';
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+
+        try {
+            const res = await fetch(
+                `/api/smart-lock/gate-code?location_code=${encodeURIComponent(locationCode)}&unit_id=${unitId}`,
+                { headers: apiHeaders() }
+            );
+            if (!res.ok) throw new Error('Failed to fetch');
+            const data = await res.json();
+
+            let display = data.access_code || '(empty)';
+            if (data.access_code2) display += ` / ${data.access_code2}`;
+            span.textContent = display;
+            span.dataset.revealed = 'true';
+            btn.innerHTML = '<i class="bi bi-eye-slash"></i>';
+
+            // Auto-hide after 10 seconds
+            setTimeout(() => {
+                span.textContent = '••••••••';
+                span.dataset.revealed = 'false';
+                btn.innerHTML = '<i class="bi bi-eye"></i>';
+            }, 10000);
+        } catch (e) {
+            span.textContent = 'Error';
+            setTimeout(() => { span.textContent = '••••••••'; }, 3000);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // Refresh gate access data via scheduler pipeline
+    async function refreshGateData() {
+        const btn = document.getElementById('refresh-gate-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Refreshing...';
+
+        try {
+            const res = await fetch('/api/jobs/gateaccess/run-async', {
+                method: 'POST',
+                headers: apiHeaders(),
+            });
+            const data = await res.json();
+            const execId = data.execution_id;
+
+            const poll = async () => {
+                const r = await fetch(`/api/history/${execId}`, { headers: apiHeaders() });
+                const d = await r.json();
+                if (d.status === 'completed') {
+                    btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
+                    btn.disabled = false;
+                    showStatus('Gate access data refreshed', true);
+                    if (loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
+                } else if (d.status === 'failed') {
+                    btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
+                    btn.disabled = false;
+                    showStatus('Gate data refresh failed', false);
+                } else {
+                    setTimeout(poll, 5000);
+                }
+            };
+            setTimeout(poll, 5000);
+        } catch (e) {
+            btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
+            btn.disabled = false;
+            showStatus('Failed to trigger refresh', false);
+        }
     }
 
     // Init

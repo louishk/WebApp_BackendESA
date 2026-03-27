@@ -4329,7 +4329,7 @@ def api_sl_units():
         pbi_session.close()
 
     # 2) Fetch assignments + keypads/padlocks from esa_backend
-    from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock
+    from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock, GateAccessData
     session = get_session()
     try:
         assignments = session.query(SmartLockUnitAssignment).filter(
@@ -4348,10 +4348,26 @@ def api_sl_units():
             SmartLockPadlock.site_id.in_(site_ids)
         ).order_by(SmartLockPadlock.padlock_id).all()
 
+        # ── gate access data (encrypted codes, lock status) ──
+        gate_data = session.query(GateAccessData).filter(
+            GateAccessData.site_id.in_(site_ids)
+        ).all()
+        gate_map = {g.unit_id: g.to_dict() for g in gate_data}
+
+        # gate data last refresh
+        gate_refresh = None
+        if gate_data:
+            gate_refresh = max(
+                (g.updated_at for g in gate_data if g.updated_at), default=None
+            )
+            if gate_refresh:
+                gate_refresh = gate_refresh.isoformat()
+
         # Merge assignments into units
         for u in units:
             key = (u['SiteID'], u['UnitID'])
             u['assignment'] = assign_map.get(key)
+            u['gate_access'] = gate_map.get(u['UnitID'])
 
         return jsonify({
             'units': units,
@@ -4359,6 +4375,7 @@ def api_sl_units():
             'keypads': [k.to_dict() for k in keypads],
             'padlocks': [p.to_dict() for p in padlocks],
             'last_refresh': last_refresh,
+            'gate_refresh': gate_refresh,
         })
     except Exception as e:
         current_app.logger.error(f"Smart lock assignments query error: {e}")
@@ -4604,5 +4621,54 @@ def api_sl_audit_log():
     except Exception as e:
         current_app.logger.error(f"Smart lock audit log error: {e}")
         return jsonify({'error': 'Failed to fetch audit log'}), 500
+    finally:
+        session.close()
+
+
+# --- Gate Code Reveal ---
+
+@api_bp.route('/smart-lock/gate-code')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_sl_gate_code():
+    """Decrypt and return a single unit's gate access code."""
+    from web.models.smart_lock import GateAccessData
+    unit_id = request.args.get('unit_id', type=int)
+    location_code = request.args.get('location_code', '')
+
+    if not unit_id or not location_code:
+        return jsonify({'error': 'unit_id and location_code required'}), 400
+
+    session = get_session()
+    try:
+        record = session.query(GateAccessData).filter_by(
+            location_code=location_code, unit_id=unit_id
+        ).first()
+
+        if not record:
+            return jsonify({'error': 'No gate access data for this unit'}), 404
+
+        from common.gate_access_crypto import get_gate_crypto
+        crypto = get_gate_crypto()
+
+        code1 = crypto.decrypt(record.access_code_enc) if record.access_code_enc else ''
+        code2 = crypto.decrypt(record.access_code2_enc) if record.access_code2_enc else ''
+
+        # Audit the reveal
+        _sl_audit(
+            session, 'gate_code_viewed', 'gate_access', str(unit_id),
+            site_id=location_code, unit_id=unit_id,
+            detail=f"Access code revealed for unit {record.unit_name}",
+        )
+
+        return jsonify({
+            'access_code': code1,
+            'access_code2': code2,
+        })
+    except Exception as e:
+        logger.error("Gate code reveal failed: %s", e)
+        return jsonify({'error': 'Failed to decrypt access code'}), 500
     finally:
         session.close()
