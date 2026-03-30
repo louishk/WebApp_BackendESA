@@ -1081,6 +1081,14 @@ def _get_mcp_tools_grouped():
         'GA_analyze_audiences', 'GA_optimize_budget', 'GA_generate_report',
     ]
     tools['Google Ads - Token'] = ['GA_start_token_refresh']
+    tools['Revenue - Data'] = [
+        'RM_get_portfolio_snapshot', 'RM_get_site_performance', 'RM_get_budget_variance',
+        'RM_get_occupancy_trends', 'RM_get_movement_analysis', 'RM_get_rate_analysis',
+        'RM_get_customer_segments',
+    ]
+    tools['Revenue - AI Analysis'] = [
+        'RM_analyze_revenue', 'RM_detect_anomalies', 'RM_generate_executive_report',
+    ]
     return tools
 
 
