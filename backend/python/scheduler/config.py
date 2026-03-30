@@ -71,6 +71,7 @@ class DataFreshnessConfig:
     """Configuration for tracking data freshness in target tables."""
     table: str = ''
     date_column: str = 'updated_at'
+    database: str = 'pbi'  # 'pbi' or 'backend'
 
 
 @dataclass
@@ -239,9 +240,13 @@ class SchedulerConfig:
                         freshness_conf = DataFreshnessConfig()
                         if 'data_freshness' in pdef:
                             df = pdef['data_freshness']
+                            db_value = df.get('database', 'pbi')
+                            if db_value not in ('pbi', 'backend'):
+                                db_value = 'pbi'
                             freshness_conf = DataFreshnessConfig(
                                 table=df.get('table', ''),
                                 date_column=df.get('date_column', 'updated_at'),
+                                database=db_value,
                             )
 
                         schedule_config = pdef.get('schedule', {})
@@ -400,10 +405,13 @@ class SchedulerConfig:
 
         # Write back to file with explicit flush for WSL filesystem
         import os
-        with open(pipelines_file, 'w') as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-            f.flush()
-            os.fsync(f.fileno())
+        try:
+            with open(pipelines_file, 'w') as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                f.flush()
+                os.fsync(f.fileno())
+        except OSError:
+            return False
 
         # Update in-memory config
         if pipeline_name in self.pipelines:

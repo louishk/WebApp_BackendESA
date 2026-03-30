@@ -450,29 +450,36 @@ def api_data_freshness():
     config = current_app.scheduler_config or SchedulerConfig.from_yaml()
     freshness = {}
 
-    try:
-        pbi_engine = get_pbi_engine(config)
-    except Exception as e:
-        return jsonify({'error': 'Could not connect to PBI database'}), 503
+    # Tables allowed for freshness queries on the backend DB (allowlist)
+    BACKEND_FRESHNESS_TABLES = frozenset({
+        'igloo_devices', 'gate_access_data',
+    })
 
-    # Build queries for all pipelines
-    queries_to_run = []
+    # Separate queries by database
+    pbi_queries = []
+    backend_queries = []
     for name, pipeline in config.pipelines.items():
         table = pipeline.data_freshness.table
         column = pipeline.data_freshness.date_column
+        db = pipeline.data_freshness.database
 
         if not table:
             freshness[name] = {'latest_date': None, 'error': 'No table configured'}
         elif not _is_valid_sql_identifier(table) or not _is_valid_sql_identifier(column):
             freshness[name] = {'latest_date': None, 'error': 'Invalid table or column name'}
+        elif db == 'backend':
+            if table not in BACKEND_FRESHNESS_TABLES:
+                freshness[name] = {'latest_date': None, 'error': 'Table not permitted'}
+            else:
+                backend_queries.append((name, table, column))
         else:
-            queries_to_run.append((name, table, column))
+            pbi_queries.append((name, table, column))
 
-    # Execute all queries in a single connection
-    if queries_to_run:
+    def _run_freshness_queries(engine, queries):
+        """Run freshness queries against an engine, rolling back on per-query errors."""
         try:
-            with pbi_engine.connect() as conn:
-                for name, table, column in queries_to_run:
+            with engine.connect() as conn:
+                for name, table, column in queries:
                     try:
                         query = text(f'SELECT MAX("{column}") as max_date FROM "{table}"')
                         result = conn.execute(query).fetchone()
@@ -486,12 +493,40 @@ def api_data_freshness():
                         else:
                             freshness[name] = {'latest_date': None}
                     except Exception as e:
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
                         current_app.logger.error(f"Data freshness query error for {name}: {e}")
                         freshness[name] = {'latest_date': None, 'error': 'Query failed'}
         except Exception as e:
-            # Connection failed - mark all as error
             current_app.logger.error(f"Data freshness connection error: {e}")
-            for name, _, _ in queries_to_run:
+            for name, _, _ in queries:
+                freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
+
+    # Query PBI database
+    if pbi_queries:
+        try:
+            pbi_engine = get_pbi_engine(config)
+            _run_freshness_queries(pbi_engine, pbi_queries)
+        except Exception as e:
+            current_app.logger.error(f"Could not connect to PBI database: {e}")
+            for name, _, _ in pbi_queries:
+                freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
+
+    # Query backend database (allowlisted tables only)
+    if backend_queries:
+        try:
+            from common.config_loader import get_database_url
+            from sqlalchemy import create_engine
+            backend_engine = create_engine(get_database_url('backend'))
+            try:
+                _run_freshness_queries(backend_engine, backend_queries)
+            finally:
+                backend_engine.dispose()
+        except Exception as e:
+            current_app.logger.error(f"Could not connect to backend database: {e}")
+            for name, _, _ in backend_queries:
                 freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
 
     return jsonify(freshness)
