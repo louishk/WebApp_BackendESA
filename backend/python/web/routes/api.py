@@ -469,6 +469,7 @@ def _validate_module_path(module_path):
 @api_bp.route('/data-freshness')
 @require_auth
 @require_api_scope('scheduler:read')
+@cached(ttl_seconds=60)
 def api_data_freshness():
     """Get latest data dates for all pipelines."""
     from scheduler.config import get_pbi_engine
