@@ -54,8 +54,8 @@ def create_app(config=None, db_url=None):
     if not app.config.get('DEBUG', False):
         app.config['SESSION_COOKIE_SECURE'] = True
 
-    # Store scheduler config
-    app.scheduler_config = config
+    # Pipeline config is now loaded from DB per-request (see _get_scheduler_config in api.py)
+    app.scheduler_config = None
 
     # Store app config for access by blueprints
     app.app_config = get_config()

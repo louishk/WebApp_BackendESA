@@ -116,6 +116,16 @@ def get_session():
     return current_app.get_db_session()
 
 
+def _get_scheduler_config():
+    """Load scheduler config from DB (source of truth), falling back to YAML."""
+    from scheduler.config import SchedulerConfig
+    session = current_app.get_db_session()
+    try:
+        return SchedulerConfig.from_db(session)
+    finally:
+        session.close()
+
+
 # PBI database session factory (for RentRoll, SiteInfo, etc.)
 _pbi_engine = None
 _pbi_session_factory = None
@@ -211,13 +221,11 @@ def health():
 @api_bp.route('/jobs')
 @require_auth
 @require_api_scope('scheduler:read')
-@cached(ttl_seconds=30)
 def api_list_jobs():
     """List all scheduled jobs."""
-    from scheduler.config import SchedulerConfig
     from scheduler.utils import cron_to_human
 
-    config = current_app.scheduler_config or SchedulerConfig.from_yaml()
+    config = _get_scheduler_config()
 
     jobs = []
     for name, pipeline in config.pipelines.items():
@@ -244,10 +252,9 @@ def api_list_jobs():
 @require_api_scope('scheduler:read')
 def api_get_job(pipeline):
     """Get job details."""
-    from scheduler.config import SchedulerConfig
     from scheduler.utils import cron_to_human
 
-    config = current_app.scheduler_config or SchedulerConfig.from_yaml()
+    config = _get_scheduler_config()
 
     if pipeline not in config.pipelines:
         return jsonify({'error': 'Pipeline not found'}), 404
@@ -279,57 +286,63 @@ def api_get_job(pipeline):
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_update_job(pipeline):
     """Update pipeline schedule/settings."""
-    from scheduler.config import SchedulerConfig
+    from scheduler.models import PipelineConfig
     from scheduler.utils import cron_to_human
 
-    config = SchedulerConfig.from_yaml()
+    session = get_session()
+    try:
+        row = session.query(PipelineConfig).filter_by(pipeline_name=pipeline).first()
+        if not row:
+            return jsonify({'error': 'Pipeline not found'}), 404
 
-    if pipeline not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
+        data = request.get_json() or {}
 
-    data = request.get_json() or {}
+        cron = data.get('cron')
+        enabled = data.get('enabled')
+        priority = data.get('priority')
 
-    cron = data.get('cron')
-    enabled = data.get('enabled')
-    priority = data.get('priority')
+        if priority is not None:
+            try:
+                priority = int(priority)
+                if not 1 <= priority <= 10:
+                    return jsonify({'error': 'Priority must be between 1 and 10'}), 400
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Priority must be an integer'}), 400
 
-    if priority is not None:
-        try:
-            priority = int(priority)
-            if not 1 <= priority <= 10:
-                return jsonify({'error': 'Priority must be between 1 and 10'}), 400
-        except (ValueError, TypeError):
-            return jsonify({'error': 'Priority must be an integer'}), 400
+        if cron:
+            try:
+                from croniter import croniter
+                croniter(cron)
+            except Exception as e:
+                current_app.logger.warning(f"Invalid cron expression '{cron}': {e}")
+                return jsonify({'error': 'Invalid cron expression'}), 400
 
-    if cron:
-        try:
-            from croniter import croniter
-            croniter(cron)
-        except Exception as e:
-            current_app.logger.warning(f"Invalid cron expression '{cron}': {e}")
-            return jsonify({'error': 'Invalid cron expression'}), 400
+        if cron is not None:
+            schedule_config = dict(row.schedule_config or {})
+            schedule_config['cron'] = cron
+            row.schedule_config = schedule_config
+        if enabled is not None:
+            row.enabled = enabled
+        if priority is not None:
+            row.priority = priority
 
-    success = config.update_pipeline_schedule(
-        pipeline_name=pipeline,
-        cron=cron,
-        enabled=enabled,
-        priority=priority
-    )
+        session.commit()
 
-    if not success:
+        cron_expr = (row.schedule_config or {}).get('cron', 'N/A')
+        return jsonify({
+            'success': True,
+            'pipeline_name': pipeline,
+            'schedule': cron_expr,
+            'schedule_human': cron_to_human(cron_expr),
+            'enabled': row.enabled,
+            'priority': row.priority,
+        })
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Failed to update job {pipeline}: {e}")
         return jsonify({'error': 'Failed to update pipeline'}), 500
-
-    p = config.pipelines[pipeline]
-    cron_expr = p.schedule_config.get('cron', 'N/A')
-
-    return jsonify({
-        'success': True,
-        'pipeline_name': pipeline,
-        'schedule': cron_expr,
-        'schedule_human': cron_to_human(cron_expr),
-        'enabled': p.enabled,
-        'priority': p.priority,
-    })
+    finally:
+        session.close()
 
 
 @api_bp.route('/jobs/<pipeline>/enable', methods=['POST'])
@@ -338,14 +351,22 @@ def api_update_job(pipeline):
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_enable_job(pipeline):
     """Enable a pipeline."""
-    from scheduler.config import SchedulerConfig
+    from scheduler.models import PipelineConfig
 
-    config = SchedulerConfig.from_yaml()
-    if pipeline not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
-
-    success = config.update_pipeline_schedule(pipeline_name=pipeline, enabled=True)
-    return jsonify({'success': success, 'enabled': True})
+    session = get_session()
+    try:
+        row = session.query(PipelineConfig).filter_by(pipeline_name=pipeline).first()
+        if not row:
+            return jsonify({'error': 'Pipeline not found'}), 404
+        row.enabled = True
+        session.commit()
+        return jsonify({'success': True, 'enabled': True})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Failed to enable job {pipeline}: {e}")
+        return jsonify({'error': 'Failed to enable pipeline'}), 500
+    finally:
+        session.close()
 
 
 @api_bp.route('/jobs/<pipeline>/disable', methods=['POST'])
@@ -354,14 +375,22 @@ def api_enable_job(pipeline):
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_disable_job(pipeline):
     """Disable a pipeline."""
-    from scheduler.config import SchedulerConfig
+    from scheduler.models import PipelineConfig
 
-    config = SchedulerConfig.from_yaml()
-    if pipeline not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
-
-    success = config.update_pipeline_schedule(pipeline_name=pipeline, enabled=False)
-    return jsonify({'success': success, 'enabled': False})
+    session = get_session()
+    try:
+        row = session.query(PipelineConfig).filter_by(pipeline_name=pipeline).first()
+        if not row:
+            return jsonify({'error': 'Pipeline not found'}), 404
+        row.enabled = False
+        session.commit()
+        return jsonify({'success': True, 'enabled': False})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Failed to disable job {pipeline}: {e}")
+        return jsonify({'error': 'Failed to disable pipeline'}), 500
+    finally:
+        session.close()
 
 
 @api_bp.route('/schedules/presets')
@@ -376,14 +405,12 @@ def api_schedule_presets():
 @api_bp.route('/jobs/upcoming')
 @require_auth
 @require_api_scope('scheduler:read')
-@cached(ttl_seconds=15)
 def api_upcoming_jobs():
     """Get upcoming scheduled executions."""
-    from scheduler.config import SchedulerConfig
     from scheduler.utils import cron_to_human
     import pytz
 
-    config = current_app.scheduler_config or SchedulerConfig.from_yaml()
+    config = _get_scheduler_config()
 
     sg_tz = pytz.timezone('Asia/Singapore')
     now = datetime.now(sg_tz)
@@ -442,12 +469,11 @@ def _validate_module_path(module_path):
 @api_bp.route('/data-freshness')
 @require_auth
 @require_api_scope('scheduler:read')
-@cached(ttl_seconds=60)
 def api_data_freshness():
     """Get latest data dates for all pipelines."""
-    from scheduler.config import SchedulerConfig, get_pbi_engine
+    from scheduler.config import get_pbi_engine
 
-    config = current_app.scheduler_config or SchedulerConfig.from_yaml()
+    config = _get_scheduler_config()
     freshness = {}
 
     # Tables allowed for freshness queries on the backend DB (allowlist)
@@ -538,13 +564,12 @@ def api_data_freshness():
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_run_job_async(pipeline):
     """Trigger job execution asynchronously."""
-    from scheduler.config import SchedulerConfig
     from scheduler.executor import PipelineExecutor
     from scheduler.models import JobHistory
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    config = current_app.scheduler_config or SchedulerConfig.from_yaml()
+    config = _get_scheduler_config()
 
     if pipeline not in config.pipelines:
         return jsonify({'error': 'Pipeline not found'}), 404
@@ -699,10 +724,9 @@ def api_stream_execution(execution_id):
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_run_job(pipeline):
     """Trigger job execution (synchronous)."""
-    from scheduler.config import SchedulerConfig
     from scheduler.executor import PipelineExecutor
 
-    config = current_app.scheduler_config or SchedulerConfig.from_yaml()
+    config = _get_scheduler_config()
 
     if pipeline not in config.pipelines:
         return jsonify({'error': 'Pipeline not found'}), 404
@@ -954,9 +978,7 @@ def api_resources():
 @require_api_scope('scheduler:read')
 def api_config():
     """Get scheduler configuration."""
-    from scheduler.config import SchedulerConfig
-
-    config = current_app.scheduler_config or SchedulerConfig.from_yaml()
+    config = _get_scheduler_config()
 
     return jsonify({
         'timezone': config.timezone,
@@ -1269,38 +1291,15 @@ def api_restart_service(service):
 @require_api_scope('scheduler:read')
 def api_list_pipelines():
     """List all pipeline configurations."""
-    from scheduler.config import SchedulerConfig
+    from scheduler.models import PipelineConfig
 
-    config = SchedulerConfig.from_yaml()
-
-    pipelines = []
-    for name, p in config.pipelines.items():
-        pipelines.append({
-            'name': name,
-            'display_name': p.display_name,
-            'description': getattr(p, 'description', ''),
-            'module_path': p.module_path,
-            'enabled': p.enabled,
-            'schedule': p.schedule_config,
-            'priority': p.priority,
-            'depends_on': p.depends_on,
-            'conflicts_with': p.conflicts_with,
-            'resource_group': p.resource_group,
-            'max_db_connections': p.max_db_connections,
-            'timeout_seconds': p.timeout_seconds,
-            'retry': {
-                'max_attempts': p.retry.max_attempts,
-                'delay_seconds': p.retry.delay_seconds,
-                'backoff_multiplier': p.retry.backoff_multiplier,
-            },
-            'data_freshness': {
-                'table': p.data_freshness.table,
-                'date_column': p.data_freshness.date_column,
-            },
-            'default_args': p.default_args,
-        })
-
-    return jsonify({'pipelines': pipelines})
+    session = get_session()
+    try:
+        rows = session.query(PipelineConfig).order_by(PipelineConfig.priority).all()
+        pipelines = [row.to_dict() for row in rows]
+        return jsonify({'pipelines': pipelines})
+    finally:
+        session.close()
 
 
 @api_bp.route('/pipelines/<name>')
@@ -1308,38 +1307,16 @@ def api_list_pipelines():
 @require_api_scope('scheduler:read')
 def api_get_pipeline(name):
     """Get a specific pipeline configuration."""
-    from scheduler.config import SchedulerConfig
+    from scheduler.models import PipelineConfig
 
-    config = SchedulerConfig.from_yaml()
-
-    if name not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
-
-    p = config.pipelines[name]
-    return jsonify({
-        'name': name,
-        'display_name': p.display_name,
-        'description': getattr(p, 'description', ''),
-        'module_path': p.module_path,
-        'enabled': p.enabled,
-        'schedule': p.schedule_config,
-        'priority': p.priority,
-        'depends_on': p.depends_on,
-        'conflicts_with': p.conflicts_with,
-        'resource_group': p.resource_group,
-        'max_db_connections': p.max_db_connections,
-        'timeout_seconds': p.timeout_seconds,
-        'retry': {
-            'max_attempts': p.retry.max_attempts,
-            'delay_seconds': p.retry.delay_seconds,
-            'backoff_multiplier': p.retry.backoff_multiplier,
-        },
-        'data_freshness': {
-            'table': p.data_freshness.table,
-            'date_column': p.data_freshness.date_column,
-        },
-        'default_args': p.default_args,
-    })
+    session = get_session()
+    try:
+        row = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
+        if not row:
+            return jsonify({'error': 'Pipeline not found'}), 404
+        return jsonify(row.to_dict())
+    finally:
+        session.close()
 
 
 @api_bp.route('/pipelines', methods=['POST'])
@@ -1348,8 +1325,7 @@ def api_get_pipeline(name):
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_create_pipeline():
     """Create a new pipeline."""
-    from scheduler.config import SchedulerConfig
-    import yaml
+    from scheduler.models import PipelineConfig
 
     data = request.get_json()
     if not data:
@@ -1362,56 +1338,55 @@ def api_create_pipeline():
     if not name.replace('_', '').replace('-', '').isalnum():
         return jsonify({'error': 'Pipeline name must be alphanumeric with underscores/hyphens'}), 400
 
-    config = SchedulerConfig.from_yaml()
-    if name in config.pipelines:
-        return jsonify({'error': f'Pipeline {name} already exists'}), 400
-
     module_path = data.get('module_path', f'datalayer.{name}')
     is_valid, msg = _validate_module_path(module_path)
     if not is_valid:
         return jsonify({'error': msg}), 400
 
-    pipeline_config = {
-        'display_name': data.get('display_name', name.replace('_', ' ').title()),
-        'description': data.get('description', ''),
-        'module_path': module_path,
-        'enabled': data.get('enabled', False),
-        'schedule': {
-            'type': 'cron',
-            'cron': data.get('cron', '0 6 * * *')
-        },
-        'priority': data.get('priority', 5),
-        'depends_on': data.get('depends_on', []),
-        'conflicts_with': data.get('conflicts_with', []),
-        'resource_group': data.get('resource_group', 'http_api'),
-        'max_db_connections': data.get('max_db_connections', 2),
-        'timeout_seconds': data.get('timeout_seconds', 3600),
-        'retry': {
-            'max_attempts': data.get('max_retries', 3),
-            'delay_seconds': data.get('retry_delay', 300),
-            'backoff_multiplier': data.get('backoff_multiplier', 2),
-        },
-        'data_freshness': {
-            'table': data.get('freshness_table', ''),
-            'date_column': data.get('freshness_column', ''),
-        },
-        'default_args': data.get('default_args', {'mode': 'auto'}),
-    }
+    session = get_session()
+    try:
+        existing = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
+        if existing:
+            return jsonify({'error': f'Pipeline {name} already exists'}), 400
 
-    config_path = Path(__file__).parent.parent.parent / 'config' / 'pipelines.yaml'
-    with open(config_path) as f:
-        yaml_data = yaml.safe_load(f)
+        row = PipelineConfig(
+            pipeline_name=name,
+            display_name=data.get('display_name', name.replace('_', ' ').title()),
+            description=data.get('description', ''),
+            module_path=module_path,
+            schedule_type='cron',
+            schedule_config={'type': 'cron', 'cron': data.get('cron', '0 6 * * *')},
+            enabled=data.get('enabled', False),
+            priority=data.get('priority', 5),
+            depends_on=data.get('depends_on', []),
+            conflicts_with=data.get('conflicts_with', []),
+            resource_group=data.get('resource_group', 'http_api'),
+            max_db_connections=data.get('max_db_connections', 2),
+            estimated_duration_seconds=data.get('estimated_duration_seconds', 600),
+            max_retries=data.get('max_retries', 3),
+            retry_delay_seconds=data.get('retry_delay', 300),
+            retry_backoff_multiplier=data.get('backoff_multiplier', 2),
+            timeout_seconds=data.get('timeout_seconds', 3600),
+            default_args=data.get('default_args', {'mode': 'auto'}),
+            data_freshness_config={
+                'table': data.get('freshness_table', ''),
+                'date_column': data.get('freshness_column', ''),
+            },
+        )
+        session.add(row)
+        session.commit()
 
-    yaml_data['pipelines'][name] = pipeline_config
-
-    with open(config_path, 'w') as f:
-        yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
-
-    return jsonify({
-        'success': True,
-        'message': f'Pipeline {name} created',
-        'pipeline': pipeline_config
-    })
+        return jsonify({
+            'success': True,
+            'message': f'Pipeline {name} created',
+            'pipeline': row.to_dict()
+        })
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Failed to create pipeline {name}: {e}")
+        return jsonify({'error': 'Failed to create pipeline'}), 500
+    finally:
+        session.close()
 
 
 @api_bp.route('/pipelines/<name>', methods=['PUT'])
@@ -1420,62 +1395,62 @@ def api_create_pipeline():
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_update_pipeline(name):
     """Update a pipeline configuration."""
-    from scheduler.config import SchedulerConfig
-    import yaml
-
-    config = SchedulerConfig.from_yaml()
-    if name not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
+    from scheduler.models import PipelineConfig
 
     data = request.get_json()
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    config_path = Path(__file__).parent.parent.parent / 'config' / 'pipelines.yaml'
-    with open(config_path) as f:
-        yaml_data = yaml.safe_load(f)
+    session = get_session()
+    try:
+        row = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
+        if not row:
+            return jsonify({'error': 'Pipeline not found'}), 404
 
-    current = yaml_data['pipelines'][name]
+        if 'display_name' in data:
+            row.display_name = data['display_name']
+        if 'description' in data:
+            row.description = data['description']
+        if 'module_path' in data:
+            is_valid, msg = _validate_module_path(data['module_path'])
+            if not is_valid:
+                return jsonify({'error': msg}), 400
+            row.module_path = data['module_path']
+        if 'enabled' in data:
+            row.enabled = data['enabled']
+        if 'cron' in data:
+            row.schedule_config = {'type': 'cron', 'cron': data['cron']}
+        if 'priority' in data:
+            row.priority = data['priority']
+        if 'depends_on' in data:
+            row.depends_on = data['depends_on']
+        if 'conflicts_with' in data:
+            row.conflicts_with = data['conflicts_with']
+        if 'resource_group' in data:
+            row.resource_group = data['resource_group']
+        if 'max_db_connections' in data:
+            row.max_db_connections = data['max_db_connections']
+        if 'timeout_seconds' in data:
+            row.timeout_seconds = data['timeout_seconds']
+        if 'max_retries' in data:
+            row.max_retries = data['max_retries']
+        if 'freshness_table' in data:
+            fc = dict(row.data_freshness_config or {})
+            fc['table'] = data['freshness_table']
+            row.data_freshness_config = fc
+        if 'freshness_column' in data:
+            fc = dict(row.data_freshness_config or {})
+            fc['date_column'] = data['freshness_column']
+            row.data_freshness_config = fc
 
-    if 'display_name' in data:
-        current['display_name'] = data['display_name']
-    if 'description' in data:
-        current['description'] = data['description']
-    if 'module_path' in data:
-        is_valid, msg = _validate_module_path(data['module_path'])
-        if not is_valid:
-            return jsonify({'error': msg}), 400
-        current['module_path'] = data['module_path']
-    if 'enabled' in data:
-        current['enabled'] = data['enabled']
-    if 'cron' in data:
-        current['schedule'] = {'type': 'cron', 'cron': data['cron']}
-    if 'priority' in data:
-        current['priority'] = data['priority']
-    if 'depends_on' in data:
-        current['depends_on'] = data['depends_on']
-    if 'conflicts_with' in data:
-        current['conflicts_with'] = data['conflicts_with']
-    if 'resource_group' in data:
-        current['resource_group'] = data['resource_group']
-    if 'max_db_connections' in data:
-        current['max_db_connections'] = data['max_db_connections']
-    if 'timeout_seconds' in data:
-        current['timeout_seconds'] = data['timeout_seconds']
-    if 'max_retries' in data:
-        current.setdefault('retry', {})['max_attempts'] = data['max_retries']
-    if 'freshness_table' in data:
-        current.setdefault('data_freshness', {})['table'] = data['freshness_table']
-    if 'freshness_column' in data:
-        current.setdefault('data_freshness', {})['date_column'] = data['freshness_column']
-
-    with open(config_path, 'w') as f:
-        yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
-
-    return jsonify({
-        'success': True,
-        'message': f'Pipeline {name} updated',
-    })
+        session.commit()
+        return jsonify({'success': True, 'message': f'Pipeline {name} updated'})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Failed to update pipeline {name}: {e}")
+        return jsonify({'error': 'Failed to update pipeline'}), 500
+    finally:
+        session.close()
 
 
 @api_bp.route('/pipelines/<name>', methods=['DELETE'])
@@ -1484,26 +1459,23 @@ def api_update_pipeline(name):
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_delete_pipeline(name):
     """Delete a pipeline."""
-    from scheduler.config import SchedulerConfig
-    import yaml
+    from scheduler.models import PipelineConfig
 
-    config = SchedulerConfig.from_yaml()
-    if name not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
+    session = get_session()
+    try:
+        row = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
+        if not row:
+            return jsonify({'error': 'Pipeline not found'}), 404
 
-    config_path = Path(__file__).parent.parent.parent / 'config' / 'pipelines.yaml'
-    with open(config_path) as f:
-        yaml_data = yaml.safe_load(f)
-
-    del yaml_data['pipelines'][name]
-
-    with open(config_path, 'w') as f:
-        yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
-
-    return jsonify({
-        'success': True,
-        'message': f'Pipeline {name} deleted',
-    })
+        session.delete(row)
+        session.commit()
+        return jsonify({'success': True, 'message': f'Pipeline {name} deleted'})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Failed to delete pipeline {name}: {e}")
+        return jsonify({'error': 'Failed to delete pipeline'}), 500
+    finally:
+        session.close()
 
 
 @api_bp.route('/modules')

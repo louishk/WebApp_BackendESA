@@ -167,6 +167,10 @@ class PipelineConfig(Base, TimestampMixin):
     # Timeouts
     timeout_seconds = Column(Integer, default=3600)
 
+    retry_backoff_multiplier = Column(Numeric(4, 2), default=2.0)
+    default_args = Column(JSONB)
+    data_freshness_config = Column(JSONB)  # {table, date_column, database}
+
     def __repr__(self):
         return f"<PipelineConfig(name={self.pipeline_name}, enabled={self.enabled})>"
 
@@ -185,8 +189,13 @@ class PipelineConfig(Base, TimestampMixin):
             'conflicts_with': self.conflicts_with or [],
             'resource_group': self.resource_group,
             'max_db_connections': self.max_db_connections,
+            'estimated_duration_seconds': self.estimated_duration_seconds,
             'max_retries': self.max_retries,
+            'retry_delay_seconds': self.retry_delay_seconds,
+            'retry_backoff_multiplier': float(self.retry_backoff_multiplier) if self.retry_backoff_multiplier is not None else None,
             'timeout_seconds': self.timeout_seconds,
+            'default_args': self.default_args or {},
+            'data_freshness_config': self.data_freshness_config or {},
         }
 
 

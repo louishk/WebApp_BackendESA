@@ -246,13 +246,17 @@ class SchedulerEngine:
                 logger.error(f"Failed to register pipeline {name}: {e}")
 
     def reload_pipelines(self):
-        """Reload pipeline config from disk and re-register jobs."""
+        """Reload pipeline config from DB and re-register jobs."""
         from scheduler.config import SchedulerConfig
 
         logger.info("Reloading pipeline configuration...")
 
-        # Load fresh config from YAML
-        new_config = SchedulerConfig.from_yaml()
+        # Load fresh config from DB (falls back to YAML if DB unavailable)
+        session = self._session_factory()
+        try:
+            new_config = SchedulerConfig.from_db(session)
+        finally:
+            session.close()
 
         # Remove all existing pipeline jobs from APScheduler
         for job in self._scheduler.get_jobs():
@@ -267,26 +271,33 @@ class SchedulerEngine:
         logger.info(f"Reloaded {len(new_config.get_enabled_pipelines())} pipelines")
 
     def _config_monitor_loop(self):
-        """Monitor pipelines.yaml for changes and auto-reload."""
-        import hashlib
-        from scheduler.config import BASE_DIR
+        """Monitor pipeline config in DB for changes and auto-reload."""
+        from sqlalchemy import func
+        from scheduler.models import PipelineConfig
 
-        config_path = BASE_DIR / 'config' / 'pipelines.yaml'
-
-        # Get initial hash
+        # Get initial max updated_at
         try:
-            self._config_hash = hashlib.md5(config_path.read_bytes()).hexdigest()
+            session = self._session_factory()
+            try:
+                result = session.query(func.max(PipelineConfig.updated_at)).scalar()
+                self._config_last_updated = result
+            finally:
+                session.close()
         except Exception:
-            self._config_hash = None
+            self._config_last_updated = None
 
         while not self._shutdown_event.wait(timeout=10):  # Check every 10 seconds
             try:
-                current_hash = hashlib.md5(config_path.read_bytes()).hexdigest()
+                session = self._session_factory()
+                try:
+                    current = session.query(func.max(PipelineConfig.updated_at)).scalar()
+                finally:
+                    session.close()
 
-                if current_hash != self._config_hash:
-                    logger.info("Config file changed, reloading pipelines...")
+                if current != self._config_last_updated:
+                    logger.info("Pipeline config changed in DB, reloading...")
                     self.reload_pipelines()
-                    self._config_hash = current_hash
+                    self._config_last_updated = current
             except Exception as e:
                 logger.error(f"Config monitor error: {e}")
 

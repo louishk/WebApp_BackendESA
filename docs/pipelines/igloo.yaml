@@ -1,0 +1,241 @@
+name: igloo
+description: >
+  Igloo Smart Lock pipeline. Fetches property and device data from the Igloo REST API
+  and stores them in igloo_properties and igloo_devices tables in the esa_backend
+  PostgreSQL database. Provides battery levels, last sync times, and device metadata
+  consumed by the Smart Lock tool. Both run modes perform a full sync — the Igloo API
+  has no delta endpoint.
+
+database: esa_backend
+api_base_url: https://api.igloocompany.co/igloo
+auth_url: https://auth.igloocompany.co/oauth2/token
+
+# =============================================================================
+# DB Tables
+# =============================================================================
+tables:
+  igloo_properties:
+    description: >
+      One row per Igloo property (property = a physical site/location in Igloo).
+      Upserted on propertyId. site_id is resolved from pipelines.yaml
+      property_site_map config (Igloo property name -> ESA SiteID).
+    primary_key: [id]
+    unique_key: [propertyId]
+    model: backend/python/common/models.py::IglooProperty
+    columns:
+      - propertyId: "VARCHAR(50) — Igloo property ID (API field: id)"
+      - name: "VARCHAR(100) — property display name (API field: name)"
+      - timezone: "VARCHAR(50) — property timezone"
+      - totalLock: "INTEGER — total lock count reported by API"
+      - site_id: "INTEGER — ESA SiteID, resolved via property_site_map config"
+      - raw_json: "JSONB — full API response for future fields"
+      - created_at: "TIMESTAMP — ETL record creation"
+      - updated_at: "TIMESTAMP — ETL last upsert"
+    indexes:
+      - idx_igloo_prop_site_id: [site_id]
+
+  igloo_devices:
+    description: >
+      One row per Igloo device (Lock, Keypad, Bridge, KeyBox). Upserted on deviceId.
+      deviceName is the join key to the Smart Lock tool: igloo_devices.deviceName
+      matches smart_lock_padlocks.padlock_id or smart_lock_keypads.keypad_id.
+      site_id is resolved via the property name -> SiteID mapping config.
+    primary_key: [id]
+    unique_key: [deviceId]
+    model: backend/python/common/models.py::IglooDevice
+    columns:
+      - deviceId: "VARCHAR(30) — Bluetooth/hardware ID e.g. SP2X2916499b (API field: deviceId)"
+      - deviceName: "VARCHAR(50) — short name e.g. 6499b — JOIN KEY to padlock_id/keypad_id"
+      - type: "VARCHAR(20) — device class: Lock, Keypad, Bridge, KeyBox"
+      - igloo_id: "VARCHAR(50) — Igloo internal record ID (API field: id)"
+      - batteryLevel: "INTEGER 0-100 — clamped at ingest; NULL if not reported"
+      - pairedAt: "TIMESTAMPTZ — device pairing timestamp (API field: pairedAt)"
+      - lastSync: "TIMESTAMPTZ — last cloud sync timestamp (API field: lastSync)"
+      - properties: "JSONB — array of property refs from API (API field: properties)"
+      - linkedDevices: "JSONB — API field: linkedDevices"
+      - linkedAccessories: "JSONB — API field: linkedAccessories"
+      - propertyId: "VARCHAR(50) — resolved from properties[0].id"
+      - propertyName: "VARCHAR(100) — resolved from properties[0].name"
+      - departmentId: "VARCHAR(50) — from department lookup by departmentId or property fallback"
+      - departmentName: "VARCHAR(100) — from department lookup"
+      - site_id: "INTEGER — ESA SiteID, resolved via propertyName -> property_site_map"
+      - raw_json: "JSONB — full device detail API response"
+      - created_at: "TIMESTAMP — ETL record creation"
+      - updated_at: "TIMESTAMP — ETL last upsert"
+    indexes:
+      - idx_igloo_dev_device_name: [deviceName]
+      - idx_igloo_dev_site_id: [site_id]
+      - idx_igloo_dev_property_id: [propertyId]
+
+# =============================================================================
+# API Endpoints Used
+# =============================================================================
+api_endpoints:
+  GET /properties:
+    pagination: cursor-based (nextCursor token)
+    response_envelope: "payload: [...], nextCursor: '...'"
+    page_limit: 300 per page
+    page_ceiling: 500 pages (MAX_PAGES safety guard — ~150,000 records)
+    used_by: igloo_to_sql.py (stage 1)
+
+  GET /departments:
+    pagination: cursor-based (nextCursor token)
+    response_envelope: "payload: [...], nextCursor: '...'"
+    page_limit: 300 per page
+    used_by: igloo_to_sql.py (stage 2)
+    notes: >
+      Used to build a dept_id -> dept_data lookup. Department name is
+      resolved by departmentId from the device, or by matching department
+      properties list if departmentId is absent.
+
+  GET /devices:
+    pagination: cursor-based (nextCursor token)
+    response_envelope: "payload: [...], nextCursor: '...'"
+    page_limit: 300 per page
+    used_by: igloo_to_sql.py (stage 3)
+    notes: List endpoint. Does not include full property/accessory detail.
+
+  GET /devices/{deviceId}:
+    pagination: none (single record)
+    response_envelope: "payload: {...}"
+    used_by: igloo_to_sql.py (stage 4 — per-device detail fetch)
+    notes: >
+      Called once per device from the /devices list to obtain expanded
+      property and linked accessory information. deviceId is regex-validated
+      before use in the URL path (pattern: ^[A-Za-z0-9_-]{1,30}$).
+      Devices failing validation are skipped; devices returning an error
+      fall back to the list-endpoint record.
+
+# =============================================================================
+# Pipeline Script
+# =============================================================================
+scripts:
+  igloo_to_sql.py:
+    path: backend/python/datalayer/igloo_to_sql.py
+    description: >
+      Six-stage pipeline: fetch properties, fetch departments, fetch devices
+      (list), fetch device details (per-device), transform + deduplicate, then
+      upsert to esa_backend. Both modes perform a full sync.
+    modes:
+      backfill:
+        description: Full sync of all properties and devices. Use for initial load or data repair.
+        usage: "python -m datalayer.igloo_to_sql --mode backfill"
+      auto:
+        description: >
+          Daily scheduled sync. Functionally identical to backfill — the Igloo API
+          has no delta endpoint so a full pull is always performed.
+        usage: "python -m datalayer.igloo_to_sql --mode auto"
+    stages:
+      1_fetch_properties: "GET /properties (paginated)"
+      2_fetch_departments: "GET /departments (paginated) — for department name mapping"
+      3_fetch_devices: "GET /devices (paginated)"
+      4_fetch_device_details: "GET /devices/{deviceId} per device — expands property + linked info"
+      5_transform: "Field validation, deduplication by propertyId / deviceId"
+      6_push: "Upsert to igloo_properties (constraint: propertyId) and igloo_devices (constraint: deviceId)"
+    config_keys:
+      pipelines.igloo.property_site_map: >
+        Dict mapping Igloo property name (string) to ESA SiteID (integer).
+        Used during transform to set site_id on both properties and devices.
+        Configured in backend/python/config/pipelines.yaml under igloo.property_site_map.
+        Example: {A38XX: 54219}
+
+# =============================================================================
+# Authentication
+# =============================================================================
+auth:
+  method: "OAuth2 client_credentials"
+  token_endpoint: "https://auth.igloocompany.co/oauth2/token"
+  grant_type: client_credentials
+  token_request_format: application/x-www-form-urlencoded
+  token_lifetime: >
+    Returned as expires_in seconds (default assumed: 3600). IglooAuth refreshes
+    automatically when the token is within 30 seconds of expiry.
+  vault_secrets:
+    IGLOO_CLIENT_ID: "OAuth2 client ID — set via /admin/secrets"
+    IGLOO_CLIENT_SECRET: "OAuth2 client secret — set via /admin/secrets"
+
+# =============================================================================
+# Schedule
+# =============================================================================
+schedule:
+  type: cron
+  expression: "0 3 * * *"
+  timezone: SGT (UTC+8)
+  human_readable: "Daily at 3:00 AM SGT"
+  default_args:
+    mode: auto
+  timeout_seconds: 600
+  retry:
+    max_attempts: 3
+    delay_seconds: 300
+    backoff_multiplier: 2
+  data_freshness:
+    table: igloo_devices
+    date_column: updated_at
+    database: backend  # queries esa_backend, not esa_pbi — igloo_devices is allowlisted
+
+# =============================================================================
+# Transformation Notes
+# =============================================================================
+transformation:
+  field_validation:
+    truncation: >
+      All string fields are truncated to their column width before upsert via
+      _truncate(). Values that become empty after truncation are stored as NULL.
+    battery_clamping: >
+      batteryLevel is clamped to [0, 100] via _clamp_int(). Non-numeric or None
+      values are stored as NULL rather than raising.
+    deviceId_regex: >
+      Before calling GET /devices/{deviceId}, the deviceId is validated against
+      ^[A-Za-z0-9_-]{1,30}$. Devices with invalid IDs are skipped (warning logged).
+    datetime_parsing: >
+      pairedAt and lastSync are parsed via datetime.fromisoformat() with 'Z'
+      replaced by '+00:00'. Invalid or missing values are stored as NULL.
+
+  property_name_mapping: >
+    site_id is resolved by looking up the property name in property_site_map
+    (from pipelines.yaml config). Properties or devices whose name does not
+    appear in the map will have site_id = NULL.
+
+  department_resolution: >
+    For each device, departmentId is used to look up the department from the
+    pre-fetched departments dict. If departmentId is absent, the pipeline
+    falls back to matching via the department's properties list (property ID
+    match). departmentId / departmentName are NULL if no match is found.
+
+  deduplication: >
+    After transformation, records are deduplicated in-memory on propertyId
+    (properties) and deviceId (devices) before the upsert. Last write wins
+    within a single pipeline run.
+
+# =============================================================================
+# Join Strategy (Smart Lock Tool)
+# =============================================================================
+join_strategy:
+  description: >
+    The Smart Lock tool correlates Igloo device data with padlocks and keypads
+    tracked in esa_backend. There is no mapping table — the join is by name.
+  padlocks: "igloo_devices.deviceName = smart_lock_padlocks.padlock_id"
+  keypads: "igloo_devices.deviceName = smart_lock_keypads.keypad_id"
+  notes: >
+    deviceName holds a short identifier (e.g. 6499b) that matches the padlock_id
+    or keypad_id recorded in the Smart Lock assignment tables.
+
+# =============================================================================
+# Migration
+# =============================================================================
+migration:
+  file: backend/python/migrations/038_igloo_tables.sql
+  description: >
+    Creates igloo_properties and igloo_devices tables with all columns and indexes.
+    Must be applied before running igloo_to_sql.py for the first time.
+
+# =============================================================================
+# Related Code
+# =============================================================================
+related:
+  models: backend/python/common/models.py (IglooProperty, IglooDevice)
+  pipeline: backend/python/datalayer/igloo_to_sql.py
+  pipeline_config: backend/python/config/pipelines.yaml (igloo section)
+  migration: backend/python/migrations/038_igloo_tables.sql
+  smart_lock_routes: backend/python/web/routes/api.py (smart lock endpoints)

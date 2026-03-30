@@ -1,0 +1,87 @@
+name: scheduler_config
+description: >
+  Scheduler configuration module. Loads pipeline definitions from
+  backend/python/config/pipelines.yaml and exposes them as typed dataclasses.
+  Used by the APScheduler daemon and by Flask routes that inspect or mutate
+  pipeline schedules.
+
+file: backend/python/scheduler/config.py
+
+# =============================================================================
+# Key Dataclasses
+# =============================================================================
+dataclasses:
+
+  DataFreshnessConfig:
+    description: >
+      Attached to each PipelineDefinition. Tells the data-freshness endpoint
+      which table and column to query to determine when a pipeline last wrote data.
+    fields:
+      table:
+        type: str
+        default: ""
+        description: >
+          Target table name. Empty string means freshness tracking is disabled
+          for this pipeline — the endpoint returns latest_date: null.
+      date_column:
+        type: str
+        default: updated_at
+        description: Column queried with MAX() to find the most recent write timestamp.
+      database:
+        type: str
+        default: pbi
+        allowed_values: [pbi, backend]
+        description: >
+          Which database holds the target table. 'pbi' means esa_pbi (analytics DB);
+          'backend' means esa_backend (app DB). Invalid values are silently coerced
+          to 'pbi' during YAML parsing.
+    notes: >
+      The database field was added in commit 0eba9a4 to support pipelines that
+      write to esa_backend (e.g. igloo, gate_access) rather than esa_pbi.
+      Pipelines without a data_freshness block in pipelines.yaml get an empty
+      DataFreshnessConfig (table='', database='pbi').
+
+  PipelineDefinition:
+    description: Full definition of one pipeline entry from pipelines.yaml.
+    relevant_field:
+      data_freshness: "DataFreshnessConfig — see above"
+
+# =============================================================================
+# YAML Config Key
+# =============================================================================
+pipelines_yaml_key:
+  path: backend/python/config/pipelines.yaml
+  data_freshness_block: |
+    data_freshness:
+      table: igloo_devices     # target table
+      date_column: updated_at  # column passed to MAX()
+      database: backend        # 'pbi' (default) or 'backend'
+  validation: >
+    During SchedulerConfig.from_yaml(), the database value is checked against
+    ('pbi', 'backend'). Any other value is replaced with 'pbi' and no exception
+    is raised (silent coercion, not a hard error).
+
+# =============================================================================
+# update_pipeline_schedule()
+# =============================================================================
+update_pipeline_schedule:
+  description: >
+    Persists a changed cron/interval schedule for a pipeline back to
+    pipelines.yaml and updates the in-memory SchedulerConfig.
+  file_write_behavior: >
+    The YAML write is wrapped in try/except OSError and returns False on failure.
+    This prevents an unhandled exception from propagating to the Flask route
+    (PUT /api/jobs) when the file is read-only — which happens on the Azure VM
+    because systemd's ProtectSystem=strict makes the app directory read-only.
+  return_values:
+    True: Schedule updated successfully (file written + in-memory updated).
+    False: Pipeline not found, or OSError writing pipelines.yaml (e.g. read-only FS).
+  caller: backend/python/web/routes/api.py — PUT /api/jobs
+
+# =============================================================================
+# Related
+# =============================================================================
+related:
+  config_file: backend/python/config/pipelines.yaml
+  data_freshness_endpoint: backend/python/web/routes/api.py (GET /api/data-freshness)
+  scheduler_api_doc: docs/api/scheduler.yaml

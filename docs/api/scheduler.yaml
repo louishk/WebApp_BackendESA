@@ -1,0 +1,219 @@
+openapi: 3.0.3
+
+info:
+  title: ESA Backend — Scheduler API
+  description: >
+    Endpoints for inspecting and managing the APScheduler pipeline daemon.
+    All routes are under the `api` Flask blueprint with URL prefix `/api`.
+
+    **Authentication**: Bearer JWT or API key (`X-API-Key` header).
+    Session-authenticated web UI users are also supported.
+
+    **Scopes**: `scheduler:read` for GET endpoints, `scheduler:write` for mutations.
+  version: "1.0.0"
+
+servers:
+  - url: https://app.extraspaceasia.com.sg
+    description: Production (Azure VM)
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    FreshnessEntry:
+      type: object
+      properties:
+        latest_date:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            MAX(date_column) from the pipeline's target table, or null if no
+            data has been written yet or if freshness tracking is not configured.
+          example: "2026-03-30T03:14:22"
+        error:
+          type: string
+          nullable: true
+          description: >
+            Present only on failure. Possible values:
+            "No table configured" — pipeline has no data_freshness.table set.
+            "Invalid table or column name" — identifier failed SQL validation.
+            "Table not permitted" — backend DB table not in the allowlist.
+            "Query failed" — MAX() query raised an exception.
+            "Database connection failed" — could not connect to the target DB.
+          example: "No table configured"
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # Data Freshness
+  # ---------------------------------------------------------------------------
+
+  /api/data-freshness:
+    get:
+      summary: Query data freshness for all pipelines
+      description: >
+        For each pipeline that has a `data_freshness` block in pipelines.yaml,
+        returns the most recent timestamp written to its target table.
+
+        Pipelines are split by target database before querying:
+
+        - **pbi** pipelines query esa_pbi via the shared PBI engine.
+        - **backend** pipelines query esa_backend via a short-lived engine
+          (created and disposed per request). Only tables in
+          `BACKEND_FRESHNESS_TABLES` are permitted; others are rejected with
+          `"Table not permitted"`.
+
+        Currently permitted backend tables: `igloo_devices`, `gate_access_data`.
+
+        Per-query errors (e.g. table does not exist) trigger a rollback on the
+        connection before continuing, preventing `InFailedSqlTransaction` errors
+        from cascading to subsequent queries in the same connection.
+
+        Pipelines with no `data_freshness.table` configured always return
+        `latest_date: null` without hitting the database.
+      operationId: getDataFreshness
+      tags: [Data Freshness]
+      responses:
+        "200":
+          description: >
+            Freshness map keyed by pipeline name. Always returns 200 — per-pipeline
+            errors are embedded in the response body rather than surfaced as HTTP errors.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/FreshnessEntry"
+              example:
+                ccws_tenants:
+                  latest_date: "2026-03-30T01:00:11"
+                igloo:
+                  latest_date: "2026-03-30T03:02:44"
+                gate_access:
+                  latest_date: "2026-03-29T23:58:01"
+                some_unconfigured_pipeline:
+                  latest_date: null
+                  error: "No table configured"
+        "503":
+          description: >
+            Returned only if the SchedulerConfig itself cannot be loaded.
+            Individual database connection failures are embedded in the 200
+            response per pipeline rather than returned as 503.
+
+  # ---------------------------------------------------------------------------
+  # Jobs (Schedule Management)
+  # ---------------------------------------------------------------------------
+
+  /api/jobs:
+    get:
+      summary: List all pipeline jobs and their current schedules
+      operationId: listJobs
+      tags: [Jobs]
+      responses:
+        "200":
+          description: List of pipeline job definitions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          example: ccws_tenants
+                        display_name:
+                          type: string
+                          example: "CCWS Tenants Pipeline"
+                        enabled:
+                          type: boolean
+                        schedule_type:
+                          type: string
+                          enum: [cron, interval, date]
+                        schedule_config:
+                          type: object
+                        next_run:
+                          type: string
+                          format: date-time
+                          nullable: true
+
+    put:
+      summary: Update a pipeline's schedule
+      description: >
+        Persists a new schedule for a pipeline to pipelines.yaml and updates the
+        in-memory config. Returns 500 with an error body (not an unhandled
+        exception) if pipelines.yaml is read-only (e.g. on the VM under
+        `ProtectSystem=strict`).
+      operationId: updateJobSchedule
+      tags: [Jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, schedule_type, schedule_config]
+              properties:
+                name:
+                  type: string
+                  description: Pipeline name as defined in pipelines.yaml
+                  example: ccws_tenants
+                schedule_type:
+                  type: string
+                  enum: [cron, interval, date]
+                schedule_config:
+                  type: object
+                  description: Schedule parameters (e.g. hour/minute for cron)
+      responses:
+        "200":
+          description: Schedule updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        "400":
+          description: Invalid request body
+        "404":
+          description: Pipeline not found
+        "500":
+          description: Failed to write pipelines.yaml (e.g. read-only filesystem)
+
+# =============================================================================
+# Implementation Notes
+# =============================================================================
+# data_freshness query logic (GET /api/data-freshness):
+#   Source: backend/python/web/routes/api.py — api_data_freshness()
+#   Config: backend/python/scheduler/config.py — DataFreshnessConfig
+#   pipelines.yaml key: data_freshness.database ('pbi' | 'backend')
+#
+#   BACKEND_FRESHNESS_TABLES allowlist (frozenset in api.py):
+#     - igloo_devices  (written by igloo_to_sql.py)
+#     - gate_access_data  (written by gate access pipeline)
+#
+#   Backend engine lifecycle:
+#     create_engine() → _run_freshness_queries() → engine.dispose()
+#     (try/finally ensures dispose() even on exception)
+#
+# update_pipeline_schedule write guard:
+#   Source: backend/python/scheduler/config.py — update_pipeline_schedule()
+#   OSError on file write → returns False → route returns HTTP 500 with error body

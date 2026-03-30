@@ -341,6 +341,72 @@ class SchedulerConfig:
 
         return config
 
+    @classmethod
+    def from_db(cls, session) -> 'SchedulerConfig':
+        """
+        Load pipeline definitions from database, with daemon/scheduler/alert
+        settings from YAML.  DB is the source of truth for pipelines.
+        Falls back to from_yaml() if the DB table is empty or unavailable.
+        """
+        from scheduler.models import PipelineConfig
+
+        # Load daemon/scheduler/alert settings from YAML (rarely change)
+        config = cls.from_yaml()
+
+        try:
+            rows = session.query(PipelineConfig).all()
+            if not rows:
+                # Table empty — fall back to YAML pipelines (bootstrap)
+                return config
+
+            # Replace YAML pipelines with DB pipelines
+            config.pipelines = {}
+            for row in rows:
+                retry_conf = RetryConfig(
+                    max_attempts=row.max_retries or 3,
+                    delay_seconds=row.retry_delay_seconds or 300,
+                    backoff_multiplier=float(row.retry_backoff_multiplier or 2.0),
+                )
+
+                freshness_conf = DataFreshnessConfig()
+                if row.data_freshness_config:
+                    df = row.data_freshness_config
+                    db_value = df.get('database', 'pbi')
+                    if db_value not in ('pbi', 'backend'):
+                        db_value = 'pbi'
+                    freshness_conf = DataFreshnessConfig(
+                        table=df.get('table', ''),
+                        date_column=df.get('date_column', 'updated_at'),
+                        database=db_value,
+                    )
+
+                config.pipelines[row.pipeline_name] = PipelineDefinition(
+                    pipeline_name=row.pipeline_name,
+                    display_name=row.display_name,
+                    module_path=row.module_path,
+                    schedule_type=row.schedule_type,
+                    schedule_config=row.schedule_config or {},
+                    enabled=row.enabled,
+                    priority=row.priority or 5,
+                    depends_on=row.depends_on or [],
+                    conflicts_with=row.conflicts_with or [],
+                    resource_group=row.resource_group or 'soap_api',
+                    max_db_connections=row.max_db_connections or 3,
+                    estimated_duration_seconds=row.estimated_duration_seconds or 600,
+                    default_args=row.default_args or {},
+                    retry=retry_conf,
+                    timeout_seconds=row.timeout_seconds or 3600,
+                    data_freshness=freshness_conf,
+                )
+        except Exception:
+            # DB unavailable — fall back to YAML pipelines
+            import logging
+            logging.getLogger(__name__).warning(
+                "Could not load pipeline config from DB, falling back to YAML"
+            )
+
+        return config
+
     def get_pipeline(self, name: str) -> Optional[PipelineDefinition]:
         """Get pipeline definition by name."""
         return self.pipelines.get(name)
