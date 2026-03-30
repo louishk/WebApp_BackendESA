@@ -17,7 +17,7 @@ import logging
 import math
 import sys
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -96,7 +96,16 @@ QUERY = text("""
         rr.days_rented,
         rr.los_range,
         rr.revenue_effective   AS actual_rent,
+        rr.disc_sconcessionplan AS discount_plan,
+        rr.disc_dcdiscount      AS discount_pct,
         b.avr_rental_rate      AS budget_arr_sqft,
+        -- ECRI fields from cc_ledgers
+        cl."dcRent"            AS tenant_current_rent,
+        cl."dRentLastChanged"  AS rent_last_changed,
+        cl."dSchedRentStrt"    AS sched_rent_start,
+        cl."dcSchedRent"       AS sched_rent,
+        cl."dSchedOut"         AS sched_out_date,
+        cl."bExcludeFromRevenueMgmt" AS exclude_from_rev_mgmt,
         COUNT(*) OVER (PARTITION BY ui."SiteID", ui."UnitID") AS tenant_count
     FROM units_info_enriched ui
     INNER JOIN siteinfo si
@@ -109,6 +118,10 @@ QUERY = text("""
         AND rr."UnitID" = ui."UnitID"
         AND rr.extract_date = (SELECT MAX(extract_date) FROM rentroll_enriched)
         AND rr."bRented" = true
+    LEFT JOIN cc_ledgers cl
+        ON cl."SiteID" = ui."SiteID"
+        AND cl."unitID" = ui."UnitID"
+        AND cl."LedgerID" = rr."LedgerID"
     WHERE ui.dcarea_fixed > 0
       AND ui.deleted_at IS NULL
       AND ui.label_type_code NOT IN ('P', 'ST', 'SC')
@@ -308,6 +321,7 @@ def write_csv(rows, output_path):
         'climate_code', 'shape', 'pillar',
         'is_rented',
         'ledger_id', 'tenant_name', 'moved_in_date', 'tenure_months', 'los_range',
+        'discount_plan', 'discount_pct',
         'is_multi_tenant', 'tenant_count', 'tenant_share_pct',
         'current_std_rate', 'current_std_sqft', 'current_std_sqm',
         'current_disc_pct',
@@ -318,6 +332,12 @@ def write_csv(rows, output_path):
         'new_target_arr_sqft', 'new_target_arr_sqm',
         'new_std_rate', 'new_std_sqft', 'new_std_sqm',
         'change_vs_current_std_pct',
+        # ECRI columns (rented units only)
+        'ecri_target_rent', 'ecri_increase_needed', 'ecri_increase_pct',
+        'rent_last_changed', 'months_since_last_increase',
+        'sched_rent_start', 'sched_rent', 'sched_out_date',
+        'exclude_from_rev_mgmt',
+        'ecri_eligible',
     ]
 
     for r in rows:
@@ -380,6 +400,54 @@ def write_csv(rows, output_path):
         r['actual_rent'] = round(raw_actual, dp)
         r['budget_arr_sqft'] = round(raw_budget, dp)
         r['area_sqft'] = round(area, 1)
+
+        # ECRI columns (rented units only)
+        if r['is_rented']:
+            # Target effective rent = new_target_arr per sqft * area
+            ecri_target = r['new_target_arr_sqft'] * area
+            raw_tenant_rent = float(r['tenant_current_rent'] or r['actual_rent'] or 0)
+
+            r['ecri_target_rent'] = round(ecri_target, dp)
+            if raw_tenant_rent > 0:
+                increase = ecri_target - raw_tenant_rent
+                r['ecri_increase_needed'] = round(increase, dp)
+                r['ecri_increase_pct'] = round(increase / raw_tenant_rent * 100, 1)
+            else:
+                r['ecri_increase_needed'] = 0
+                r['ecri_increase_pct'] = 0
+
+            # Months since last rent change
+            rent_changed = r.get('rent_last_changed')
+            if rent_changed:
+                if isinstance(rent_changed, (date, datetime)):
+                    if isinstance(rent_changed, datetime):
+                        rent_changed = rent_changed.date()
+                    delta = date.today() - rent_changed
+                    r['months_since_last_increase'] = int(delta.days / 30.44)
+                else:
+                    r['months_since_last_increase'] = ''
+            else:
+                r['months_since_last_increase'] = ''
+
+            # ECRI eligibility: tenure >= 12mo, no pending increase, not excluded,
+            # not scheduled out within 30 days, last increase >= 12 months ago
+            tenure_ok = r['tenure_months'] >= 12
+            srs = r.get('sched_rent_start')
+            if isinstance(srs, datetime):
+                srs = srs.date()
+            no_pending = not srs or srs < date.today()
+            not_excluded = not r.get('exclude_from_rev_mgmt')
+            no_sched_out = not r.get('sched_out_date')
+            last_increase_ok = r['months_since_last_increase'] == '' or (
+                isinstance(r['months_since_last_increase'], int) and r['months_since_last_increase'] >= 12
+            )
+            r['ecri_eligible'] = all([tenure_ok, no_pending, not_excluded, no_sched_out, last_increase_ok])
+        else:
+            r['ecri_target_rent'] = ''
+            r['ecri_increase_needed'] = ''
+            r['ecri_increase_pct'] = ''
+            r['months_since_last_increase'] = ''
+            r['ecri_eligible'] = ''
 
     with open(output_path, 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction='ignore')
