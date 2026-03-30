@@ -60,8 +60,8 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-API_BASE_URL = 'https://api.igloocompany.co/igloo'
-AUTH_URL = 'https://auth.igloocompany.co/oauth2/token'
+API_BASE_URL = 'https://api.igloohome.co/igloo'
+AUTH_URL = 'https://auth.igloohome.co/oauth2/token'
 DEFAULT_PAGE_LIMIT = 300
 MAX_PAGES = 500  # Safety ceiling: ~150,000 records at limit=300
 
