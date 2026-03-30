@@ -6,15 +6,17 @@ Queries esa_pbi enriched views for revenue analytics MCP tools.
 import asyncio
 import logging
 import re
+import time
 from datetime import date as _date
 from typing import Optional, List, Dict, Any
 
+import asyncpg
+
 from mcp_esa.config.database_presets import get_database_presets
-from mcp_esa.services.simple_database import SimpleDatabase
 
 logger = logging.getLogger(__name__)
 
-_pbi_connection: Optional[SimpleDatabase] = None
+_pbi_pool: Optional[asyncpg.Pool] = None
 _pbi_lock = asyncio.Lock()
 
 _SITE_CODE_RE = re.compile(r'^[A-Z]\d{3}$')
@@ -50,27 +52,45 @@ def validate_date(val: Optional[str], param_name: str = 'date') -> Optional[str]
     return val
 
 
-async def _get_pbi_db() -> SimpleDatabase:
-    global _pbi_connection
-    if _pbi_connection and _pbi_connection.connected:
-        return _pbi_connection
+async def _get_pool() -> asyncpg.Pool:
+    global _pbi_pool
+    if _pbi_pool is not None:
+        return _pbi_pool
     async with _pbi_lock:
-        if _pbi_connection and _pbi_connection.connected:
-            return _pbi_connection
+        if _pbi_pool is not None:
+            return _pbi_pool
         presets = get_database_presets()
         config = presets.get_preset('esa_pbi')
         if not config:
             raise Exception("esa_pbi database preset not configured")
-        _pbi_connection = SimpleDatabase(config)
-        await _pbi_connection.connect()
-        return _pbi_connection
+        _pbi_pool = await asyncpg.create_pool(
+            host=config.host,
+            port=config.port,
+            user=config.user,
+            password=config.password,
+            database=config.database,
+            ssl='require' if config.ssl else 'prefer',
+            min_size=2,
+            max_size=8,
+        )
+        logger.info("Revenue service asyncpg pool created (esa_pbi)")
+        return _pbi_pool
+
+
+async def _query(sql: str, params: list = None) -> List[dict]:
+    pool = await _get_pool()
+    params = params or []
+    start = time.time()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(sql, *params)
+    elapsed = round((time.time() - start) * 1000, 1)
+    logger.debug(f"Revenue query: {len(rows)} rows in {elapsed}ms")
+    return [dict(r) for r in rows]
 
 
 async def get_portfolio_snapshot(extract_date: str = None) -> dict:
     extract_date = validate_date(extract_date, 'extract_date')
-    db = await _get_pbi_db()
-
-    rows = await db.execute_query("""
+    rows = await _query("""
         WITH latest AS (
             SELECT COALESCE($1::date, MAX(extract_date)) AS dt
             FROM rentroll_enriched
@@ -123,9 +143,7 @@ async def get_portfolio_snapshot(extract_date: str = None) -> dict:
 async def get_site_performance(extract_date: str = None, site_code: str = None) -> List[dict]:
     extract_date = validate_date(extract_date, 'extract_date')
     site_code = validate_site_code(site_code)
-    db = await _get_pbi_db()
-
-    rows = await db.execute_query("""
+    rows = await _query("""
         WITH latest AS (
             SELECT COALESCE($1::date, MAX(extract_date)) AS dt
             FROM rentroll_enriched
@@ -176,9 +194,7 @@ async def get_site_performance(extract_date: str = None, site_code: str = None) 
 async def get_budget_variance(month: str = None, site_code: str = None) -> List[dict]:
     month = validate_date(month, 'month')
     site_code = validate_site_code(site_code)
-    db = await _get_pbi_db()
-
-    rows = await db.execute_query("""
+    rows = await _query("""
         WITH target_month AS (
             SELECT COALESCE($1::date, DATE_TRUNC('month', CURRENT_DATE)::date) AS m
         ),
@@ -231,10 +247,10 @@ async def get_budget_variance(month: str = None, site_code: str = None) -> List[
 async def get_occupancy_trends(days: int = 90, site_code: str = None) -> List[dict]:
     days = max(1, min(int(days), 365))
     site_code = validate_site_code(site_code)
-    db = await _get_pbi_db()
+
 
     if site_code:
-        rows = await db.execute_query("""
+        rows = await _query("""
             SELECT
                 r.extract_date,
                 ROUND(COUNT(*) FILTER (WHERE r."bRented" = true AND r."bRentable" = true)::numeric /
@@ -253,7 +269,7 @@ async def get_occupancy_trends(days: int = 90, site_code: str = None) -> List[di
             ORDER BY r.extract_date
         """, [site_code, days])
     else:
-        rows = await db.execute_query("""
+        rows = await _query("""
             SELECT
                 r.extract_date,
                 ROUND(COUNT(*) FILTER (WHERE r."bRented" = true AND r."bRentable" = true)::numeric /
@@ -286,10 +302,10 @@ async def get_occupancy_trends(days: int = 90, site_code: str = None) -> List[di
 async def get_movement_analysis(days: int = 30, site_code: str = None) -> dict:
     days = max(1, min(int(days), 365))
     site_code = validate_site_code(site_code)
-    db = await _get_pbi_db()
+
 
     if site_code:
-        rows = await db.execute_query("""
+        rows = await _query("""
             SELECT
                 COUNT(*) FILTER (WHERE m."MoveIn" = 1) AS total_mi,
                 COUNT(*) FILTER (WHERE m."MoveOut" = 1) AS total_mo,
@@ -305,7 +321,7 @@ async def get_movement_analysis(days: int = 30, site_code: str = None) -> dict:
               AND m."MoveDate" >= CURRENT_DATE - $2 * INTERVAL '1 day'
         """, [site_code, days])
     else:
-        rows = await db.execute_query("""
+        rows = await _query("""
             SELECT
                 COUNT(*) FILTER (WHERE m."MoveIn" = 1) AS total_mi,
                 COUNT(*) FILTER (WHERE m."MoveOut" = 1) AS total_mo,
@@ -338,9 +354,7 @@ async def get_movement_analysis(days: int = 30, site_code: str = None) -> dict:
 async def get_rate_analysis(extract_date: str = None, site_code: str = None) -> List[dict]:
     extract_date = validate_date(extract_date, 'extract_date')
     site_code = validate_site_code(site_code)
-    db = await _get_pbi_db()
-
-    rows = await db.execute_query("""
+    rows = await _query("""
         WITH latest AS (
             SELECT COALESCE($1::date, MAX(extract_date)) AS dt FROM rentroll_enriched
         )
@@ -387,9 +401,7 @@ async def get_rate_analysis(extract_date: str = None, site_code: str = None) -> 
 async def get_customer_segments(extract_date: str = None, site_code: str = None) -> List[dict]:
     extract_date = validate_date(extract_date, 'extract_date')
     site_code = validate_site_code(site_code)
-    db = await _get_pbi_db()
-
-    rows = await db.execute_query("""
+    rows = await _query("""
         WITH latest AS (
             SELECT COALESCE($1::date, MAX(extract_date)) AS dt FROM rentroll_enriched
         )
@@ -426,10 +438,10 @@ async def get_customer_segments(extract_date: str = None, site_code: str = None)
 
 
 async def get_anomalies(extract_date: str = None, site_code: str = None) -> dict:
-    db = await _get_pbi_db()
+
 
     # 1. Occupancy drops WoW > 2pp
-    occ_drops = await db.execute_query("""
+    occ_drops = await _query("""
         WITH occ_by_site AS (
             SELECT
                 r."SiteID",
@@ -464,7 +476,7 @@ async def get_anomalies(extract_date: str = None, site_code: str = None) -> dict
     """)
 
     # 2. Revenue below budget > 10%
-    revenue_concerns = await db.execute_query("""
+    revenue_concerns = await _query("""
         WITH actuals AS (
             SELECT s."SiteCode" AS site_code,
                    SUM(r.revenue_effective) FILTER (WHERE r."bRented" = true) AS actual_revenue
@@ -487,7 +499,7 @@ async def get_anomalies(extract_date: str = None, site_code: str = None) -> dict
     """)
 
     # 3. Long-vacant concentration (>30% of vacant units 60d+)
-    vacancy_spikes = await db.execute_query("""
+    vacancy_spikes = await _query("""
         WITH latest AS (
             SELECT MAX(extract_date) AS dt FROM rentroll_enriched
         )
@@ -510,7 +522,7 @@ async def get_anomalies(extract_date: str = None, site_code: str = None) -> dict
     """)
 
     # 4. High discount penetration (>40%)
-    discount_alerts = await db.execute_query("""
+    discount_alerts = await _query("""
         WITH latest AS (
             SELECT MAX(extract_date) AS dt FROM rentroll_enriched
         )
