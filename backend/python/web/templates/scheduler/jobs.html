@@ -550,22 +550,22 @@ th.sortable.desc .sort-icon::after {
         .catch(err => alert('Error: ' + err));
     }
 
-    // Load jobs and data freshness
-    Promise.all([
-        fetch('/api/jobs').then(r => r.json()),
-        fetch('/api/data-freshness').then(r => r.json())
-    ])
-    .then(([jobsResponse, freshnessResponse]) => {
+    // Load jobs first (fast), then backfill freshness data (slow)
+    fetch('/api/jobs').then(r => r.json())
+    .then(jobsResponse => {
         jobsData = jobsResponse.jobs || [];
-
-        // Merge freshness data into jobs
-        jobsData.forEach(job => {
-            const freshness = freshnessResponse[job.pipeline_name];
-            job.latest_data = freshness ? freshness.latest_date : null;
-        });
-
-        // Initial sort by priority
         sortJobs('priority');
+
+        // Load data freshness in background, update cells when ready
+        fetch('/api/data-freshness').then(r => r.json())
+        .then(freshnessResponse => {
+            jobsData.forEach(job => {
+                const freshness = freshnessResponse[job.pipeline_name];
+                job.latest_data = freshness ? freshness.latest_date : null;
+            });
+            renderJobs();
+        })
+        .catch(() => {});
     })
     .catch(err => {
         document.getElementById('jobs-table').innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f66;">Error loading jobs</td></tr>';
