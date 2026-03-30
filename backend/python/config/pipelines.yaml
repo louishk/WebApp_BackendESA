@@ -261,6 +261,31 @@ pipelines:
     data_freshness:
       table: calendar_events
       date_column: synced_at
+  igloo:
+    display_name: Igloo Smart Locks
+    description: Sync properties and device data from Igloo API
+    module_path: datalayer.igloo_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: "0 3 * * *"
+    default_args:
+      mode: auto
+    priority: 5
+    resource_group: http_api
+    max_db_connections: 2
+    estimated_duration_seconds: 120
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 600
+    data_freshness:
+      table: igloo_devices
+      date_column: updated_at
+      database: backend
+    property_site_map:
+      A38XX: 54219
   gateaccess:
     display_name: Gate Access Data
     description: Fetch gate access data (lock codes, lock status) from SOAP API

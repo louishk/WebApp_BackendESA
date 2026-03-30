@@ -58,6 +58,7 @@ from .models import (
     GadsAccountMap, GadsCampaign, GadsAdGroup, GadsKeyword,
     GadsCampaignDaily, GadsCampaignConversions, GadsAdGroupDaily, GadsKeywordDaily,
 )
+from .models import IglooProperty, IglooDevice  # Igloo smart lock models
 from .models import Tenant, Ledger, Charge, CcwsDiscount  # CallCenterWs models
 from .models import CcwsTenant, CcwsLedger, CcwsCharge  # CallCenterWs API-only models
 # Management Summary models
@@ -185,6 +186,9 @@ __all__ = [
     'GadsCampaignConversions',
     'GadsAdGroupDaily',
     'GadsKeywordDaily',
+    # Igloo smart lock models
+    'IglooProperty',
+    'IglooDevice',
 
     # Operations
     'BaseRepository',

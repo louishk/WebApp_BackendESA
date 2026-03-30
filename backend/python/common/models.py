@@ -3539,3 +3539,53 @@ class GadsKeywordDaily(Base, BaseModel):
         Index('idx_gads_kw_daily_ad_group', 'ad_group_id'),
     )
 
+
+# ============================================================================
+# Igloo Smart Lock Models
+# ============================================================================
+
+
+class IglooProperty(Base, BaseModel, TimestampMixin):
+    """Igloo property (site/location) synced from Igloo API."""
+    __tablename__ = 'igloo_properties'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    propertyId = Column(String(50), unique=True, nullable=False, comment="Igloo property ID (API field: id)")
+    name = Column(String(100), nullable=False, comment="Property name (API field: name)")
+    timezone = Column(String(50), comment="Property timezone (API field: timezone)")
+    totalLock = Column(Integer, comment="Total lock count (API field: totalLock)")
+    site_id = Column(Integer, comment="ESA SiteID (mapped via config)")
+    raw_json = Column(JSONB, comment="Full API response")
+
+    __table_args__ = (
+        Index('idx_igloo_prop_site_id', 'site_id'),
+    )
+
+
+class IglooDevice(Base, BaseModel, TimestampMixin):
+    """Igloo device (lock, keypad, bridge, keybox) synced from Igloo API."""
+    __tablename__ = 'igloo_devices'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    deviceId = Column(String(30), unique=True, nullable=False, comment="Bluetooth ID e.g. SP2X2916499b (API field: deviceId)")
+    deviceName = Column(String(50), nullable=False, comment="Short name e.g. 6499b — JOIN KEY to padlock_id/keypad_id")
+    type = Column(String(20), nullable=False, comment="Lock, Keypad, Bridge, KeyBox (API field: type)")
+    igloo_id = Column(String(50), comment="Igloo internal record ID (API field: id)")
+    batteryLevel = Column(Integer, comment="0-100 (API field: batteryLevel)")
+    pairedAt = Column(DateTime(timezone=True), comment="API field: pairedAt")
+    lastSync = Column(DateTime(timezone=True), comment="API field: lastSync")
+    properties = Column(JSONB, comment="Array of property refs (API field: properties)")
+    linkedDevices = Column(JSONB, comment="API field: linkedDevices")
+    linkedAccessories = Column(JSONB, comment="API field: linkedAccessories")
+    propertyId = Column(String(50), comment="Resolved from properties[0].id")
+    propertyName = Column(String(100), comment="Resolved from properties[0].name")
+    departmentId = Column(String(50), comment="From department lookup")
+    departmentName = Column(String(100), comment="From department lookup")
+    site_id = Column(Integer, comment="ESA SiteID (mapped via config)")
+    raw_json = Column(JSONB, comment="Full API response for future fields")
+
+    __table_args__ = (
+        Index('idx_igloo_dev_device_name', 'deviceName'),
+        Index('idx_igloo_dev_site_id', 'site_id'),
+        Index('idx_igloo_dev_property_id', 'propertyId'),
+    )
