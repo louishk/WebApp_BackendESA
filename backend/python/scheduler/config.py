@@ -341,26 +341,32 @@ class SchedulerConfig:
 
         return config
 
+    # Cached base config (daemon/scheduler/alerts from YAML — never changes at runtime)
+    _yaml_base_config = None
+
     @classmethod
     def from_db(cls, session) -> 'SchedulerConfig':
         """
         Load pipeline definitions from database, with daemon/scheduler/alert
-        settings from YAML.  DB is the source of truth for pipelines.
+        settings from YAML (cached).  DB is the source of truth for pipelines.
         Falls back to from_yaml() if the DB table is empty or unavailable.
         """
         from scheduler.models import PipelineConfig
+        import copy
 
-        # Load daemon/scheduler/alert settings from YAML (rarely change)
-        config = cls.from_yaml()
+        # Cache YAML base config on first call (daemon/scheduler/alerts rarely change)
+        if cls._yaml_base_config is None:
+            cls._yaml_base_config = cls.from_yaml()
+
+        config = copy.copy(cls._yaml_base_config)
+        config.pipelines = {}
 
         try:
             rows = session.query(PipelineConfig).all()
             if not rows:
                 # Table empty — fall back to YAML pipelines (bootstrap)
-                return config
+                return cls.from_yaml()
 
-            # Replace YAML pipelines with DB pipelines
-            config.pipelines = {}
             for row in rows:
                 retry_conf = RetryConfig(
                     max_attempts=row.max_retries or 3,
