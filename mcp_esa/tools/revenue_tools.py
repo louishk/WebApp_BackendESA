@@ -601,11 +601,11 @@ Be concise and actionable. Don't repeat raw numbers — interpret them."""
                 svc.get_customer_segments(site_code=site_code),
             )
 
-            # Build comprehensive data summary for LLM
+            # Build data summary for LLM (keep concise to avoid token limits)
             data_parts = []
             data_parts.append(_format_portfolio_snapshot(snap_data))
-            data_parts.append("\n" + _format_site_table(sites_data[:15]))
-            data_parts.append("\n" + _format_budget_table(budget_data))
+            data_parts.append("\n" + _format_site_table(sites_data[:10]))
+            data_parts.append("\n" + _format_budget_table(budget_data[:10]))
 
             data_parts.append(f"\nMOVEMENT (7-day): MI={move_7d.get('total_move_ins', 0)}, MO={move_7d.get('total_move_outs', 0)}, Net={move_7d.get('net_absorption', 0)}")
             data_parts.append(f"MOVEMENT (30-day): MI={move_30d.get('total_move_ins', 0)}, MO={move_30d.get('total_move_outs', 0)}, Net={move_30d.get('net_absorption', 0)}, Avg MI Rate/Sqf={_fmt_money(move_30d.get('avg_mi_rate_sqft'))}, Avg Days Vacant Before MI={_fmt_num(move_30d.get('avg_days_vacant_before_mi'))}")
@@ -631,7 +631,11 @@ Be concise and actionable. Don't repeat raw numbers — interpret them."""
                 for s in bottom3:
                     data_parts.append(f"  - {s.get('site_code')} ({s.get('name')}): {_fmt_pct(s.get('occ_pct_unit'))}, Rev {_fmt_money(s.get('revenue'))}")
 
-            data_parts.append("\n" + _format_anomalies(anomaly_data))
+            # Trim anomalies for LLM context
+            trimmed_anomalies = {
+                k: v[:5] for k, v in anomaly_data.items()
+            }
+            data_parts.append("\n" + _format_anomalies(trimmed_anomalies))
 
             if segment_data:
                 data_parts.append("\nTENANT MIX:")
@@ -691,10 +695,14 @@ IMPORTANT: Be factual and grounded in the data. Flag genuine concerns but don't 
                 max_tokens=4000
             )
 
+            content = response.get('content') or ''
+            if not content.strip():
+                return f"LLM returned empty response. Raw data:\n\n{data_summary}"
+
             from datetime import date
             scope = f" — {site_code}" if site_code else ""
             header = f"ESA Weekly Executive Briefing{scope}\nWeek of {date.today().isoformat()}\n{'=' * 50}"
-            return f"{header}\n\n{response['content']}"
+            return f"{header}\n\n{content}"
 
         except Exception as e:
             logger.error(f"RM_generate_executive_report error: {e}", exc_info=True)
