@@ -76,12 +76,14 @@ class SmartLockUnitAssignment(Base):
     site_id = Column(Integer, nullable=False)
     unit_id = Column(Integer, nullable=False)
     keypad_pk = Column(Integer, ForeignKey('smart_lock_keypads.id', ondelete='SET NULL'))
+    keypad_2_pk = Column(Integer, ForeignKey('smart_lock_keypads.id', ondelete='SET NULL'))
     padlock_pk = Column(Integer, ForeignKey('smart_lock_padlocks.id', ondelete='SET NULL'))
     assigned_by = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     keypad = relationship('SmartLockKeypad', foreign_keys=[keypad_pk], lazy='joined')
+    keypad_2 = relationship('SmartLockKeypad', foreign_keys=[keypad_2_pk], lazy='joined')
     padlock = relationship('SmartLockPadlock', foreign_keys=[padlock_pk], lazy='joined')
 
     __table_args__ = (
@@ -94,8 +96,10 @@ class SmartLockUnitAssignment(Base):
             'site_id': self.site_id,
             'unit_id': self.unit_id,
             'keypad_pk': self.keypad_pk,
+            'keypad_2_pk': self.keypad_2_pk,
             'padlock_pk': self.padlock_pk,
             'keypad_id': self.keypad.keypad_id if self.keypad else None,
+            'keypad_2_id': self.keypad_2.keypad_id if self.keypad_2 else None,
             'padlock_id': self.padlock.padlock_id if self.padlock else None,
             'assigned_by': self.assigned_by,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -172,5 +176,44 @@ class GateAccessData(Base):
             'keypad_zone': self.keypad_zone,
             'has_access_code': bool(self.access_code_enc),
             'has_access_code2': bool(self.access_code2_enc),
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class IglooAccessCode(Base):
+    """Igloo access codes (PINs/eKeys) cached from Igloo API, encrypted at rest."""
+    __tablename__ = 'igloo_access_codes'
+
+    id = Column(Integer, primary_key=True)
+    device_id = Column(String(30), nullable=False)
+    access_id = Column(String(50), nullable=False)
+    access_type = Column(String(10), nullable=False, default='pin')
+    pin_type = Column(String(20))
+    pin_enc = Column(Text)
+    name = Column(String(100))
+    start_datetime = Column(DateTime(timezone=True))
+    end_datetime = Column(DateTime(timezone=True))
+    is_custom_pin = Column(Boolean, default=False)
+    site_id = Column(Integer)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('device_id', 'access_id', name='uq_igloo_access_device_access'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'device_id': self.device_id,
+            'access_id': self.access_id,
+            'access_type': self.access_type,
+            'pin_type': self.pin_type,
+            'has_pin': bool(self.pin_enc),
+            'name': self.name,
+            'start_datetime': self.start_datetime.isoformat() if self.start_datetime else None,
+            'end_datetime': self.end_datetime.isoformat() if self.end_datetime else None,
+            'is_custom_pin': self.is_custom_pin,
+            'site_id': self.site_id,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

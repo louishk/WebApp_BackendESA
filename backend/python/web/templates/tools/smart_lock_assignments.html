@@ -23,6 +23,7 @@
             <span id="refresh-info"></span>
             <button class="btn btn-secondary" id="refresh-btn" onclick="refreshUnitData()" style="margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem;">Refresh Unit Data</button>
             <button id="refresh-gate-btn" class="btn btn-secondary" onclick="refreshGateData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #f59e0b; color: #d97706;"><i class="bi bi-shield-lock"></i> Refresh Gate Data</button>
+            <button id="refresh-igloo-btn" class="btn btn-secondary" onclick="refreshIglooData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Refresh Igloo Data</button>
             <span id="refresh-status" style="display: none; margin-left: 0.5rem;"></span>
         </div>
     </div>
@@ -81,6 +82,7 @@
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Rentable</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Rented</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Keypad</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Keypad 2</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0; min-width: 180px;">Padlock</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Gate</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Overlock</th>
@@ -88,7 +90,7 @@
             </tr>
         </thead>
         <tbody id="units-tbody">
-            <tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
+            <tr><td colspan="11" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
         </tbody>
     </table>
     <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
@@ -209,6 +211,7 @@
                 if (u.assignment) {
                     originalAssignments[key] = {
                         keypad_pk: u.assignment.keypad_pk,
+                        keypad_2_pk: u.assignment.keypad_2_pk,
                         padlock_pk: u.assignment.padlock_pk,
                     };
                 }
@@ -224,11 +227,16 @@
                 const gdt = new Date(data.gate_refresh + 'Z');
                 refreshText += (refreshText ? ' · ' : '') + 'Gate data: ' + gdt.toLocaleString();
             }
+            if (data.igloo_refresh) {
+                const idt = new Date(data.igloo_refresh + 'Z');
+                refreshText += (refreshText ? ' · ' : '') + 'Igloo data: ' + idt.toLocaleString();
+            }
             if (refreshText) {
                 document.getElementById('refresh-info').textContent = refreshText;
             }
             document.getElementById('refresh-info-wrapper').style.display = 'block';
             document.getElementById('refresh-gate-btn').style.display = '';
+            document.getElementById('refresh-igloo-btn').style.display = '';
 
             document.getElementById('summary-row').style.display = 'flex';
             document.getElementById('save-btn').style.display = 'inline-block';
@@ -247,7 +255,7 @@
     function getCurrentAssignment(siteId, unitId) {
         const key = `${siteId}_${unitId}`;
         if (changes[key] !== undefined) return changes[key];
-        return originalAssignments[key] || { keypad_pk: null, padlock_pk: null };
+        return originalAssignments[key] || { keypad_pk: null, keypad_2_pk: null, padlock_pk: null };
     }
 
     function getAssignedPadlockPks(siteId, excludeUnitId) {
@@ -304,7 +312,7 @@
         });
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="11" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
             document.getElementById('count-info').textContent = '';
             return;
         }
@@ -313,7 +321,30 @@
             const key = `${u.SiteID}_${u.UnitID}`;
             const current = getCurrentAssignment(u.SiteID, u.UnitID);
             const hasChange = changes[key] !== undefined;
-            const rowBg = hasChange ? 'background: #fffbeb;' : '';
+
+            // Check for Igloo site discrepancy
+            let discrepancy = false;
+            let discrepancyMsg = '';
+            if (current.keypad_pk) {
+                const kp = (siteKeypads[u.SiteID] || []).find(k => k.id === current.keypad_pk);
+                if (kp && kp.igloo && kp.igloo.site_id && kp.igloo.site_id !== u.SiteID) {
+                    discrepancy = true;
+                    discrepancyMsg += `Keypad ${kp.keypad_id} is at site ${kp.igloo.site_id} in Igloo. `;
+                }
+            }
+            if (current.padlock_pk) {
+                const pl = (sitePadlocks[u.SiteID] || []).find(p => p.id === current.padlock_pk);
+                if (pl && pl.igloo && pl.igloo.site_id && pl.igloo.site_id !== u.SiteID) {
+                    discrepancy = true;
+                    discrepancyMsg += `Padlock ${pl.padlock_id} is at site ${pl.igloo.site_id} in Igloo. `;
+                }
+            }
+            const discrepancyBg = discrepancy ? 'background: #fef2f2; border-left: 3px solid #dc2626;' : '';
+            const discrepancyIcon = discrepancy
+                ? `<span title="${esc(discrepancyMsg)}" style="color:#dc2626;cursor:help;margin-left:0.25rem;"><i class="bi bi-exclamation-triangle-fill"></i></span>`
+                : '';
+
+            const rowBg = hasChange ? 'background: #fffbeb;' : discrepancyBg;
             const rentBadge = u.bRentable
                 ? '<span style="color:#059669;">Yes</span>'
                 : '<span style="color:#dc2626;">No</span>';
@@ -327,6 +358,13 @@
             siteKps.forEach(k => {
                 const sel = current.keypad_pk === k.id ? 'selected' : '';
                 kpOptions += `<option value="${k.id}" ${sel}>${esc(k.keypad_id)}</option>`;
+            });
+
+            // Build keypad 2 dropdown
+            let kp2Options = '<option value="">— None —</option>';
+            siteKps.forEach(k => {
+                const sel = current.keypad_2_pk === k.id ? 'selected' : '';
+                kp2Options += `<option value="${k.id}" ${sel}>${esc(k.keypad_id)}</option>`;
             });
 
             // Build padlock dropdown
@@ -362,7 +400,7 @@
                 : '<span style="color:#999;">—</span>';
 
             return `<tr style="${rowBg}">
-                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteCode(u.SiteID))}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteCode(u.SiteID))}${discrepancyIcon}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${u.UnitID}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">${esc(u.sUnitName)}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${rentBadge}</td>
@@ -370,6 +408,10 @@
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">
                     <select onchange="onAssignChange(${u.SiteID}, ${u.UnitID}, 'keypad_pk', this.value)"
                             style="padding:0.3rem;border:1px solid #e5e7eb;border-radius:4px;width:100%;font-size:0.8rem;">${kpOptions}</select>
+                </td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">
+                    <select onchange="onAssignChange(${u.SiteID}, ${u.UnitID}, 'keypad_2_pk', this.value)"
+                            style="padding:0.3rem;border:1px solid #e5e7eb;border-radius:4px;width:100%;font-size:0.8rem;">${kp2Options}</select>
                 </td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;">
                     <select onchange="onAssignChange(${u.SiteID}, ${u.UnitID}, 'padlock_pk', this.value)"
@@ -386,13 +428,13 @@
 
     function onAssignChange(siteId, unitId, field, value) {
         const key = `${siteId}_${unitId}`;
-        const orig = originalAssignments[key] || { keypad_pk: null, padlock_pk: null };
+        const orig = originalAssignments[key] || { keypad_pk: null, keypad_2_pk: null, padlock_pk: null };
         const current = changes[key] || { ...orig };
 
         current[field] = value ? parseInt(value) : null;
 
         // Check if it's back to original
-        if (current.keypad_pk === orig.keypad_pk && current.padlock_pk === orig.padlock_pk) {
+        if (current.keypad_pk === orig.keypad_pk && current.keypad_2_pk === orig.keypad_2_pk && current.padlock_pk === orig.padlock_pk) {
             delete changes[key];
         } else {
             changes[key] = current;
@@ -427,6 +469,7 @@
                 site_id: siteId,
                 unit_id: unitId,
                 keypad_pk: changes[key].keypad_pk,
+                keypad_2_pk: changes[key].keypad_2_pk,
                 padlock_pk: changes[key].padlock_pk,
             };
         });
@@ -592,10 +635,10 @@
                 const u = unassignedUnits[i];
                 const p = unassignedPadlocks[i];
                 const key = `${u.SiteID}_${u.UnitID}`;
-                const orig = originalAssignments[key] || { keypad_pk: null, padlock_pk: null };
+                const orig = originalAssignments[key] || { keypad_pk: null, keypad_2_pk: null, padlock_pk: null };
                 const current = changes[key] || { ...orig };
                 current.padlock_pk = p.id;
-                if (current.keypad_pk === orig.keypad_pk && current.padlock_pk === orig.padlock_pk) {
+                if (current.keypad_pk === orig.keypad_pk && current.keypad_2_pk === orig.keypad_2_pk && current.padlock_pk === orig.padlock_pk) {
                     delete changes[key];
                 } else {
                     changes[key] = current;
@@ -687,6 +730,39 @@
             btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
             btn.disabled = false;
             showStatus('Failed to trigger refresh', false);
+        }
+    }
+
+    // Refresh Igloo device data via sync endpoint
+    async function refreshIglooData() {
+        const btn = document.getElementById('refresh-igloo-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Refreshing...';
+        try {
+            const res = await fetch('/api/igloo/sync', { method: 'POST', headers: apiHeaders() });
+            const data = await res.json();
+            const execId = data.execution_id;
+            const poll = async () => {
+                const r = await fetch(`/api/history/${execId}`, { headers: apiHeaders() });
+                const d = await r.json();
+                if (d.status === 'completed') {
+                    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
+                    btn.disabled = false;
+                    showStatus('Igloo data refreshed', true);
+                    if (loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
+                } else if (d.status === 'failed') {
+                    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
+                    btn.disabled = false;
+                    showStatus('Igloo refresh failed', false);
+                } else {
+                    setTimeout(poll, 5000);
+                }
+            };
+            setTimeout(poll, 5000);
+        } catch (e) {
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
+            btn.disabled = false;
+            showStatus('Failed to trigger Igloo refresh', false);
         }
     }
 

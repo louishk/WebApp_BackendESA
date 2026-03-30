@@ -3836,7 +3836,12 @@ def _sl_username():
 
 
 def _require_sl_session_access(f):
-    """Check can_access_smart_lock for session-authenticated users (RBAC guard)."""
+    """Check can_access_smart_lock for session-authenticated users (RBAC guard).
+
+    Auth model: session users are checked here; JWT-only callers are authorized
+    exclusively by @require_api_scope('smart_lock:*'). If neither auth method is
+    present, @require_auth has already rejected the request.
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
         from flask_login import current_user
@@ -3890,20 +3895,22 @@ def api_sl_keypads_list():
             for a in assignments:
                 assignment_map[a.keypad_pk] = {'site_id': a.site_id, 'unit_id': a.unit_id}
 
-        # Build igloo device lookup: deviceName -> igloo data
+        # Build igloo device lookup: deviceId/deviceName -> igloo data
         keypad_ids = [k.keypad_id for k in keypads]
         igloo_map = {}
         if keypad_ids:
             igloo_devs = session.query(IglooDevice).filter(
-                IglooDevice.deviceName.in_(keypad_ids),
+                (IglooDevice.deviceId.in_(keypad_ids)) | (IglooDevice.deviceName.in_(keypad_ids)),
                 IglooDevice.type == 'Keypad'
             ).all()
             for ig in igloo_devs:
-                igloo_map[ig.deviceName] = {
+                igloo_data = {
                     'batteryLevel': ig.batteryLevel,
                     'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
                     'deviceId': ig.deviceId,
                 }
+                igloo_map[ig.deviceId] = igloo_data
+                igloo_map[ig.deviceName] = igloo_data
 
         result = []
         for k in keypads:
@@ -4122,20 +4129,22 @@ def api_sl_padlocks_list():
             for a in assignments:
                 assignment_map[a.padlock_pk] = {'site_id': a.site_id, 'unit_id': a.unit_id}
 
-        # Build igloo device lookup: deviceName -> igloo data
+        # Build igloo device lookup: deviceId/deviceName -> igloo data
         padlock_ids = [p.padlock_id for p in padlocks]
         igloo_map = {}
         if padlock_ids:
             igloo_devs = session.query(IglooDevice).filter(
-                IglooDevice.deviceName.in_(padlock_ids),
+                (IglooDevice.deviceId.in_(padlock_ids)) | (IglooDevice.deviceName.in_(padlock_ids)),
                 IglooDevice.type == 'Lock'
             ).all()
             for ig in igloo_devs:
-                igloo_map[ig.deviceName] = {
+                igloo_data = {
                     'batteryLevel': ig.batteryLevel,
                     'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
                     'deviceId': ig.deviceId,
                 }
+                igloo_map[ig.deviceId] = igloo_data
+                igloo_map[ig.deviceName] = igloo_data
 
         result = []
         for p in padlocks:
@@ -4411,14 +4420,19 @@ def api_sl_units():
         igloo_devs = session.query(IglooDevice).filter(
             IglooDevice.site_id.in_(site_ids)
         ).all()
+        # Build lookup by both deviceId and deviceName for compatibility
         igloo_map = {}
         for ig in igloo_devs:
-            igloo_map[ig.deviceName] = {
+            igloo_data = {
                 'batteryLevel': ig.batteryLevel,
                 'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
                 'deviceId': ig.deviceId,
                 'type': ig.type,
+                'departmentId': ig.departmentId,
+                'site_id': ig.site_id,
             }
+            igloo_map[ig.deviceId] = igloo_data
+            igloo_map[ig.deviceName] = igloo_data
 
         # Enrich keypads/padlocks with igloo data
         keypads_out = []
@@ -4433,6 +4447,15 @@ def api_sl_units():
             d['igloo'] = igloo_map.get(p.padlock_id)
             padlocks_out.append(d)
 
+        # Igloo data last refresh
+        igloo_refresh = None
+        if igloo_devs:
+            igloo_refresh = max(
+                (ig.updated_at for ig in igloo_devs if ig.updated_at), default=None
+            )
+            if igloo_refresh:
+                igloo_refresh = igloo_refresh.isoformat()
+
         # Merge assignments into units
         for u in units:
             key = (u['SiteID'], u['UnitID'])
@@ -4446,6 +4469,7 @@ def api_sl_units():
             'padlocks': padlocks_out,
             'last_refresh': last_refresh,
             'gate_refresh': gate_refresh,
+            'igloo_refresh': igloo_refresh,
         })
     except Exception as e:
         current_app.logger.error(f"Smart lock assignments query error: {e}")
@@ -4483,7 +4507,7 @@ def api_sl_assignments_upsert():
         if not sid or not uid:
             continue
         try:
-            parsed_items.append((int(sid), int(uid), item.get('keypad_pk'), item.get('padlock_pk')))
+            parsed_items.append((int(sid), int(uid), item.get('keypad_pk'), item.get('padlock_pk'), item.get('keypad_2_pk')))
             site_ids_set.add(int(sid))
         except (ValueError, TypeError):
             return jsonify({'error': 'site_id and unit_id must be integers'}), 400
@@ -4500,7 +4524,7 @@ def api_sl_assignments_upsert():
         finally:
             pbi_session.close()
 
-        for sid, uid, _, _ in parsed_items:
+        for sid, uid, _, _, _ in parsed_items:
             if (sid, uid) not in valid_units:
                 return jsonify({'error': f'Unit {uid} not found at site {sid}'}), 400
 
@@ -4508,12 +4532,16 @@ def api_sl_assignments_upsert():
     session = get_session()
     try:
         upserted = 0
-        for sid, uid, new_keypad_pk, new_padlock_pk in parsed_items:
+        for sid, uid, new_keypad_pk, new_padlock_pk, new_keypad_2_pk in parsed_items:
             # Validate keypad/padlock belong to the same site
             if new_keypad_pk:
                 kp = session.query(SmartLockKeypad).get(int(new_keypad_pk))
                 if not kp or kp.site_id != sid:
                     return jsonify({'error': 'Keypad does not belong to the specified site'}), 400
+            if new_keypad_2_pk:
+                kp2 = session.query(SmartLockKeypad).get(int(new_keypad_2_pk))
+                if not kp2 or kp2.site_id != sid:
+                    return jsonify({'error': 'Keypad 2 does not belong to the specified site'}), 400
             if new_padlock_pk:
                 pl = session.query(SmartLockPadlock).get(int(new_padlock_pk))
                 if not pl or pl.site_id != sid:
@@ -4524,12 +4552,15 @@ def api_sl_assignments_upsert():
             ).first()
 
             old_keypad_pk = existing.keypad_pk if existing else None
+            old_keypad_2_pk = existing.keypad_2_pk if existing else None
             old_padlock_pk = existing.padlock_pk if existing else None
             resolved_keypad_pk = int(new_keypad_pk) if new_keypad_pk else None
+            resolved_keypad_2_pk = int(new_keypad_2_pk) if new_keypad_2_pk else None
             resolved_padlock_pk = int(new_padlock_pk) if new_padlock_pk else None
 
             if existing:
                 existing.keypad_pk = resolved_keypad_pk
+                existing.keypad_2_pk = resolved_keypad_2_pk
                 existing.padlock_pk = resolved_padlock_pk
                 existing.assigned_by = username
                 existing.updated_at = datetime.utcnow()
@@ -4538,6 +4569,7 @@ def api_sl_assignments_upsert():
                     site_id=sid,
                     unit_id=uid,
                     keypad_pk=resolved_keypad_pk,
+                    keypad_2_pk=resolved_keypad_2_pk,
                     padlock_pk=resolved_padlock_pk,
                     assigned_by=username,
                 )
@@ -4566,6 +4598,35 @@ def api_sl_assignments_upsert():
                         _sl_audit(session, 'keypad_assigned', 'assignment', new_kp.keypad_id,
                                   site_id=sid, unit_id=uid,
                                   detail=f'Assigned keypad {new_kp.keypad_id} to unit {uid}')
+
+            # Update keypad 2 status
+            if old_keypad_2_pk != resolved_keypad_2_pk:
+                if old_keypad_2_pk:
+                    old_kp2 = session.query(SmartLockKeypad).get(old_keypad_2_pk)
+                    if old_kp2:
+                        other_ref = session.query(SmartLockUnitAssignment).filter(
+                            SmartLockUnitAssignment.keypad_2_pk == old_keypad_2_pk,
+                            SmartLockUnitAssignment.site_id == sid,
+                            SmartLockUnitAssignment.unit_id != uid,
+                        ).first()
+                        if not other_ref:
+                            # Also check keypad_pk slot
+                            other_ref_kp1 = session.query(SmartLockUnitAssignment).filter(
+                                SmartLockUnitAssignment.keypad_pk == old_keypad_2_pk,
+                                SmartLockUnitAssignment.site_id == sid,
+                            ).first()
+                            if not other_ref_kp1:
+                                old_kp2.status = 'not_assigned'
+                        _sl_audit(session, 'keypad_unassigned', 'assignment', old_kp2.keypad_id,
+                                  site_id=sid, unit_id=uid,
+                                  detail=f'Unassigned keypad 2 {old_kp2.keypad_id} from unit {uid}')
+                if resolved_keypad_2_pk:
+                    new_kp2 = session.query(SmartLockKeypad).get(resolved_keypad_2_pk)
+                    if new_kp2:
+                        new_kp2.status = 'assigned'
+                        _sl_audit(session, 'keypad_assigned', 'assignment', new_kp2.keypad_id,
+                                  site_id=sid, unit_id=uid,
+                                  detail=f'Assigned keypad 2 {new_kp2.keypad_id} to unit {uid}')
 
             # Update padlock status
             if old_padlock_pk != resolved_padlock_pk:
@@ -4632,7 +4693,12 @@ def api_sl_assignments_list():
         assignments = q.order_by(SmartLockUnitAssignment.unit_id).all()
 
         # Build keypad/padlock ID lookup maps
-        keypad_pks = {a.keypad_pk for a in assignments if a.keypad_pk}
+        keypad_pks = set()
+        for a in assignments:
+            if a.keypad_pk:
+                keypad_pks.add(a.keypad_pk)
+            if a.keypad_2_pk:
+                keypad_pks.add(a.keypad_2_pk)
         padlock_pks = {a.padlock_pk for a in assignments if a.padlock_pk}
 
         kp_map = {}
@@ -4652,6 +4718,8 @@ def api_sl_assignments_list():
                 'unit_id': a.unit_id,
                 'keypad_pk': a.keypad_pk,
                 'keypad_id': kp_map.get(a.keypad_pk),
+                'keypad_2_pk': a.keypad_2_pk,
+                'keypad_2_id': kp_map.get(a.keypad_2_pk),
                 'padlock_pk': a.padlock_pk,
                 'padlock_id': pl_map.get(a.padlock_pk),
                 'assigned_by': a.assigned_by,
@@ -4747,3 +4815,416 @@ def api_sl_gate_code():
         return jsonify({'error': 'Failed to decrypt access code'}), 500
     finally:
         session.close()
+
+
+# =============================================================================
+# Igloo API Proxy Endpoints
+# =============================================================================
+
+_ISO8601_RE = re.compile(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}')
+
+
+def _validate_iso_dt(value):
+    """Validate an ISO-8601 datetime string. Returns None if absent, raises ValueError if malformed."""
+    if not value:
+        return None
+    if not isinstance(value, str) or not _ISO8601_RE.match(value) or len(value) > 40:
+        raise ValueError("Invalid ISO-8601 datetime format")
+    return value
+
+def _get_igloo_client():
+    """Get or create IglooClient for the current request (per-request scope via g)."""
+    from common.igloo_client import IglooClient
+    if 'igloo_client' not in g:
+        g.igloo_client = IglooClient()
+    return g.igloo_client
+
+
+@api_bp.route('/igloo/devices')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_igloo_devices():
+    """List all Igloo devices."""
+    department_id = request.args.get('department_id')
+    try:
+        client = _get_igloo_client()
+        devices = client.list_devices(department_id=department_id)
+        return jsonify({'devices': devices, 'count': len(devices)})
+    except Exception as e:
+        current_app.logger.exception("Igloo devices list error")
+        return jsonify({'error': 'Failed to fetch Igloo devices'}), 500
+
+
+@api_bp.route('/igloo/devices/<device_id>')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_igloo_device_detail(device_id):
+    """Get single Igloo device detail."""
+    try:
+        client = _get_igloo_client()
+        device = client.get_device(device_id)
+        return jsonify({'device': device})
+    except Exception as e:
+        current_app.logger.exception("Igloo device detail error")
+        return jsonify({'error': 'Failed to fetch device detail'}), 500
+
+
+@api_bp.route('/igloo/devices/<device_id>/access')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_igloo_device_access(device_id):
+    """List PINs/eKeys on a device."""
+    try:
+        client = _get_igloo_client()
+        access_list = client.list_device_access(device_id)
+        return jsonify({'access': access_list, 'count': len(access_list)})
+    except Exception as e:
+        current_app.logger.exception("Igloo device access error")
+        return jsonify({'error': 'Failed to fetch device access codes'}), 500
+
+
+@api_bp.route('/igloo/devices/<device_id>/activity')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_igloo_device_activity(device_id):
+    """Get device unlock audit log."""
+    limit = request.args.get('limit', 50, type=int)
+    try:
+        client = _get_igloo_client()
+        activity = client.list_device_activity(device_id, limit=min(limit, 200))
+        return jsonify({'activity': activity, 'count': len(activity)})
+    except Exception as e:
+        current_app.logger.exception("Igloo device activity error")
+        return jsonify({'error': 'Failed to fetch device activity'}), 500
+
+
+@api_bp.route('/igloo/devices/<device_id>/jobs')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_igloo_device_jobs(device_id):
+    """Get device job history."""
+    try:
+        client = _get_igloo_client()
+        jobs = client.list_device_jobs(device_id)
+        return jsonify({'jobs': jobs, 'count': len(jobs)})
+    except Exception as e:
+        current_app.logger.exception("Igloo device jobs error")
+        return jsonify({'error': 'Failed to fetch device jobs'}), 500
+
+
+@api_bp.route('/igloo/departments')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_igloo_departments():
+    """List Igloo departments (= sites)."""
+    try:
+        client = _get_igloo_client()
+        departments = client.list_departments()
+        return jsonify({'departments': departments, 'count': len(departments)})
+    except Exception as e:
+        current_app.logger.exception("Igloo departments error")
+        return jsonify({'error': 'Failed to fetch departments'}), 500
+
+
+@api_bp.route('/igloo/departments/<dept_id>/access')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_igloo_department_access(dept_id):
+    """List all PINs across a department/site."""
+    try:
+        client = _get_igloo_client()
+        access_list = client.list_department_access(dept_id)
+        return jsonify({'access': access_list, 'count': len(access_list)})
+    except Exception as e:
+        current_app.logger.exception("Igloo department access error")
+        return jsonify({'error': 'Failed to fetch department access codes'}), 500
+
+
+@api_bp.route('/igloo/properties')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_igloo_properties():
+    """List Igloo properties."""
+    try:
+        client = _get_igloo_client()
+        properties = client.list_properties()
+        return jsonify({'properties': properties, 'count': len(properties)})
+    except Exception as e:
+        current_app.logger.exception("Igloo properties error")
+        return jsonify({'error': 'Failed to fetch properties'}), 500
+
+
+# --- Igloo Write Operations (PIN management) ---
+
+@api_bp.route('/igloo/devices/<device_id>/pin/custom', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_igloo_create_custom_pin(device_id):
+    """Create a custom/duration PIN on a device."""
+    data = request.get_json()
+    if not data or 'pin' not in data:
+        return jsonify({'error': 'pin is required'}), 400
+
+    pin = str(data['pin']).strip()
+    name = (data.get('name') or '').strip()[:100] or 'Custom PIN'
+    try:
+        start_dt = _validate_iso_dt(data.get('start_datetime'))
+        end_dt = _validate_iso_dt(data.get('end_datetime'))
+    except ValueError:
+        return jsonify({'error': 'Invalid datetime format — use ISO-8601'}), 400
+
+    if not re.match(r'^\d{4,10}$', pin):
+        return jsonify({'error': 'PIN must be 4-10 digits'}), 400
+
+    session = get_session()
+    try:
+        client = _get_igloo_client()
+        result = client.create_custom_pin(device_id, pin, name, start_dt=start_dt, end_dt=end_dt)
+        _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
+                  detail=f'Custom PIN created on {device_id}: {name}')
+        session.commit()
+        return jsonify({'success': True, 'result': result}), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Igloo create custom PIN error")
+        return jsonify({'error': 'Failed to create PIN'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/igloo/devices/<device_id>/pin/permanent', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_igloo_create_permanent_pin(device_id):
+    """Create a permanent algorithmic PIN."""
+    session = get_session()
+    try:
+        client = _get_igloo_client()
+        result = client.create_permanent_pin(device_id)
+        _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
+                  detail=f'Permanent PIN created on {device_id}')
+        session.commit()
+        return jsonify({'success': True, 'result': result}), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Igloo create permanent PIN error")
+        return jsonify({'error': 'Failed to create permanent PIN'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/igloo/devices/<device_id>/pin/daily', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_igloo_create_daily_pin(device_id):
+    """Create a daily rotating PIN."""
+    session = get_session()
+    try:
+        client = _get_igloo_client()
+        result = client.create_daily_pin(device_id)
+        _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
+                  detail=f'Daily PIN created on {device_id}')
+        session.commit()
+        return jsonify({'success': True, 'result': result}), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Igloo create daily PIN error")
+        return jsonify({'error': 'Failed to create daily PIN'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/igloo/devices/<device_id>/pin/hourly', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_igloo_create_hourly_pin(device_id):
+    """Create an hourly rotating PIN."""
+    session = get_session()
+    try:
+        client = _get_igloo_client()
+        result = client.create_hourly_pin(device_id)
+        _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
+                  detail=f'Hourly PIN created on {device_id}')
+        session.commit()
+        return jsonify({'success': True, 'result': result}), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Igloo create hourly PIN error")
+        return jsonify({'error': 'Failed to create hourly PIN'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/igloo/devices/<device_id>/pin/otp', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_igloo_create_otp_pin(device_id):
+    """Create a one-time PIN."""
+    session = get_session()
+    try:
+        client = _get_igloo_client()
+        result = client.create_otp_pin(device_id)
+        _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
+                  detail=f'OTP PIN created on {device_id}')
+        session.commit()
+        return jsonify({'success': True, 'result': result}), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Igloo create OTP PIN error")
+        return jsonify({'error': 'Failed to create OTP PIN'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/igloo/devices/<device_id>/ekey', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_igloo_create_ekey(device_id):
+    """Create a guest Bluetooth eKey."""
+    data = request.get_json()
+    if not data or 'name' not in data:
+        return jsonify({'error': 'name is required'}), 400
+
+    name = (data.get('name') or '').strip()[:100]
+    try:
+        start_dt = _validate_iso_dt(data.get('start_datetime'))
+        end_dt = _validate_iso_dt(data.get('end_datetime'))
+    except ValueError:
+        return jsonify({'error': 'Invalid datetime format — use ISO-8601'}), 400
+
+    if not name:
+        return jsonify({'error': 'name is required'}), 400
+
+    session = get_session()
+    try:
+        client = _get_igloo_client()
+        result = client.create_ekey(device_id, name, start_dt=start_dt, end_dt=end_dt)
+        _sl_audit(session, 'igloo_ekey_created', 'igloo', device_id,
+                  detail=f'eKey created on {device_id}: {name}')
+        session.commit()
+        return jsonify({'success': True, 'result': result}), 201
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Igloo create eKey error")
+        return jsonify({'error': 'Failed to create eKey'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/igloo/devices/<device_id>/access/<access_id>', methods=['DELETE'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_igloo_revoke_access(device_id, access_id):
+    """Revoke a PIN or eKey."""
+    session = get_session()
+    try:
+        client = _get_igloo_client()
+        result = client.revoke_access(device_id, access_id)
+        _sl_audit(session, 'igloo_access_revoked', 'igloo', device_id,
+                  detail=f'Revoked access {access_id} on {device_id}')
+        session.commit()
+        return jsonify({'success': True, 'result': result})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Igloo revoke access error")
+        return jsonify({'error': 'Failed to revoke access'}), 500
+    finally:
+        session.close()
+
+
+# --- Igloo Data Sync ---
+
+@api_bp.route('/igloo/sync', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=5, window_seconds=60)
+def api_igloo_sync():
+    """Trigger Igloo data refresh via scheduler pipeline."""
+    try:
+        from scheduler.executor import PipelineExecutor
+
+        config = _get_scheduler_config()
+        if 'igloo' not in config.pipelines:
+            return jsonify({'error': 'Igloo pipeline not configured'}), 404
+
+        p = config.pipelines['igloo']
+        execution_id = uuid4()
+        final_args = dict(p.default_args)
+        final_args['mode'] = 'auto'
+        db_url = current_app.db_url
+
+        def run_pipeline():
+            from scheduler.models import JobHistory
+            from sqlalchemy import create_engine as sa_create_engine
+            from sqlalchemy.orm import sessionmaker as sa_sessionmaker
+
+            engine = sa_create_engine(db_url)
+            Session = sa_sessionmaker(bind=engine)
+            session = Session()
+
+            job_history = JobHistory(
+                job_id=f"igloo_{execution_id}",
+                pipeline_name='igloo',
+                execution_id=execution_id,
+                status='running',
+                priority=p.priority,
+                scheduled_at=datetime.utcnow(),
+                started_at=datetime.utcnow(),
+                mode='auto',
+                parameters=final_args,
+                triggered_by='web',
+            )
+            try:
+                session.add(job_history)
+                session.commit()
+
+                executor = PipelineExecutor()
+                executor.execute_pipeline('igloo', final_args)
+
+                job_history.status = 'completed'
+                job_history.completed_at = datetime.utcnow()
+                session.commit()
+            except Exception as exc:
+                job_history.status = 'failed'
+                job_history.error_message = f'{type(exc).__name__}: pipeline execution failed'
+                job_history.completed_at = datetime.utcnow()
+                session.commit()
+                logger.error("Igloo sync pipeline failed: %s", exc)
+            finally:
+                session.close()
+                engine.dispose()
+
+        thread = threading.Thread(target=run_pipeline, daemon=True)
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'execution_id': str(execution_id),
+            'message': 'Igloo sync started',
+        })
+    except Exception as e:
+        current_app.logger.exception("Igloo sync trigger error")
+        return jsonify({'error': 'Failed to trigger Igloo sync'}), 500
