@@ -47,7 +47,7 @@ CLIMATE_MATRIX = {
     'D': 1.15,
     'A': 1.20,
     'AD': 1.25,
-    'RF': 1.60,
+    'RF': 1.30,
 }
 
 # Currency rounding: decimal places per currency
@@ -58,6 +58,9 @@ CURRENCY_DECIMALS = {
     'HKD': 2,
 }
 
+# sqft to sqm conversion factor
+SQFT_TO_SQM = 1 / 10.7639
+
 # ── End Configurable Parameters ──────────────────────────────────────────────
 
 # Project root (anchored to this file's known location in backend/python/scripts/)
@@ -65,47 +68,56 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 QUERY = text("""
     SELECT
-        rr."SiteID"         AS site_id,
-        si."SiteCode"       AS site_code,
-        si."Name"           AS site_name,
-        si."Country"        AS country,
-        b.currency          AS currency,
-        rr."UnitID"         AS unit_id,
-        rr."sUnit"          AS s_unit,
-        rr.dcarea_fixed     AS area_sqft,
-        rr."iFloor"         AS floor,
-        rr."sTypeName"      AS s_type_name,
-        ucl.final_label,
-        ucl.size_category,
-        ucl.size_range,
-        ucl.unit_type_code,
-        ucl.climate_code,
-        ucl.shape,
-        ucl.pillar,
-        rr."LedgerID"       AS ledger_id,
-        rr."sTenant"        AS tenant_name,
-        rr."dLeaseDate"     AS moved_in_date,
+        ui."SiteID"             AS site_id,
+        si."SiteCode"           AS site_code,
+        si."Name"               AS site_name,
+        si."Country"            AS country,
+        b.currency              AS currency,
+        ui."UnitID"             AS unit_id,
+        ui."sUnitName"          AS s_unit,
+        ui.dcarea_fixed         AS area_sqft,
+        ui."iFloor"             AS floor,
+        ui."sTypeName"          AS s_type_name,
+        ui.category_label       AS final_label,
+        ui.label_size_category  AS size_category,
+        ui.label_size_range     AS size_range,
+        ui.label_type_code      AS unit_type_code,
+        ui.label_climate_code   AS climate_code,
+        ui.label_shape          AS shape,
+        ui.label_pillar         AS pillar,
+        ui."bRented"            AS is_rented_flag,
+        ui."dcStdRate"          AS current_std_rate,
+        ui."dcWebRate"          AS web_rate,
+        ui."dcPushRate"         AS push_rate,
+        ui."iDaysVacant"        AS days_vacant,
+        rr."LedgerID"          AS ledger_id,
+        rr."sTenant"           AS tenant_name,
+        rr."dLeaseDate"        AS moved_in_date,
         rr.days_rented,
         rr.los_range,
-        rr."dcStdRate"      AS current_std_rate,
-        rr.revenue_effective AS actual_rent,
-        b.avr_rental_rate   AS budget_arr_sqft,
-        COUNT(*) OVER (PARTITION BY rr."SiteID", rr."UnitID") AS tenant_count
-    FROM rentroll_enriched rr
-    INNER JOIN unit_category_labels ucl
-        ON ucl.site_id = rr."SiteID" AND ucl.unit_id = rr."UnitID"
+        rr.revenue_effective   AS actual_rent,
+        b.avr_rental_rate      AS budget_arr_sqft,
+        COUNT(*) OVER (PARTITION BY ui."SiteID", ui."UnitID") AS tenant_count
+    FROM units_info_enriched ui
     INNER JOIN siteinfo si
-        ON si."SiteID" = rr."SiteID"
+        ON si."SiteID" = ui."SiteID"
     LEFT JOIN vw_budget_monthly b
         ON b.site_code = si."SiteCode"
         AND b.date = date_trunc('month', CURRENT_DATE)
-    WHERE rr.extract_date = (SELECT MAX(extract_date) FROM rentroll_enriched)
-      AND rr."bRented" = true
-      AND rr.dcarea_fixed > 0
-      AND rr."dcStdRate" > 0
-      AND ucl.unit_type_code NOT IN ('P', 'ST', 'SC')
+    LEFT JOIN rentroll_enriched rr
+        ON rr."SiteID" = ui."SiteID"
+        AND rr."UnitID" = ui."UnitID"
+        AND rr.extract_date = (SELECT MAX(extract_date) FROM rentroll_enriched)
+        AND rr."bRented" = true
+    WHERE ui.dcarea_fixed > 0
+      AND ui.deleted_at IS NULL
+      AND ui.label_type_code NOT IN ('P', 'ST', 'SC')
+      AND ui."sTypeName" NOT ILIKE '%%mail%%box%%'
+      AND ui."sTypeName" NOT ILIKE '%%parking%%'
+      AND ui."sTypeName" NOT ILIKE '%%car%%park%%'
+      AND ui."sTypeName" NOT ILIKE '%%bizplus%%'
       AND b.avr_rental_rate IS NOT NULL
-    ORDER BY rr."SiteID", rr."UnitID"
+    ORDER BY ui."SiteID", ui."UnitID"
 """)
 
 
@@ -156,6 +168,12 @@ def fit_yield_curves(rows):
     site_buckets = defaultdict(lambda: defaultdict(lambda: {'nla': 0.0, 'weighted_rate': 0.0, 'count': 0}))
 
     for r in rows:
+        # Only fit curve from occupied units with a std rate
+        if not r['current_std_rate'] or r['current_std_rate'] <= 0:
+            continue
+        if not r.get('is_rented_flag'):
+            continue
+
         disc = CURRENT_DISCOUNT.get(r['country'], 0.35)
         book_sqft = (r['current_std_rate'] / r['area_sqft']) * (1 - disc)
 
@@ -221,13 +239,18 @@ def compute_recalibrated(rows, curves):
         r['_fitted_rate'] = fitted_base * CLIMATE_MATRIX.get(climate, 1.0)
 
     # Step 2: Rescale per site so NLA-weighted avg = budget ARR/sqft
-    # Deduplicate NLA for multi-tenant units
+    # Deduplicate NLA for multi-tenant units; count each unit once
     site_totals = defaultdict(lambda: {'weighted_fitted': 0.0, 'nla': 0.0, 'budget': 0.0})
+    seen_units = set()
     for r in rows:
+        unit_key = (r['site_id'], r['unit_id'])
+        if unit_key in seen_units:
+            continue
+        seen_units.add(unit_key)
+
         st = site_totals[r['site_id']]
-        nla_share = r['area_sqft'] / r['tenant_count']
-        st['weighted_fitted'] += r['_fitted_rate'] * nla_share
-        st['nla'] += nla_share
+        st['weighted_fitted'] += r['_fitted_rate'] * r['area_sqft']
+        st['nla'] += r['area_sqft']
         st['budget'] = float(r['budget_arr_sqft'])
 
     site_scale = {}
@@ -252,12 +275,22 @@ def compute_recalibrated(rows, curves):
         country = site_rows[0]['country']
         currency = site_rows[0]['currency'] or '???'
 
-        wavg_new = sum(r['new_target_arr_sqft'] * r['area_sqft'] / r['tenant_count'] for r in site_rows) / st['nla']
+        # Deduplicated wavg for validation
+        seen_v = set()
+        wavg_num = 0.0
+        for r in site_rows:
+            uk = (r['site_id'], r['unit_id'])
+            if uk not in seen_v:
+                seen_v.add(uk)
+                wavg_num += r['new_target_arr_sqft'] * r['area_sqft']
+        wavg_new = wavg_num / st['nla']
         residual = abs(wavg_new - st['budget']) / st['budget'] * 100
+        rented = sum(1 for r in site_rows if r.get('ledger_id'))
+        vacant = len(site_rows) - rented
 
         logger.info(
             f'  {sc} ({country}, {currency}): '
-            f'units={len(site_rows)}, NLA={st["nla"]:.0f}, '
+            f'rented={rented}, vacant={vacant}, NLA={st["nla"]:.0f}, '
             f'budget={st["budget"]:.2f}, new_wavg={wavg_new:.2f}, '
             f'residual={residual:.4f}%, scale={site_scale[site_id]:.4f}'
         )
@@ -270,16 +303,20 @@ def write_csv(rows, output_path):
     columns = [
         'site_id', 'site_code', 'site_name', 'country', 'currency',
         'unit_id', 's_unit',
-        'area_sqft', 'floor', 's_type_name',
+        'area_sqft', 'area_sqm', 'floor', 's_type_name', 'days_vacant',
         'final_label', 'size_category', 'size_range', 'unit_type_code',
         'climate_code', 'shape', 'pillar',
+        'is_rented',
         'ledger_id', 'tenant_name', 'moved_in_date', 'tenure_months', 'los_range',
         'is_multi_tenant', 'tenant_count', 'tenant_share_pct',
-        'current_std_rate', 'current_std_sqft', 'current_disc_pct',
-        'current_book_rate', 'current_book_sqft',
-        'actual_rent', 'actual_rent_sqft', 'actual_vs_budget_pct',
-        'budget_arr_sqft',
-        'new_target_arr_sqft', 'new_std_rate', 'new_std_sqft',
+        'current_std_rate', 'current_std_sqft', 'current_std_sqm',
+        'current_disc_pct',
+        'current_book_rate', 'current_book_sqft', 'current_book_sqm',
+        'actual_rent', 'actual_rent_sqft', 'actual_rent_sqm',
+        'actual_vs_budget_pct',
+        'budget_arr_sqft', 'budget_arr_sqm',
+        'new_target_arr_sqft', 'new_target_arr_sqm',
+        'new_std_rate', 'new_std_sqft', 'new_std_sqm',
         'change_vs_current_std_pct',
     ]
 
@@ -289,6 +326,9 @@ def write_csv(rows, output_path):
         disc = CURRENT_DISCOUNT.get(r['country'], 0.35)
         area = r['area_sqft']
         tc = r['tenant_count']
+
+        # Rented status
+        r['is_rented'] = bool(r.get('is_rented_flag'))
 
         # Tenure
         r['tenure_months'] = int(r['days_rented'] / 30.44) if r['days_rented'] else 0
@@ -313,7 +353,20 @@ def write_csv(rows, output_path):
         else:
             r['change_vs_current_std_pct'] = 0
 
-        # Now round everything for output
+        # Sqm columns (KR uses sqm as primary, SG/MY get sqft primary with sqm ref)
+        area_sqm = area * SQFT_TO_SQM
+        r['area_sqm'] = round(area_sqm, 2)
+
+        # Per-sqm rates (= per-sqft rate / SQFT_TO_SQM = per-sqft rate * 10.7639)
+        sqm_factor = 1 / SQFT_TO_SQM  # ~10.7639
+        r['current_std_sqm'] = round(raw_std_sqft * sqm_factor, dp)
+        r['current_book_sqm'] = round(raw_book_sqft * sqm_factor, dp)
+        r['actual_rent_sqm'] = round(raw_actual_sqft * sqm_factor, dp)
+        r['budget_arr_sqm'] = round(raw_budget * sqm_factor, dp)
+        r['new_target_arr_sqm'] = round(r['new_target_arr_sqft'] * sqm_factor, dp)
+        r['new_std_sqm'] = round(r['new_std_sqft'] * sqm_factor, dp)
+
+        # Now round sqft values for output
         r['current_std_sqft'] = round(raw_std_sqft, dp)
         r['current_disc_pct'] = disc
         r['current_book_rate'] = round(raw_book_rate, dp)
