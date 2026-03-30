@@ -3866,6 +3866,7 @@ def api_sl_keypads_list():
     session = get_session()
     try:
         from web.models.smart_lock import SmartLockKeypad, SmartLockUnitAssignment
+        from common.models import IglooDevice
         q = session.query(SmartLockKeypad)
         if site_id:
             q = q.filter(SmartLockKeypad.site_id == int(site_id))
@@ -3881,10 +3882,26 @@ def api_sl_keypads_list():
             for a in assignments:
                 assignment_map[a.keypad_pk] = {'site_id': a.site_id, 'unit_id': a.unit_id}
 
+        # Build igloo device lookup: deviceName -> igloo data
+        keypad_ids = [k.keypad_id for k in keypads]
+        igloo_map = {}
+        if keypad_ids:
+            igloo_devs = session.query(IglooDevice).filter(
+                IglooDevice.deviceName.in_(keypad_ids),
+                IglooDevice.type == 'Keypad'
+            ).all()
+            for ig in igloo_devs:
+                igloo_map[ig.deviceName] = {
+                    'batteryLevel': ig.batteryLevel,
+                    'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
+                    'deviceId': ig.deviceId,
+                }
+
         result = []
         for k in keypads:
             d = k.to_dict()
             d['assigned_to'] = assignment_map.get(k.id)
+            d['igloo'] = igloo_map.get(k.keypad_id)
             result.append(d)
 
         return jsonify({'keypads': result})
@@ -4082,6 +4099,7 @@ def api_sl_padlocks_list():
     session = get_session()
     try:
         from web.models.smart_lock import SmartLockPadlock, SmartLockUnitAssignment
+        from common.models import IglooDevice
         q = session.query(SmartLockPadlock)
         if site_id:
             q = q.filter(SmartLockPadlock.site_id == int(site_id))
@@ -4096,10 +4114,26 @@ def api_sl_padlocks_list():
             for a in assignments:
                 assignment_map[a.padlock_pk] = {'site_id': a.site_id, 'unit_id': a.unit_id}
 
+        # Build igloo device lookup: deviceName -> igloo data
+        padlock_ids = [p.padlock_id for p in padlocks]
+        igloo_map = {}
+        if padlock_ids:
+            igloo_devs = session.query(IglooDevice).filter(
+                IglooDevice.deviceName.in_(padlock_ids),
+                IglooDevice.type == 'Lock'
+            ).all()
+            for ig in igloo_devs:
+                igloo_map[ig.deviceName] = {
+                    'batteryLevel': ig.batteryLevel,
+                    'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
+                    'deviceId': ig.deviceId,
+                }
+
         result = []
         for p in padlocks:
             d = p.to_dict()
             d['assigned_to'] = assignment_map.get(p.id)
+            d['igloo'] = igloo_map.get(p.padlock_id)
             result.append(d)
 
         return jsonify({'padlocks': result})
@@ -4331,6 +4365,7 @@ def api_sl_units():
 
     # 2) Fetch assignments + keypads/padlocks from esa_backend
     from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock, GateAccessData
+    from common.models import IglooDevice
     session = get_session()
     try:
         assignments = session.query(SmartLockUnitAssignment).filter(
@@ -4364,6 +4399,32 @@ def api_sl_units():
             if gate_refresh:
                 gate_refresh = gate_refresh.isoformat()
 
+        # ── igloo device data (battery, last sync) ──
+        igloo_devs = session.query(IglooDevice).filter(
+            IglooDevice.site_id.in_(site_ids)
+        ).all()
+        igloo_map = {}
+        for ig in igloo_devs:
+            igloo_map[ig.deviceName] = {
+                'batteryLevel': ig.batteryLevel,
+                'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
+                'deviceId': ig.deviceId,
+                'type': ig.type,
+            }
+
+        # Enrich keypads/padlocks with igloo data
+        keypads_out = []
+        for k in keypads:
+            d = k.to_dict()
+            d['igloo'] = igloo_map.get(k.keypad_id)
+            keypads_out.append(d)
+
+        padlocks_out = []
+        for p in padlocks:
+            d = p.to_dict()
+            d['igloo'] = igloo_map.get(p.padlock_id)
+            padlocks_out.append(d)
+
         # Merge assignments into units
         for u in units:
             key = (u['SiteID'], u['UnitID'])
@@ -4373,8 +4434,8 @@ def api_sl_units():
         return jsonify({
             'units': units,
             'count': len(units),
-            'keypads': [k.to_dict() for k in keypads],
-            'padlocks': [p.to_dict() for p in padlocks],
+            'keypads': keypads_out,
+            'padlocks': padlocks_out,
             'last_refresh': last_refresh,
             'gate_refresh': gate_refresh,
         })

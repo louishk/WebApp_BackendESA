@@ -63,13 +63,15 @@
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Padlock ID</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Site</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Status</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Battery</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Last Sync</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Assigned To</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Notes</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Actions</th>
             </tr>
         </thead>
         <tbody id="padlocks-tbody">
-            <tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">Select a site and click Load</td></tr>
+            <tr><td colspan="8" style="padding: 2rem; text-align: center; color: #999;">Select a site and click Load</td></tr>
         </tbody>
     </table>
     <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
@@ -100,6 +102,16 @@
     let allSites = [];
     let allPadlocks = [];
     let csvBatchData = null;
+
+    function timeAgo(date) {
+        const ms = Date.now() - date.getTime();
+        const mins = Math.floor(ms / 60000);
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        const days = Math.floor(hrs / 24);
+        return `${days}d ago`;
+    }
 
     function esc(str) {
         if (str == null) return '';
@@ -173,7 +185,7 @@
         else if (statusFilter === 'not_assigned') filtered = filtered.filter(p => p.status !== 'assigned');
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" style="padding: 2rem; text-align: center; color: #999;">No padlocks match filter</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" style="padding: 2rem; text-align: center; color: #999;">No padlocks match filter</td></tr>';
             document.getElementById('count-info').textContent = '';
             return;
         }
@@ -182,10 +194,20 @@
                 ? '<span style="background:#d1fae5;color:#059669;padding:0.15rem 0.5rem;border-radius:9999px;font-size:0.75rem;">Assigned</span>'
                 : '<span style="background:#f3f4f6;color:#6b7280;padding:0.15rem 0.5rem;border-radius:9999px;font-size:0.75rem;">Not Assigned</span>';
             const assignedTo = p.assigned_to ? `Unit ${p.assigned_to.unit_id}` : '—';
+            const bat = p.igloo && p.igloo.batteryLevel != null ? p.igloo.batteryLevel : null;
+            const batBadge = bat !== null
+                ? `<span style="background:${bat >= 60 ? '#d1fae5' : bat >= 30 ? '#fef3c7' : '#fee2e2'};color:${bat >= 60 ? '#059669' : bat >= 30 ? '#d97706' : '#dc2626'};padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">${bat}%</span>`
+                : '<span style="color:#999;">—</span>';
+            const syncDate = p.igloo && p.igloo.lastSync ? new Date(p.igloo.lastSync) : null;
+            const syncText = syncDate ? timeAgo(syncDate) : '—';
+            const syncColor = syncDate && (Date.now() - syncDate) > 7*86400000 ? 'color:#dc2626;' : 'color:#6b7280;';
+            const syncCell = syncDate ? `<span style="${syncColor}font-size:0.8rem;" title="${syncDate.toLocaleString()}">${syncText}</span>` : '<span style="color:#999;">—</span>';
             return `<tr>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;font-weight:500;">${esc(p.padlock_id)}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteName(p.site_id))}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${statusBadge}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${batBadge}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${syncCell}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(assignedTo)}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(p.notes)}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">
