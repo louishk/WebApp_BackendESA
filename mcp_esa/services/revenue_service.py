@@ -236,31 +236,38 @@ async def get_occupancy_trends(days: int = 90, site_code: str = None) -> List[di
     if site_code:
         rows = await db.execute_query("""
             SELECT
-                os.extract_date,
-                os."dcUnitOccupancy" AS unit_occ,
-                os."dcAreaOccupancy" AS area_occ,
-                os."dcEconomicOccupancy" AS economic_occ,
-                os."dcActualRevenue" AS actual_revenue,
-                os."dcPotentialRevenue" AS potential_revenue
-            FROM mgmt_occupancy_statistics os
-            JOIN siteinfo s ON s."SiteID" = os."SiteID"
+                r.extract_date,
+                ROUND(COUNT(*) FILTER (WHERE r."bRented" = true AND r."bRentable" = true)::numeric /
+                    NULLIF(COUNT(*) FILTER (WHERE r."bRentable" = true), 0) * 100, 2) AS unit_occ,
+                ROUND(SUM(r.dcarea_fixed) FILTER (WHERE r."bRented" = true AND r."bRentable" = true)::numeric /
+                    NULLIF(SUM(r.dcarea_fixed) FILTER (WHERE r."bRentable" = true), 0) * 100, 2) AS area_occ,
+                ROUND(SUM(r.revenue_effective) FILTER (WHERE r."bRented" = true)::numeric /
+                    NULLIF(SUM(r."dcStdRate") FILTER (WHERE r."bRentable" = true), 0) * 100, 2) AS economic_occ,
+                SUM(r.revenue_effective) FILTER (WHERE r."bRented" = true) AS actual_revenue,
+                SUM(r."dcStdRate") FILTER (WHERE r."bRentable" = true) AS potential_revenue
+            FROM rentroll_enriched r
+            JOIN siteinfo s ON s."SiteID" = r."SiteID"
             WHERE s."SiteCode" = $1
-              AND os.extract_date >= CURRENT_DATE - $2 * INTERVAL '1 day'
-            ORDER BY os.extract_date
+              AND r.extract_date >= CURRENT_DATE - $2 * INTERVAL '1 day'
+            GROUP BY r.extract_date
+            ORDER BY r.extract_date
         """, [site_code, days])
     else:
         rows = await db.execute_query("""
             SELECT
-                os.extract_date,
-                AVG(os."dcUnitOccupancy") AS unit_occ,
-                AVG(os."dcAreaOccupancy") AS area_occ,
-                AVG(os."dcEconomicOccupancy") AS economic_occ,
-                SUM(os."dcActualRevenue") AS actual_revenue,
-                SUM(os."dcPotentialRevenue") AS potential_revenue
-            FROM mgmt_occupancy_statistics os
-            WHERE os.extract_date >= CURRENT_DATE - $1 * INTERVAL '1 day'
-            GROUP BY os.extract_date
-            ORDER BY os.extract_date
+                r.extract_date,
+                ROUND(COUNT(*) FILTER (WHERE r."bRented" = true AND r."bRentable" = true)::numeric /
+                    NULLIF(COUNT(*) FILTER (WHERE r."bRentable" = true), 0) * 100, 2) AS unit_occ,
+                ROUND(SUM(r.dcarea_fixed) FILTER (WHERE r."bRented" = true AND r."bRentable" = true)::numeric /
+                    NULLIF(SUM(r.dcarea_fixed) FILTER (WHERE r."bRentable" = true), 0) * 100, 2) AS area_occ,
+                ROUND(SUM(r.revenue_effective) FILTER (WHERE r."bRented" = true)::numeric /
+                    NULLIF(SUM(r."dcStdRate") FILTER (WHERE r."bRentable" = true), 0) * 100, 2) AS economic_occ,
+                SUM(r.revenue_effective) FILTER (WHERE r."bRented" = true) AS actual_revenue,
+                SUM(r."dcStdRate") FILTER (WHERE r."bRentable" = true) AS potential_revenue
+            FROM rentroll_enriched r
+            WHERE r.extract_date >= CURRENT_DATE - $1 * INTERVAL '1 day'
+            GROUP BY r.extract_date
+            ORDER BY r.extract_date
         """, [days])
 
     return [
@@ -290,8 +297,8 @@ async def get_movement_analysis(days: int = 30, site_code: str = None) -> dict:
                     FILTER (WHERE m."MoveIn" = 1 AND m."MovedInArea_fixed" > 0) AS avg_mi_rate_sqft,
                 AVG(m."MovedInDaysVacant")
                     FILTER (WHERE m."MoveIn" = 1) AS avg_days_vacant_before_mi,
-                AVG(m."MovedInDaysRented")
-                    FILTER (WHERE m."MoveOut" = 1 AND m."MovedInDaysRented" > 0) AS avg_los_at_mo
+                AVG(m."MovedOutDaysRented")
+                    FILTER (WHERE m."MoveOut" = 1 AND m."MovedOutDaysRented" > 0) AS avg_los_at_mo
             FROM mimo_enriched m
             JOIN siteinfo s ON s."SiteID" = m."SiteID"
             WHERE s."SiteCode" = $1
@@ -306,8 +313,8 @@ async def get_movement_analysis(days: int = 30, site_code: str = None) -> dict:
                     FILTER (WHERE m."MoveIn" = 1 AND m."MovedInArea_fixed" > 0) AS avg_mi_rate_sqft,
                 AVG(m."MovedInDaysVacant")
                     FILTER (WHERE m."MoveIn" = 1) AS avg_days_vacant_before_mi,
-                AVG(m."MovedInDaysRented")
-                    FILTER (WHERE m."MoveOut" = 1 AND m."MovedInDaysRented" > 0) AS avg_los_at_mo
+                AVG(m."MovedOutDaysRented")
+                    FILTER (WHERE m."MoveOut" = 1 AND m."MovedOutDaysRented" > 0) AS avg_los_at_mo
             FROM mimo_enriched m
             WHERE m."MoveDate" >= CURRENT_DATE - $1 * INTERVAL '1 day'
         """, [days])
@@ -423,21 +430,29 @@ async def get_anomalies(extract_date: str = None, site_code: str = None) -> dict
 
     # 1. Occupancy drops WoW > 2pp
     occ_drops = await db.execute_query("""
-        WITH current_occ AS (
-            SELECT os."SiteID", s."SiteCode", s."Name",
-                   os."dcUnitOccupancy" AS occ,
-                   os.extract_date
-            FROM mgmt_occupancy_statistics os
-            JOIN siteinfo s ON s."SiteID" = os."SiteID"
-            WHERE os.extract_date = (SELECT MAX(extract_date) FROM mgmt_occupancy_statistics)
+        WITH occ_by_site AS (
+            SELECT
+                r."SiteID",
+                r.extract_date,
+                ROUND(COUNT(*) FILTER (WHERE r."bRented" = true AND r."bRentable" = true)::numeric /
+                    NULLIF(COUNT(*) FILTER (WHERE r."bRentable" = true), 0) * 100, 2) AS occ
+            FROM rentroll_enriched r
+            WHERE r.extract_date IN (
+                (SELECT MAX(extract_date) FROM rentroll_enriched),
+                (SELECT MAX(extract_date) FROM rentroll_enriched WHERE extract_date <= CURRENT_DATE - 7)
+            )
+            GROUP BY r."SiteID", r.extract_date
+        ),
+        current_occ AS (
+            SELECT o."SiteID", s."SiteCode", s."Name", o.occ
+            FROM occ_by_site o
+            JOIN siteinfo s ON s."SiteID" = o."SiteID"
+            WHERE o.extract_date = (SELECT MAX(extract_date) FROM rentroll_enriched)
         ),
         prev_occ AS (
-            SELECT os."SiteID", os."dcUnitOccupancy" AS occ
-            FROM mgmt_occupancy_statistics os
-            WHERE os.extract_date = (
-                SELECT MAX(extract_date) FROM mgmt_occupancy_statistics
-                WHERE extract_date <= CURRENT_DATE - 7
-            )
+            SELECT o."SiteID", o.occ
+            FROM occ_by_site o
+            WHERE o.extract_date = (SELECT MAX(extract_date) FROM rentroll_enriched WHERE extract_date <= CURRENT_DATE - 7)
         )
         SELECT c."SiteCode" AS site_code, c."Name" AS name,
                c.occ AS current_occ_pct, p.occ AS prev_occ_pct,
