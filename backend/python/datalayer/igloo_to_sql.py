@@ -45,7 +45,7 @@ from common import (
     IglooProperty,
     IglooDevice,
 )
-from common.config import get_pipeline_config, DatabaseType
+from common.config import DatabaseType
 from common.config_loader import get_database_url
 from common.secrets_vault import vault_config
 
@@ -470,8 +470,17 @@ def main():
     """Main function to fetch and push Igloo data to SQL."""
     args = parse_args()
 
-    # Load property-to-site mapping from pipeline config
-    property_site_map = get_pipeline_config('igloo', 'property_site_map', {})
+    # Load property-to-site mapping from pipelines.yaml
+    # (get_pipeline_config looks under scheduler.yaml which has no pipeline entries)
+    import yaml
+    pipelines_yaml = Path(__file__).parent.parent / 'config' / 'pipelines.yaml'
+    property_site_map = {}
+    try:
+        with open(pipelines_yaml) as f:
+            cfg = yaml.safe_load(f) or {}
+        property_site_map = cfg.get('pipelines', {}).get('igloo', {}).get('property_site_map', {})
+    except Exception:
+        logger.warning("Could not load property_site_map from pipelines.yaml")
 
     # Print header
     print("=" * 70)
