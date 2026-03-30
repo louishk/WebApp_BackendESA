@@ -13,6 +13,7 @@ server:
 features:
   database: true
   google_ads: true
+  revenue: true
 
 # =============================================================================
 # Google Ads API

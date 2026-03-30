@@ -74,6 +74,10 @@ class Settings:
     def google_ads_enabled(self) -> bool:
         return self._features.get('google_ads', True)
 
+    @property
+    def revenue_enabled(self) -> bool:
+        return self._features.get('revenue', True)
+
     # Google Ads (non-secret fields)
     @property
     def google_ads_client_id(self) -> str:
