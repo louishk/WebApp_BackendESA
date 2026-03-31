@@ -176,13 +176,17 @@ class PipelineConfig(Base, TimestampMixin):
 
     def to_dict(self) -> dict:
         """Convert to dictionary for API responses."""
+        schedule_cfg = self.schedule_config or {}
+        freshness_cfg = self.data_freshness_config or {}
         return {
+            'name': self.pipeline_name,
             'pipeline_name': self.pipeline_name,
             'display_name': self.display_name,
             'description': self.description,
             'module_path': self.module_path,
             'schedule_type': self.schedule_type,
-            'schedule_config': self.schedule_config,
+            'schedule_config': schedule_cfg,
+            'schedule': {'cron': schedule_cfg.get('cron', '')},
             'enabled': self.enabled,
             'priority': self.priority,
             'depends_on': self.depends_on or [],
@@ -195,7 +199,11 @@ class PipelineConfig(Base, TimestampMixin):
             'retry_backoff_multiplier': float(self.retry_backoff_multiplier) if self.retry_backoff_multiplier is not None else None,
             'timeout_seconds': self.timeout_seconds,
             'default_args': self.default_args or {},
-            'data_freshness_config': self.data_freshness_config or {},
+            'data_freshness_config': freshness_cfg,
+            'data_freshness': {
+                'table': freshness_cfg.get('table', ''),
+                'date_column': freshness_cfg.get('date_column', ''),
+            },
         }
 
 
