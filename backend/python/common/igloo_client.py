@@ -222,6 +222,24 @@ class IglooClient:
         if not _DEPT_ID_RE.match(dept_id):
             raise IglooAPIError("Invalid department ID format")
 
+    @staticmethod
+    def _resolve_department_id(device_id: str) -> Optional[str]:
+        """Look up departmentId from igloo_devices table in esa_backend DB."""
+        try:
+            from sqlalchemy import create_engine, text
+            from common.config_loader import get_database_url
+            engine = create_engine(get_database_url('backend'))
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text('SELECT "departmentId" FROM igloo_devices WHERE "deviceId" = :did'),
+                    {'did': device_id},
+                ).fetchone()
+            engine.dispose()
+            return row[0] if row and row[0] else None
+        except Exception:
+            logger.exception("Failed to resolve departmentId for %s", device_id)
+            return None
+
     # ------------------------------------------------------------------
     # Read operations
     # ------------------------------------------------------------------
@@ -343,6 +361,8 @@ class IglooClient:
         name: str,
         start_dt: Optional[str] = None,
         end_dt: Optional[str] = None,
+        pin_type: str = 'permanent',
+        department_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a custom PIN on a device via a job.
 
@@ -350,21 +370,41 @@ class IglooClient:
             device_id: Igloo device ID.
             pin: PIN code to set.
             name: Human-readable name/label for the PIN.
-            start_dt: Optional ISO-8601 start datetime.
-            end_dt: Optional ISO-8601 end datetime.
+            start_dt: ISO-8601 start datetime (required for 'duration' pinType).
+            end_dt: ISO-8601 end datetime (required for 'duration' pinType).
+            pin_type: 'permanent' or 'duration'.
+            department_id: Igloo department ID (required by API).
 
         Returns:
             Job response dict.
         """
         self._validate_device_id(device_id)
+
+        # Resolve departmentId: try DB first, then API departments list
+        if not department_id:
+            department_id = self._resolve_department_id(device_id)
+        if not department_id:
+            # Fallback: fetch first department from API
+            depts = self.list_departments()
+            if depts:
+                department_id = depts[0].get('id')
+        if not department_id:
+            raise IglooAPIError("Cannot determine departmentId for device")
+
+        now = datetime.now(timezone.utc)
+        if not start_dt:
+            start_dt = now.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+
         payload: Dict[str, Any] = {
-            'jobType': 'addCustomPin',
-            'pin': pin,
-            'name': name,
+            'customPin': pin,
+            'pinType': pin_type,
+            'startDateTime': start_dt,
+            'departmentId': department_id,
         }
-        if start_dt:
-            payload['startDate'] = start_dt
-        if end_dt:
+        # endDate only for duration PINs (permanent PINs don't accept it)
+        if pin_type == 'duration':
+            if not end_dt:
+                end_dt = (now + timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%S+00:00')
             payload['endDate'] = end_dt
 
         try:
@@ -377,8 +417,18 @@ class IglooClient:
             return resp.json()
         except IglooAPIError:
             raise
-        except Exception:
-            logger.exception("Failed to create custom PIN on device %s", device_id)
+        except Exception as exc:
+            # Extract response body from HTTPError for debugging
+            resp_body = ''
+            if hasattr(exc, 'response') and exc.response is not None:
+                try:
+                    resp_body = exc.response.text[:500]
+                except Exception:
+                    pass
+            logger.error(
+                "Failed to create custom PIN on device %s — payload: %s — response: %s",
+                device_id, payload, resp_body,
+            )
             raise IglooAPIError("Failed to create custom PIN")
 
     def create_permanent_pin(self, device_id: str) -> Dict[str, Any]:
