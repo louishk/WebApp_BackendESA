@@ -21,12 +21,13 @@
             <button class="btn btn-sm status-filter-btn" data-filter="assigned" onclick="setStatusFilter('assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Assigned</button>
             <button class="btn btn-sm status-filter-btn" data-filter="not_assigned" onclick="setStatusFilter('not_assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Not Assigned</button>
         </div>
+        <button id="sync-igloo-btn" class="btn btn-secondary" onclick="syncIgloo()" style="margin-left: auto; font-size: 0.75rem; padding: 0.3rem 0.6rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Sync Igloo</button>
         <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
     </div>
 </div>
 
-<!-- Add / CSV Upload -->
-<div class="card" style="margin-bottom: 1rem;">
+<!-- Add / CSV Upload (hidden — devices auto-populated from Igloo) -->
+<div class="card" style="margin-bottom: 1rem; display: none;">
     <h3 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 1rem;">Add Keypads</h3>
     <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem;">
         <div>
@@ -362,6 +363,41 @@
         a.href = URL.createObjectURL(blob);
         a.download = 'keypads_template.csv';
         a.click();
+    }
+
+    async function syncIgloo() {
+        const btn = document.getElementById('sync-igloo-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Syncing...';
+        try {
+            const res = await fetch('/api/igloo/sync', { method: 'POST', headers: apiHeaders() });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed');
+            const execId = data.execution_id;
+            const poll = async () => {
+                try {
+                    const r = await fetch(`/api/history/${execId}`, { headers: apiHeaders() });
+                    const d = await r.json();
+                    if (d.status === 'completed') {
+                        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync Igloo';
+                        btn.disabled = false;
+                        showStatus('Igloo sync complete — keypads updated', true);
+                        loadKeypads();
+                    } else if (d.status === 'failed') {
+                        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync Igloo';
+                        btn.disabled = false;
+                        showStatus('Igloo sync failed', false);
+                    } else {
+                        setTimeout(poll, 5000);
+                    }
+                } catch (e) { setTimeout(poll, 5000); }
+            };
+            setTimeout(poll, 5000);
+        } catch (e) {
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync Igloo';
+            btn.disabled = false;
+            showStatus('Failed to trigger Igloo sync', false);
+        }
     }
 
     // Init

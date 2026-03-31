@@ -24,6 +24,7 @@
             <button class="btn btn-secondary" id="refresh-btn" onclick="refreshUnitData()" style="margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem;">Refresh Unit Data</button>
             <button id="refresh-gate-btn" class="btn btn-secondary" onclick="refreshGateData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #f59e0b; color: #d97706;"><i class="bi bi-shield-lock"></i> Refresh Gate Data</button>
             <button id="refresh-igloo-btn" class="btn btn-secondary" onclick="refreshIglooData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Refresh Igloo Data</button>
+            <button id="audit-pins-btn" class="btn btn-secondary" onclick="auditPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #8b5cf6; color: #7c3aed;"><i class="bi bi-key"></i> Audit PINs</button>
             <span id="refresh-status" style="display: none; margin-left: 0.5rem;"></span>
         </div>
     </div>
@@ -87,10 +88,11 @@
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Gate</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Overlock</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Access Code</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">PIN Status</th>
             </tr>
         </thead>
         <tbody id="units-tbody">
-            <tr><td colspan="11" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
+            <tr><td colspan="12" style="padding: 2rem; text-align: center; color: #999;">Select site(s) and click Load Units</td></tr>
         </tbody>
     </table>
     <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
@@ -145,6 +147,7 @@
     let sitePadlocks = {};   // site_id -> [{id, padlock_id, status, ...}]
     let changes = {};        // "siteId_unitId" -> {keypad_pk, padlock_pk}
     let originalAssignments = {}; // "siteId_unitId" -> {keypad_pk, padlock_pk}
+    let pinAuditMap = {};    // "siteId_unitId" -> {status, igloo_pin_count, ...}
     let kpFilter = 'all';  // keypad assignment filter
     let plFilter = 'all';  // padlock assignment filter
 
@@ -237,6 +240,8 @@
             document.getElementById('refresh-info-wrapper').style.display = 'block';
             document.getElementById('refresh-gate-btn').style.display = '';
             document.getElementById('refresh-igloo-btn').style.display = '';
+            document.getElementById('audit-pins-btn').style.display = '';
+            pinAuditMap = {};  // reset on reload
 
             document.getElementById('summary-row').style.display = 'flex';
             document.getElementById('save-btn').style.display = 'inline-block';
@@ -312,7 +317,7 @@
         });
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="11" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="12" style="padding: 2rem; text-align: center; color: #999;">No units match filters</td></tr>';
             document.getElementById('count-info').textContent = '';
             return;
         }
@@ -420,6 +425,7 @@
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${u.gate_access ? gateBadge : '<span style="color:#999;">—</span>'}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${u.gate_access ? overlockBadge : ''}</td>
                 <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;white-space:nowrap;">${codeCell}</td>
+                <td style="padding:0.4rem 0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;white-space:nowrap;">${pinStatusCell(u)}</td>
             </tr>`;
         }).join('');
 
@@ -763,6 +769,85 @@
             btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
             btn.disabled = false;
             showStatus('Failed to trigger Igloo refresh', false);
+        }
+    }
+
+    // PIN Status cell renderer
+    function pinStatusCell(u) {
+        const key = `${u.SiteID}_${u.UnitID}`;
+        const audit = pinAuditMap[key];
+        if (!audit) return '<span style="color:#999;font-size:0.75rem;">—</span>';
+
+        const current = getCurrentAssignment(u.SiteID, u.UnitID);
+        if (!current.keypad_pk) return '<span style="color:#999;font-size:0.75rem;">—</span>';
+
+        if (audit.status === 'match') {
+            return `<span style="background:#d1fae5;color:#059669;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="PIN matches gate code (${esc(audit.matching_pin_type)}: ${esc(audit.matching_pin_name)})"><i class="bi bi-check-circle-fill"></i> Match</span>`;
+        } else if (audit.status === 'mismatch') {
+            return `<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="${audit.igloo_pin_count} PIN(s) on keypad, none match gate code"><i class="bi bi-x-circle-fill"></i> Mismatch</span>
+                    <button onclick="pushGatePin(${u.SiteID}, ${u.UnitID})" style="margin-left:0.25rem;background:none;border:1px solid #7c3aed;color:#7c3aed;border-radius:4px;padding:0.1rem 0.3rem;font-size:0.65rem;cursor:pointer;" title="Push gate code as PIN to keypad"><i class="bi bi-arrow-up-circle"></i> Push</button>`;
+        } else if (audit.status === 'no_igloo_pin') {
+            return `<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="No PINs set on this keypad"><i class="bi bi-exclamation-circle"></i> No PIN</span>
+                    <button onclick="pushGatePin(${u.SiteID}, ${u.UnitID})" style="margin-left:0.25rem;background:none;border:1px solid #7c3aed;color:#7c3aed;border-radius:4px;padding:0.1rem 0.3rem;font-size:0.65rem;cursor:pointer;" title="Push gate code as PIN to keypad"><i class="bi bi-arrow-up-circle"></i> Push</button>`;
+        } else if (audit.status === 'no_gate_code') {
+            return '<span style="background:#f3f4f6;color:#6b7280;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="No SiteLink gate code for this unit"><i class="bi bi-dash-circle"></i> No Code</span>';
+        }
+        return '';
+    }
+
+    // Audit PINs — compare Igloo keypad PINs with SiteLink gate codes
+    async function auditPins() {
+        const btn = document.getElementById('audit-pins-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Auditing...';
+
+        try {
+            const res = await fetch(`/api/smart-lock/pin-audit?site_ids=${loadedSiteIds.join(',')}`, { headers: apiHeaders() });
+            if (!res.ok) {
+                const d = await res.json().catch(() => ({}));
+                throw new Error(d.error || `HTTP ${res.status}`);
+            }
+            const data = await res.json();
+
+            pinAuditMap = {};
+            (data.results || []).forEach(r => {
+                pinAuditMap[`${r.site_id}_${r.unit_id}`] = r;
+            });
+
+            const counts = { match: 0, mismatch: 0, no_igloo_pin: 0, no_gate_code: 0 };
+            Object.values(pinAuditMap).forEach(r => counts[r.status]++);
+
+            renderTable();
+            showStatus(`PIN audit: ${counts.match} match, ${counts.mismatch} mismatch, ${counts.no_igloo_pin} no PIN, ${counts.no_gate_code} no code`, counts.mismatch === 0);
+            loadAuditLog();
+        } catch (e) {
+            showStatus('PIN audit failed: ' + e.message, false);
+        } finally {
+            btn.innerHTML = '<i class="bi bi-key"></i> Audit PINs';
+            btn.disabled = false;
+        }
+    }
+
+    // Push gate code as custom PIN to Igloo keypad
+    async function pushGatePin(siteId, unitId) {
+        if (!confirm('Push this unit\'s SiteLink gate code as a custom PIN to its assigned Igloo keypad?')) return;
+
+        try {
+            const res = await fetch('/api/smart-lock/push-gate-pin', {
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({ site_id: siteId, unit_id: unitId }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus(`PIN pushed to ${data.device_id} for ${data.unit_name}`, true);
+                loadAuditLog();
+                // Re-run audit to update status
+                auditPins();
+            } else {
+                showStatus(data.error || 'Failed to push PIN', false);
+            }
+        } catch (e) {
+            showStatus('Network error', false);
         }
     }
 

@@ -4817,6 +4817,213 @@ def api_sl_gate_code():
         session.close()
 
 
+# --- PIN Audit & Push ---
+
+@api_bp.route('/smart-lock/pin-audit')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+@rate_limit_api(max_requests=10, window_seconds=60)
+def api_sl_pin_audit():
+    """Compare Igloo keypad PINs with SiteLink gate access codes for a site.
+
+    Returns per-unit match status without exposing actual PIN values.
+    """
+    site_ids_param = request.args.get('site_ids', '')
+    if not site_ids_param:
+        return jsonify({'error': 'site_ids parameter is required'}), 400
+    try:
+        site_ids = parse_site_ids(site_ids_param)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, GateAccessData
+    from common.igloo_client import IglooClient, IglooAPIError
+
+    session = get_session()
+    try:
+        # 1) Get all assignments with keypads for these sites
+        assignments = session.query(SmartLockUnitAssignment).filter(
+            SmartLockUnitAssignment.site_id.in_(site_ids),
+            SmartLockUnitAssignment.keypad_pk.isnot(None),
+        ).all()
+
+        if not assignments:
+            return jsonify({'results': [], 'count': 0})
+
+        # 2) Build keypad PK -> deviceId map
+        keypad_pks = {a.keypad_pk for a in assignments}
+        keypads = session.query(SmartLockKeypad).filter(
+            SmartLockKeypad.id.in_(keypad_pks)
+        ).all()
+        kp_map = {k.id: k.keypad_id for k in keypads}  # pk -> deviceId
+
+        # 3) Get gate access codes for all units
+        unit_keys = [(a.site_id, a.unit_id) for a in assignments]
+        gate_records = session.query(GateAccessData).filter(
+            GateAccessData.site_id.in_(site_ids)
+        ).all()
+        gate_map = {(g.site_id, g.unit_id): g for g in gate_records}
+
+        # 4) Decrypt gate codes
+        from common.gate_access_crypto import get_gate_crypto
+        crypto = get_gate_crypto()
+
+        gate_codes = {}  # (site_id, unit_id) -> plaintext code
+        for key, g in gate_map.items():
+            if g.access_code_enc:
+                try:
+                    gate_codes[key] = crypto.decrypt(g.access_code_enc)
+                except Exception:
+                    pass
+
+        # 5) Fetch Igloo PINs per unique keypad deviceId
+        unique_device_ids = set(kp_map.values())
+        igloo_pins = {}  # deviceId -> [pin_values]
+        try:
+            client = IglooClient()
+            for device_id in unique_device_ids:
+                try:
+                    access_list = client.list_device_access(device_id)
+                    pins = []
+                    for entry in access_list:
+                        if entry.get('accessType') == 'pin' and entry.get('pin'):
+                            pins.append({
+                                'pin': entry['pin'],
+                                'name': entry.get('name', ''),
+                                'pinType': entry.get('pinType', ''),
+                                'id': entry.get('id', ''),
+                                'isCustomPin': entry.get('isCustomPin', False),
+                            })
+                    igloo_pins[device_id] = pins
+                except IglooAPIError:
+                    igloo_pins[device_id] = []
+        except IglooAPIError as e:
+            return jsonify({'error': 'Failed to connect to Igloo API'}), 502
+
+        # 6) Compare and build results
+        results = []
+        for a in assignments:
+            device_id = kp_map.get(a.keypad_pk)
+            gate_code = gate_codes.get((a.site_id, a.unit_id))
+            device_pins = igloo_pins.get(device_id, [])
+
+            # Determine match status
+            if not gate_code:
+                status = 'no_gate_code'
+                matching_pin = None
+            elif not device_pins:
+                status = 'no_igloo_pin'
+                matching_pin = None
+            else:
+                # Check if any Igloo PIN matches the gate code
+                matching_pin = None
+                for p in device_pins:
+                    if p['pin'] == gate_code:
+                        matching_pin = p
+                        break
+                status = 'match' if matching_pin else 'mismatch'
+
+            results.append({
+                'site_id': a.site_id,
+                'unit_id': a.unit_id,
+                'keypad_pk': a.keypad_pk,
+                'device_id': device_id,
+                'status': status,
+                'has_gate_code': bool(gate_code),
+                'igloo_pin_count': len(device_pins),
+                'matching_pin_name': matching_pin['name'] if matching_pin else None,
+                'matching_pin_type': matching_pin['pinType'] if matching_pin else None,
+            })
+
+        # Audit
+        _sl_audit(session, 'pin_audit', 'igloo',
+                  detail=f'PIN audit for {len(results)} units across {len(site_ids)} site(s)')
+        session.commit()
+
+        return jsonify({'results': results, 'count': len(results)})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("PIN audit error")
+        return jsonify({'error': 'Failed to run PIN audit'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/push-gate-pin', methods=['POST'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_sl_push_gate_pin():
+    """Push a unit's SiteLink gate access code as a custom PIN to its assigned Igloo keypad."""
+    from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, GateAccessData
+    from common.igloo_client import IglooClient, IglooAPIError
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    site_id = data.get('site_id')
+    unit_id = data.get('unit_id')
+    if not site_id or not unit_id:
+        return jsonify({'error': 'site_id and unit_id required'}), 400
+    try:
+        site_id = int(site_id)
+        unit_id = int(unit_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'site_id and unit_id must be integers'}), 400
+
+    session = get_session()
+    try:
+        # 1) Get the assignment and its keypad
+        assignment = session.query(SmartLockUnitAssignment).filter_by(
+            site_id=site_id, unit_id=unit_id
+        ).first()
+        if not assignment or not assignment.keypad_pk:
+            return jsonify({'error': 'No keypad assigned to this unit'}), 404
+
+        keypad = session.query(SmartLockKeypad).get(assignment.keypad_pk)
+        if not keypad:
+            return jsonify({'error': 'Keypad not found'}), 404
+        device_id = keypad.keypad_id
+
+        # 2) Get and decrypt the gate access code
+        gate = session.query(GateAccessData).filter_by(
+            site_id=site_id, unit_id=unit_id
+        ).first()
+        if not gate or not gate.access_code_enc:
+            return jsonify({'error': 'No gate access code for this unit'}), 404
+
+        from common.gate_access_crypto import get_gate_crypto
+        crypto = get_gate_crypto()
+        pin = crypto.decrypt(gate.access_code_enc)
+        if not pin:
+            return jsonify({'error': 'Gate access code is empty'}), 400
+
+        # 3) Push to Igloo as custom PIN
+        unit_name = gate.unit_name or f'Unit {unit_id}'
+        client = IglooClient()
+        result = client.create_custom_pin(device_id, pin, unit_name)
+
+        # 4) Audit
+        _sl_audit(session, 'gate_pin_pushed', 'igloo', device_id,
+                  site_id=site_id, unit_id=unit_id,
+                  detail=f'Pushed gate code to keypad {device_id} for unit {unit_name}')
+        session.commit()
+
+        return jsonify({'success': True, 'device_id': device_id, 'unit_name': unit_name}), 201
+    except IglooAPIError:
+        session.rollback()
+        return jsonify({'error': 'Failed to push PIN to Igloo'}), 502
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Push gate PIN error")
+        return jsonify({'error': 'Failed to push gate PIN'}), 500
+    finally:
+        session.close()
+
+
 # =============================================================================
 # Igloo API Proxy Endpoints
 # =============================================================================
