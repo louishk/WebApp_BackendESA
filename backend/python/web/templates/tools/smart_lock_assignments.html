@@ -786,6 +786,8 @@
         } else if (audit.status === 'mismatch') {
             return `<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="${audit.igloo_pin_count} PIN(s) on keypad, none match gate code"><i class="bi bi-x-circle-fill"></i> Mismatch</span>
                     <button onclick="pushGatePin(${u.SiteID}, ${u.UnitID})" style="margin-left:0.25rem;background:none;border:1px solid #7c3aed;color:#7c3aed;border-radius:4px;padding:0.1rem 0.3rem;font-size:0.65rem;cursor:pointer;" title="Push gate code as PIN to keypad"><i class="bi bi-arrow-up-circle"></i> Push</button>`;
+        } else if (audit.status === 'pending') {
+            return `<span style="background:#ede9fe;color:#7c3aed;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="PIN pushed, waiting for device Bluetooth sync"><i class="bi bi-clock-history"></i> Pending</span>`;
         } else if (audit.status === 'no_igloo_pin') {
             return `<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="No PINs set on this keypad"><i class="bi bi-exclamation-circle"></i> No PIN</span>
                     <button onclick="pushGatePin(${u.SiteID}, ${u.UnitID})" style="margin-left:0.25rem;background:none;border:1px solid #7c3aed;color:#7c3aed;border-radius:4px;padding:0.1rem 0.3rem;font-size:0.65rem;cursor:pointer;" title="Push gate code as PIN to keypad"><i class="bi bi-arrow-up-circle"></i> Push</button>`;
@@ -814,11 +816,14 @@
                 pinAuditMap[`${r.site_id}_${r.unit_id}`] = r;
             });
 
-            const counts = { match: 0, mismatch: 0, no_igloo_pin: 0, no_gate_code: 0 };
-            Object.values(pinAuditMap).forEach(r => counts[r.status]++);
+            const counts = { match: 0, mismatch: 0, pending: 0, no_igloo_pin: 0, no_gate_code: 0 };
+            Object.values(pinAuditMap).forEach(r => counts[r.status] = (counts[r.status] || 0) + 1);
 
             renderTable();
-            showStatus(`PIN audit: ${counts.match} match, ${counts.mismatch} mismatch, ${counts.no_igloo_pin} no PIN, ${counts.no_gate_code} no code`, counts.mismatch === 0);
+            let summary = `PIN audit: ${counts.match} match, ${counts.mismatch} mismatch`;
+            if (counts.pending) summary += `, ${counts.pending} pending`;
+            summary += `, ${counts.no_igloo_pin} no PIN, ${counts.no_gate_code} no code`;
+            showStatus(summary, counts.mismatch === 0);
             loadAuditLog();
         } catch (e) {
             showStatus('PIN audit failed: ' + e.message, false);

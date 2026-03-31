@@ -4880,6 +4880,7 @@ def api_sl_pin_audit():
         # 5) Fetch Igloo PINs per unique keypad deviceId
         unique_device_ids = set(kp_map.values())
         igloo_pins = {}  # deviceId -> [pin_values]
+        igloo_pending = {}  # deviceId -> [pending custom pins from jobs]
         try:
             client = IglooClient()
             for device_id in unique_device_ids:
@@ -4898,6 +4899,19 @@ def api_sl_pin_audit():
                     igloo_pins[device_id] = pins
                 except IglooAPIError:
                     igloo_pins[device_id] = []
+
+                # Also check pending jobs for custom PINs not yet synced
+                try:
+                    jobs = client.list_device_jobs(device_id)
+                    pending = []
+                    for j in jobs:
+                        if j.get('status') == 'pending' and j.get('description') == 'create_bluetooth_pin':
+                            ad = j.get('accessData', {})
+                            if ad.get('customPin'):
+                                pending.append(ad['customPin'])
+                    igloo_pending[device_id] = pending
+                except IglooAPIError:
+                    igloo_pending[device_id] = []
         except IglooAPIError as e:
             return jsonify({'error': 'Failed to connect to Igloo API'}), 502
 
@@ -4907,22 +4921,30 @@ def api_sl_pin_audit():
             device_id = kp_map.get(a.keypad_pk)
             gate_code = gate_codes.get((a.site_id, a.unit_id))
             device_pins = igloo_pins.get(device_id, [])
+            pending_pins = igloo_pending.get(device_id, [])
 
             # Determine match status
             if not gate_code:
                 status = 'no_gate_code'
                 matching_pin = None
-            elif not device_pins:
+            elif not device_pins and not pending_pins:
                 status = 'no_igloo_pin'
                 matching_pin = None
             else:
-                # Check if any Igloo PIN matches the gate code
+                # Check if any active Igloo PIN matches the gate code
                 matching_pin = None
                 for p in device_pins:
                     if p['pin'] == gate_code:
                         matching_pin = p
                         break
-                status = 'match' if matching_pin else 'mismatch'
+
+                if matching_pin:
+                    status = 'match'
+                elif gate_code in pending_pins:
+                    status = 'pending'
+                    matching_pin = None
+                else:
+                    status = 'mismatch'
 
             results.append({
                 'site_id': a.site_id,
@@ -4932,6 +4954,7 @@ def api_sl_pin_audit():
                 'status': status,
                 'has_gate_code': bool(gate_code),
                 'igloo_pin_count': len(device_pins),
+                'pending_pin_count': len(pending_pins),
                 'matching_pin_name': matching_pin['name'] if matching_pin else None,
                 'matching_pin_type': matching_pin['pinType'] if matching_pin else None,
             })
