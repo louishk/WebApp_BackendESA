@@ -286,6 +286,7 @@ pipelines:
       database: backend
     property_site_map:
       A38XX: 54219
+      Commonwealth: 54219
   gateaccess:
     display_name: Gate Access Data
     description: Fetch gate access data (lock codes, lock status) from SOAP API
