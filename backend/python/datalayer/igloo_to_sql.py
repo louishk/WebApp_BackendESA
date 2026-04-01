@@ -294,13 +294,15 @@ def transform_device(
         code_match = re.match(r'^([A-Z]\d{3,4})', property_name)
         if code_match:
             site_id = _site_code_to_id.get(code_match.group(1))
-            # Auto-populate siteinfo with the discovered mapping
-            if site_id and property_id:
-                _new_igloo_mappings.append({
-                    'site_id': site_id,
-                    'prop_id': property_id,
-                    'dept_id': dept_id,
-                })
+
+    # Auto-enrich siteinfo if we resolved site_id but igloo_property_id isn't mapped yet
+    if site_id and property_id and property_id not in _igloo_prop_to_site:
+        _new_igloo_mappings.append({
+            'site_id': site_id,
+            'prop_id': property_id,
+            'dept_id': dept_id,
+        })
+        _igloo_prop_to_site[property_id] = site_id  # prevent duplicates within same run
 
     return {
         'deviceId': _truncate(item.get('deviceId', ''), 30) or '',
