@@ -286,8 +286,13 @@ def transform_device(
                 dept_name = _truncate(d_info.get('departmentName', d_info.get('name')), 100)
                 break
 
-    # Resolve site_id via property name
+    # Resolve site_id: try config map first, then extract site code from property name
     site_id = property_site_map.get(property_name) if property_name else None
+    if not site_id and property_name:
+        # Extract site code (e.g. "L029") from property name like "L029 - Commonwealth"
+        code_match = re.match(r'^([A-Z]\d{3,4})', property_name)
+        if code_match:
+            site_id = _site_code_to_id.get(code_match.group(1))
 
     return {
         'deviceId': _truncate(item.get('deviceId', ''), 30) or '',
@@ -416,6 +421,26 @@ def sync_devices_to_smart_locks(
     return kp_count, pl_count
 
 
+# Module-level cache for site code -> SiteID lookup (built once per pipeline run)
+_site_code_to_id: Dict[str, int] = {}
+
+
+def _build_site_code_map():
+    """Build SiteCode -> SiteID lookup from esa_pbi siteinfo table."""
+    global _site_code_to_id
+    try:
+        pbi_url = get_database_url('pbi')
+        pbi_engine = create_engine(pbi_url)
+        from sqlalchemy import text
+        with pbi_engine.connect() as conn:
+            rows = conn.execute(text('SELECT "SiteCode", "SiteID" FROM siteinfo')).fetchall()
+        pbi_engine.dispose()
+        _site_code_to_id = {r[0]: r[1] for r in rows if r[0]}
+        logger.info("Built site code map: %d entries", len(_site_code_to_id))
+    except Exception:
+        logger.exception("Failed to build site code map from siteinfo")
+
+
 # =============================================================================
 # Pipeline Functions
 # =============================================================================
@@ -434,6 +459,9 @@ def run_pipeline(
     Returns:
         Tuple of (property_count, device_count)
     """
+    # Build site code lookup for dynamic property name -> SiteID resolution
+    _build_site_code_map()
+
     # Get credentials from vault
     client_id = vault_config('IGLOO_CLIENT_ID')
     client_secret = vault_config('IGLOO_CLIENT_SECRET')
