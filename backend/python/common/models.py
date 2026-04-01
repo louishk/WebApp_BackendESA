@@ -1020,6 +1020,10 @@ class SiteInfo(Base, BaseModel):
     google_place_id = Column(String(50), nullable=True, comment="Google Maps Place ID")
     embedsocial_source_id = Column(String(50), nullable=True, comment="EmbedSocial source identifier")
 
+    # Igloo Smart Lock mapping
+    igloo_department_id = Column(String(50), nullable=True, comment="Igloo department ID (country level)")
+    igloo_property_id = Column(String(50), nullable=True, comment="Igloo property ID (site level)")
+
     __table_args__ = (
         Index('idx_siteinfo_code', 'SiteCode'),
         Index('idx_siteinfo_country', 'Country'),

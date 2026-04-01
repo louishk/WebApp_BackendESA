@@ -286,13 +286,21 @@ def transform_device(
                 dept_name = _truncate(d_info.get('departmentName', d_info.get('name')), 100)
                 break
 
-    # Resolve site_id: try config map first, then extract site code from property name
-    site_id = property_site_map.get(property_name) if property_name else None
+    # Resolve site_id: 1) siteinfo.igloo_property_id, 2) config map, 3) regex site code
+    site_id = _igloo_prop_to_site.get(property_id) if property_id else None
     if not site_id and property_name:
-        # Extract site code (e.g. "L029") from property name like "L029 - Commonwealth"
+        site_id = property_site_map.get(property_name)
+    if not site_id and property_name:
         code_match = re.match(r'^([A-Z]\d{3,4})', property_name)
         if code_match:
             site_id = _site_code_to_id.get(code_match.group(1))
+            # Auto-populate siteinfo with the discovered mapping
+            if site_id and property_id:
+                _new_igloo_mappings.append({
+                    'site_id': site_id,
+                    'prop_id': property_id,
+                    'dept_id': dept_id,
+                })
 
     return {
         'deviceId': _truncate(item.get('deviceId', ''), 30) or '',
@@ -421,24 +429,53 @@ def sync_devices_to_smart_locks(
     return kp_count, pl_count
 
 
-# Module-level cache for site code -> SiteID lookup (built once per pipeline run)
-_site_code_to_id: Dict[str, int] = {}
+# Module-level caches (built once per pipeline run)
+_site_code_to_id: Dict[str, int] = {}           # SiteCode -> SiteID
+_igloo_prop_to_site: Dict[str, int] = {}         # igloo_property_id -> SiteID
+_igloo_dept_to_site: Dict[str, Dict] = {}        # igloo_department_id -> {SiteID, ...}
+_new_igloo_mappings: List[Dict[str, Any]] = []   # auto-discovered mappings to persist
 
 
-def _build_site_code_map():
-    """Build SiteCode -> SiteID lookup from esa_pbi siteinfo table."""
-    global _site_code_to_id
+def _build_site_lookups():
+    """Build site lookup caches from esa_pbi siteinfo table."""
+    global _site_code_to_id, _igloo_prop_to_site
     try:
         pbi_url = get_database_url('pbi')
         pbi_engine = create_engine(pbi_url)
         from sqlalchemy import text
         with pbi_engine.connect() as conn:
-            rows = conn.execute(text('SELECT "SiteCode", "SiteID" FROM siteinfo')).fetchall()
+            rows = conn.execute(text(
+                'SELECT "SiteID", "SiteCode", igloo_property_id, igloo_department_id FROM siteinfo'
+            )).fetchall()
         pbi_engine.dispose()
-        _site_code_to_id = {r[0]: r[1] for r in rows if r[0]}
-        logger.info("Built site code map: %d entries", len(_site_code_to_id))
+        _site_code_to_id = {r[1]: r[0] for r in rows if r[1]}
+        _igloo_prop_to_site = {r[2]: r[0] for r in rows if r[2]}
+        logger.info("Site lookups: %d site codes, %d igloo property mappings",
+                     len(_site_code_to_id), len(_igloo_prop_to_site))
     except Exception:
-        logger.exception("Failed to build site code map from siteinfo")
+        logger.exception("Failed to build site lookups from siteinfo")
+
+
+def _persist_igloo_mappings():
+    """Write auto-discovered igloo_property_id / igloo_department_id back to siteinfo."""
+    if not _new_igloo_mappings:
+        return
+    try:
+        pbi_url = get_database_url('pbi')
+        pbi_engine = create_engine(pbi_url)
+        from sqlalchemy import text
+        with pbi_engine.begin() as conn:
+            for mapping in _new_igloo_mappings:
+                conn.execute(text("""
+                    UPDATE siteinfo
+                    SET igloo_property_id = COALESCE(igloo_property_id, :prop_id),
+                        igloo_department_id = COALESCE(igloo_department_id, :dept_id)
+                    WHERE "SiteID" = :site_id
+                """), mapping)
+        pbi_engine.dispose()
+        logger.info("Persisted %d new Igloo mappings to siteinfo", len(_new_igloo_mappings))
+    except Exception:
+        logger.exception("Failed to persist Igloo mappings to siteinfo")
 
 
 # =============================================================================
@@ -459,8 +496,9 @@ def run_pipeline(
     Returns:
         Tuple of (property_count, device_count)
     """
-    # Build site code lookup for dynamic property name -> SiteID resolution
-    _build_site_code_map()
+    # Build site lookups (siteinfo igloo mappings + site codes)
+    _build_site_lookups()
+    _new_igloo_mappings.clear()
 
     # Get credentials from vault
     client_id = vault_config('IGLOO_CLIENT_ID')
@@ -539,7 +577,12 @@ def run_pipeline(
         dev_count = push_to_database(
             engine, device_records, IglooDevice, ['deviceId'], 'device')
 
-        # --- Stage 7: Auto-populate smart lock keypads/padlocks ---
+        # --- Stage 7: Persist auto-discovered Igloo mappings to siteinfo ---
+        if _new_igloo_mappings:
+            print(f"[STAGE:ENRICH] Writing {len(_new_igloo_mappings)} new Igloo mappings to siteinfo")
+            _persist_igloo_mappings()
+
+        # --- Stage 8: Auto-populate smart lock keypads/padlocks ---
         print("[STAGE:SYNC] Auto-populating smart lock keypads/padlocks from Igloo devices")
         kp_count, pl_count = sync_devices_to_smart_locks(engine, device_records)
         print(f"  Keypads: {kp_count} synced, Padlocks: {pl_count} synced")
