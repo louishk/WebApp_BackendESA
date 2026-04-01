@@ -4778,6 +4778,122 @@ def api_sl_audit_log():
         session.close()
 
 
+# --- Site Config ---
+
+@api_bp.route('/smart-lock/config')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_sl_config_list():
+    """List smart lock site configurations."""
+    from web.models.smart_lock import SmartLockSiteConfig
+    session = get_session()
+    try:
+        configs = session.query(SmartLockSiteConfig).order_by(
+            SmartLockSiteConfig.site_code
+        ).all()
+        return jsonify({
+            'configs': [c.to_dict() for c in configs],
+            'count': len(configs),
+        })
+    except Exception as e:
+        current_app.logger.exception("Smart lock config list error")
+        return jsonify({'error': 'Failed to fetch config'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/config/enabled')
+@require_auth
+@require_api_scope('smart_lock:read')
+def api_sl_config_enabled():
+    """List only enabled smart lock sites. Lightweight endpoint for external consumers."""
+    from web.models.smart_lock import SmartLockSiteConfig
+    session = get_session()
+    try:
+        configs = session.query(SmartLockSiteConfig).filter(
+            SmartLockSiteConfig.enabled.is_(True)
+        ).order_by(SmartLockSiteConfig.site_code).all()
+        return jsonify({
+            'sites': [{'site_id': c.site_id, 'site_code': c.site_code, 'site_name': c.site_name} for c in configs],
+            'count': len(configs),
+        })
+    except Exception as e:
+        current_app.logger.exception("Smart lock enabled sites error")
+        return jsonify({'error': 'Failed to fetch enabled sites'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/config', methods=['PUT'])
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:write')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_sl_config_upsert():
+    """Enable or disable smart lock for a site."""
+    from web.models.smart_lock import SmartLockSiteConfig
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+
+    site_id = data.get('site_id')
+    enabled = data.get('enabled')
+    if not site_id or enabled is None:
+        return jsonify({'error': 'site_id and enabled required'}), 400
+    try:
+        site_id = int(site_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'site_id must be an integer'}), 400
+
+    session = get_session()
+    try:
+        config = session.query(SmartLockSiteConfig).get(site_id)
+        if config:
+            config.enabled = bool(enabled)
+            if 'notes' in data:
+                config.notes = (data['notes'] or '').strip()[:255] or None
+            config.updated_by = _sl_username()
+        else:
+            # Resolve site_code and site_name from esa_pbi
+            site_code = None
+            site_name = None
+            try:
+                pbi_session = get_pbi_session()
+                row = pbi_session.execute(
+                    text('SELECT "SiteCode", "Name" FROM siteinfo WHERE "SiteID" = :sid'),
+                    {'sid': site_id}
+                ).fetchone()
+                pbi_session.close()
+                if row:
+                    site_code = row[0]
+                    site_name = row[1]
+            except Exception:
+                pass
+
+            config = SmartLockSiteConfig(
+                site_id=site_id,
+                enabled=bool(enabled),
+                site_code=site_code,
+                site_name=site_name,
+                notes=(data.get('notes') or '').strip()[:255] or None,
+                updated_by=_sl_username(),
+            )
+            session.add(config)
+
+        _sl_audit(session, 'config_updated', 'config', str(site_id),
+                  site_id=site_id,
+                  detail=f'Smart lock {"enabled" if enabled else "disabled"} for site {site_id}')
+        session.commit()
+        return jsonify({'success': True, 'config': config.to_dict()})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.exception("Smart lock config upsert error")
+        return jsonify({'error': 'Failed to update config'}), 500
+    finally:
+        session.close()
+
+
 # --- Gate Code Reveal ---
 
 @api_bp.route('/smart-lock/gate-code')

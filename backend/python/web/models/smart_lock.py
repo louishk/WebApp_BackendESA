@@ -217,3 +217,28 @@ class IglooAccessCode(Base):
             'site_id': self.site_id,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class SmartLockSiteConfig(Base):
+    """Per-site smart lock enable/disable configuration."""
+    __tablename__ = 'smart_lock_site_config'
+
+    site_id = Column(Integer, primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    site_code = Column(String(10))
+    site_name = Column(String(255))
+    notes = Column(String(255))
+    updated_by = Column(String(255))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'site_id': self.site_id,
+            'enabled': self.enabled,
+            'site_code': self.site_code,
+            'site_name': self.site_name,
+            'notes': self.notes,
+            'updated_by': self.updated_by,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

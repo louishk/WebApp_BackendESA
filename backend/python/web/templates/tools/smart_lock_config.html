@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Smart Lock — Site Configuration{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Smart Lock — Site Configuration</h1>
+</div>
+
+<!-- Add Site -->
+<div class="card" style="margin-bottom: 1rem;">
+    <h3 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 1rem;">Enable Smart Lock for a Site</h3>
+    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+        <div>
+            <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem;">Site</label>
+            <div id="add-site-filter" style="min-width: 260px;"></div>
+        </div>
+        <div>
+            <label style="display: block; font-size: 0.8rem; margin-bottom: 0.25rem;">Notes</label>
+            <input type="text" id="add-notes" placeholder="Optional" style="padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; width: 200px;">
+        </div>
+        <button class="btn" onclick="enableSite()">Enable</button>
+    </div>
+    <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none; margin-top: 0.5rem;"></span>
+</div>
+
+<!-- Config Table -->
+<div class="card" style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+            <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 5;">
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Site Code</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Site Name</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Site ID</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Enabled</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Notes</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Updated By</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Updated At</th>
+            </tr>
+        </thead>
+        <tbody id="config-tbody">
+            <tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+
+    function esc(str) {
+        if (str == null) return '';
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+    }
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function showStatus(msg, ok) {
+        const el = document.getElementById('status-msg');
+        el.textContent = msg;
+        el.style.display = 'inline-block';
+        el.style.background = ok ? '#d1fae5' : '#fee2e2';
+        el.style.color = ok ? '#059669' : '#dc2626';
+        setTimeout(() => { el.style.display = 'none'; }, 4000);
+    }
+
+    async function loadConfigs() {
+        try {
+            const res = await fetch('/api/smart-lock/config', { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            renderTable(data.configs || []);
+        } catch (e) {
+            document.getElementById('config-tbody').innerHTML =
+                '<tr><td colspan="7" style="padding:2rem;text-align:center;color:#dc2626;">Failed to load</td></tr>';
+        }
+    }
+
+    function renderTable(configs) {
+        const tbody = document.getElementById('config-tbody');
+        if (configs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:#999;">No sites configured. Use the form above to enable a site.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = configs.map(c => {
+            const toggleLabel = c.enabled ? 'Disable' : 'Enable';
+            const toggleColor = c.enabled ? '#dc2626' : '#059669';
+            const badge = c.enabled
+                ? '<span style="background:#d1fae5;color:#059669;padding:0.2rem 0.6rem;border-radius:9999px;font-size:0.75rem;font-weight:500;">ON</span>'
+                : '<span style="background:#fee2e2;color:#dc2626;padding:0.2rem 0.6rem;border-radius:9999px;font-size:0.75rem;font-weight:500;">OFF</span>';
+            const dt = c.updated_at ? new Date(c.updated_at + 'Z').toLocaleString() : '—';
+            return `<tr>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;font-weight:500;">${esc(c.site_code || '—')}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(c.site_name || '—')}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${c.site_id}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">
+                    ${badge}
+                    <button onclick="toggleSite(${c.site_id}, ${!c.enabled})"
+                            style="margin-left:0.5rem;background:none;border:1px solid ${toggleColor};color:${toggleColor};border-radius:4px;padding:0.15rem 0.4rem;font-size:0.7rem;cursor:pointer;">${toggleLabel}</button>
+                </td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(c.notes || '')}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(c.updated_by || '—')}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;font-size:0.8rem;color:#6b7280;">${dt}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    async function toggleSite(siteId, enabled) {
+        try {
+            const res = await fetch('/api/smart-lock/config', {
+                method: 'PUT', headers: apiHeaders(),
+                body: JSON.stringify({ site_id: siteId, enabled }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus(`Site ${siteId} ${enabled ? 'enabled' : 'disabled'}`, true);
+                loadConfigs();
+            } else {
+                showStatus(data.error || 'Failed', false);
+            }
+        } catch (e) { showStatus('Network error', false); }
+    }
+
+    async function enableSite() {
+        const siteIds = SiteFilter.getSelected('add-site-filter');
+        if (!siteIds.length) { showStatus('Select a site', false); return; }
+        const notes = document.getElementById('add-notes').value.trim();
+
+        try {
+            const res = await fetch('/api/smart-lock/config', {
+                method: 'PUT', headers: apiHeaders(),
+                body: JSON.stringify({ site_id: parseInt(siteIds[0]), enabled: true, notes }),
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+                showStatus(`Site ${data.config.site_code || siteIds[0]} enabled`, true);
+                document.getElementById('add-notes').value = '';
+                loadConfigs();
+            } else {
+                showStatus(data.error || 'Failed', false);
+            }
+        } catch (e) { showStatus('Network error', false); }
+    }
+
+    // Init
+    SiteFilter.init('add-site-filter', { mode: 'single' });
+    loadConfigs();
+</script>
+{% endblock %}

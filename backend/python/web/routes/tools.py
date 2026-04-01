@@ -75,3 +75,11 @@ def smart_lock_padlocks():
 def smart_lock_assignments():
     """Smart Lock — unit assignment page."""
     return render_template('tools/smart_lock_assignments.html')
+
+
+@tools_bp.route('/smart-lock/config')
+@login_required
+@smart_lock_access_required
+def smart_lock_config():
+    """Smart Lock — site configuration page."""
+    return render_template('tools/smart_lock_config.html')
