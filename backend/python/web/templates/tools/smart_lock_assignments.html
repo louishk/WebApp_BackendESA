@@ -334,14 +334,14 @@
                 const kp = (siteKeypads[u.SiteID] || []).find(k => k.id === current.keypad_pk);
                 if (kp && kp.igloo && kp.igloo.site_id && kp.igloo.site_id !== u.SiteID) {
                     discrepancy = true;
-                    discrepancyMsg += `Keypad ${kp.keypad_id} is at site ${kp.igloo.site_id} in Igloo. `;
+                    discrepancyMsg += `Keypad ${kp.keypad_id} is at ${kp.igloo.property || 'unknown property'} (${kp.igloo.country || '?'}) in Igloo. `;
                 }
             }
             if (current.padlock_pk) {
                 const pl = (sitePadlocks[u.SiteID] || []).find(p => p.id === current.padlock_pk);
                 if (pl && pl.igloo && pl.igloo.site_id && pl.igloo.site_id !== u.SiteID) {
                     discrepancy = true;
-                    discrepancyMsg += `Padlock ${pl.padlock_id} is at site ${pl.igloo.site_id} in Igloo. `;
+                    discrepancyMsg += `Padlock ${pl.padlock_id} is at ${pl.igloo.property || 'unknown property'} (${pl.igloo.country || '?'}) in Igloo. `;
                 }
             }
             const discrepancyBg = discrepancy ? 'background: #fef2f2; border-left: 3px solid #dc2626;' : '';

@@ -63,6 +63,8 @@
             <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 5;">
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Padlock ID</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Site</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Country</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Property</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Status</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Battery</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Last Sync</th>
@@ -72,7 +74,7 @@
             </tr>
         </thead>
         <tbody id="padlocks-tbody">
-            <tr><td colspan="8" style="padding: 2rem; text-align: center; color: #999;">Select a site and click Load</td></tr>
+            <tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">Select a site and click Load</td></tr>
         </tbody>
     </table>
     <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
@@ -186,7 +188,7 @@
         else if (statusFilter === 'not_assigned') filtered = filtered.filter(p => p.status !== 'assigned');
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" style="padding: 2rem; text-align: center; color: #999;">No padlocks match filter</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">No padlocks match filter</td></tr>';
             document.getElementById('count-info').textContent = '';
             return;
         }
@@ -203,9 +205,13 @@
             const syncText = syncDate ? timeAgo(syncDate) : '—';
             const syncColor = syncDate && (Date.now() - syncDate) > 7*86400000 ? 'color:#dc2626;' : 'color:#6b7280;';
             const syncCell = syncDate ? `<span style="${syncColor}font-size:0.8rem;" title="${syncDate.toLocaleString()}">${syncText}</span>` : '<span style="color:#999;">—</span>';
+            const country = p.igloo && p.igloo.country ? p.igloo.country : '—';
+            const property = p.igloo && p.igloo.property ? p.igloo.property : '—';
             return `<tr>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;font-weight:500;">${esc(p.padlock_id)}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteName(p.site_id))}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(country)}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(property)}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${statusBadge}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${batBadge}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${syncCell}</td>

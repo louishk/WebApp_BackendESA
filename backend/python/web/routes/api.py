@@ -3908,6 +3908,12 @@ def api_sl_keypads_list():
                     'batteryLevel': ig.batteryLevel,
                     'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
                     'deviceId': ig.deviceId,
+                    'type': ig.type,
+                    'country': ig.departmentName,
+                    'country_id': ig.departmentId,
+                    'property': ig.propertyName,
+                    'property_id': ig.propertyId,
+                    'site_id': ig.site_id,
                 }
                 igloo_map[ig.deviceId] = igloo_data
                 igloo_map[ig.deviceName] = igloo_data
@@ -4142,6 +4148,12 @@ def api_sl_padlocks_list():
                     'batteryLevel': ig.batteryLevel,
                     'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
                     'deviceId': ig.deviceId,
+                    'type': ig.type,
+                    'country': ig.departmentName,
+                    'country_id': ig.departmentId,
+                    'property': ig.propertyName,
+                    'property_id': ig.propertyId,
+                    'site_id': ig.site_id,
                 }
                 igloo_map[ig.deviceId] = igloo_data
                 igloo_map[ig.deviceName] = igloo_data
@@ -4428,7 +4440,10 @@ def api_sl_units():
                 'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
                 'deviceId': ig.deviceId,
                 'type': ig.type,
-                'departmentId': ig.departmentId,
+                'country': ig.departmentName,
+                'country_id': ig.departmentId,
+                'property': ig.propertyName,
+                'property_id': ig.propertyId,
                 'site_id': ig.site_id,
             }
             igloo_map[ig.deviceId] = igloo_data

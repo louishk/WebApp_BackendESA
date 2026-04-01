@@ -1,0 +1,869 @@
+openapi: 3.0.3
+info:
+  title: ESA Backend — Smart Lock API
+  description: |
+    Smart lock management API for keypad/padlock assignment, unit management,
+    PIN audit, and gate code integration.
+
+    **Base URL**: `https://backend.extraspace.com.sg`
+
+    **Authentication**: API key via `X-API-Key` header.
+    Format: `esa_{key_id}.{secret}`. Requires `smart_lock:read` and/or `smart_lock:write` scope.
+
+    **Rate Limits**: 30 requests/minute on write endpoints.
+
+    **Igloo Hierarchy**: Department (country) → Property (site) → Device (keypad/padlock).
+    Devices are auto-populated from the Igloo API. Each device's `igloo` object includes
+    `country` (department name), `property` (site name), and mapped ESA `site_id`.
+  version: 1.2.0
+  contact:
+    name: ESA Backend
+servers:
+- url: https://backend.extraspace.com.sg
+  description: Production
+security:
+- ApiKeyAuth: []
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key in format `esa_{key_id}.{secret}`.
+        Requires `smart_lock:read` scope for GET endpoints and `smart_lock:write` scope for mutations.
+        Example: `X-API-Key: esa_479abc54.ypI96v-vVlm8LGSGvTAEuzFEPAMRardaECk04kNk`
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: string
+          example: site_id parameter is required
+    Keypad:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Internal primary key
+          example: 5
+        keypad_id:
+          type: string
+          description: Igloo Bluetooth device ID (auto-populated from Igloo)
+          example: EK2X11000729
+        site_id:
+          type: integer
+          example: 54219
+        status:
+          type: string
+          enum:
+          - assigned
+          - not_assigned
+          example: assigned
+        notes:
+          type: string
+          nullable: true
+          example: Floor 3 zone keypad
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        igloo:
+          type: object
+          nullable: true
+          description: Igloo device enrichment data (null if no matching Igloo device)
+          properties:
+            deviceId:
+              type: string
+              description: Igloo Bluetooth hardware ID
+              example: EK2X11000729
+            type:
+              type: string
+              example: Keypad
+            batteryLevel:
+              type: integer
+              description: 0-100
+              example: 100
+            lastSync:
+              type: string
+              format: date-time
+            country:
+              type: string
+              description: Igloo department name (country level)
+              example: Singapore
+            country_id:
+              type: string
+              description: Igloo department ID
+              example: 69bbb99062fb6e2159903b50
+            property:
+              type: string
+              description: Igloo property name (site level)
+              example: Commonwealth
+            property_id:
+              type: string
+              description: Igloo property ID
+              example: 2zj7moox9bqxSHzhF
+            site_id:
+              type: integer
+              description: ESA SiteID (mapped from Igloo property)
+              example: 54219
+    Padlock:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 12
+        padlock_id:
+          type: string
+          description: Igloo Bluetooth device ID (auto-populated from Igloo)
+          example: SP2X2916499b
+        site_id:
+          type: integer
+          example: 54219
+        status:
+          type: string
+          enum:
+          - assigned
+          - not_assigned
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        igloo:
+          type: object
+          nullable: true
+          description: Igloo device enrichment data (null if no matching Igloo device)
+          properties:
+            deviceId:
+              type: string
+              example: SP2X2916499b
+            type:
+              type: string
+              example: Lock
+            batteryLevel:
+              type: integer
+              example: 51
+            lastSync:
+              type: string
+              format: date-time
+            country:
+              type: string
+              description: Igloo department name (country level)
+              example: Singapore
+            country_id:
+              type: string
+              example: 69bbb99062fb6e2159903b50
+            property:
+              type: string
+              description: Igloo property name (site level)
+              example: Commonwealth
+            property_id:
+              type: string
+              example: 2zj7moox9bqxSHzhF
+            site_id:
+              type: integer
+              example: 54219
+    Assignment:
+      type: object
+      properties:
+        site_id:
+          type: integer
+          example: 123
+        unit_id:
+          type: integer
+          example: 12345
+        keypad_pk:
+          type: integer
+          nullable: true
+          description: Internal PK of primary assigned keypad (null if none)
+          example: 5
+        keypad_id:
+          type: string
+          nullable: true
+          description: Human-readable primary keypad identifier
+          example: KP-001
+        keypad_2_pk:
+          type: integer
+          nullable: true
+          description: Internal PK of secondary keypad (null if none)
+          example: 7
+        keypad_2_id:
+          type: string
+          nullable: true
+          description: Human-readable secondary keypad identifier
+          example: KP-007
+        padlock_pk:
+          type: integer
+          nullable: true
+          description: Internal PK of assigned padlock (null if none)
+          example: 12
+        padlock_id:
+          type: string
+          nullable: true
+          description: Human-readable padlock identifier
+          example: PL-003
+        assigned_by:
+          type: string
+          nullable: true
+          example: louis
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    AssignmentUpsertItem:
+      type: object
+      required:
+      - site_id
+      - unit_id
+      properties:
+        site_id:
+          type: integer
+          example: 123
+        unit_id:
+          type: integer
+          example: 12345
+        keypad_pk:
+          type: integer
+          nullable: true
+          description: PK of primary keypad to assign, or null to unassign
+        keypad_2_pk:
+          type: integer
+          nullable: true
+          description: PK of secondary keypad to assign, or null to unassign
+        padlock_pk:
+          type: integer
+          nullable: true
+          description: PK of padlock to assign, or null to unassign
+    IglooAccessCode:
+      type: object
+      description: Cached Igloo access code record from esa_backend.igloo_access_codes.
+      properties:
+        id:
+          type: integer
+        device_id:
+          type: string
+          description: Bluetooth deviceId
+          example: SP2X2916499b
+        access_id:
+          type: string
+          description: Igloo access entry ID (used for deletion)
+          example: acc_abc123
+        access_type:
+          type: string
+          enum:
+          - pin
+          - ekey
+          example: pin
+        pin_type:
+          type: string
+          nullable: true
+          enum:
+          - permanent
+          - duration
+          - otp
+          - daily
+          - hourly
+          example: duration
+        has_pin:
+          type: boolean
+          description: True if an encrypted PIN value is stored (pin_enc is not null)
+        name:
+          type: string
+          nullable: true
+          example: Tenant A
+        start_datetime:
+          type: string
+          format: date-time
+          nullable: true
+        end_datetime:
+          type: string
+          format: date-time
+          nullable: true
+        is_custom_pin:
+          type: boolean
+          example: true
+        site_id:
+          type: integer
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+paths:
+  /api/smart-lock/assignments:
+    get:
+      summary: List assignments for a site
+      description: 'Returns all unit assignments for the specified site, with human-readable
+        keypad and padlock identifiers. Optionally filter by specific unit IDs.
+
+        '
+      operationId: listAssignments
+      tags:
+      - Assignments
+      parameters:
+      - name: site_id
+        in: query
+        required: true
+        schema:
+          type: integer
+        description: Site ID to fetch assignments for
+        example: 123
+      - name: unit_ids
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Comma-separated unit IDs to filter (optional)
+        example: 1001,1002,1003
+      responses:
+        '200':
+          description: Assignments list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Assignment'
+                  count:
+                    type: integer
+                    example: 42
+        '400':
+          description: Missing or invalid parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden — insufficient scope or role
+    put:
+      summary: Bulk upsert assignments
+      description: 'Create or update unit assignments in bulk. Each item specifies
+        a unit and its keypad/padlock assignment. Set keypad_pk or padlock_pk to null
+        to unassign.
+
+        Validates that keypads/padlocks belong to the specified site and that unit
+        IDs exist in `units_info`. Maximum 500 items per request.
+
+        Keypad and padlock status fields are automatically updated. Keypads can be
+        assigned to multiple units; padlocks are 1:1.
+
+        '
+      operationId: upsertAssignments
+      tags:
+      - Assignments
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - assignments
+              properties:
+                assignments:
+                  type: array
+                  maxItems: 500
+                  items:
+                    $ref: '#/components/schemas/AssignmentUpsertItem'
+            example:
+              assignments:
+              - site_id: 123
+                unit_id: 12345
+                keypad_pk: 5
+                keypad_2_pk: 7
+                padlock_pk: 12
+              - site_id: 123
+                unit_id: 12346
+                keypad_pk: 5
+                keypad_2_pk: null
+                padlock_pk: null
+      responses:
+        '200':
+          description: Assignments saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  upserted:
+                    type: integer
+                    example: 2
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden — insufficient scope or role
+  /api/smart-lock/keypads:
+    get:
+      summary: List keypads
+      description: List all keypads, optionally filtered by site_id.
+      operationId: listKeypads
+      tags:
+      - Keypads
+      parameters:
+      - name: site_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Keypads list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keypads:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Keypad'
+    post:
+      summary: Create a keypad
+      operationId: createKeypad
+      tags:
+      - Keypads
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - keypad_id
+              - site_id
+              properties:
+                keypad_id:
+                  type: string
+                  maxLength: 50
+                  example: KP-001
+                site_id:
+                  type: integer
+                  example: 123
+                notes:
+                  type: string
+                  maxLength: 255
+      responses:
+        '200':
+          description: Keypad created
+        '400':
+          description: Validation error or duplicate
+  /api/smart-lock/keypads/batch:
+    post:
+      summary: Batch create keypads
+      description: Create multiple keypads from a list. Skips duplicates. Max 500
+        items.
+      operationId: batchCreateKeypads
+      tags:
+      - Keypads
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - items
+              properties:
+                items:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required:
+                    - keypad_id
+                    - site_id
+                    properties:
+                      keypad_id:
+                        type: string
+                      site_id:
+                        type: integer
+                      notes:
+                        type: string
+      responses:
+        '200':
+          description: Batch result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  created:
+                    type: integer
+                  skipped:
+                    type: integer
+  /api/smart-lock/keypads/{id}:
+    delete:
+      summary: Delete a keypad
+      description: Deletes the keypad and unlinks it from any assigned units.
+      operationId: deleteKeypad
+      tags:
+      - Keypads
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Keypad deleted
+        '404':
+          description: Keypad not found
+  /api/smart-lock/padlocks:
+    get:
+      summary: List padlocks
+      operationId: listPadlocks
+      tags:
+      - Padlocks
+      parameters:
+      - name: site_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Padlocks list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  padlocks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Padlock'
+    post:
+      summary: Create a padlock
+      operationId: createPadlock
+      tags:
+      - Padlocks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - padlock_id
+              - site_id
+              properties:
+                padlock_id:
+                  type: string
+                  maxLength: 50
+                site_id:
+                  type: integer
+                notes:
+                  type: string
+                  maxLength: 255
+      responses:
+        '200':
+          description: Padlock created
+        '400':
+          description: Validation error or duplicate
+  /api/smart-lock/padlocks/batch:
+    post:
+      summary: Batch create padlocks
+      description: Max 500 items. Skips duplicates.
+      operationId: batchCreatePadlocks
+      tags:
+      - Padlocks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - items
+              properties:
+                items:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    required:
+                    - padlock_id
+                    - site_id
+                    properties:
+                      padlock_id:
+                        type: string
+                      site_id:
+                        type: integer
+                      notes:
+                        type: string
+      responses:
+        '200':
+          description: Batch result
+  /api/smart-lock/padlocks/{id}:
+    delete:
+      summary: Delete a padlock
+      operationId: deletePadlock
+      tags:
+      - Padlocks
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Padlock deleted
+        '404':
+          description: Padlock not found
+  /api/smart-lock/units:
+    get:
+      summary: List units with assignments
+      description: 'Returns unit data from `units_info` (esa_pbi) merged with assignment
+        data from `smart_lock_unit_assignments` (esa_backend). Also returns all keypads
+        and padlocks for the requested sites (for dropdown population).
+
+        '
+      operationId: listUnitsWithAssignments
+      tags:
+      - Units
+      parameters:
+      - name: site_ids
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Comma-separated site IDs
+        example: 123,456
+      responses:
+        '200':
+          description: Units with assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  units:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        SiteID:
+                          type: integer
+                        UnitID:
+                          type: integer
+                        sUnitName:
+                          type: string
+                        bRentable:
+                          type: boolean
+                        bRented:
+                          type: boolean
+                        assignment:
+                          type: object
+                          nullable: true
+                  count:
+                    type: integer
+                  keypads:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Keypad'
+                  padlocks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Padlock'
+                  last_refresh:
+                    type: string
+                    format: date-time
+                    nullable: true
+                    description: Most recent updated_at from units_info for loaded
+                      sites
+  /api/smart-lock/audit-log:
+    get:
+      summary: Get audit log entries
+      operationId: getAuditLog
+      tags:
+      - Audit
+      parameters:
+      - name: site_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+          maximum: 500
+      responses:
+        '200':
+          description: Audit log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        action:
+                          type: string
+                          example: keypad_assigned
+                        entity_type:
+                          type: string
+                          example: assignment
+                        entity_id:
+                          type: string
+                          nullable: true
+                        site_id:
+                          type: integer
+                          nullable: true
+                        unit_id:
+                          type: integer
+                          nullable: true
+                        detail:
+                          type: string
+                          nullable: true
+                        username:
+                          type: string
+                        created_at:
+                          type: string
+                          format: date-time
+  /api/smart-lock/pin-audit:
+    get:
+      summary: Audit PINs — compare Igloo keypad PINs with SiteLink gate codes
+      description: 'For all units with keypad assignments at the given site(s), compares
+        the Igloo keypad PINs with the decrypted SiteLink gate access codes. Also
+        checks pending Igloo jobs for recently pushed PINs. Returns per-unit match
+        status without exposing actual PIN values.
+
+        '
+      tags:
+      - Smart Lock
+      security:
+      - ApiKeyAuth: []
+      parameters:
+      - name: site_ids
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Comma-separated site IDs (e.g. "54219,38782")
+      responses:
+        '200':
+          description: Audit results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        site_id:
+                          type: integer
+                        unit_id:
+                          type: integer
+                        keypad_pk:
+                          type: integer
+                        device_id:
+                          type: string
+                          description: Igloo Bluetooth deviceId
+                        status:
+                          type: string
+                          enum:
+                          - match
+                          - mismatch
+                          - pending
+                          - no_igloo_pin
+                          - no_gate_code
+                          description: 'match — an active Igloo PIN matches the gate
+                            code. mismatch — PINs exist but none match. pending —
+                            PIN pushed as job, waiting for Bluetooth sync. no_igloo_pin
+                            — keypad has no PINs set. no_gate_code — unit has no SiteLink
+                            gate access code.
+
+                            '
+                        has_gate_code:
+                          type: boolean
+                        igloo_pin_count:
+                          type: integer
+                        pending_pin_count:
+                          type: integer
+                        matching_pin_name:
+                          type: string
+                          nullable: true
+                        matching_pin_type:
+                          type: string
+                          nullable: true
+  /api/smart-lock/push-gate-pin:
+    post:
+      summary: Push SiteLink gate code as custom PIN to Igloo keypad
+      description: 'Reads the encrypted SiteLink gate access code for a unit, decrypts
+        it, and pushes it as a permanent custom PIN to the unit''s assigned Igloo
+        keypad. The PIN is queued as a Bluetooth job on Igloo and will activate when
+        the keypad next syncs via Bluetooth (or an Igloo Bridge). Requires the unit
+        to have both a keypad assignment and a gate access code.
+
+        '
+      tags:
+      - Smart Lock
+      security:
+      - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - site_id
+              - unit_id
+              properties:
+                site_id:
+                  type: integer
+                unit_id:
+                  type: integer
+      responses:
+        '201':
+          description: PIN job created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  device_id:
+                    type: string
+                  unit_name:
+                    type: string
+        '404':
+          description: No keypad assigned or no gate code for this unit
+        '502':
+          description: Igloo API call failed
