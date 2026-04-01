@@ -5432,17 +5432,24 @@ def api_igloo_sync():
                 session.commit()
 
                 executor = PipelineExecutor()
-                executor.execute_pipeline('igloo', final_args)
+                result = executor.execute_streaming(
+                    module_path=p.module_path,
+                    args=final_args,
+                    execution_id=execution_id,
+                    timeout_seconds=p.timeout_seconds,
+                )
 
-                job_history.status = 'completed'
+                job_history.status = 'completed' if result.success else 'failed'
                 job_history.completed_at = datetime.utcnow()
+                if not result.success:
+                    job_history.error_message = 'Pipeline execution failed'
                 session.commit()
             except Exception as exc:
                 job_history.status = 'failed'
                 job_history.error_message = f'{type(exc).__name__}: pipeline execution failed'
                 job_history.completed_at = datetime.utcnow()
                 session.commit()
-                logger.error("Igloo sync pipeline failed: %s", exc)
+                logging.getLogger(__name__).error("Igloo sync pipeline failed: %s", exc)
             finally:
                 session.close()
                 engine.dispose()

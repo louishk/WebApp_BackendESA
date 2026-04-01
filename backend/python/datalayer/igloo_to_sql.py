@@ -279,10 +279,11 @@ def transform_device(
         dept_name = _truncate(dept_info.get('name'), 100)
     elif property_id:
         for d_id, d_info in departments.items():
-            d_props = d_info.get('properties', [])
-            if any(p.get('id') == property_id for p in d_props):
+            # Igloo returns propertyRef (with _id) or properties (with id)
+            d_props = d_info.get('propertyRef', d_info.get('properties', []))
+            if any(p.get('_id', p.get('id')) == property_id for p in d_props):
                 dept_id = _truncate(d_id, 50)
-                dept_name = _truncate(d_info.get('name'), 100)
+                dept_name = _truncate(d_info.get('departmentName', d_info.get('name')), 100)
                 break
 
     # Resolve site_id via property name
