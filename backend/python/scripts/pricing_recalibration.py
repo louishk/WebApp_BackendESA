@@ -360,9 +360,10 @@ def write_csv(rows, output_path):
         # ECRI columns (rented units only)
         'ecri_target_rent', 'ecri_increase_needed', 'ecri_increase_pct',
         'rent_last_changed', 'months_since_last_increase',
-        'paid_thru_date',
-        'sched_rent_start', 'sched_rent', 'sched_out_date',
-        'ecri_eligible',
+        'paid_thru_date', 'long_term_prepaid',
+        'sched_rent_start', 'sched_rent', 'has_pending_sched_rent',
+        'sched_out_date',
+        'ecri_eligible', 'ecri_exclusion_reason',
     ]
 
     for r in rows:
@@ -454,24 +455,44 @@ def write_csv(rows, output_path):
             else:
                 r['months_since_last_increase'] = ''
 
-            # ECRI eligibility: tenure >= 12mo, no pending increase,
-            # not scheduled out, last increase >= 12 months ago
-            tenure_ok = r['tenure_months'] >= 12
+            # Pending scheduled rent increase
             srs = r.get('sched_rent_start')
             if isinstance(srs, datetime):
                 srs = srs.date()
-            no_pending = not srs or srs < date.today()
-            no_sched_out = not r.get('sched_out_date')
-            last_increase_ok = r['months_since_last_increase'] == '' or (
-                isinstance(r['months_since_last_increase'], int) and r['months_since_last_increase'] >= 12
-            )
-            r['ecri_eligible'] = all([tenure_ok, no_pending, no_sched_out, last_increase_ok])
+            r['has_pending_sched_rent'] = bool(srs and srs >= date.today())
+
+            # Long-term prepaid (paid_thru > 3 months from today)
+            ptd = r.get('paid_thru_date')
+            if isinstance(ptd, datetime):
+                ptd = ptd.date()
+            r['long_term_prepaid'] = bool(ptd and ptd > date.today() + timedelta(days=90))
+
+            # ECRI eligibility with exclusion reasons
+            exclusions = []
+            if r['tenure_months'] < 12:
+                exclusions.append('tenure<12mo')
+            if r['has_pending_sched_rent']:
+                exclusions.append('pending_sched_rent')
+            if r.get('sched_out_date'):
+                exclusions.append('sched_move_out')
+            if r['months_since_last_increase'] != '' and (
+                isinstance(r['months_since_last_increase'], int) and r['months_since_last_increase'] < 12
+            ):
+                exclusions.append('last_increase<12mo')
+            if r['long_term_prepaid']:
+                exclusions.append('long_term_prepaid')
+
+            r['ecri_eligible'] = len(exclusions) == 0
+            r['ecri_exclusion_reason'] = '; '.join(exclusions) if exclusions else ''
         else:
             r['ecri_target_rent'] = ''
             r['ecri_increase_needed'] = ''
             r['ecri_increase_pct'] = ''
             r['months_since_last_increase'] = ''
+            r['has_pending_sched_rent'] = ''
+            r['long_term_prepaid'] = ''
             r['ecri_eligible'] = ''
+            r['ecri_exclusion_reason'] = ''
 
         # Format date fields as DD/MM/YYYY
         for dk in ('moved_in_date', 'rent_last_changed', 'paid_thru_date', 'sched_rent_start', 'sched_out_date'):
