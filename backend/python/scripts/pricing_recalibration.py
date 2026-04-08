@@ -481,6 +481,8 @@ def write_csv(rows, output_path):
                 exclusions.append('last_increase<12mo')
             if r['long_term_prepaid']:
                 exclusions.append('long_term_prepaid')
+            if r.get('tenant_total_units', 0) > 1:
+                exclusions.append('multi_unit_tenant')
 
             r['ecri_eligible'] = len(exclusions) == 0
             r['ecri_exclusion_reason'] = '; '.join(exclusions) if exclusions else ''
