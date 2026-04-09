@@ -132,7 +132,7 @@ class AppConfig:
     def _find_config_dir(self) -> Path:
         """Find config directory by searching from current location."""
         # Try relative to this file first
-        base = Path(__file__).parent.parent.parent  # backend/
+        base = Path(__file__).parent.parent  # backend/python/
         config_path = base / "config"
         if config_path.exists():
             return config_path
