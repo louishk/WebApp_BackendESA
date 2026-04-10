@@ -6,12 +6,19 @@ Uses unified config system (YAML + vault) for databases, Redis, and HTTP client.
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Optional, Any
-import os
+import logging
+import time
+
+logger = logging.getLogger(__name__)
+
+_pipeline_args_cache: Dict = {}
+_pipeline_args_cache_ts: float = 0.0
+_PIPELINE_ARGS_CACHE_TTL = 300  # 5 minutes
 
 
 def get_pipeline_config(pipeline_name: str, key: str, default: Any = None) -> Any:
     """
-    Get pipeline-specific config from scheduler.yaml.
+    Get pipeline-specific config. DB is source of truth, falls back to scheduler.yaml.
 
     Usage:
         location_codes = get_pipeline_config('rentroll', 'location_codes', [])
@@ -25,6 +32,39 @@ def get_pipeline_config(pipeline_name: str, key: str, default: Any = None) -> An
     Returns:
         Configuration value or default
     """
+    global _pipeline_args_cache, _pipeline_args_cache_ts
+
+    # Try DB first (pipeline_specific_args JSONB column) with module-level cache
+    now = time.time()
+    if now - _pipeline_args_cache_ts > _PIPELINE_ARGS_CACHE_TTL:
+        try:
+            from common.config_loader import get_database_url
+            from sqlalchemy import create_engine, text
+
+            engine = create_engine(get_database_url('backend'), pool_size=1, max_overflow=0)
+            try:
+                with engine.connect() as conn:
+                    rows = conn.execute(text(
+                        "SELECT pipeline_name, pipeline_specific_args "
+                        "FROM scheduler_pipeline_config "
+                        "WHERE pipeline_specific_args IS NOT NULL"
+                    ))
+                    _pipeline_args_cache = {
+                        r[0]: r[1] for r in rows if r[1]
+                    }
+                    _pipeline_args_cache_ts = now
+            finally:
+                engine.dispose()
+        except Exception:
+            logger.debug("Could not refresh pipeline args cache from DB")
+
+    # Check DB cache
+    if pipeline_name in _pipeline_args_cache:
+        args = _pipeline_args_cache[pipeline_name]
+        if key in args:
+            return args[key]
+
+    # Fall back to scheduler.yaml via config_loader
     try:
         from common.config_loader import get_config
         config = get_config()

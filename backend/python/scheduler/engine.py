@@ -223,10 +223,15 @@ class SchedulerEngine:
             logger.info("Scheduler resumed")
 
     def _register_pipelines(self):
-        """Register all enabled pipelines with APScheduler."""
+        """Register all enabled pipelines with APScheduler.
+        Skips pipelines managed by the orchestrator to prevent dual execution."""
         for name, pipeline in self.config.pipelines.items():
             if not pipeline.enabled:
                 logger.debug(f"Skipping disabled pipeline: {name}")
+                continue
+
+            if pipeline.managed_by == 'orchestrator':
+                logger.info(f"Skipping orchestrator-managed pipeline: {name}")
                 continue
 
             try:

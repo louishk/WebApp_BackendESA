@@ -171,6 +171,11 @@ class PipelineConfig(Base, TimestampMixin):
     default_args = Column(JSONB)
     data_freshness_config = Column(JSONB)  # {table, date_column, database}
 
+    # Extended config (migration 048)
+    sync_config = Column(JSONB)  # {strategy, watermark_field, phases, validation, checkpoint_interval}
+    pipeline_specific_args = Column(JSONB)  # {sql_chunk_size, location_codes, batch_size, etc.}
+    managed_by = Column(String(20), nullable=False, default='scheduler')  # scheduler | orchestrator
+
     def __repr__(self):
         return f"<PipelineConfig(name={self.pipeline_name}, enabled={self.enabled})>"
 
@@ -204,6 +209,9 @@ class PipelineConfig(Base, TimestampMixin):
                 'table': freshness_cfg.get('table', ''),
                 'date_column': freshness_cfg.get('date_column', ''),
             },
+            'sync_config': self.sync_config or {},
+            'pipeline_specific_args': self.pipeline_specific_args or {},
+            'managed_by': self.managed_by or 'scheduler',
         }
 
 

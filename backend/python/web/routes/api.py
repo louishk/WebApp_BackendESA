@@ -466,6 +466,45 @@ def _validate_module_path(module_path):
     return True, 'valid'
 
 
+_SYNC_CONFIG_ALLOWED_KEYS = frozenset({
+    'strategy', 'watermark_field', 'phases', 'validation',
+    'checkpoint_interval', 'lookback_window',
+})
+
+
+def _validate_sync_config(sc):
+    """Validate sync_config JSONB shape. Returns (is_valid, error_msg)."""
+    if sc is None:
+        return True, None
+    if not isinstance(sc, dict):
+        return False, 'sync_config must be an object'
+    unknown = set(sc.keys()) - _SYNC_CONFIG_ALLOWED_KEYS
+    if unknown:
+        return False, f'Unknown sync_config keys: {", ".join(sorted(unknown))}'
+    if 'strategy' in sc and sc['strategy'] not in ('watermark', 'lookback', 'full'):
+        return False, 'sync_config.strategy must be watermark, lookback, or full'
+    return True, None
+
+
+def _validate_pipeline_specific_args(args):
+    """Validate pipeline_specific_args JSONB — must be a flat dict with scalar/list values."""
+    if args is None:
+        return True, None
+    if not isinstance(args, dict):
+        return False, 'pipeline_specific_args must be an object'
+    for k, v in args.items():
+        if not isinstance(k, str):
+            return False, 'pipeline_specific_args keys must be strings'
+        if isinstance(v, dict):
+            # Allow one level of nesting (e.g., property_site_map)
+            for sk, sv in v.items():
+                if isinstance(sv, (dict, list)):
+                    return False, f'pipeline_specific_args.{k} has too-deep nesting'
+        elif not isinstance(v, (str, int, float, bool, list, type(None))):
+            return False, f'pipeline_specific_args.{k} has unsupported type'
+    return True, None
+
+
 @api_bp.route('/data-freshness')
 @require_auth
 @require_api_scope('scheduler:read')
@@ -1344,6 +1383,18 @@ def api_create_pipeline():
     if not is_valid:
         return jsonify({'error': msg}), 400
 
+    managed_by = data.get('managed_by', 'scheduler')
+    if managed_by not in ('scheduler', 'orchestrator'):
+        return jsonify({'error': 'managed_by must be scheduler or orchestrator'}), 400
+
+    valid, err = _validate_sync_config(data.get('sync_config'))
+    if not valid:
+        return jsonify({'error': err}), 400
+
+    valid, err = _validate_pipeline_specific_args(data.get('pipeline_specific_args'))
+    if not valid:
+        return jsonify({'error': err}), 400
+
     session = get_session()
     try:
         existing = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
@@ -1373,6 +1424,9 @@ def api_create_pipeline():
                 'table': data.get('freshness_table', ''),
                 'date_column': data.get('freshness_column', ''),
             },
+            sync_config=data.get('sync_config'),
+            pipeline_specific_args=data.get('pipeline_specific_args'),
+            managed_by=managed_by,
         )
         session.add(row)
         session.commit()
@@ -1443,6 +1497,20 @@ def api_update_pipeline(name):
             fc = dict(row.data_freshness_config or {})
             fc['date_column'] = data['freshness_column']
             row.data_freshness_config = fc
+        if 'sync_config' in data:
+            valid, err = _validate_sync_config(data['sync_config'])
+            if not valid:
+                return jsonify({'error': err}), 400
+            row.sync_config = data['sync_config']
+        if 'pipeline_specific_args' in data:
+            valid, err = _validate_pipeline_specific_args(data['pipeline_specific_args'])
+            if not valid:
+                return jsonify({'error': err}), 400
+            row.pipeline_specific_args = data['pipeline_specific_args']
+        if 'managed_by' in data:
+            if data['managed_by'] not in ('scheduler', 'orchestrator'):
+                return jsonify({'error': 'managed_by must be scheduler or orchestrator'}), 400
+            row.managed_by = data['managed_by']
 
         session.commit()
         return jsonify({'success': True, 'message': f'Pipeline {name} updated'})
@@ -1817,6 +1885,7 @@ def api_inventory_units():
             FROM units_info u
             LEFT JOIN vw_units_inventory v
                 ON v.unit_id = u."UnitID"
+                AND v.site_id = u."SiteID"
             WHERE u."SiteID" IN ({placeholders})
             ORDER BY u."SiteID", u."sUnitName"
         """)

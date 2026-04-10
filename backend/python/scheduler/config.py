@@ -93,6 +93,9 @@ class PipelineDefinition:
     retry: RetryConfig = field(default_factory=RetryConfig)
     timeout_seconds: int = 3600
     data_freshness: DataFreshnessConfig = field(default_factory=DataFreshnessConfig)
+    sync_config: Dict[str, Any] = field(default_factory=dict)
+    pipeline_specific_args: Dict[str, Any] = field(default_factory=dict)
+    managed_by: str = 'scheduler'
 
 
 @dataclass
@@ -125,6 +128,7 @@ class AlertsConfig:
     """Alert channels configuration."""
     slack: SlackConfig = field(default_factory=SlackConfig)
     email: EmailConfig = field(default_factory=EmailConfig)
+    teams: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -249,6 +253,14 @@ class SchedulerConfig:
                                 database=db_value,
                             )
 
+                        # Parse sync config
+                        sync_conf = pdef.get('sync', {})
+
+                        # Build pipeline_specific_args from non-standard keys
+                        specific_args = {}
+                        if 'property_site_map' in pdef:
+                            specific_args['property_site_map'] = pdef['property_site_map']
+
                         schedule_config = pdef.get('schedule', {})
                         config.pipelines[name] = PipelineDefinition(
                             pipeline_name=name,
@@ -267,6 +279,9 @@ class SchedulerConfig:
                             retry=retry_conf,
                             timeout_seconds=pdef.get('timeout_seconds', 3600),
                             data_freshness=freshness_conf,
+                            sync_config=sync_conf,
+                            pipeline_specific_args=specific_args,
+                            managed_by='scheduler',
                         )
 
         # Load alerts config
@@ -302,6 +317,17 @@ class SchedulerConfig:
                             to_addresses=e.get('to_addresses', []),
                             min_severity=e.get('min_severity', 'error'),
                         )
+
+                    # Teams config
+                    if 'teams' in a:
+                        t = a['teams']
+                        config.alerts.teams = {
+                            'enabled': t.get('enabled', False),
+                            'webhook_url': _resolve_env(t.get('webhook_url', '')),
+                            'on_failure': t.get('on_failure', True),
+                            'on_retry': t.get('on_retry', False),
+                            'on_success': t.get('on_success', False),
+                        }
 
         return config
 
@@ -403,6 +429,10 @@ class SchedulerConfig:
                     retry=retry_conf,
                     timeout_seconds=row.timeout_seconds or 3600,
                     data_freshness=freshness_conf,
+                    sync_config=row.sync_config or {},
+                    pipeline_specific_args=row.pipeline_specific_args or {},
+                    # getattr guard: column may not exist if running before migration 048
+                    managed_by=getattr(row, 'managed_by', None) or 'scheduler',
                 )
         except Exception:
             # DB unavailable — fall back to YAML pipelines
