@@ -20,7 +20,7 @@ microsoft_oauth:
   client_id: "a95a430f-94c8-4c9d-8522-f5e26cebe8ec"
   client_secret_vault: "MS_OAUTH_CLIENT_SECRET"
   tenant_id: "45d0dc96-5f92-4a48-93c1-edea9332dd55"
-  redirect_uri: "https://backend.extraspace.com.sg/mcp/oauth/callback"
+  redirect_uri: "https://backend.extraspace.com.sg/mcp-server/oauth/callback"
   allowed_domains:
     - "extraspaceasia.com"
 
