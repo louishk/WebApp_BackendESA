@@ -10,6 +10,20 @@ server:
   port: 8002
   debug: false
 
+# =============================================================================
+# Microsoft OAuth (for claude.ai Enterprise connector SSO)
+# =============================================================================
+# Reuses the same Azure AD app registration as the Flask app.
+# The MCP redirect_uri must be registered in Azure AD as an additional redirect.
+microsoft_oauth:
+  enabled: true
+  client_id: "a95a430f-94c8-4c9d-8522-f5e26cebe8ec"
+  client_secret_vault: "MS_OAUTH_CLIENT_SECRET"
+  tenant_id: "45d0dc96-5f92-4a48-93c1-edea9332dd55"
+  redirect_uri: "https://backend.extraspace.com.sg/mcp/oauth/callback"
+  allowed_domains:
+    - "extraspaceasia.com"
+
 features:
   database: true
   google_ads: true

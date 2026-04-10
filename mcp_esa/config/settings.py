@@ -43,6 +43,7 @@ class Settings:
         self._server = self._mcp.get('server', {})
         self._features = self._mcp.get('features', {})
         self._gads = self._mcp.get('google_ads', {})
+        self._ms_oauth = self._mcp.get('microsoft_oauth', {})
 
     # Server
     @property
@@ -77,6 +78,32 @@ class Settings:
     @property
     def revenue_enabled(self) -> bool:
         return self._features.get('revenue', True)
+
+    # Microsoft OAuth (for claude.ai Enterprise SSO)
+    @property
+    def ms_oauth_enabled(self) -> bool:
+        return self._ms_oauth.get('enabled', False)
+
+    @property
+    def ms_oauth_client_id(self) -> str:
+        return self._ms_oauth.get('client_id', '')
+
+    @property
+    def ms_oauth_client_secret(self) -> str:
+        vault_key = self._ms_oauth.get('client_secret_vault', 'MS_OAUTH_CLIENT_SECRET')
+        return self._config.get_secret(vault_key) or ''
+
+    @property
+    def ms_oauth_tenant_id(self) -> str:
+        return self._ms_oauth.get('tenant_id', 'common')
+
+    @property
+    def ms_oauth_redirect_uri(self) -> str:
+        return self._ms_oauth.get('redirect_uri', '')
+
+    @property
+    def ms_oauth_allowed_domains(self) -> list:
+        return self._ms_oauth.get('allowed_domains', ['extraspaceasia.com'])
 
     # Google Ads (non-secret fields)
     @property
