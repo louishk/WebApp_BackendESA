@@ -1101,16 +1101,34 @@ def get_preset_tables(preset_name):
         else:
             # PostgreSQL / MySQL / MariaDB / MSSQL — use SQLAlchemy
             from sqlalchemy import create_engine, text as sa_text
+            from sqlalchemy.engine import URL
 
-            if db_type == 'postgresql':
-                ssl_param = '?sslmode=require' if db_config.get('ssl') else ''
-                url = f"postgresql://{db_config['user']}:{password}@{db_config['host']}:{db_config.get('port', 5432)}/{db_config['database']}{ssl_param}"
-            elif db_type in ('mysql', 'mariadb'):
-                url = f"mysql+pymysql://{db_config['user']}:{password}@{db_config['host']}:{db_config.get('port', 3306)}/{db_config['database']}"
-            elif db_type == 'mssql':
-                url = f"mssql+pyodbc://{db_config['user']}:{password}@{db_config['host']}:{db_config.get('port', 1433)}/{db_config['database']}?driver=ODBC+Driver+17+for+SQL+Server"
-            else:
+            driver_map = {
+                'postgresql': 'postgresql',
+                'mysql': 'mysql+pymysql',
+                'mariadb': 'mysql+pymysql',
+                'mssql': 'mssql+pyodbc',
+            }
+            driver = driver_map.get(db_type)
+            if not driver:
                 return jsonify({"error": f"Unsupported DB type: {db_type}"}), 400
+
+            port_defaults = {'postgresql': 5432, 'mysql': 3306, 'mariadb': 3306, 'mssql': 1433}
+            query_params = {}
+            if db_type == 'postgresql' and db_config.get('ssl'):
+                query_params['sslmode'] = 'require'
+            elif db_type == 'mssql':
+                query_params['driver'] = 'ODBC Driver 17 for SQL Server'
+
+            url = URL.create(
+                drivername=driver,
+                username=db_config['user'],
+                password=password,
+                host=db_config['host'],
+                port=db_config.get('port', port_defaults.get(db_type, 5432)),
+                database=db_config['database'],
+                query=query_params,
+            )
 
             engine = create_engine(url)
             with engine.connect() as conn:

@@ -152,6 +152,11 @@ Use this connection with:
         if connection_name not in _active_connections:
             return f"No active connection named '{connection_name}'. Use DB_connect_preset(preset_name='{connection_name}') first."
 
+        # Re-check preset access (connections are shared across keys)
+        allowed_presets = allowed_db_presets_var.get([])
+        if allowed_presets and connection_name not in allowed_presets:
+            return f"Access denied: preset '{connection_name}' is not allowed for this API key"
+
         conn = _active_connections[connection_name]
         if not conn.connected:
             return f"Connection '{connection_name}' is not active. Please reconnect using DB_connect_preset."
@@ -218,6 +223,11 @@ Use this connection with:
         if connection_name not in _active_connections:
             return f"No active connection named '{connection_name}'. Use DB_connect_preset first."
 
+        # Re-check preset access (connections are shared across keys)
+        allowed_presets = allowed_db_presets_var.get([])
+        if allowed_presets and connection_name not in allowed_presets:
+            return f"Access denied: preset '{connection_name}' is not allowed for this API key"
+
         conn = _active_connections[connection_name]
         if not conn.connected:
             return f"Connection '{connection_name}' is not active."
@@ -272,6 +282,11 @@ Use this connection with:
 
         if connection_name not in _active_connections:
             return f"No active connection named '{connection_name}'. Use DB_connect_preset first."
+
+        # Re-check preset access (connections are shared across keys)
+        allowed_presets = allowed_db_presets_var.get([])
+        if allowed_presets and connection_name not in allowed_presets:
+            return f"Access denied: preset '{connection_name}' is not allowed for this API key"
 
         conn = _active_connections[connection_name]
         if not conn.connected:

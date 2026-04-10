@@ -244,11 +244,27 @@ class DatabaseService:
         # Strip double-quoted identifiers to plain names (prevents bypass via "Table")
         normalized = re.sub(r'"([^"]+)"', r'\1', normalized)
 
-        # Match: FROM table, JOIN table, INTO table
-        # Handles optional schema prefix (schema.table)
-        # Stops at whitespace, comma, parenthesis, or semicolon
-        pattern = r'(?:FROM|JOIN|INTO)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)(?:\s|,|\(|;|$)'
-        matches = re.findall(pattern, normalized, re.IGNORECASE)
+        # Extract FROM clause bodies (between FROM and next keyword/end)
+        # This catches comma-separated tables: FROM t1 AS a, t2, schema.t3
+        from_body_pattern = r'(?:FROM|JOIN|INTO)\s+(.*?)(?=\s+(?:WHERE|JOIN|INNER|LEFT|RIGHT|FULL|CROSS|ORDER|GROUP|HAVING|LIMIT|UNION|ON|SET|RETURNING)\b|\)|;|$)'
+        from_bodies = re.findall(from_body_pattern, normalized, re.IGNORECASE)
+
+        # From each body, extract all identifiers (handles aliases and commas)
+        ident_pattern = r'([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)'
+        skip_words = {'AS', 'SELECT', 'LATERAL', 'UNNEST', 'GENERATE_SERIES', 'VALUES',
+                       'AND', 'OR', 'NOT', 'NULL', 'TRUE', 'FALSE', 'ON', 'USING',
+                       'ASC', 'DESC', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'IS', 'IN',
+                       'BETWEEN', 'LIKE', 'ILIKE', 'CAST', 'COALESCE', 'NULLIF', 'EXISTS'}
+
+        matches = []
+        for body in from_bodies:
+            # Split by comma to get each table reference (with optional alias)
+            parts = [p.strip() for p in body.split(',')]
+            for part in parts:
+                # First identifier in each part is the table name
+                ident_match = re.match(ident_pattern, part)
+                if ident_match:
+                    matches.append(ident_match.group(1))
 
         # System schemas that should be blocked when table restrictions are active
         blocked_schemas = {'information_schema', 'pg_catalog'}
@@ -263,8 +279,8 @@ class DatabaseService:
                 else:
                     tables.add(table_part.lower())
             else:
-                # Skip SQL keywords that can follow FROM/JOIN
-                if match.upper() not in ('SELECT', 'LATERAL', 'UNNEST', 'GENERATE_SERIES', 'VALUES'):
+                # Skip SQL keywords that could appear as false positives
+                if match.upper() not in skip_words:
                     tables.add(match.lower())
 
         return tables

@@ -271,22 +271,42 @@ function loadTablesForPreset(preset) {
                 return;
             }
 
-            // Select/Deselect All buttons
+            // Select/Deselect All buttons (built with createElement to avoid innerHTML injection)
             var controls = document.createElement('div');
             controls.style.cssText = 'grid-column: 1 / -1; margin-bottom: 0.3rem; display: flex; gap: 0.5rem;';
-            controls.innerHTML =
-                '<button type="button" onclick="togglePresetTables(\'' + preset + '\', true)" style="font-size: 0.65rem; padding: 0.1rem 0.3rem; border: 1px solid #ccc; background: #f5f5f5; border-radius: 2px; cursor: pointer;">Select All</button>' +
-                '<button type="button" onclick="togglePresetTables(\'' + preset + '\', false)" style="font-size: 0.65rem; padding: 0.1rem 0.3rem; border: 1px solid #ccc; background: #f5f5f5; border-radius: 2px; cursor: pointer;">Deselect All</button>';
+            var btnStyle = 'font-size: 0.65rem; padding: 0.1rem 0.3rem; border: 1px solid #ccc; background: #f5f5f5; border-radius: 2px; cursor: pointer;';
+            var selAllBtn = document.createElement('button');
+            selAllBtn.type = 'button';
+            selAllBtn.style.cssText = btnStyle;
+            selAllBtn.textContent = 'Select All';
+            selAllBtn.addEventListener('click', function() { togglePresetTables(preset, true); });
+            var deselBtn = document.createElement('button');
+            deselBtn.type = 'button';
+            deselBtn.style.cssText = btnStyle;
+            deselBtn.textContent = 'Deselect All';
+            deselBtn.addEventListener('click', function() { togglePresetTables(preset, false); });
+            controls.appendChild(selAllBtn);
+            controls.appendChild(deselBtn);
             container.appendChild(controls);
 
             tables.forEach(function(table) {
-                var checked = existingLower.indexOf(table.toLowerCase()) !== -1;
+                var isChecked = existingLower.indexOf(table.toLowerCase()) !== -1;
                 var div = document.createElement('div');
-                div.innerHTML =
-                    '<label style="font-size: 0.75rem; display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">' +
-                    '<input type="checkbox" name="mcp_db_table_rules__' + preset + '" value="' + table + '"' +
-                    (checked ? ' checked' : '') + ' class="mcp-table-cb" data-preset="' + preset + '">' +
-                    '<code style="font-size: 0.7rem;">' + table + '</code></label>';
+                var label = document.createElement('label');
+                label.style.cssText = 'font-size: 0.75rem; display: flex; align-items: center; gap: 0.3rem; cursor: pointer;';
+                var input = document.createElement('input');
+                input.type = 'checkbox';
+                input.name = 'mcp_db_table_rules__' + preset;
+                input.value = table;
+                input.className = 'mcp-table-cb';
+                input.dataset.preset = preset;
+                if (isChecked) input.checked = true;
+                var code = document.createElement('code');
+                code.style.cssText = 'font-size: 0.7rem;';
+                code.textContent = table;
+                label.appendChild(input);
+                label.appendChild(code);
+                div.appendChild(label);
                 container.appendChild(div);
             });
 
