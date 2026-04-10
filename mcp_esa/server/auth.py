@@ -142,6 +142,7 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
             request.state.scopes = user_info["scopes"]
             request.state.mcp_tools = user_info["mcp_tools"]
             request.state.mcp_db_presets = user_info.get("mcp_db_presets", [])
+            request.state.mcp_db_table_rules = user_info.get("mcp_db_table_rules", {})
             logger.info(f"MCP auth OK: {user_info['username']} (key: {user_info['key_id']}) from {client_ip}")
             return await call_next(request)
 
@@ -163,6 +164,7 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
             request.state.scopes = user_info["scopes"]
             request.state.mcp_tools = user_info["mcp_tools"]
             request.state.mcp_db_presets = user_info.get("mcp_db_presets", [])
+            request.state.mcp_db_table_rules = user_info.get("mcp_db_table_rules", {})
             logger.info(f"MCP OAuth auth OK: {user_info['username']} from {client_ip}")
             return await call_next(request)
 
@@ -225,7 +227,7 @@ def _authenticate_api_key(api_key_header: str) -> Tuple[Optional[dict], Optional
             text("""
                 SELECT ak.id, ak.key_hash, ak.scopes, ak.is_active,
                        ak.expires_at, ak.daily_quota, ak.daily_usage, ak.quota_reset_date,
-                       ak.mcp_enabled, ak.mcp_tools, ak.mcp_db_presets,
+                       ak.mcp_enabled, ak.mcp_tools, ak.mcp_db_presets, ak.mcp_db_table_rules,
                        u.username, u.id as user_id
                 FROM api_keys ak
                 JOIN users u ON u.id = ak.user_id
@@ -286,6 +288,7 @@ def _authenticate_api_key(api_key_header: str) -> Tuple[Optional[dict], Optional
             "scopes": row.scopes or [],
             "mcp_tools": row.mcp_tools or [],
             "mcp_db_presets": row.mcp_db_presets or [],
+            "mcp_db_table_rules": row.mcp_db_table_rules or {},
         }, None
 
     except Exception as e:
@@ -351,13 +354,14 @@ def _authenticate_bearer_token(token: str) -> Tuple[Optional[dict], Optional[str
     client_id = payload.get("client_id")
     mcp_tools = None  # None = no restriction (all tools)
     mcp_db_presets = []  # empty = all presets
+    mcp_db_table_rules = {}
     oauth_username = None
     if client_id:
         session = _get_session()
         try:
             row = session.execute(
                 text("""
-                    SELECT ak.mcp_tools, ak.mcp_db_presets, u.username
+                    SELECT ak.mcp_tools, ak.mcp_db_presets, ak.mcp_db_table_rules, u.username
                     FROM api_keys ak JOIN users u ON u.id = ak.user_id
                     WHERE ak.key_id = :key_id AND ak.is_active = true AND ak.mcp_enabled = true
                 """),
@@ -367,6 +371,7 @@ def _authenticate_bearer_token(token: str) -> Tuple[Optional[dict], Optional[str
                 return None, "API key no longer active"
             mcp_tools = row.mcp_tools or None
             mcp_db_presets = row.mcp_db_presets or []
+            mcp_db_table_rules = row.mcp_db_table_rules or {}
             oauth_username = row.username
         except Exception as e:
             logger.error(f"OAuth token key lookup error: {e}")
@@ -381,4 +386,5 @@ def _authenticate_bearer_token(token: str) -> Tuple[Optional[dict], Optional[str
         "scopes": payload.get("scope", "mcp:*").split(),
         "mcp_tools": mcp_tools,
         "mcp_db_presets": mcp_db_presets if client_id else [],
+        "mcp_db_table_rules": mcp_db_table_rules,
     }, None

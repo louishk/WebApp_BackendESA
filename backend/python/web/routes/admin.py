@@ -3,11 +3,14 @@ Admin routes - user, role, and page management.
 """
 
 import re
+import logging
 import bcrypt
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, current_app
 from flask_login import login_required, current_user
 from web.utils.audit import audit_log, AuditEvent
 from web.utils.validators import validate_password
+
+logger = logging.getLogger(__name__)
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -1050,6 +1053,96 @@ def _get_mcp_db_presets():
         return {}
 
 
+@admin_bp.route('/api-keys/preset-tables/<preset_name>', methods=['GET'])
+@login_required
+@admin_required
+def get_preset_tables(preset_name):
+    """AJAX: Return list of tables in a database preset (for table access control UI)."""
+    try:
+        from common.config_loader import get_config
+        config = get_config()
+        raw = config.get_raw_config('mcp')
+        databases = raw.get('databases', {})
+
+        if preset_name not in databases:
+            return jsonify({"error": "Preset not found"}), 404
+
+        db_config = databases[preset_name]
+        db_type = db_config.get('type', 'postgresql')
+
+        # Resolve password from vault
+        password = None
+        pw_key = db_config.get('password_vault')
+        if pw_key:
+            from common.secrets_vault import vault_config
+            password = vault_config(pw_key, default=None)
+        else:
+            password = db_config.get('password')
+
+        tables = []
+
+        if db_type == 'bigquery':
+            # BigQuery: use google-cloud-bigquery
+            creds_key = db_config.get('credentials_json_vault')
+            if creds_key:
+                import json as json_mod
+                from common.secrets_vault import vault_config
+                from google.cloud import bigquery
+                from google.oauth2 import service_account
+                creds_json = vault_config(creds_key, default=None)
+                if creds_json:
+                    info = json_mod.loads(creds_json)
+                    credentials = service_account.Credentials.from_service_account_info(info)
+                    client = bigquery.Client(credentials=credentials, project=db_config.get('project_id'))
+                    dataset = db_config.get('dataset')
+                    if dataset:
+                        for t in client.list_tables(dataset):
+                            tables.append(t.table_id)
+        else:
+            # PostgreSQL / MySQL / MariaDB / MSSQL — use SQLAlchemy
+            from sqlalchemy import create_engine, text as sa_text
+
+            if db_type == 'postgresql':
+                ssl_param = '?sslmode=require' if db_config.get('ssl') else ''
+                url = f"postgresql://{db_config['user']}:{password}@{db_config['host']}:{db_config.get('port', 5432)}/{db_config['database']}{ssl_param}"
+            elif db_type in ('mysql', 'mariadb'):
+                url = f"mysql+pymysql://{db_config['user']}:{password}@{db_config['host']}:{db_config.get('port', 3306)}/{db_config['database']}"
+            elif db_type == 'mssql':
+                url = f"mssql+pyodbc://{db_config['user']}:{password}@{db_config['host']}:{db_config.get('port', 1433)}/{db_config['database']}?driver=ODBC+Driver+17+for+SQL+Server"
+            else:
+                return jsonify({"error": f"Unsupported DB type: {db_type}"}), 400
+
+            engine = create_engine(url)
+            with engine.connect() as conn:
+                if db_type == 'postgresql':
+                    rows = conn.execute(sa_text(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = 'public' AND table_type IN ('BASE TABLE', 'VIEW') "
+                        "ORDER BY table_name"
+                    ))
+                elif db_type in ('mysql', 'mariadb'):
+                    rows = conn.execute(sa_text(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = :db ORDER BY table_name"
+                    ), {"db": db_config['database']})
+                elif db_type == 'mssql':
+                    rows = conn.execute(sa_text(
+                        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                        "WHERE TABLE_SCHEMA = 'dbo' AND TABLE_TYPE = 'BASE TABLE' "
+                        "ORDER BY TABLE_NAME"
+                    ))
+                tables = [row[0] for row in rows]
+            engine.dispose()
+
+        # Sanitize: only return valid identifier names
+        safe_tables = [t for t in tables if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]{0,127}$', t)]
+        return jsonify({"tables": sorted(safe_tables)})
+
+    except Exception as e:
+        logger.error(f"Failed to list tables for preset {preset_name}: {e}")
+        return jsonify({"error": "Failed to connect to database"}), 500
+
+
 def _get_mcp_tools_grouped():
     """Get available MCP tools grouped by category for the admin UI."""
     from collections import OrderedDict
@@ -1147,12 +1240,24 @@ def edit_api_key(user_id):
             mcp_db_presets = request.form.getlist('mcp_db_presets')
             api_key.mcp_db_presets = mcp_db_presets if mcp_db_presets else []
 
+            # Update MCP DB table restrictions
+            # Form sends: mcp_db_table_rules__esa_pbi=rent_rolls&mcp_db_table_rules__esa_pbi=site_info&...
+            mcp_db_table_rules = {}
+            for key in request.form:
+                if key.startswith('mcp_db_table_rules__'):
+                    preset = key[len('mcp_db_table_rules__'):]
+                    tables = request.form.getlist(key)
+                    if tables:
+                        mcp_db_table_rules[preset] = tables
+            api_key.mcp_db_table_rules = mcp_db_table_rules
+
             db.commit()
             audit_log(AuditEvent.CONFIG_UPDATED,
                       f"Updated API key config for user '{user.username}': scopes={scopes}, "
                       f"rate_limit={api_key.rate_limit}, daily_quota={api_key.daily_quota}, "
                       f"mcp_enabled={api_key.mcp_enabled}, mcp_tools={len(mcp_tools)} selected, "
-                      f"mcp_db_presets={len(mcp_db_presets)} selected")
+                      f"mcp_db_presets={len(mcp_db_presets)} selected, "
+                      f"mcp_db_table_rules={len(mcp_db_table_rules)} preset(s) restricted")
             flash(f'API key settings updated for {user.username}.', 'success')
             return redirect(url_for('admin.list_api_keys'))
 

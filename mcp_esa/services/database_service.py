@@ -229,6 +229,46 @@ class DatabaseService:
         else:
             return 'VERY_SLOW'
 
+    @staticmethod
+    def extract_table_references(query: str) -> set:
+        """
+        Extract table names referenced in a SQL query using regex.
+        Catches FROM, JOIN, and INTO clauses. Not a full SQL parser,
+        but sufficient for read-only SELECT queries.
+        """
+        # Normalize whitespace
+        normalized = re.sub(r'\s+', ' ', query.strip())
+
+        tables = set()
+
+        # Strip double-quoted identifiers to plain names (prevents bypass via "Table")
+        normalized = re.sub(r'"([^"]+)"', r'\1', normalized)
+
+        # Match: FROM table, JOIN table, INTO table
+        # Handles optional schema prefix (schema.table)
+        # Stops at whitespace, comma, parenthesis, or semicolon
+        pattern = r'(?:FROM|JOIN|INTO)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?)(?:\s|,|\(|;|$)'
+        matches = re.findall(pattern, normalized, re.IGNORECASE)
+
+        # System schemas that should be blocked when table restrictions are active
+        blocked_schemas = {'information_schema', 'pg_catalog'}
+
+        for match in matches:
+            # If schema.table, check for system schema access
+            if '.' in match:
+                schema_part, table_part = match.rsplit('.', 1)
+                if schema_part.lower() in blocked_schemas:
+                    # Mark as a system schema access — caller should block
+                    tables.add(f'_system_.{table_part.lower()}')
+                else:
+                    tables.add(table_part.lower())
+            else:
+                # Skip SQL keywords that can follow FROM/JOIN
+                if match.upper() not in ('SELECT', 'LATERAL', 'UNNEST', 'GENERATE_SERIES', 'VALUES'):
+                    tables.add(match.lower())
+
+        return tables
+
 
 # Global database service instance
 _database_service = None

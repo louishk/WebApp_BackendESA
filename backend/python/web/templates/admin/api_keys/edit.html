@@ -145,10 +145,29 @@
                 <div>
                     <label style="font-size: 0.8rem;">
                         <input type="checkbox" name="mcp_db_presets" value="{{ preset_name }}"
+                               class="mcp-preset-cb" data-preset="{{ preset_name }}"
                                {{ 'checked' if api_key.mcp_db_presets and preset_name in api_key.mcp_db_presets }}>
                         <code style="font-size: 0.75rem;">{{ preset_name }}</code>
                         <span style="color: #888; font-size: 0.7rem;">({{ preset_info }})</span>
                     </label>
+                    <!-- Expandable table access section -->
+                    <div class="table-access-section" data-preset="{{ preset_name }}"
+                         style="margin-left: 1.4rem; margin-top: 0.4rem; display: none;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;">
+                            <button type="button" class="btn-load-tables" data-preset="{{ preset_name }}"
+                                    style="font-size: 0.7rem; padding: 0.15rem 0.4rem; background: var(--esa-navy); color: white; border: none; border-radius: 3px; cursor: pointer;">
+                                Load Tables
+                            </button>
+                            <span class="table-status" data-preset="{{ preset_name }}" style="font-size: 0.7rem; color: #888;"></span>
+                        </div>
+                        <p style="font-size: 0.7rem; color: #aaa; margin-bottom: 0.3rem;">
+                            Leave all unchecked = <strong>all tables allowed</strong> (no restriction). Check specific tables to restrict access to only those tables.
+                        </p>
+                        <div class="table-checkboxes" data-preset="{{ preset_name }}"
+                             style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.2rem 1rem; max-height: 300px; overflow-y: auto;">
+                            <!-- Populated by AJAX -->
+                        </div>
+                    </div>
                 </div>
                 {% endfor %}
             </div>
@@ -204,5 +223,92 @@ function toggleGroup(group) {
     const allChecked = Array.from(cbs).every(cb => cb.checked);
     cbs.forEach(cb => cb.checked = !allChecked);
 }
+
+// Table-level access control
+var existingTableRules = {{ (api_key.mcp_db_table_rules or {})|tojson }};
+
+// Show/hide table access section when preset checkbox changes
+document.querySelectorAll('.mcp-preset-cb').forEach(function(cb) {
+    var preset = cb.dataset.preset;
+    var section = document.querySelector('.table-access-section[data-preset="' + preset + '"]');
+    if (section) {
+        section.style.display = cb.checked ? '' : 'none';
+        // Auto-load tables if preset is checked and has existing rules
+        if (cb.checked && existingTableRules[preset]) {
+            loadTablesForPreset(preset);
+        }
+    }
+    cb.addEventListener('change', function() {
+        if (section) section.style.display = this.checked ? '' : 'none';
+    });
+});
+
+function loadTablesForPreset(preset) {
+    var container = document.querySelector('.table-checkboxes[data-preset="' + preset + '"]');
+    var status = document.querySelector('.table-status[data-preset="' + preset + '"]');
+    var btn = document.querySelector('.btn-load-tables[data-preset="' + preset + '"]');
+    if (!container) return;
+
+    status.textContent = 'Loading...';
+    btn.disabled = true;
+
+    fetch('/admin/api-keys/preset-tables/' + encodeURIComponent(preset))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) {
+                status.textContent = 'Error: ' + data.error;
+                btn.disabled = false;
+                return;
+            }
+            var tables = data.tables || [];
+            var existing = existingTableRules[preset] || [];
+            var existingLower = existing.map(function(t) { return t.toLowerCase(); });
+
+            container.innerHTML = '';
+            if (tables.length === 0) {
+                status.textContent = 'No tables found';
+                btn.disabled = false;
+                return;
+            }
+
+            // Select/Deselect All buttons
+            var controls = document.createElement('div');
+            controls.style.cssText = 'grid-column: 1 / -1; margin-bottom: 0.3rem; display: flex; gap: 0.5rem;';
+            controls.innerHTML =
+                '<button type="button" onclick="togglePresetTables(\'' + preset + '\', true)" style="font-size: 0.65rem; padding: 0.1rem 0.3rem; border: 1px solid #ccc; background: #f5f5f5; border-radius: 2px; cursor: pointer;">Select All</button>' +
+                '<button type="button" onclick="togglePresetTables(\'' + preset + '\', false)" style="font-size: 0.65rem; padding: 0.1rem 0.3rem; border: 1px solid #ccc; background: #f5f5f5; border-radius: 2px; cursor: pointer;">Deselect All</button>';
+            container.appendChild(controls);
+
+            tables.forEach(function(table) {
+                var checked = existingLower.indexOf(table.toLowerCase()) !== -1;
+                var div = document.createElement('div');
+                div.innerHTML =
+                    '<label style="font-size: 0.75rem; display: flex; align-items: center; gap: 0.3rem; cursor: pointer;">' +
+                    '<input type="checkbox" name="mcp_db_table_rules__' + preset + '" value="' + table + '"' +
+                    (checked ? ' checked' : '') + ' class="mcp-table-cb" data-preset="' + preset + '">' +
+                    '<code style="font-size: 0.7rem;">' + table + '</code></label>';
+                container.appendChild(div);
+            });
+
+            status.textContent = tables.length + ' tables';
+            btn.disabled = false;
+        })
+        .catch(function(err) {
+            status.textContent = 'Failed to load';
+            btn.disabled = false;
+        });
+}
+
+function togglePresetTables(preset, checked) {
+    document.querySelectorAll('.mcp-table-cb[data-preset="' + preset + '"]')
+        .forEach(function(cb) { cb.checked = checked; });
+}
+
+// Wire up Load Tables buttons
+document.querySelectorAll('.btn-load-tables').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        loadTablesForPreset(this.dataset.preset);
+    });
+});
 </script>
 {% endblock %}

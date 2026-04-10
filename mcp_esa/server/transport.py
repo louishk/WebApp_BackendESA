@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Context variables for per-request state (used by DB tools and stats)
 allowed_db_presets_var: contextvars.ContextVar[List[str]] = contextvars.ContextVar('allowed_db_presets', default=[])
+allowed_db_tables_var: contextvars.ContextVar[dict] = contextvars.ContextVar('allowed_db_tables', default={})
 request_context_var: contextvars.ContextVar[dict] = contextvars.ContextVar('request_context', default={})
 
 
@@ -49,6 +50,10 @@ class StreamableHTTPTransport:
         # Set DB preset restrictions in contextvar for DB tools to check
         db_presets = getattr(request.state, 'mcp_db_presets', []) if hasattr(request, 'state') else []
         allowed_db_presets_var.set(db_presets)
+
+        # Set per-preset table restrictions in contextvar for DB tools
+        db_table_rules = getattr(request.state, 'mcp_db_table_rules', {}) if hasattr(request, 'state') else {}
+        allowed_db_tables_var.set(db_table_rules)
 
         # Set request context for tool stats tracking
         client_ip = request.client.host if request.client else "unknown"

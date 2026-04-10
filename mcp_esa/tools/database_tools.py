@@ -12,7 +12,7 @@ from mcp.server import Server
 from mcp_esa.services.simple_database import SimpleDatabase
 from mcp_esa.services.database_service import get_database_service
 from mcp_esa.config.database_presets import get_database_presets
-from mcp_esa.server.transport import allowed_db_presets_var
+from mcp_esa.server.transport import allowed_db_presets_var, allowed_db_tables_var
 
 if TYPE_CHECKING:
     from mcp_esa.server.mcp_server import MCPServerApp
@@ -21,6 +21,17 @@ logger = logging.getLogger(__name__)
 
 # Global connection storage
 _active_connections: Dict[str, SimpleDatabase] = {}
+
+
+def _get_allowed_tables(connection_name: str) -> list:
+    """Get the allowed tables for a connection. Returns None if no restrictions."""
+    table_rules = allowed_db_tables_var.get({})
+    if not table_rules:
+        return None
+    tables = table_rules.get(connection_name)
+    if not tables:
+        return None  # Missing key or empty list = no restrictions
+    return [t.lower() for t in tables]
 
 
 def register_database_tools(server: Server, app: 'MCPServerApp') -> None:
@@ -146,6 +157,19 @@ Use this connection with:
             return f"Connection '{connection_name}' is not active. Please reconnect using DB_connect_preset."
 
         try:
+            # Check per-key table restrictions
+            allowed_tables = _get_allowed_tables(connection_name)
+            if allowed_tables is not None:
+                referenced = db_service.extract_table_references(query)
+                # Block system schema access (information_schema, pg_catalog)
+                system_refs = {t for t in referenced if t.startswith('_system_.')}
+                if system_refs:
+                    return "Access denied: system catalog queries are not allowed when table restrictions are active"
+                blocked = referenced - set(allowed_tables)
+                if blocked:
+                    blocked_list = ', '.join(sorted(blocked))
+                    return f"Access denied: query references restricted table(s): {blocked_list}"
+
             result = await db_service.execute_safe_query(conn, query)
 
             if not result.success:
@@ -201,6 +225,19 @@ Use this connection with:
         try:
             tables = await conn.get_tables(schema)
 
+            # Filter by per-key table restrictions
+            allowed_tables = _get_allowed_tables(connection_name)
+            if allowed_tables is not None:
+                filtered = []
+                for table in tables:
+                    if isinstance(table, dict):
+                        name = table.get('table_name') or table.get('TABLE_NAME') or list(table.values())[0]
+                    else:
+                        name = str(table)
+                    if name.lower() in allowed_tables:
+                        filtered.append(table)
+                tables = filtered
+
             if not tables:
                 return f"No tables found in {connection_name}" + (f" (schema: {schema})" if schema else "")
 
@@ -239,6 +276,11 @@ Use this connection with:
         conn = _active_connections[connection_name]
         if not conn.connected:
             return f"Connection '{connection_name}' is not active."
+
+        # Check per-key table restrictions
+        allowed_tables = _get_allowed_tables(connection_name)
+        if allowed_tables is not None and table_name.lower() not in allowed_tables:
+            return f"Access denied: table '{table_name}' is not accessible for this API key"
 
         try:
             columns = await conn.describe_table(table_name, schema)

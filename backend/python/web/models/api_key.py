@@ -93,6 +93,8 @@ class ApiKey(Base):
                        comment="Allowed MCP tool names (empty list = all tools)")
     mcp_db_presets = Column(JSONB, nullable=False, default=list,
                             comment="Allowed DB preset names (empty list = all presets)")
+    mcp_db_table_rules = Column(JSONB, nullable=False, default=dict,
+                                 comment="Per-preset table allow-lists (empty = all tables)")
 
     is_active = Column(Boolean, nullable=False, default=True)
     last_used_at = Column(DateTime(timezone=True), comment="Last time this key was used")
@@ -132,6 +134,15 @@ class ApiKey(Base):
             return True  # Empty list means all tools
         return tool_name in self.mcp_tools
 
+    def get_allowed_tables(self, preset_name):
+        """Get allowed tables for a preset. Returns None if no restrictions."""
+        if not self.mcp_db_table_rules:
+            return None
+        tables = self.mcp_db_table_rules.get(preset_name)
+        if not tables:
+            return None  # Empty list or missing key = no restrictions
+        return tables
+
     def to_dict(self):
         """Convert to dictionary (never includes the hash)."""
         return {
@@ -143,6 +154,7 @@ class ApiKey(Base):
             'mcp_enabled': self.mcp_enabled,
             'mcp_tools': self.mcp_tools or [],
             'mcp_db_presets': self.mcp_db_presets or [],
+            'mcp_db_table_rules': self.mcp_db_table_rules or {},
             'rate_limit': self.rate_limit,
             'daily_quota': self.daily_quota,
             'daily_usage': self.daily_usage,
