@@ -66,6 +66,7 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         "/oauth/register",
         "/oauth/authorize",
         "/oauth/token",
+        "/oauth/callback",
     }
 
     def __init__(self, app):
