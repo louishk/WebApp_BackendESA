@@ -49,7 +49,6 @@ class SugarCRMService:
         self.config = config
         self._client = httpx.Client(timeout=config.timeout)
         self._access_token: Optional[str] = None
-        self._refresh_token: Optional[str] = None
         self._token_expires_at: float = 0.0
 
     # ---------------- Auth ----------------
@@ -72,7 +71,6 @@ class SugarCRMService:
             raise SugarCRMAPIError("SugarCRM authentication failed", code="auth_failed")
         data = resp.json()
         self._access_token = data.get("access_token")
-        self._refresh_token = data.get("refresh_token")
         self._token_expires_at = now + int(data.get("expires_in", 3600))
 
     def _headers(self) -> Dict[str, str]:

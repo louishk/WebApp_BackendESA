@@ -24,6 +24,8 @@ def _mock_response(json_body, status=200):
     r.status_code = status
     r.json.return_value = json_body
     r.text = str(json_body)
+    # content must be bytes-like so `not resp.content` in _request behaves correctly
+    r.content = b"" if status == 204 else b"{}"
     return r
 
 
