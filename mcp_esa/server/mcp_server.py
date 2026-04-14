@@ -83,6 +83,15 @@ def create_mcp_server(settings: Optional[Settings] = None) -> MCPServerApp:
         except Exception as e:
             logger.warning(f"Failed to register Revenue Management tools: {e}")
 
+    # Register SugarCRM tools
+    if settings.sugarcrm_enabled:
+        try:
+            from mcp_esa.tools.sugarcrm_tools import register_sugarcrm_tools
+            register_sugarcrm_tools(server, app)
+            logger.info("SugarCRM tools registered")
+        except Exception as e:
+            logger.warning(f"Failed to register SugarCRM tools: {e}")
+
     tool_count = len(server._tool_handlers) if hasattr(server, '_tool_handlers') else 0
     logger.info(f"MCP Server '{settings.mcp_server_name}' created with {tool_count} tools")
     return app
