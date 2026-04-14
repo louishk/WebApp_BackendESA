@@ -28,6 +28,18 @@ features:
   database: true
   google_ads: true
   revenue: true
+  naver_searchad: true
+
+# =============================================================================
+# Naver Search Ad API
+# =============================================================================
+# HMAC-SHA256 signed requests. Credentials resolved from vault in production;
+# for local testing the service also falls back to .env (NAVER_SEARCHAD_*).
+naver_searchad:
+  base_url: "https://api.searchad.naver.com"
+  api_key_vault: "NAVER_SEARCHAD_API_KEY"
+  secret_key_vault: "NAVER_SEARCHAD_SECRET_KEY"
+  customer_id_vault: "NAVER_SEARCHAD_CUSTOMER_ID"
 
 # =============================================================================
 # Google Ads API

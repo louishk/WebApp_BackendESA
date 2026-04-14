@@ -44,6 +44,7 @@ class Settings:
         self._features = self._mcp.get('features', {})
         self._gads = self._mcp.get('google_ads', {})
         self._ms_oauth = self._mcp.get('microsoft_oauth', {})
+        self._naver = self._mcp.get('naver_searchad', {})
 
     # Server
     @property
@@ -78,6 +79,41 @@ class Settings:
     @property
     def revenue_enabled(self) -> bool:
         return self._features.get('revenue', True)
+
+    @property
+    def naver_searchad_enabled(self) -> bool:
+        return self._features.get('naver_searchad', True)
+
+    # Naver Search Ad — vault-first, env fallback (for local endpoint testing)
+    def _vault_or_env(self, vault_key: str, env_key: str) -> str:
+        import os
+        val = self._config.get_secret(vault_key) if vault_key else None
+        return val or os.getenv(env_key, '') or ''
+
+    @property
+    def naver_searchad_base_url(self) -> str:
+        return self._naver.get('base_url', 'https://api.searchad.naver.com')
+
+    @property
+    def naver_searchad_api_key(self) -> str:
+        return self._vault_or_env(
+            self._naver.get('api_key_vault', 'NAVER_SEARCHAD_API_KEY'),
+            'NAVER_SEARCHAD_API_KEY',
+        )
+
+    @property
+    def naver_searchad_secret_key(self) -> str:
+        return self._vault_or_env(
+            self._naver.get('secret_key_vault', 'NAVER_SEARCHAD_SECRET_KEY'),
+            'NAVER_SEARCHAD_SECRET_KEY',
+        )
+
+    @property
+    def naver_searchad_customer_id(self) -> str:
+        return self._vault_or_env(
+            self._naver.get('customer_id_vault', 'NAVER_SEARCHAD_CUSTOMER_ID'),
+            'NAVER_SEARCHAD_CUSTOMER_ID',
+        )
 
     # Microsoft OAuth (for claude.ai Enterprise SSO)
     @property

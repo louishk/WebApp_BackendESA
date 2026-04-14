@@ -65,6 +65,15 @@ def create_mcp_server(settings: Optional[Settings] = None) -> MCPServerApp:
         except Exception as e:
             logger.warning(f"Failed to register Google Ads tools: {e}")
 
+    # Register Naver Search Ad tools
+    if settings.naver_searchad_enabled:
+        try:
+            from mcp_esa.tools.naver_searchad_tools import register_naver_searchad_tools
+            register_naver_searchad_tools(server, app)
+            logger.info("Naver Search Ad tools registered")
+        except Exception as e:
+            logger.warning(f"Failed to register Naver Search Ad tools: {e}")
+
     # Register Revenue Management tools
     if settings.revenue_enabled:
         try:

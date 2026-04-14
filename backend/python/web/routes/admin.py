@@ -1192,6 +1192,24 @@ def _get_mcp_tools_grouped():
         'GA_analyze_audiences', 'GA_optimize_budget', 'GA_generate_report',
     ]
     tools['Google Ads - Token'] = ['GA_start_token_refresh']
+    tools['Naver Search Ad - Account'] = [
+        'NSA_test_connection', 'NSA_list_business_channels',
+    ]
+    tools['Naver Search Ad - Campaigns'] = [
+        'NSA_list_campaigns', 'NSA_get_campaign', 'NSA_create_campaign',
+        'NSA_set_campaign_status', 'NSA_delete_campaign',
+    ]
+    tools['Naver Search Ad - Ad Groups & Keywords'] = [
+        'NSA_list_ad_groups', 'NSA_get_ad_group', 'NSA_list_keywords',
+        'NSA_update_keyword_bid', 'NSA_list_ads',
+    ]
+    tools['Naver Search Ad - Reporting'] = [
+        'NSA_get_stats', 'NSA_create_stat_report', 'NSA_get_stat_report',
+        'NSA_keyword_tool',
+    ]
+    tools['Naver Search Ad - Billing'] = [
+        'NSA_get_bizmoney_balance', 'NSA_get_bizmoney_cost',
+    ]
     tools['Revenue - Data'] = [
         'RM_get_portfolio_snapshot', 'RM_get_site_performance', 'RM_get_budget_variance',
         'RM_get_occupancy_trends', 'RM_get_movement_analysis', 'RM_get_rate_analysis',
