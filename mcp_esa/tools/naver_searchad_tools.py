@@ -406,6 +406,416 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
         except Exception as e:
             return _err(e, "get_bizmoney_cost")
 
+    # =================================================================
+    # AI-POWERED ANALYSIS TOOLS
+    # =================================================================
+
+    async def _fetch_snapshot(
+        svc: NaverSearchAdService,
+        date_preset: str,
+        include_keywords_for_top: int = 0,
+    ) -> Dict:
+        """Fetch a campaign+adgroup snapshot with stats. Used by AI tools.
+
+        If include_keywords_for_top > 0, also pulls keywords + stats for the
+        top-N ad groups by recent spend.
+        """
+        import asyncio
+
+        campaigns = await svc.list_campaigns()
+        ad_groups = await svc.list_ad_groups()
+
+        async def stats_for(ids: List[str]) -> Dict[str, Dict]:
+            if not ids:
+                return {}
+            # Naver /stats caps work best < ~100 ids; chunk
+            by_id: Dict[str, Dict] = {}
+            for i in range(0, len(ids), 80):
+                chunk = ids[i : i + 80]
+                try:
+                    raw = await svc.get_stats(ids=chunk, date_preset=date_preset)
+                except NaverSearchAdAPIError as e:
+                    logger.warning("stats batch failed: %s", e)
+                    continue
+                # Response shape: {"data": [{"id":..., "impCnt":...}, ...]}
+                rows = raw.get("data", []) if isinstance(raw, dict) else raw or []
+                for row in rows:
+                    rid = row.get("id") or row.get("nccId")
+                    if rid:
+                        by_id[str(rid)] = row
+            return by_id
+
+        campaign_ids = [c.get("nccCampaignId") for c in campaigns if c.get("nccCampaignId")]
+        adgroup_ids = [g.get("nccAdgroupId") for g in ad_groups if g.get("nccAdgroupId")]
+
+        campaign_stats, adgroup_stats = await asyncio.gather(
+            stats_for(campaign_ids),
+            stats_for(adgroup_ids),
+        )
+
+        keyword_bundles: List[Dict] = []
+        if include_keywords_for_top > 0 and ad_groups:
+            ranked = sorted(
+                ad_groups,
+                key=lambda g: adgroup_stats.get(g.get("nccAdgroupId", ""), {}).get("salesAmt", 0) or 0,
+                reverse=True,
+            )[:include_keywords_for_top]
+            for g in ranked:
+                gid = g.get("nccAdgroupId")
+                try:
+                    kws = await svc.list_keywords(gid)
+                except NaverSearchAdAPIError:
+                    continue
+                if not kws:
+                    continue
+                kw_ids = [k.get("nccKeywordId") for k in kws if k.get("nccKeywordId")]
+                kw_stats = await stats_for(kw_ids)
+                for k in kws:
+                    kid = k.get("nccKeywordId")
+                    keyword_bundles.append(
+                        {
+                            "ad_group_id": gid,
+                            "ad_group_name": g.get("name"),
+                            "keyword_id": kid,
+                            "keyword": k.get("keyword"),
+                            "bidAmt": k.get("bidAmt"),
+                            "status": k.get("status"),
+                            "metrics": kw_stats.get(kid, {}),
+                        }
+                    )
+
+        return {
+            "campaigns": [
+                {**c, "metrics": campaign_stats.get(c.get("nccCampaignId", ""), {})}
+                for c in campaigns
+            ],
+            "ad_groups": [
+                {**g, "metrics": adgroup_stats.get(g.get("nccAdgroupId", ""), {})}
+                for g in ad_groups
+            ],
+            "keywords": keyword_bundles,
+        }
+
+    def _summarize_campaigns(snapshot: Dict) -> str:
+        lines = []
+        total_imp = total_clk = total_cost = total_conv = 0
+        for c in snapshot["campaigns"]:
+            m = c.get("metrics") or {}
+            imp = int(m.get("impCnt", 0) or 0)
+            clk = int(m.get("clkCnt", 0) or 0)
+            cost = int(m.get("salesAmt", 0) or 0)
+            conv = int(m.get("ccnt", 0) or 0)
+            total_imp += imp; total_clk += clk; total_cost += cost; total_conv += conv
+            lines.append(
+                f"- {c.get('name')} [{c.get('campaignTp')}/{c.get('status')}] "
+                f"dailyBudget=₩{c.get('dailyBudget', 0):,} "
+                f"impCnt={imp:,} clkCnt={clk:,} spend=₩{cost:,} ccnt={conv}"
+            )
+        header = (
+            f"ACCOUNT TOTALS: impCnt={total_imp:,} clkCnt={total_clk:,} "
+            f"spend=₩{total_cost:,} ccnt={total_conv}\n\nCAMPAIGNS ({len(snapshot['campaigns'])}):\n"
+        )
+        return header + "\n".join(lines)
+
+    def _summarize_keywords(snapshot: Dict, limit: int = 60) -> str:
+        rows = []
+        for k in snapshot["keywords"][:limit]:
+            m = k.get("metrics") or {}
+            rows.append(
+                f"- [{k.get('ad_group_name')}] {k.get('keyword')} "
+                f"bid=₩{k.get('bidAmt', 0):,} "
+                f"impCnt={int(m.get('impCnt', 0) or 0):,} "
+                f"clkCnt={int(m.get('clkCnt', 0) or 0):,} "
+                f"spend=₩{int(m.get('salesAmt', 0) or 0):,} "
+                f"ccnt={int(m.get('ccnt', 0) or 0)} "
+                f"avgRnk={float(m.get('avgRnk', 0) or 0):.1f}"
+            )
+        return f"\nKEYWORDS ({len(snapshot['keywords'])} total, showing {min(limit, len(snapshot['keywords']))}):\n" + "\n".join(rows)
+
+    async def _llm_chat(system: str, user: str, max_tokens: int = 2500) -> str:
+        """Call the configured chat provider. Returns None if unavailable."""
+        from mcp_esa.services.llm_manager import get_llm_manager
+
+        mgr = get_llm_manager()
+        if not mgr:
+            return None
+        try:
+            provider = mgr.get_chat_provider()
+        except ValueError:
+            return None
+        resp = await provider.chat_completion(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.3,
+            max_tokens=max_tokens,
+        )
+        return resp.get("content") if isinstance(resp, dict) else str(resp)
+
+    async def nsa_audit_account(
+        auth_context: Optional[Dict] = None,
+        date_preset: str = "last30days",
+    ) -> str:
+        """AI-powered audit of the Naver Search Ad account."""
+        config = _get_config()
+        if not config:
+            return "Naver Search Ad not configured"
+        try:
+            svc = NaverSearchAdService(config)
+            snap = await _fetch_snapshot(svc, date_preset, include_keywords_for_top=3)
+            data = _summarize_campaigns(snap) + "\n" + _summarize_keywords(snap, limit=40)
+
+            system = (
+                "You are an expert Naver Search Ad (검색광고) auditor. Naver is the dominant "
+                "Korean search engine and its ad platform is analogous to Google Ads but with "
+                "KRW-denominated costs and HMAC-signed APIs. Produce a structured audit with:\n\n"
+                "1. **Executive Summary** (2-3 sentences on overall health)\n"
+                "2. **Performance Scorecard** (1-10): Campaign Structure, Keyword Health, "
+                "Budget Efficiency, Conversion Performance\n"
+                "3. **Key Findings** (top 5 with numbers)\n"
+                "4. **Prioritized Recommendations** (High/Medium/Low impact, concrete actions)\n"
+                "5. **Quick Wins**\n\n"
+                "Use KRW (₩) for currency. Naver has no Quality Score, so use avgRnk and CTR "
+                "as proxies for keyword health."
+            )
+            content = await _llm_chat(system, f"Audit this Naver account:\n\n{data}", 3000)
+            if not content:
+                return f"LLM unavailable. Raw snapshot:\n\n{data}"
+            return f"Naver Search Ad Account Audit ({date_preset})\n{'=' * 50}\n\n{content}"
+        except Exception as e:
+            return _err(e, "audit_account")
+
+    async def nsa_analyze_keywords(
+        auth_context: Optional[Dict] = None,
+        ad_group_id: Optional[str] = None,
+        date_preset: str = "last30days",
+    ) -> str:
+        """AI keyword strategy analysis. If ad_group_id omitted, analyzes top 5 ad groups."""
+        config = _get_config()
+        if not config:
+            return "Naver Search Ad not configured"
+        try:
+            svc = NaverSearchAdService(config)
+            if ad_group_id:
+                # Focused analysis on one ad group
+                kws = await svc.list_keywords(ad_group_id)
+                kw_ids = [k.get("nccKeywordId") for k in kws if k.get("nccKeywordId")]
+                stats_raw = await svc.get_stats(ids=kw_ids, date_preset=date_preset) if kw_ids else {}
+                by_id: Dict[str, Dict] = {}
+                rows = stats_raw.get("data", []) if isinstance(stats_raw, dict) else stats_raw or []
+                for r in rows:
+                    rid = r.get("id") or r.get("nccId")
+                    if rid:
+                        by_id[str(rid)] = r
+                lines = [f"AD GROUP {ad_group_id} — keywords ({len(kws)}):\n"]
+                for k in kws[:80]:
+                    m = by_id.get(k.get("nccKeywordId", ""), {})
+                    lines.append(
+                        f"- {k.get('keyword')} bid=₩{k.get('bidAmt', 0):,} "
+                        f"status={k.get('status')} "
+                        f"impCnt={int(m.get('impCnt', 0) or 0):,} "
+                        f"clkCnt={int(m.get('clkCnt', 0) or 0):,} "
+                        f"spend=₩{int(m.get('salesAmt', 0) or 0):,} "
+                        f"ccnt={int(m.get('ccnt', 0) or 0)} "
+                        f"avgRnk={float(m.get('avgRnk', 0) or 0):.1f}"
+                    )
+                data = "\n".join(lines)
+            else:
+                snap = await _fetch_snapshot(svc, date_preset, include_keywords_for_top=5)
+                data = _summarize_keywords(snap, limit=120)
+
+            system = (
+                "You are a Naver Search Ad keyword strategist. Provide:\n"
+                "1. **Top Performers** (scale with higher bids)\n"
+                "2. **Underperformers** (pause / reduce bid, with reasons)\n"
+                "3. **Bid Optimization** (specific KRW bid suggestions)\n"
+                "4. **Match / Coverage Gaps**\n"
+                "5. **Keywords to Pause Outright**\n\n"
+                "Use KRW. Naver has no Quality Score — use avgRnk and CTR."
+            )
+            content = await _llm_chat(system, f"Analyze these Naver keywords:\n\n{data}", 2500)
+            if not content:
+                return f"LLM unavailable. Raw data:\n\n{data}"
+            return f"Keyword Strategy Analysis ({date_preset})\n{'=' * 50}\n\n{content}"
+        except Exception as e:
+            return _err(e, "analyze_keywords")
+
+    async def nsa_analyze_trends(
+        auth_context: Optional[Dict] = None,
+        since: str = None,
+        until: str = None,
+        breakdown: str = "dayOfWeek",
+    ) -> str:
+        """AI trend analysis across a date range, broken down by day/hour/device."""
+        if not (since and until):
+            return "since and until (YYYY-MM-DD) are required"
+        config = _get_config()
+        if not config:
+            return "Naver Search Ad not configured"
+        try:
+            svc = NaverSearchAdService(config)
+            campaigns = await svc.list_campaigns()
+            ids = [c.get("nccCampaignId") for c in campaigns if c.get("nccCampaignId")]
+            if not ids:
+                return "No campaigns found"
+            # Fetch stats with breakdown over the explicit range
+            import json as _json
+            params = {
+                "ids": ids,
+                "fields": _json.dumps(["impCnt", "clkCnt", "salesAmt", "ctr", "cpc", "ccnt"]),
+                "timeRange": _json.dumps({"since": since, "until": until}),
+                "breakdown": breakdown,
+            }
+            raw = await svc._request("GET", "/stats", params=params)
+            data = _dump(raw)[:8000]
+
+            system = (
+                "You are a Naver Search Ad trend analyst. Given a stat series broken down by "
+                f"'{breakdown}' across {since}→{until}, identify:\n"
+                "1. Strong vs weak time windows (with numbers)\n"
+                "2. Spend efficiency patterns\n"
+                "3. Day-parting / scheduling recommendations\n"
+                "4. Seasonal or step changes to investigate\n\n"
+                "Use KRW for money. Be specific."
+            )
+            content = await _llm_chat(system, f"Analyze these Naver trends:\n\n{data}", 2000)
+            if not content:
+                return f"LLM unavailable. Raw data:\n\n{data}"
+            return f"Trend Analysis {since}→{until} [{breakdown}]\n{'=' * 50}\n\n{content}"
+        except Exception as e:
+            return _err(e, "analyze_trends")
+
+    async def nsa_suggest_negative_keywords(
+        auth_context: Optional[Dict] = None,
+        ad_group_id: Optional[str] = None,
+        date_preset: str = "last30days",
+    ) -> str:
+        """Identify wasteful keywords / terms to consider as negatives.
+
+        Naver has no search-terms report; this analyzes registered keywords with
+        spend-but-no-conversions, which are the closest analog.
+        """
+        config = _get_config()
+        if not config:
+            return "Naver Search Ad not configured"
+        try:
+            svc = NaverSearchAdService(config)
+            snap = await _fetch_snapshot(svc, date_preset, include_keywords_for_top=5)
+            waste = [
+                k for k in snap["keywords"]
+                if int((k.get("metrics") or {}).get("salesAmt", 0) or 0) > 0
+                and int((k.get("metrics") or {}).get("ccnt", 0) or 0) == 0
+            ]
+            waste.sort(
+                key=lambda k: int((k.get("metrics") or {}).get("salesAmt", 0) or 0),
+                reverse=True,
+            )
+            if ad_group_id:
+                waste = [k for k in waste if k.get("ad_group_id") == ad_group_id]
+
+            lines = [f"WASTEFUL KEYWORDS (spend > 0, conversions = 0) — {len(waste)}:\n"]
+            for k in waste[:50]:
+                m = k.get("metrics") or {}
+                lines.append(
+                    f"- [{k.get('ad_group_name')}] {k.get('keyword')}: "
+                    f"spend=₩{int(m.get('salesAmt', 0) or 0):,} "
+                    f"clkCnt={int(m.get('clkCnt', 0) or 0)} "
+                    f"impCnt={int(m.get('impCnt', 0) or 0):,}"
+                )
+            data = "\n".join(lines)
+
+            system = (
+                "You are a Naver Search Ad optimization expert. Given wasteful keywords "
+                "(with spend but no conversions), recommend:\n"
+                "1. Keywords to pause immediately\n"
+                "2. Keywords to reduce bids on (suggest % reduction)\n"
+                "3. Candidate negative keywords / phrases\n"
+                "4. Root-cause hypotheses (landing page, intent mismatch, etc.)\n\n"
+                "Use KRW. Be specific."
+            )
+            content = await _llm_chat(system, f"Review waste:\n\n{data}", 2000)
+            if not content:
+                return f"LLM unavailable. Raw data:\n\n{data}"
+            return f"Negative Keyword Suggestions ({date_preset})\n{'=' * 50}\n\n{content}"
+        except Exception as e:
+            return _err(e, "suggest_negative_keywords")
+
+    async def nsa_optimize_budget(
+        auth_context: Optional[Dict] = None,
+        date_preset: str = "last30days",
+    ) -> str:
+        """AI-powered budget reallocation across campaigns."""
+        config = _get_config()
+        if not config:
+            return "Naver Search Ad not configured"
+        try:
+            svc = NaverSearchAdService(config)
+            snap = await _fetch_snapshot(svc, date_preset)
+            data = _summarize_campaigns(snap)
+
+            system = (
+                "You are a Naver Search Ad budget optimization expert. For each campaign, "
+                "compare dailyBudget vs actual spend, clicks, and conversions. Recommend:\n"
+                "1. Campaigns to **increase** dailyBudget (with new KRW amount + justification)\n"
+                "2. Campaigns to **decrease** or pause\n"
+                "3. A total budget reallocation plan (net change = 0 KRW)\n"
+                "4. Risks and things to monitor after the change\n\n"
+                "Use KRW. Be concrete."
+            )
+            content = await _llm_chat(system, f"Optimize budgets:\n\n{data}", 2500)
+            if not content:
+                return f"LLM unavailable. Raw data:\n\n{data}"
+            return f"Budget Optimization ({date_preset})\n{'=' * 50}\n\n{content}"
+        except Exception as e:
+            return _err(e, "optimize_budget")
+
+    async def nsa_generate_report(
+        auth_context: Optional[Dict] = None,
+        date_preset: str = "last30days",
+        report_type: str = "executive",
+    ) -> str:
+        """Generate an executive / detailed / optimization report.
+
+        report_type: executive | detailed | optimization
+        """
+        config = _get_config()
+        if not config:
+            return "Naver Search Ad not configured"
+        try:
+            svc = NaverSearchAdService(config)
+            snap = await _fetch_snapshot(svc, date_preset, include_keywords_for_top=3)
+            data = _summarize_campaigns(snap) + "\n" + _summarize_keywords(snap, limit=40)
+
+            templates = {
+                "executive": (
+                    "Write a one-page executive report for leadership. Structure:\n"
+                    "- Headline metrics (spend, clicks, conversions, ROAS if derivable)\n"
+                    "- Wins and concerns\n"
+                    "- 3 strategic recommendations\n"
+                    "Tone: concise, non-technical, KRW."
+                ),
+                "detailed": (
+                    "Write a detailed performance report covering every campaign and the top "
+                    "keywords, with period-over-period qualitative assessment, and "
+                    "prioritized action items. Use KRW."
+                ),
+                "optimization": (
+                    "Write an optimization playbook: the 10 highest-impact changes ranked by "
+                    "estimated KRW impact, each with a step-by-step action plan."
+                ),
+            }
+            system = (
+                "You are a Naver Search Ad reporting specialist. "
+                + templates.get(report_type, templates["executive"])
+            )
+            content = await _llm_chat(system, f"Account data:\n\n{data}", 3000)
+            if not content:
+                return f"LLM unavailable. Raw data:\n\n{data}"
+            return f"Naver Search Ad {report_type.title()} Report ({date_preset})\n{'=' * 50}\n\n{content}"
+        except Exception as e:
+            return _err(e, "generate_report")
+
     # -----------------------------------------------------------------
     # Input schemas
     # -----------------------------------------------------------------
@@ -523,6 +933,61 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
         "required": ["date"],
     }
 
+    # AI analysis schemas
+    _date_preset_only = {
+        "type": "object",
+        "properties": {
+            "date_preset": {
+                "type": "string",
+                "description": "today | yesterday | last7days | last14days | last30days",
+                "default": "last30days",
+            },
+        },
+    }
+    nsa_audit_account._input_schema = _date_preset_only
+    nsa_optimize_budget._input_schema = _date_preset_only
+    nsa_analyze_keywords._input_schema = {
+        "type": "object",
+        "properties": {
+            "ad_group_id": {
+                "type": "string",
+                "description": "Optional — focus on one ad group. Omit for top-5 analysis.",
+            },
+            "date_preset": {"type": "string", "default": "last30days"},
+        },
+    }
+    nsa_analyze_trends._input_schema = {
+        "type": "object",
+        "properties": {
+            "since": {"type": "string", "description": "YYYY-MM-DD"},
+            "until": {"type": "string", "description": "YYYY-MM-DD"},
+            "breakdown": {
+                "type": "string",
+                "description": "pcMobile | hh24 | dayOfWeek",
+                "default": "dayOfWeek",
+            },
+        },
+        "required": ["since", "until"],
+    }
+    nsa_suggest_negative_keywords._input_schema = {
+        "type": "object",
+        "properties": {
+            "ad_group_id": {"type": "string", "description": "Optional filter"},
+            "date_preset": {"type": "string", "default": "last30days"},
+        },
+    }
+    nsa_generate_report._input_schema = {
+        "type": "object",
+        "properties": {
+            "date_preset": {"type": "string", "default": "last30days"},
+            "report_type": {
+                "type": "string",
+                "description": "executive | detailed | optimization",
+                "default": "executive",
+            },
+        },
+    }
+
     # -----------------------------------------------------------------
     # Register
     # -----------------------------------------------------------------
@@ -545,6 +1010,13 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
         "NSA_keyword_tool": nsa_keyword_tool,
         "NSA_get_bizmoney_balance": nsa_get_bizmoney_balance,
         "NSA_get_bizmoney_cost": nsa_get_bizmoney_cost,
+        # AI-powered analysis
+        "NSA_audit_account": nsa_audit_account,
+        "NSA_analyze_keywords": nsa_analyze_keywords,
+        "NSA_analyze_trends": nsa_analyze_trends,
+        "NSA_suggest_negative_keywords": nsa_suggest_negative_keywords,
+        "NSA_optimize_budget": nsa_optimize_budget,
+        "NSA_generate_report": nsa_generate_report,
     }
 
     for name, handler in tools.items():

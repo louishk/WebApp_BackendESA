@@ -1210,6 +1210,10 @@ def _get_mcp_tools_grouped():
     tools['Naver Search Ad - Billing'] = [
         'NSA_get_bizmoney_balance', 'NSA_get_bizmoney_cost',
     ]
+    tools['Naver Search Ad - AI Analysis'] = [
+        'NSA_audit_account', 'NSA_analyze_keywords', 'NSA_analyze_trends',
+        'NSA_suggest_negative_keywords', 'NSA_optimize_budget', 'NSA_generate_report',
+    ]
     tools['Revenue - Data'] = [
         'RM_get_portfolio_snapshot', 'RM_get_site_performance', 'RM_get_budget_variance',
         'RM_get_occupancy_trends', 'RM_get_movement_analysis', 'RM_get_rate_analysis',
