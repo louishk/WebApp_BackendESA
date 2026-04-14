@@ -405,7 +405,7 @@ def register_sugarcrm_tools(server: Server, app: 'MCPServerApp') -> None:
             if not lead_id or not convert_data:
                 return "lead_id and convert_data are required"
             svc = _get_service(app)
-            result = svc._request("POST", f"/Leads/{lead_id}/convert", json_body=convert_data)
+            result = svc.convert_lead(lead_id, convert_data)
             return json.dumps(result, indent=2, default=str)
         except SugarCRMAPIError as e:
             logger.warning("SugarCRM error in SC_convert_lead: %s (code=%s)", e, e.code)

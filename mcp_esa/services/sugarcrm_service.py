@@ -289,3 +289,11 @@ class SugarCRMService:
 
     def studio_deploy(self) -> dict:
         return self._request("POST", "/Administration/rebuild")
+
+    # ---------------- Convenience ----------------
+
+    def convert_lead(self, lead_id: str, convert_data: dict) -> dict:
+        lead_id = self._validate_id(lead_id)
+        if not isinstance(convert_data, dict) or not convert_data:
+            raise SugarCRMAPIError("convert_data must be a non-empty dict", code="bad_data")
+        return self._request("POST", f"/Leads/{lead_id}/convert", json_body=convert_data)
