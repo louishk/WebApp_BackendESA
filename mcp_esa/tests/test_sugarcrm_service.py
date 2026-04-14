@@ -163,3 +163,66 @@ def test_link_name_validation_rejects_bad_names():
         with pytest.raises(SugarCRMAPIError) as e:
             svc.get_related("Accounts", "A1", bad)
         assert e.value.code == "bad_link"
+
+
+def test_list_modules_hits_metadata():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"modules": {"Accounts": {}}})
+        svc.list_modules()
+    args, kwargs = req.call_args
+    assert args[0] == "GET"
+    assert args[1].endswith("/metadata")
+    assert kwargs["params"]["type_filter"] == "modules"
+
+
+def test_list_fields_hits_module_metadata():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"fields": {}})
+        svc.list_fields("Accounts")
+    args, _ = req.call_args
+    assert args[1].endswith("/metadata/modules/Accounts")
+
+
+def test_create_field_posts_spec():
+    svc = _service_with_token()
+    spec = {"name": "c_score_c", "type": "int", "label": "Score"}
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"name": "c_score_c"})
+        svc.create_field("Leads", spec)
+    args, kwargs = req.call_args
+    assert args[0] == "POST"
+    assert args[1].endswith("/Administration/fields/Leads")
+    assert kwargs["json"] == spec
+
+
+def test_create_field_rejects_bad_spec():
+    svc = _service_with_token()
+    with pytest.raises(SugarCRMAPIError) as e:
+        svc.create_field("Leads", {"name": "x"})  # missing type
+    assert e.value.code == "bad_spec"
+
+
+def test_update_dropdown_validates_values_list():
+    svc = _service_with_token()
+    with pytest.raises(SugarCRMAPIError) as e:
+        svc.update_dropdown("my_dd", "not-a-list")
+    assert e.value.code == "bad_values"
+
+
+def test_create_relationship_requires_all_keys():
+    svc = _service_with_token()
+    with pytest.raises(SugarCRMAPIError) as e:
+        svc.create_relationship({"lhs_module": "Accounts"})
+    assert e.value.code == "bad_spec"
+
+
+def test_studio_deploy_calls_rebuild():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"success": True})
+        svc.studio_deploy()
+    args, _ = req.call_args
+    assert args[0] == "POST"
+    assert args[1].endswith("/Administration/rebuild")

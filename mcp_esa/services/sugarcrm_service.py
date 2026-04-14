@@ -214,3 +214,78 @@ class SugarCRMService:
         link_name = self._validate_link_name(link_name)
         related_id = self._validate_id(related_id)
         return self._request("DELETE", f"/{module}/{record_id}/link/{link_name}/{related_id}")
+
+    # ---------------- Studio / admin ----------------
+
+    def list_modules(self) -> dict:
+        return self._request("GET", "/metadata", params={"type_filter": "modules"})
+
+    def list_fields(self, module: str) -> dict:
+        module = self._validate_module(module)
+        return self._request("GET", f"/metadata/modules/{module}")
+
+    def get_field(self, module: str, field_name: str) -> dict:
+        module = self._validate_module(module)
+        field_name = self._validate_link_name(field_name)
+        return self._request("GET", f"/Administration/fields/{module}/{field_name}")
+
+    def create_field(self, module: str, spec: dict) -> dict:
+        module = self._validate_module(module)
+        if not isinstance(spec, dict) or not spec.get("name") or not spec.get("type"):
+            raise SugarCRMAPIError("spec must include name and type", code="bad_spec")
+        return self._request("POST", f"/Administration/fields/{module}", json_body=spec)
+
+    def update_field(self, module: str, field_name: str, spec: dict) -> dict:
+        module = self._validate_module(module)
+        field_name = self._validate_link_name(field_name)
+        if not isinstance(spec, dict) or not spec:
+            raise SugarCRMAPIError("spec must be a non-empty dict", code="bad_spec")
+        return self._request("PUT", f"/Administration/fields/{module}/{field_name}", json_body=spec)
+
+    def delete_field(self, module: str, field_name: str) -> dict:
+        module = self._validate_module(module)
+        field_name = self._validate_link_name(field_name)
+        return self._request("DELETE", f"/Administration/fields/{module}/{field_name}")
+
+    def list_dropdowns(self) -> dict:
+        return self._request("GET", "/Administration/dropdowns")
+
+    def get_dropdown(self, name: str) -> dict:
+        name = self._validate_link_name(name)
+        return self._request("GET", f"/Administration/dropdowns/{name}")
+
+    def update_dropdown(self, name: str, values: list) -> dict:
+        name = self._validate_link_name(name)
+        if not isinstance(values, list):
+            raise SugarCRMAPIError("values must be a list", code="bad_values")
+        return self._request("PUT", f"/Administration/dropdowns/{name}", json_body={"values": values})
+
+    def create_relationship(self, spec: dict) -> dict:
+        if not isinstance(spec, dict):
+            raise SugarCRMAPIError("spec must be a dict", code="bad_spec")
+        required = ("lhs_module", "rhs_module", "relationship_type")
+        if not all(spec.get(k) for k in required):
+            raise SugarCRMAPIError("spec must include lhs_module, rhs_module, relationship_type",
+                                   code="bad_spec")
+        self._validate_module(spec["lhs_module"])
+        self._validate_module(spec["rhs_module"])
+        return self._request("POST", "/Administration/relationships", json_body=spec)
+
+    def delete_relationship(self, rel_name: str) -> dict:
+        rel_name = self._validate_link_name(rel_name)
+        return self._request("DELETE", f"/Administration/relationships/{rel_name}")
+
+    def get_layout(self, module: str, view: str) -> dict:
+        module = self._validate_module(module)
+        view = self._validate_link_name(view)
+        return self._request("GET", f"/metadata/modules/{module}/layouts/{view}")
+
+    def update_layout(self, module: str, view: str, spec: dict) -> dict:
+        module = self._validate_module(module)
+        view = self._validate_link_name(view)
+        if not isinstance(spec, dict) or not spec:
+            raise SugarCRMAPIError("spec must be a non-empty dict", code="bad_spec")
+        return self._request("PUT", f"/Administration/layouts/{module}/{view}", json_body=spec)
+
+    def studio_deploy(self) -> dict:
+        return self._request("POST", "/Administration/rebuild")
