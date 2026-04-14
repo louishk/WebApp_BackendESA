@@ -113,3 +113,70 @@ class SugarCRMService:
             self._client.close()
         except Exception:
             pass
+
+    # ---------------- Module / id validation ----------------
+    # Prevents URL-path injection from tool parameters.
+
+    @staticmethod
+    def _validate_module(module: str) -> str:
+        import re
+        if not isinstance(module, str) or not re.match(r'^[A-Za-z][A-Za-z0-9_]{0,63}$', module):
+            raise SugarCRMAPIError("Invalid module name", code="bad_module")
+        return module
+
+    @staticmethod
+    def _validate_id(record_id: str) -> str:
+        import re
+        if not isinstance(record_id, str) or not re.match(r'^[A-Za-z0-9_\-]{1,64}$', record_id):
+            raise SugarCRMAPIError("Invalid record id", code="bad_id")
+        return record_id
+
+    # ---------------- Record CRUD ----------------
+
+    def get_record(self, module: str, record_id: str, fields: Optional[List[str]] = None) -> dict:
+        module = self._validate_module(module)
+        record_id = self._validate_id(record_id)
+        params: Dict[str, Any] = {}
+        if fields:
+            params["fields"] = ",".join(fields)
+        return self._request("GET", f"/{module}/{record_id}", params=params)
+
+    def list_records(self, module: str, filter: Optional[List[dict]] = None,
+                     fields: Optional[List[str]] = None, limit: int = 20, offset: int = 0,
+                     order_by: Optional[str] = None) -> dict:
+        module = self._validate_module(module)
+        params: Dict[str, Any] = {"max_num": int(limit), "offset": int(offset)}
+        if fields:
+            params["fields"] = ",".join(fields)
+        if order_by:
+            params["order_by"] = order_by
+        if filter:
+            for i, clause in enumerate(filter):
+                for k, v in clause.items():
+                    params[f"filter[{i}][{k}]"] = v
+        return self._request("GET", f"/{module}", params=params)
+
+    def search(self, module: str, q: str, fields: Optional[List[str]] = None, limit: int = 20) -> dict:
+        module = self._validate_module(module)
+        params: Dict[str, Any] = {"q": q, "module_list": module, "max_num": int(limit)}
+        if fields:
+            params["fields"] = ",".join(fields)
+        return self._request("GET", "/search", params=params)
+
+    def create_record(self, module: str, data: dict) -> dict:
+        module = self._validate_module(module)
+        if not isinstance(data, dict) or not data:
+            raise SugarCRMAPIError("data must be a non-empty dict", code="bad_data")
+        return self._request("POST", f"/{module}", json_body=data)
+
+    def update_record(self, module: str, record_id: str, data: dict) -> dict:
+        module = self._validate_module(module)
+        record_id = self._validate_id(record_id)
+        if not isinstance(data, dict) or not data:
+            raise SugarCRMAPIError("data must be a non-empty dict", code="bad_data")
+        return self._request("PUT", f"/{module}/{record_id}", json_body=data)
+
+    def delete_record(self, module: str, record_id: str) -> dict:
+        module = self._validate_module(module)
+        record_id = self._validate_id(record_id)
+        return self._request("DELETE", f"/{module}/{record_id}")

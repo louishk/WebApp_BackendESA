@@ -1,4 +1,5 @@
 """Unit tests for SugarCRMService. Uses mocked httpx to avoid real API calls."""
+import time
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -39,3 +40,87 @@ def test_ensure_token_calls_oauth_and_caches():
         svc._ensure_token()  # cached, should not call again
     assert post.call_count == 1
     assert svc._access_token == "AT"
+
+
+def _service_with_token():
+    svc = SugarCRMService(_make_config())
+    svc._access_token = "AT"
+    svc._token_expires_at = time.time() + 3600
+    return svc
+
+
+def test_get_record_hits_correct_path():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"id": "abc", "name": "Acme"})
+        out = svc.get_record("Accounts", "abc", fields=["name"])
+    args, kwargs = req.call_args
+    assert args[0] == "GET"
+    assert args[1].endswith("/Accounts/abc")
+    assert kwargs["params"] == {"fields": "name"}
+    assert out["name"] == "Acme"
+
+
+def test_list_records_passes_filter_and_paging():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"records": [], "next_offset": -1})
+        svc.list_records("Leads", filter=[{"status": "New"}], limit=50, offset=0,
+                         fields=["first_name", "last_name"], order_by="date_entered:desc")
+    _, kwargs = req.call_args
+    p = kwargs["params"]
+    assert p["max_num"] == 50
+    assert p["offset"] == 0
+    assert p["fields"] == "first_name,last_name"
+    assert p["order_by"] == "date_entered:desc"
+    assert p["filter[0][status]"] == "New"
+
+
+def test_create_record_posts_json():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"id": "new1"})
+        out = svc.create_record("Contacts", {"first_name": "A"})
+    args, kwargs = req.call_args
+    assert args[0] == "POST"
+    assert args[1].endswith("/Contacts")
+    assert kwargs["json"] == {"first_name": "A"}
+    assert out["id"] == "new1"
+
+
+def test_delete_record_issues_delete():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({}, status=204)
+        svc.delete_record("Leads", "L1")
+    args, _ = req.call_args
+    assert args[0] == "DELETE"
+    assert args[1].endswith("/Leads/L1")
+
+
+def test_search_uses_global_endpoint():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"records": []})
+        svc.search("Contacts", q="john@example.com", limit=10)
+    _, kwargs = req.call_args
+    p = kwargs["params"]
+    assert p["q"] == "john@example.com"
+    assert p["module_list"] == "Contacts"
+    assert p["max_num"] == 10
+
+
+def test_validate_module_rejects_bad_names():
+    svc = _service_with_token()
+    for bad in ["", "Acc/ounts", "../etc", "Accounts;DROP", "  "]:
+        with pytest.raises(SugarCRMAPIError) as e:
+            svc.get_record(bad, "id1")
+        assert e.value.code == "bad_module"
+
+
+def test_validate_id_rejects_bad_ids():
+    svc = _service_with_token()
+    for bad in ["", "../x", "a/b", "a;b"]:
+        with pytest.raises(SugarCRMAPIError) as e:
+            svc.get_record("Accounts", bad)
+        assert e.value.code == "bad_id"
