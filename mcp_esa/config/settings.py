@@ -43,6 +43,7 @@ class Settings:
         self._server = self._mcp.get('server', {})
         self._features = self._mcp.get('features', {})
         self._gads = self._mcp.get('google_ads', {})
+        self._sugarcrm = self._mcp.get('sugarcrm', {})
         self._ms_oauth = self._mcp.get('microsoft_oauth', {})
         self._naver = self._mcp.get('naver_searchad', {})
 
@@ -164,6 +165,43 @@ class Settings:
     @property
     def google_ads_refresh_token(self) -> str:
         vault_key = self._gads.get('refresh_token_vault', 'GOOGLE_ADS_REFRESH_TOKEN')
+        return self._config.get_secret(vault_key) or ''
+
+    # SugarCRM feature flag
+    @property
+    def sugarcrm_enabled(self) -> bool:
+        return self._features.get('sugarcrm', False)
+
+    # SugarCRM (non-secret fields)
+    @property
+    def sugarcrm_url(self) -> str:
+        return self._sugarcrm.get('url', '')
+
+    @property
+    def sugarcrm_username(self) -> str:
+        return self._sugarcrm.get('username', '')
+
+    @property
+    def sugarcrm_client_id(self) -> str:
+        return self._sugarcrm.get('client_id', 'sugar')
+
+    @property
+    def sugarcrm_platform(self) -> str:
+        return self._sugarcrm.get('platform', 'mcp_esa')
+
+    @property
+    def sugarcrm_timeout(self) -> int:
+        return int(self._sugarcrm.get('timeout', 30))
+
+    # SugarCRM secrets (resolved from vault)
+    @property
+    def sugarcrm_password(self) -> str:
+        vault_key = self._sugarcrm.get('password_vault', 'SUGARCRM_PASSWORD')
+        return self._config.get_secret(vault_key) or ''
+
+    @property
+    def sugarcrm_client_secret(self) -> str:
+        vault_key = self._sugarcrm.get('client_secret_vault', 'SUGARCRM_CLIENT_SECRET')
         return self._config.get_secret(vault_key) or ''
 
     # Database URLs (for auth middleware)

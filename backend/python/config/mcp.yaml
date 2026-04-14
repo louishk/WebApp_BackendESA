@@ -29,6 +29,7 @@ features:
   google_ads: true
   revenue: true
   naver_searchad: true
+  sugarcrm: true
 
 # =============================================================================
 # Naver Search Ad API
@@ -50,6 +51,19 @@ google_ads:
   client_secret_vault: "GOOGLE_ADS_CLIENT_SECRET"
   developer_token_vault: "GOOGLE_ADS_DEVELOPER_TOKEN"
   refresh_token_vault: "GOOGLE_ADS_REFRESH_TOKEN"
+
+# =============================================================================
+# SugarCRM REST v11 API
+# =============================================================================
+# Non-secret fields live here; password + client_secret resolved from vault.
+sugarcrm:
+  url: "https://extraspaceasia.sugarondemand.com"
+  username: "mcp_service"
+  client_id: "sugar"
+  platform: "mcp_esa"
+  timeout: 30
+  password_vault: "SUGARCRM_PASSWORD"
+  client_secret_vault: "SUGARCRM_CLIENT_SECRET"
 
 # =============================================================================
 # Database Presets (for DB_* MCP tools)
