@@ -124,3 +124,42 @@ def test_validate_id_rejects_bad_ids():
         with pytest.raises(SugarCRMAPIError) as e:
             svc.get_record("Accounts", bad)
         assert e.value.code == "bad_id"
+
+
+def test_get_related_uses_link_path():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({"records": []})
+        svc.get_related("Accounts", "A1", "contacts", limit=5)
+    args, kwargs = req.call_args
+    assert args[0] == "GET"
+    assert args[1].endswith("/Accounts/A1/link/contacts")
+    assert kwargs["params"]["max_num"] == 5
+
+
+def test_link_records_posts_related_id():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({})
+        svc.link_records("Accounts", "A1", "contacts", "C1")
+    args, kwargs = req.call_args
+    assert args[0] == "POST"
+    assert args[1].endswith("/Accounts/A1/link/contacts/C1")
+
+
+def test_unlink_records_deletes():
+    svc = _service_with_token()
+    with patch.object(svc._client, 'request') as req:
+        req.return_value = _mock_response({})
+        svc.unlink_records("Accounts", "A1", "contacts", "C1")
+    args, _ = req.call_args
+    assert args[0] == "DELETE"
+    assert args[1].endswith("/Accounts/A1/link/contacts/C1")
+
+
+def test_link_name_validation_rejects_bad_names():
+    svc = _service_with_token()
+    for bad in ["", "con/tacts", "../x", "a;b"]:
+        with pytest.raises(SugarCRMAPIError) as e:
+            svc.get_related("Accounts", "A1", bad)
+        assert e.value.code == "bad_link"

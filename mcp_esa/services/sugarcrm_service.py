@@ -180,3 +180,37 @@ class SugarCRMService:
         module = self._validate_module(module)
         record_id = self._validate_id(record_id)
         return self._request("DELETE", f"/{module}/{record_id}")
+
+    # ---------------- Relationships ----------------
+
+    @staticmethod
+    def _validate_link_name(link: str) -> str:
+        import re
+        if not isinstance(link, str) or not re.match(r'^[A-Za-z][A-Za-z0-9_]{0,63}$', link):
+            raise SugarCRMAPIError("Invalid link name", code="bad_link")
+        return link
+
+    def get_related(self, module: str, record_id: str, link_name: str,
+                    limit: int = 20, offset: int = 0,
+                    fields: Optional[List[str]] = None) -> dict:
+        module = self._validate_module(module)
+        record_id = self._validate_id(record_id)
+        link_name = self._validate_link_name(link_name)
+        params: Dict[str, Any] = {"max_num": int(limit), "offset": int(offset)}
+        if fields:
+            params["fields"] = ",".join(fields)
+        return self._request("GET", f"/{module}/{record_id}/link/{link_name}", params=params)
+
+    def link_records(self, module: str, record_id: str, link_name: str, related_id: str) -> dict:
+        module = self._validate_module(module)
+        record_id = self._validate_id(record_id)
+        link_name = self._validate_link_name(link_name)
+        related_id = self._validate_id(related_id)
+        return self._request("POST", f"/{module}/{record_id}/link/{link_name}/{related_id}")
+
+    def unlink_records(self, module: str, record_id: str, link_name: str, related_id: str) -> dict:
+        module = self._validate_module(module)
+        record_id = self._validate_id(record_id)
+        link_name = self._validate_link_name(link_name)
+        related_id = self._validate_id(related_id)
+        return self._request("DELETE", f"/{module}/{record_id}/link/{link_name}/{related_id}")
