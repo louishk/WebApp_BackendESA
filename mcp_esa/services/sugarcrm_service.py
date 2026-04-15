@@ -379,3 +379,69 @@ class SugarCRMService:
         if not convert_data:
             raise SugarCRMAPIError("convert_data must be a non-empty dict", code="bad_data")
         return self._request("POST", f"/Leads/{lead_id}/convert", json_body=convert_data)
+
+    # ---------------- Module Loader (Studio schema changes via packages) ----------------
+
+    _PACKAGE_ID_RE = r'^[A-Za-z0-9_\-]{1,128}$'
+
+    @classmethod
+    def _validate_package_id(cls, package_id: str) -> str:
+        import re
+        if not isinstance(package_id, str) or not re.match(cls._PACKAGE_ID_RE, package_id):
+            raise SugarCRMAPIError("Invalid package id", code="bad_package_id")
+        return package_id
+
+    def list_packages(self, status: str = "installed") -> dict:
+        """Sugar v11: GET /Administration/packages/{installed|staged}"""
+        if status not in ("installed", "staged"):
+            raise SugarCRMAPIError("status must be 'installed' or 'staged'", code="bad_status")
+        return self._request("GET", f"/Administration/packages/{status}")
+
+    def get_package(self, package_id: str) -> dict:
+        package_id = self._validate_package_id(package_id)
+        return self._request("GET", f"/Administration/package/{package_id}")
+
+    def upload_package(self, filename: str, content_bytes: bytes) -> dict:
+        """Multipart upload a package zip to POST /Administration/packages."""
+        import re
+        if not filename or not re.match(r'^[A-Za-z0-9._\-]{1,128}\.zip$', filename):
+            raise SugarCRMAPIError("filename must be a .zip with safe chars", code="bad_filename")
+        if not isinstance(content_bytes, (bytes, bytearray)) or not content_bytes:
+            raise SugarCRMAPIError("content must be non-empty bytes", code="bad_content")
+        self._ensure_token()
+        url = f"{self.config.api_base}/Administration/packages"
+        # Do NOT set Content-Type here — httpx sets multipart boundary
+        headers = {"OAuth-Token": self._access_token or ""}
+        try:
+            resp = self._client.post(
+                url,
+                headers=headers,
+                files={"package_file": (filename, bytes(content_bytes), "application/zip")},
+                timeout=max(60, self.config.timeout),
+            )
+        except httpx.RequestError as e:
+            logger.exception("SugarCRM network error on package upload")
+            raise SugarCRMAPIError("SugarCRM network error", code="network_error") from e
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+                code = body.get("error")
+            except Exception:
+                code = None
+            logger.error("SugarCRM package upload error %s: %s", resp.status_code, resp.text[:400])
+            raise SugarCRMAPIError("SugarCRM package upload failed",
+                                   code=code or f"http_{resp.status_code}",
+                                   details={"http_status": resp.status_code})
+        return resp.json() if resp.content else {}
+
+    def install_package(self, package_id: str) -> dict:
+        package_id = self._validate_package_id(package_id)
+        return self._request("GET", f"/Administration/packages/{package_id}/install")
+
+    def uninstall_package(self, package_id: str) -> dict:
+        package_id = self._validate_package_id(package_id)
+        return self._request("GET", f"/Administration/packages/{package_id}/uninstall")
+
+    def get_package_install_status(self, package_id: str) -> dict:
+        package_id = self._validate_package_id(package_id)
+        return self._request("GET", f"/Administration/packages/{package_id}/installation-status")

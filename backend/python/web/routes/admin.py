@@ -1192,6 +1192,16 @@ def _get_mcp_tools_grouped():
         'GA_analyze_audiences', 'GA_optimize_budget', 'GA_generate_report',
     ]
     tools['Google Ads - Token'] = ['GA_start_token_refresh']
+    tools['Google Analytics 4 - Account'] = [
+        'GA4_test_connection', 'GA4_list_properties', 'GA4_get_metadata',
+    ]
+    tools['Google Analytics 4 - Reports'] = [
+        'GA4_run_report', 'GA4_run_realtime',
+    ]
+    tools['Google Analytics 4 - Pre-built'] = [
+        'GA4_top_pages', 'GA4_traffic_sources', 'GA4_user_acquisition',
+        'GA4_conversions', 'GA4_device_breakdown', 'GA4_geo_breakdown',
+    ]
     tools['Naver Search Ad - Account'] = [
         'NSA_test_connection', 'NSA_list_business_channels',
     ]
@@ -1239,6 +1249,10 @@ def _get_mcp_tools_grouped():
         'SC_create_relationship', 'SC_delete_relationship',
         'SC_update_layout', 'SC_studio_deploy',
         'SC_list_fields_admin',
+    ]
+    tools['SugarCRM - Module Loader'] = [
+        'SC_list_packages', 'SC_get_package', 'SC_get_package_install_status',
+        'SC_upload_package', 'SC_install_package', 'SC_uninstall_package',
     ]
     return tools
 

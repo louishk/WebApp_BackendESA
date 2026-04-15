@@ -589,6 +589,111 @@ def register_sugarcrm_tools(server: Server, app: 'MCPServerApp') -> None:
             return "Operation failed. Check server logs for details."
 
     # =========================================================================
+    # Module Loader tier (sugarcrm_admin) — schema changes via Sugar packages
+    # Verified working on Sugar Cloud where direct Studio writes are blocked.
+    # =========================================================================
+
+    async def SC_list_packages(auth_context: Optional[Dict] = None,
+                               status: str = "installed") -> str:
+        """List Sugar packages. status = 'installed' or 'staged'."""
+        try:
+            svc = _get_service(app)
+            return json.dumps(svc.list_packages(status or "installed"), indent=2, default=str)
+        except SugarCRMAPIError as e:
+            logger.warning("SugarCRM error in SC_list_packages: %s (code=%s)", e, e.code)
+            return f"SugarCRM error: {e.code or 'unknown'}"
+        except Exception:
+            logger.error("Unexpected error in SC_list_packages", exc_info=True)
+            return "Operation failed. Check server logs for details."
+
+    async def SC_get_package(auth_context: Optional[Dict] = None,
+                             package_id: str = None) -> str:
+        """Get metadata for a single Sugar package by id."""
+        try:
+            if not package_id:
+                return "package_id is required"
+            svc = _get_service(app)
+            return json.dumps(svc.get_package(package_id), indent=2, default=str)
+        except SugarCRMAPIError as e:
+            logger.warning("SugarCRM error in SC_get_package: %s (code=%s)", e, e.code)
+            return f"SugarCRM error: {e.code or 'unknown'}"
+        except Exception:
+            logger.error("Unexpected error in SC_get_package", exc_info=True)
+            return "Operation failed. Check server logs for details."
+
+    async def SC_upload_package(auth_context: Optional[Dict] = None,
+                                filename: str = None,
+                                content_b64: str = None) -> str:
+        """Upload a Sugar package zip. filename must end with .zip; content_b64 is base64 of the zip bytes."""
+        try:
+            if not filename or not content_b64:
+                return "filename and content_b64 are required"
+            import base64
+            try:
+                raw = base64.b64decode(content_b64, validate=True)
+            except Exception:
+                return "content_b64 must be valid base64"
+            svc = _get_service(app)
+            return json.dumps(svc.upload_package(filename, raw), indent=2, default=str)
+        except SugarCRMAPIError as e:
+            logger.warning("SugarCRM error in SC_upload_package: %s (code=%s)", e, e.code)
+            return f"SugarCRM error: {e.code or 'unknown'}"
+        except Exception:
+            logger.error("Unexpected error in SC_upload_package", exc_info=True)
+            return "Operation failed. Check server logs for details."
+
+    async def SC_install_package(auth_context: Optional[Dict] = None,
+                                 package_id: str = None,
+                                 confirm: bool = False) -> str:
+        """Install a staged Sugar package by id. Schema change — requires confirm=True."""
+        try:
+            if not confirm:
+                return "Refused: destructive operation requires confirm=True"
+            if not package_id:
+                return "package_id is required"
+            svc = _get_service(app)
+            return json.dumps(svc.install_package(package_id), indent=2, default=str)
+        except SugarCRMAPIError as e:
+            logger.warning("SugarCRM error in SC_install_package: %s (code=%s)", e, e.code)
+            return f"SugarCRM error: {e.code or 'unknown'}"
+        except Exception:
+            logger.error("Unexpected error in SC_install_package", exc_info=True)
+            return "Operation failed. Check server logs for details."
+
+    async def SC_uninstall_package(auth_context: Optional[Dict] = None,
+                                   package_id: str = None,
+                                   confirm: bool = False) -> str:
+        """Uninstall an installed Sugar package. Destructive — requires confirm=True."""
+        try:
+            if not confirm:
+                return "Refused: destructive operation requires confirm=True"
+            if not package_id:
+                return "package_id is required"
+            svc = _get_service(app)
+            return json.dumps(svc.uninstall_package(package_id), indent=2, default=str)
+        except SugarCRMAPIError as e:
+            logger.warning("SugarCRM error in SC_uninstall_package: %s (code=%s)", e, e.code)
+            return f"SugarCRM error: {e.code or 'unknown'}"
+        except Exception:
+            logger.error("Unexpected error in SC_uninstall_package", exc_info=True)
+            return "Operation failed. Check server logs for details."
+
+    async def SC_get_package_install_status(auth_context: Optional[Dict] = None,
+                                            package_id: str = None) -> str:
+        """Get installation status of a Sugar package (staged/installing/installed/failed)."""
+        try:
+            if not package_id:
+                return "package_id is required"
+            svc = _get_service(app)
+            return json.dumps(svc.get_package_install_status(package_id), indent=2, default=str)
+        except SugarCRMAPIError as e:
+            logger.warning("SugarCRM error in SC_get_package_install_status: %s (code=%s)", e, e.code)
+            return f"SugarCRM error: {e.code or 'unknown'}"
+        except Exception:
+            logger.error("Unexpected error in SC_get_package_install_status", exc_info=True)
+            return "Operation failed. Check server logs for details."
+
+    # =========================================================================
     # INPUT SCHEMAS
     # =========================================================================
 
@@ -850,6 +955,48 @@ def register_sugarcrm_tools(server: Server, app: 'MCPServerApp') -> None:
 
     SC_list_fields_admin._input_schema = _module_only
 
+    # Module Loader schemas
+    SC_list_packages._input_schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["installed", "staged"], "default": "installed"},
+        },
+        "required": [],
+    }
+    _package_id_only = {
+        "type": "object",
+        "properties": {
+            "package_id": {"type": "string", "description": "Sugar package id"},
+        },
+        "required": ["package_id"],
+    }
+    SC_get_package._input_schema = _package_id_only
+    SC_get_package_install_status._input_schema = _package_id_only
+    SC_upload_package._input_schema = {
+        "type": "object",
+        "properties": {
+            "filename": {"type": "string", "description": "Package filename ending in .zip"},
+            "content_b64": {"type": "string", "description": "Base64-encoded zip file contents"},
+        },
+        "required": ["filename", "content_b64"],
+    }
+    SC_install_package._input_schema = {
+        "type": "object",
+        "properties": {
+            "package_id": {"type": "string", "description": "Sugar package id (must be staged)"},
+            "confirm": {"type": "boolean", "description": "Must be true to install", "default": False},
+        },
+        "required": ["package_id"],
+    }
+    SC_uninstall_package._input_schema = {
+        "type": "object",
+        "properties": {
+            "package_id": {"type": "string", "description": "Sugar package id (must be installed)"},
+            "confirm": {"type": "boolean", "description": "Must be true to uninstall", "default": False},
+        },
+        "required": ["package_id"],
+    }
+
     # =========================================================================
     # REGISTER ALL TOOLS
     # =========================================================================
@@ -889,6 +1036,13 @@ def register_sugarcrm_tools(server: Server, app: 'MCPServerApp') -> None:
         "SC_update_layout": SC_update_layout,
         "SC_studio_deploy": SC_studio_deploy,
         "SC_list_fields_admin": SC_list_fields_admin,
+        # Module Loader tier (schema changes via Sugar packages)
+        "SC_list_packages": SC_list_packages,
+        "SC_get_package": SC_get_package,
+        "SC_upload_package": SC_upload_package,
+        "SC_install_package": SC_install_package,
+        "SC_uninstall_package": SC_uninstall_package,
+        "SC_get_package_install_status": SC_get_package_install_status,
     }
 
     for name, handler in tools.items():
