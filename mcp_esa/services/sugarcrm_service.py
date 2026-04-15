@@ -133,6 +133,26 @@ class SugarCRMService:
         return record_id
 
     @staticmethod
+    def _normalize_dict(d, field_name: str = "data") -> Optional[dict]:
+        """Accept dict or JSON-string dict; return dict or None."""
+        if d is None:
+            return None
+        if isinstance(d, dict):
+            return d
+        if isinstance(d, str):
+            s = d.strip()
+            if not s:
+                return None
+            import json
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, dict):
+                    return parsed
+            except ValueError:
+                pass
+        raise SugarCRMAPIError(f"{field_name} must be a dict or JSON-encoded dict", code="bad_data")
+
+    @staticmethod
     def _normalize_fields(fields) -> Optional[str]:
         """Accept list[str], comma-separated str, or JSON-encoded list str; return comma-separated str or None."""
         if fields is None or fields == "":
@@ -193,16 +213,18 @@ class SugarCRMService:
             params["fields"] = f
         return self._request("GET", "/search", params=params)
 
-    def create_record(self, module: str, data: dict) -> dict:
+    def create_record(self, module: str, data) -> dict:
         module = self._validate_module(module)
-        if not isinstance(data, dict) or not data:
+        data = self._normalize_dict(data, "data")
+        if not data:
             raise SugarCRMAPIError("data must be a non-empty dict", code="bad_data")
         return self._request("POST", f"/{module}", json_body=data)
 
-    def update_record(self, module: str, record_id: str, data: dict) -> dict:
+    def update_record(self, module: str, record_id: str, data) -> dict:
         module = self._validate_module(module)
         record_id = self._validate_id(record_id)
-        if not isinstance(data, dict) or not data:
+        data = self._normalize_dict(data, "data")
+        if not data:
             raise SugarCRMAPIError("data must be a non-empty dict", code="bad_data")
         return self._request("PUT", f"/{module}/{record_id}", json_body=data)
 
@@ -266,16 +288,18 @@ class SugarCRMService:
             raise SugarCRMAPIError(f"field {field_name} not found on {module}", code="not_found")
         return fields[field_name]
 
-    def create_field(self, module: str, spec: dict) -> dict:
+    def create_field(self, module: str, spec) -> dict:
         module = self._validate_module(module)
-        if not isinstance(spec, dict) or not spec.get("name") or not spec.get("type"):
+        spec = self._normalize_dict(spec, "spec")
+        if not spec or not spec.get("name") or not spec.get("type"):
             raise SugarCRMAPIError("spec must include name and type", code="bad_spec")
         return self._request("POST", f"/Administration/fields/{module}", json_body=spec)
 
-    def update_field(self, module: str, field_name: str, spec: dict) -> dict:
+    def update_field(self, module: str, field_name: str, spec) -> dict:
         module = self._validate_module(module)
         field_name = self._validate_link_name(field_name)
-        if not isinstance(spec, dict) or not spec:
+        spec = self._normalize_dict(spec, "spec")
+        if not spec:
             raise SugarCRMAPIError("spec must be a non-empty dict", code="bad_spec")
         return self._request("PUT", f"/Administration/fields/{module}/{field_name}", json_body=spec)
 
@@ -308,8 +332,9 @@ class SugarCRMService:
             raise SugarCRMAPIError("values must be a list", code="bad_values")
         return self._request("PUT", f"/Administration/dropdowns/{name}", json_body={"values": values})
 
-    def create_relationship(self, spec: dict) -> dict:
-        if not isinstance(spec, dict):
+    def create_relationship(self, spec) -> dict:
+        spec = self._normalize_dict(spec, "spec")
+        if not spec:
             raise SugarCRMAPIError("spec must be a dict", code="bad_spec")
         required = ("lhs_module", "rhs_module", "relationship_type")
         if not all(spec.get(k) for k in required):
@@ -335,10 +360,11 @@ class SugarCRMService:
             raise SugarCRMAPIError(f"view {view} not found on {module}", code="not_found")
         return views[view]
 
-    def update_layout(self, module: str, view: str, spec: dict) -> dict:
+    def update_layout(self, module: str, view: str, spec) -> dict:
         module = self._validate_module(module)
         view = self._validate_link_name(view)
-        if not isinstance(spec, dict) or not spec:
+        spec = self._normalize_dict(spec, "spec")
+        if not spec:
             raise SugarCRMAPIError("spec must be a non-empty dict", code="bad_spec")
         return self._request("PUT", f"/Administration/layouts/{module}/{view}", json_body=spec)
 
@@ -347,8 +373,9 @@ class SugarCRMService:
 
     # ---------------- Convenience ----------------
 
-    def convert_lead(self, lead_id: str, convert_data: dict) -> dict:
+    def convert_lead(self, lead_id: str, convert_data) -> dict:
         lead_id = self._validate_id(lead_id)
-        if not isinstance(convert_data, dict) or not convert_data:
+        convert_data = self._normalize_dict(convert_data, "convert_data")
+        if not convert_data:
             raise SugarCRMAPIError("convert_data must be a non-empty dict", code="bad_data")
         return self._request("POST", f"/Leads/{lead_id}/convert", json_body=convert_data)
