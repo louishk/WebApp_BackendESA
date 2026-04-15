@@ -145,17 +145,17 @@ class SugarCRMService:
     def list_records(self, module: str, filter: Optional[List[dict]] = None,
                      fields: Optional[List[str]] = None, limit: int = 20, offset: int = 0,
                      order_by: Optional[str] = None) -> dict:
+        """POST {module}/filter — Sugar v11 filter endpoint (matches common/sugarcrm_client)."""
         module = self._validate_module(module)
         params: Dict[str, Any] = {"max_num": int(limit), "offset": int(offset)}
         if fields:
             params["fields"] = ",".join(fields)
         if order_by:
             params["order_by"] = order_by
+        body: Dict[str, Any] = {"deleted": False}
         if filter:
-            for i, clause in enumerate(filter):
-                for k, v in clause.items():
-                    params[f"filter[{i}][{k}]"] = v
-        return self._request("GET", f"/{module}", params=params)
+            body["filter"] = filter
+        return self._request("POST", f"/{module}/filter", params=params, json_body=body)
 
     def search(self, module: str, q: str, fields: Optional[List[str]] = None, limit: int = 20) -> dict:
         module = self._validate_module(module)

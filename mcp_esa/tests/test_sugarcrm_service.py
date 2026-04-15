@@ -67,13 +67,16 @@ def test_list_records_passes_filter_and_paging():
         req.return_value = _mock_response({"records": [], "next_offset": -1})
         svc.list_records("Leads", filter=[{"status": "New"}], limit=50, offset=0,
                          fields=["first_name", "last_name"], order_by="date_entered:desc")
-    _, kwargs = req.call_args
+    args, kwargs = req.call_args
+    assert args[0] == "POST"
+    assert args[1].endswith("/Leads/filter")
     p = kwargs["params"]
     assert p["max_num"] == 50
     assert p["offset"] == 0
     assert p["fields"] == "first_name,last_name"
     assert p["order_by"] == "date_entered:desc"
-    assert p["filter[0][status]"] == "New"
+    assert kwargs["json"]["filter"] == [{"status": "New"}]
+    assert kwargs["json"]["deleted"] is False
 
 
 def test_create_record_posts_json():
