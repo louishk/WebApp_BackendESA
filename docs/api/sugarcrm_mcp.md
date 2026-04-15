@@ -28,6 +28,17 @@ Tiers are a convention for granting bundles. Actual enforcement is the existing 
 
 `SC_delete_record`, `SC_delete_field`, `SC_delete_relationship`, and `SC_studio_deploy` require `confirm=True`. Without it they return a refusal string.
 
+## Sugar Cloud Studio limitations
+
+The ESA SugarCRM tenant is hosted on Sugar Cloud. Sugar Cloud does **not** expose Studio write endpoints via REST — they are UI-only. The following tools will return `no_method` (HTTP 404) when invoked:
+
+- `SC_create_field`, `SC_update_field`, `SC_delete_field`
+- `SC_create_relationship`, `SC_delete_relationship`
+- `SC_update_layout`, `SC_studio_deploy`
+- `SC_update_dropdown`
+
+Read-side Studio tools (`SC_list_modules`, `SC_list_fields`, `SC_get_field`, `SC_list_dropdowns`, `SC_get_dropdown`, `SC_get_layout`, `SC_list_fields_admin`) are fully functional — metadata is readable even though writes are not. For schema changes, use the Sugar Studio UI directly.
+
 ## Config
 
 In `backend/python/config/mcp.yaml`:
