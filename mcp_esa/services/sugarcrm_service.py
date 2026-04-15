@@ -398,8 +398,16 @@ class SugarCRMService:
         return self._request("GET", f"/Administration/packages/{status}")
 
     def get_package(self, package_id: str) -> dict:
+        """GET /Administration/package/{id} (singular) — returns package metadata + base64 content."""
         package_id = self._validate_package_id(package_id)
         return self._request("GET", f"/Administration/package/{package_id}")
+
+    def get_package_metadata(self, package_id: str) -> dict:
+        """Same as get_package but strips the large base64 `content` field from the response."""
+        data = self.get_package(package_id)
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items() if k != "content"}
+        return data
 
     def upload_package(self, filename: str, content_bytes: bytes) -> dict:
         """Multipart upload a package zip to POST /Administration/packages."""
@@ -435,13 +443,11 @@ class SugarCRMService:
         return resp.json() if resp.content else {}
 
     def install_package(self, package_id: str) -> dict:
+        """GET /Administration/packages/{id}/install — DESTRUCTIVE: Sugar fires install on GET."""
         package_id = self._validate_package_id(package_id)
         return self._request("GET", f"/Administration/packages/{package_id}/install")
 
     def uninstall_package(self, package_id: str) -> dict:
+        """GET /Administration/packages/{id}/uninstall — DESTRUCTIVE: Sugar fires uninstall on GET."""
         package_id = self._validate_package_id(package_id)
         return self._request("GET", f"/Administration/packages/{package_id}/uninstall")
-
-    def get_package_install_status(self, package_id: str) -> dict:
-        package_id = self._validate_package_id(package_id)
-        return self._request("GET", f"/Administration/packages/{package_id}/installation-status")

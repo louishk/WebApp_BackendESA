@@ -607,13 +607,18 @@ def register_sugarcrm_tools(server: Server, app: 'MCPServerApp') -> None:
             return "Operation failed. Check server logs for details."
 
     async def SC_get_package(auth_context: Optional[Dict] = None,
-                             package_id: str = None) -> str:
-        """Get metadata for a single Sugar package by id."""
+                             package_id: str = None,
+                             include_content: bool = False) -> str:
+        """Get metadata for a Sugar package. Set include_content=True to also return the base64 zip (very large)."""
         try:
             if not package_id:
                 return "package_id is required"
             svc = _get_service(app)
-            return json.dumps(svc.get_package(package_id), indent=2, default=str)
+            if include_content:
+                data = svc.get_package(package_id)
+            else:
+                data = svc.get_package_metadata(package_id)
+            return json.dumps(data, indent=2, default=str)
         except SugarCRMAPIError as e:
             logger.warning("SugarCRM error in SC_get_package: %s (code=%s)", e, e.code)
             return f"SugarCRM error: {e.code or 'unknown'}"
@@ -676,21 +681,6 @@ def register_sugarcrm_tools(server: Server, app: 'MCPServerApp') -> None:
             return f"SugarCRM error: {e.code or 'unknown'}"
         except Exception:
             logger.error("Unexpected error in SC_uninstall_package", exc_info=True)
-            return "Operation failed. Check server logs for details."
-
-    async def SC_get_package_install_status(auth_context: Optional[Dict] = None,
-                                            package_id: str = None) -> str:
-        """Get installation status of a Sugar package (staged/installing/installed/failed)."""
-        try:
-            if not package_id:
-                return "package_id is required"
-            svc = _get_service(app)
-            return json.dumps(svc.get_package_install_status(package_id), indent=2, default=str)
-        except SugarCRMAPIError as e:
-            logger.warning("SugarCRM error in SC_get_package_install_status: %s (code=%s)", e, e.code)
-            return f"SugarCRM error: {e.code or 'unknown'}"
-        except Exception:
-            logger.error("Unexpected error in SC_get_package_install_status", exc_info=True)
             return "Operation failed. Check server logs for details."
 
     # =========================================================================
@@ -963,15 +953,14 @@ def register_sugarcrm_tools(server: Server, app: 'MCPServerApp') -> None:
         },
         "required": [],
     }
-    _package_id_only = {
+    SC_get_package._input_schema = {
         "type": "object",
         "properties": {
             "package_id": {"type": "string", "description": "Sugar package id"},
+            "include_content": {"type": "boolean", "default": False, "description": "Include the base64-encoded zip content (large)"},
         },
         "required": ["package_id"],
     }
-    SC_get_package._input_schema = _package_id_only
-    SC_get_package_install_status._input_schema = _package_id_only
     SC_upload_package._input_schema = {
         "type": "object",
         "properties": {
@@ -1042,7 +1031,6 @@ def register_sugarcrm_tools(server: Server, app: 'MCPServerApp') -> None:
         "SC_upload_package": SC_upload_package,
         "SC_install_package": SC_install_package,
         "SC_uninstall_package": SC_uninstall_package,
-        "SC_get_package_install_status": SC_get_package_install_status,
     }
 
     for name, handler in tools.items():

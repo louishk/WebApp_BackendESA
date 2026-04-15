@@ -1251,7 +1251,7 @@ def _get_mcp_tools_grouped():
         'SC_list_fields_admin',
     ]
     tools['SugarCRM - Module Loader'] = [
-        'SC_list_packages', 'SC_get_package', 'SC_get_package_install_status',
+        'SC_list_packages', 'SC_get_package',
         'SC_upload_package', 'SC_install_package', 'SC_uninstall_package',
     ]
     return tools
