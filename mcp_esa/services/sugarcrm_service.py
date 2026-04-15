@@ -22,7 +22,8 @@ class SugarCRMConfig:
     password: str
     client_id: str = "sugar"
     client_secret: str = ""
-    platform: str = "mcp_esa"
+    platform: str = "mobile"
+    api_version: str = "v11"
     timeout: int = 30
 
     def __post_init__(self):
@@ -30,7 +31,7 @@ class SugarCRMConfig:
 
     @property
     def api_base(self) -> str:
-        return f"{self.url}/rest/v11_20"
+        return f"{self.url}/rest/{self.api_version}"
 
 
 class SugarCRMAPIError(Exception):

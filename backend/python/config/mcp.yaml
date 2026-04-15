@@ -57,10 +57,11 @@ google_ads:
 # =============================================================================
 # Non-secret fields live here; password + client_secret resolved from vault.
 sugarcrm:
-  url: "https://extraspaceasia.sugarondemand.com"
-  username: "mcp_service"
+  url: "https://extraspace.sugarondemand.com"
+  username: "api_data"
   client_id: "sugar"
-  platform: "mcp_esa"
+  platform: "mobile"
+  api_version: "v11"
   timeout: 30
   password_vault: "SUGARCRM_PASSWORD"
   client_secret_vault: "SUGARCRM_CLIENT_SECRET"

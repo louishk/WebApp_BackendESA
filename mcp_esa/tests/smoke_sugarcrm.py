@@ -28,6 +28,7 @@ def _svc():
         client_id=s.sugarcrm_client_id,
         client_secret=s.sugarcrm_client_secret,
         platform=s.sugarcrm_platform,
+        api_version=s.sugarcrm_api_version,
         timeout=s.sugarcrm_timeout,
     )
     return SugarCRMService(cfg)

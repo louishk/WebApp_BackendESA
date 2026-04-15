@@ -187,7 +187,11 @@ class Settings:
 
     @property
     def sugarcrm_platform(self) -> str:
-        return self._sugarcrm.get('platform', 'mcp_esa')
+        return self._sugarcrm.get('platform', 'mobile')
+
+    @property
+    def sugarcrm_api_version(self) -> str:
+        return self._sugarcrm.get('api_version', 'v11')
 
     @property
     def sugarcrm_timeout(self) -> int:
