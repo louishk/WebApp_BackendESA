@@ -394,15 +394,16 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
 
     async def nsa_get_bizmoney_cost(
         auth_context: Optional[Dict] = None,
-        date: str = None,
+        start_date: str = None,
+        end_date: str = None,
     ) -> str:
-        if not date:
-            return "date (YYYY-MM-DD) is required"
+        if not (start_date and end_date):
+            return "start_date and end_date (YYYY-MM-DD) are required"
         config = _get_config()
         if not config:
             return "Naver Search Ad not configured"
         try:
-            return _dump(await NaverSearchAdService(config).get_bizmoney_cost(date))
+            return _dump(await NaverSearchAdService(config).get_bizmoney_cost(start_date, end_date))
         except Exception as e:
             return _err(e, "get_bizmoney_cost")
 
@@ -679,7 +680,7 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
                 "4. Seasonal or step changes to investigate\n\n"
                 "Use KRW for money. Be specific."
             )
-            content = await _llm_chat(system, f"Analyze these Naver trends:\n\n{data}", 2000)
+            content = await _llm_chat(system, f"Analyze these Naver trends:\n\n{data}", 4000)
             if not content:
                 return f"LLM unavailable. Raw data:\n\n{data}"
             return f"Trend Analysis {since}→{until} [{breakdown}]\n{'=' * 50}\n\n{content}"
@@ -734,7 +735,7 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
                 "4. Root-cause hypotheses (landing page, intent mismatch, etc.)\n\n"
                 "Use KRW. Be specific."
             )
-            content = await _llm_chat(system, f"Review waste:\n\n{data}", 2000)
+            content = await _llm_chat(system, f"Review waste:\n\n{data}", 4000)
             if not content:
                 return f"LLM unavailable. Raw data:\n\n{data}"
             return f"Negative Keyword Suggestions ({date_preset})\n{'=' * 50}\n\n{content}"
@@ -763,7 +764,7 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
                 "4. Risks and things to monitor after the change\n\n"
                 "Use KRW. Be concrete."
             )
-            content = await _llm_chat(system, f"Optimize budgets:\n\n{data}", 2500)
+            content = await _llm_chat(system, f"Optimize budgets:\n\n{data}", 6000)
             if not content:
                 return f"LLM unavailable. Raw data:\n\n{data}"
             return f"Budget Optimization ({date_preset})\n{'=' * 50}\n\n{content}"
@@ -909,8 +910,8 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
     nsa_create_stat_report._input_schema = {
         "type": "object",
         "properties": {
-            "report_tp": {"type": "string", "description": "AD | AD_DETAIL | AD_CONVERSION | ADGROUP | CAMPAIGN | KEYWORD | BUSINESS_CHANNEL"},
-            "stat_dt": {"type": "string", "description": "YYYY-MM-DD"},
+            "report_tp": {"type": "string", "description": "AD | AD_DETAIL (only these two are accepted by /stat-reports)"},
+            "stat_dt": {"type": "string", "description": "YYYY-MM-DD (normalized to ISO datetime internally)"},
         },
         "required": ["report_tp", "stat_dt"],
     }
@@ -929,8 +930,11 @@ def register_naver_searchad_tools(server: Server, app: "MCPServerApp") -> None:
     }
     nsa_get_bizmoney_cost._input_schema = {
         "type": "object",
-        "properties": {"date": {"type": "string", "description": "YYYY-MM-DD"}},
-        "required": ["date"],
+        "properties": {
+            "start_date": {"type": "string", "description": "YYYY-MM-DD"},
+            "end_date": {"type": "string", "description": "YYYY-MM-DD"},
+        },
+        "required": ["start_date", "end_date"],
     }
 
     # AI analysis schemas

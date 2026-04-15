@@ -233,6 +233,9 @@ class NaverSearchAdService:
 
     # Stat reports (async jobs)
     async def create_stat_report(self, report_tp: str, stat_dt: str) -> Dict[str, Any]:
+        # Naver rejects bare YYYY-MM-DD here; it requires ISO 8601 datetime.
+        if len(stat_dt) == 10 and stat_dt[4] == "-" and stat_dt[7] == "-":
+            stat_dt = f"{stat_dt}T00:00:00Z"
         return await self._request(
             "POST",
             "/stat-reports",
@@ -257,5 +260,9 @@ class NaverSearchAdService:
     async def get_bizmoney_balance(self) -> Dict[str, Any]:
         return await self._request("GET", "/billing/bizmoney")
 
-    async def get_bizmoney_cost(self, date: str) -> Dict[str, Any]:
-        return await self._request("GET", f"/billing/bizmoney/cost/{date}")
+    async def get_bizmoney_cost(self, start_date: str, end_date: str) -> Dict[str, Any]:
+        return await self._request(
+            "GET",
+            "/billing/bizmoney/histories/exhaust",
+            params={"searchStartDt": start_date, "searchEndDt": end_date},
+        )
