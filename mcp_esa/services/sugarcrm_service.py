@@ -132,36 +132,65 @@ class SugarCRMService:
             raise SugarCRMAPIError("Invalid record id", code="bad_id")
         return record_id
 
+    @staticmethod
+    def _normalize_fields(fields) -> Optional[str]:
+        """Accept list[str], comma-separated str, or JSON-encoded list str; return comma-separated str or None."""
+        if fields is None or fields == "":
+            return None
+        if isinstance(fields, list):
+            return ",".join(str(f).strip() for f in fields if f)
+        if isinstance(fields, str):
+            s = fields.strip()
+            if s.startswith("[") and s.endswith("]"):
+                import json
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return ",".join(str(f).strip() for f in parsed if f)
+                except ValueError:
+                    pass
+            return s
+        raise SugarCRMAPIError("fields must be a list or comma-separated string", code="bad_fields")
+
     # ---------------- Record CRUD ----------------
 
-    def get_record(self, module: str, record_id: str, fields: Optional[List[str]] = None) -> dict:
+    def get_record(self, module: str, record_id: str, fields=None) -> dict:
         module = self._validate_module(module)
         record_id = self._validate_id(record_id)
         params: Dict[str, Any] = {}
-        if fields:
-            params["fields"] = ",".join(fields)
+        f = self._normalize_fields(fields)
+        if f:
+            params["fields"] = f
         return self._request("GET", f"/{module}/{record_id}", params=params)
 
-    def list_records(self, module: str, filter: Optional[List[dict]] = None,
-                     fields: Optional[List[str]] = None, limit: int = 20, offset: int = 0,
-                     order_by: Optional[str] = None) -> dict:
+    def list_records(self, module: str, filter=None, fields=None, limit: int = 20,
+                     offset: int = 0, order_by: Optional[str] = None) -> dict:
         """POST {module}/filter — Sugar v11 filter endpoint (matches common/sugarcrm_client)."""
         module = self._validate_module(module)
         params: Dict[str, Any] = {"max_num": int(limit), "offset": int(offset)}
-        if fields:
-            params["fields"] = ",".join(fields)
+        f = self._normalize_fields(fields)
+        if f:
+            params["fields"] = f
         if order_by:
             params["order_by"] = order_by
         body: Dict[str, Any] = {"deleted": False}
         if filter:
+            # accept either a list of clauses or a JSON-encoded string
+            if isinstance(filter, str):
+                import json
+                try:
+                    filter = json.loads(filter)
+                except ValueError:
+                    raise SugarCRMAPIError("filter must be a list or JSON-encoded list", code="bad_filter")
             body["filter"] = filter
         return self._request("POST", f"/{module}/filter", params=params, json_body=body)
 
-    def search(self, module: str, q: str, fields: Optional[List[str]] = None, limit: int = 20) -> dict:
+    def search(self, module: str, q: str, fields=None, limit: int = 20) -> dict:
         module = self._validate_module(module)
         params: Dict[str, Any] = {"q": q, "module_list": module, "max_num": int(limit)}
-        if fields:
-            params["fields"] = ",".join(fields)
+        f = self._normalize_fields(fields)
+        if f:
+            params["fields"] = f
         return self._request("GET", "/search", params=params)
 
     def create_record(self, module: str, data: dict) -> dict:
@@ -192,14 +221,14 @@ class SugarCRMService:
         return link
 
     def get_related(self, module: str, record_id: str, link_name: str,
-                    limit: int = 20, offset: int = 0,
-                    fields: Optional[List[str]] = None) -> dict:
+                    limit: int = 20, offset: int = 0, fields=None) -> dict:
         module = self._validate_module(module)
         record_id = self._validate_id(record_id)
         link_name = self._validate_link_name(link_name)
         params: Dict[str, Any] = {"max_num": int(limit), "offset": int(offset)}
-        if fields:
-            params["fields"] = ",".join(fields)
+        f = self._normalize_fields(fields)
+        if f:
+            params["fields"] = f
         return self._request("GET", f"/{module}/{record_id}/link/{link_name}", params=params)
 
     def link_records(self, module: str, record_id: str, link_name: str, related_id: str) -> dict:
