@@ -1222,6 +1222,24 @@ def _get_mcp_tools_grouped():
     tools['Revenue - AI Analysis'] = [
         'RM_analyze_revenue', 'RM_detect_anomalies', 'RM_generate_executive_report',
     ]
+    tools['SugarCRM - Read'] = [
+        'SC_get_record', 'SC_list_records', 'SC_search', 'SC_get_related',
+        'SC_list_modules', 'SC_list_fields', 'SC_get_field',
+        'SC_list_dropdowns', 'SC_get_dropdown', 'SC_get_layout',
+        'SC_get_lead', 'SC_get_contact', 'SC_get_account', 'SC_search_by_email',
+    ]
+    tools['SugarCRM - Write'] = [
+        'SC_create_record', 'SC_update_record', 'SC_delete_record',
+        'SC_link_records', 'SC_unlink_records',
+        'SC_create_lead', 'SC_convert_lead', 'SC_log_call',
+    ]
+    tools['SugarCRM - Admin (Studio)'] = [
+        'SC_create_field', 'SC_update_field', 'SC_delete_field',
+        'SC_update_dropdown',
+        'SC_create_relationship', 'SC_delete_relationship',
+        'SC_update_layout', 'SC_studio_deploy',
+        'SC_list_fields_admin',
+    ]
     return tools
 
 
