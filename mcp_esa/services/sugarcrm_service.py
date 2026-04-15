@@ -251,13 +251,20 @@ class SugarCRMService:
         return self._request("GET", "/metadata", params={"type_filter": "modules"})
 
     def list_fields(self, module: str) -> dict:
+        """Fetch per-module metadata via /metadata?type_filter=modules&module_filter=X and return the module slice."""
         module = self._validate_module(module)
-        return self._request("GET", f"/metadata/modules/{module}")
+        result = self._request("GET", "/metadata",
+                               params={"type_filter": "modules", "module_filter": module})
+        return result.get("modules", {}).get(module, result)
 
     def get_field(self, module: str, field_name: str) -> dict:
         module = self._validate_module(module)
         field_name = self._validate_link_name(field_name)
-        return self._request("GET", f"/Administration/fields/{module}/{field_name}")
+        mod = self.list_fields(module)
+        fields = mod.get("fields", {})
+        if field_name not in fields:
+            raise SugarCRMAPIError(f"field {field_name} not found on {module}", code="not_found")
+        return fields[field_name]
 
     def create_field(self, module: str, spec: dict) -> dict:
         module = self._validate_module(module)

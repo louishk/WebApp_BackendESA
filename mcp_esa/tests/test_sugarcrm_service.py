@@ -179,13 +179,16 @@ def test_list_modules_hits_metadata():
     assert kwargs["params"]["type_filter"] == "modules"
 
 
-def test_list_fields_hits_module_metadata():
+def test_list_fields_hits_metadata_with_module_filter():
     svc = _service_with_token()
     with patch.object(svc._client, 'request') as req:
-        req.return_value = _mock_response({"fields": {}})
+        req.return_value = _mock_response({"modules": {"Accounts": {"fields": {}}}})
         svc.list_fields("Accounts")
-    args, _ = req.call_args
-    assert args[1].endswith("/metadata/modules/Accounts")
+    args, kwargs = req.call_args
+    assert args[1].endswith("/metadata")
+    p = kwargs["params"]
+    assert p["type_filter"] == "modules"
+    assert p["module_filter"] == "Accounts"
 
 
 def test_create_field_posts_spec():
