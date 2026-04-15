@@ -285,15 +285,26 @@ class SugarCRMService:
         return self._request("DELETE", f"/Administration/fields/{module}/{field_name}")
 
     def list_dropdowns(self) -> dict:
-        return self._request("GET", "/Administration/dropdowns")
+        """Sugar v11 exposes dropdown lists via /lang/{lang} as app_list_strings."""
+        result = self._request("GET", "/lang/en_us")
+        return result.get("app_list_strings", result)
 
     def get_dropdown(self, name: str) -> dict:
         name = self._validate_link_name(name)
-        return self._request("GET", f"/Administration/dropdowns/{name}")
+        lists = self.list_dropdowns()
+        if name not in lists:
+            raise SugarCRMAPIError(f"dropdown {name} not found", code="not_found")
+        return {"name": name, "values": lists[name]}
 
-    def update_dropdown(self, name: str, values: list) -> dict:
+    def update_dropdown(self, name: str, values) -> dict:
         name = self._validate_link_name(name)
-        if not isinstance(values, list):
+        if isinstance(values, str):
+            import json
+            try:
+                values = json.loads(values)
+            except ValueError:
+                raise SugarCRMAPIError("values must be a list", code="bad_values")
+        if not isinstance(values, (list, dict)):
             raise SugarCRMAPIError("values must be a list", code="bad_values")
         return self._request("PUT", f"/Administration/dropdowns/{name}", json_body={"values": values})
 
@@ -313,9 +324,16 @@ class SugarCRMService:
         return self._request("DELETE", f"/Administration/relationships/{rel_name}")
 
     def get_layout(self, module: str, view: str) -> dict:
+        """Sugar v11 layouts are nested inside /metadata?module_filter=X under views[view]."""
         module = self._validate_module(module)
         view = self._validate_link_name(view)
-        return self._request("GET", f"/metadata/modules/{module}/layouts/{view}")
+        result = self._request("GET", "/metadata",
+                               params={"type_filter": "modules", "module_filter": module})
+        mod = result.get("modules", {}).get(module, {})
+        views = mod.get("views", {})
+        if view not in views:
+            raise SugarCRMAPIError(f"view {view} not found on {module}", code="not_found")
+        return views[view]
 
     def update_layout(self, module: str, view: str, spec: dict) -> dict:
         module = self._validate_module(module)
