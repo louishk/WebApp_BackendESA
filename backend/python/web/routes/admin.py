@@ -1254,6 +1254,11 @@ def _get_mcp_tools_grouped():
         'SC_list_packages', 'SC_get_package',
         'SC_upload_package', 'SC_install_package', 'SC_uninstall_package',
     ]
+    tools['Google Search Console'] = [
+        'GSC_test_connection', 'GSC_list_sites', 'GSC_analyze_keywords',
+        'GSC_inspect_url', 'GSC_list_sitemaps', 'GSC_submit_sitemap',
+        'GSC_delete_sitemap', 'GSC_get_coverage',
+    ]
     return tools
 
 
