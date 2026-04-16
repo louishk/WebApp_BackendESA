@@ -65,6 +65,15 @@ def create_mcp_server(settings: Optional[Settings] = None) -> MCPServerApp:
         except Exception as e:
             logger.warning(f"Failed to register Google Ads tools: {e}")
 
+    # Register Google Analytics 4 tools
+    if settings.google_analytics4_enabled:
+        try:
+            from mcp_esa.tools.google_analytics4_tools import register_google_analytics4_tools
+            register_google_analytics4_tools(server, app)
+            logger.info("Google Analytics 4 tools registered")
+        except Exception as e:
+            logger.warning(f"Failed to register Google Analytics 4 tools: {e}")
+
     # Register Naver Search Ad tools
     if settings.naver_searchad_enabled:
         try:
@@ -91,6 +100,15 @@ def create_mcp_server(settings: Optional[Settings] = None) -> MCPServerApp:
             logger.info("SugarCRM tools registered")
         except Exception as e:
             logger.warning(f"Failed to register SugarCRM tools: {e}")
+
+    # Register Google Search Console tools
+    if settings.google_searchconsole_enabled:
+        try:
+            from mcp_esa.tools.google_searchconsole_tools import register_google_searchconsole_tools
+            register_google_searchconsole_tools(server, app)
+            logger.info("Google Search Console tools registered")
+        except Exception as e:
+            logger.warning(f"Failed to register Google Search Console tools: {e}")
 
     tool_count = len(server._tool_handlers) if hasattr(server, '_tool_handlers') else 0
     logger.info(f"MCP Server '{settings.mcp_server_name}' created with {tool_count} tools")
