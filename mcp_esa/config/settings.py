@@ -43,6 +43,8 @@ class Settings:
         self._server = self._mcp.get('server', {})
         self._features = self._mcp.get('features', {})
         self._gads = self._mcp.get('google_ads', {})
+        self._ga4 = self._mcp.get('google_analytics4', {})
+        self._gsc = self._mcp.get('google_searchconsole', {})
         self._sugarcrm = self._mcp.get('sugarcrm', {})
         self._ms_oauth = self._mcp.get('microsoft_oauth', {})
         self._naver = self._mcp.get('naver_searchad', {})
@@ -165,6 +167,45 @@ class Settings:
     @property
     def google_ads_refresh_token(self) -> str:
         vault_key = self._gads.get('refresh_token_vault', 'GOOGLE_ADS_REFRESH_TOKEN')
+        return self._config.get_secret(vault_key) or ''
+
+    # Google Analytics 4
+    @property
+    def google_analytics4_enabled(self) -> bool:
+        return self._features.get('google_analytics4', False)
+
+    @property
+    def google_analytics4_client_id(self) -> str:
+        # Falls back to the Google Ads client_id (same OAuth app)
+        return self._ga4.get('client_id') or self._gads.get('client_id', '')
+
+    @property
+    def google_analytics4_client_secret(self) -> str:
+        vault_key = self._ga4.get('client_secret_vault', 'GOOGLE_ADS_CLIENT_SECRET')
+        return self._config.get_secret(vault_key) or ''
+
+    @property
+    def google_analytics4_refresh_token(self) -> str:
+        vault_key = self._ga4.get('refresh_token_vault', 'GOOGLE_ANALYTICS_REFRESH_TOKEN')
+        return self._config.get_secret(vault_key) or ''
+
+    # Google Search Console
+    @property
+    def google_searchconsole_enabled(self) -> bool:
+        return self._features.get('google_searchconsole', False)
+
+    @property
+    def google_searchconsole_client_id(self) -> str:
+        return self._gsc.get('client_id') or self._gads.get('client_id', '')
+
+    @property
+    def google_searchconsole_client_secret(self) -> str:
+        vault_key = self._gsc.get('client_secret_vault', 'GOOGLE_ADS_CLIENT_SECRET')
+        return self._config.get_secret(vault_key) or ''
+
+    @property
+    def google_searchconsole_refresh_token(self) -> str:
+        vault_key = self._gsc.get('refresh_token_vault', 'GOOGLE_SEARCHCONSOLE_REFRESH_TOKEN')
         return self._config.get_secret(vault_key) or ''
 
     # SugarCRM feature flag

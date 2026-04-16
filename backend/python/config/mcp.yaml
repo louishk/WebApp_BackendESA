@@ -27,6 +27,8 @@ microsoft_oauth:
 features:
   database: true
   google_ads: true
+  google_analytics4: true
+  google_searchconsole: true
   revenue: true
   naver_searchad: true
   sugarcrm: true
@@ -51,6 +53,28 @@ google_ads:
   client_secret_vault: "GOOGLE_ADS_CLIENT_SECRET"
   developer_token_vault: "GOOGLE_ADS_DEVELOPER_TOKEN"
   refresh_token_vault: "GOOGLE_ADS_REFRESH_TOKEN"
+
+# =============================================================================
+# Google Analytics 4 (Data + Admin API)
+# =============================================================================
+# Reuses the Google Ads OAuth client_id/client_secret, but requires a NEW
+# refresh token minted with the analytics.readonly scope (Google refresh tokens
+# are scope-locked at consent time). Use scripts/mint_ga4_refresh_token.py.
+google_analytics4:
+  client_id: "387700327426-cmsrklgau8vqh9mnjvl95cc4vvenqj77.apps.googleusercontent.com"
+  client_secret_vault: "GOOGLE_ADS_CLIENT_SECRET"
+  refresh_token_vault: "GOOGLE_ANALYTICS_REFRESH_TOKEN"
+
+# =============================================================================
+# Google Search Console API
+# =============================================================================
+# Reuses the Google Ads OAuth client_id/client_secret. Requires a NEW
+# refresh token minted with the webmasters scope.
+# Use scripts/mint_gsc_refresh_token.py.
+google_searchconsole:
+  client_id: "387700327426-cmsrklgau8vqh9mnjvl95cc4vvenqj77.apps.googleusercontent.com"
+  client_secret_vault: "GOOGLE_ADS_CLIENT_SECRET"
+  refresh_token_vault: "GOOGLE_SEARCHCONSOLE_REFRESH_TOKEN"
 
 # =============================================================================
 # SugarCRM REST v11 API

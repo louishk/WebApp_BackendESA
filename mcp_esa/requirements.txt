@@ -13,6 +13,14 @@ aiomysql>=0.2.0
 # Google Ads tools
 google-ads>=25.0.0
 
+# Google Analytics 4 tools (Data API + Admin API)
+google-analytics-data>=0.18.0
+google-analytics-admin>=0.22.0
+google-auth-oauthlib>=1.2.0
+
+# Google Search Console
+google-api-python-client>=2.100.0
+
 # BigQuery
 google-cloud-bigquery>=3.0.0
 google-auth>=2.0.0
