@@ -3759,3 +3759,25 @@ class CcwsInsuranceCoverage(Base, BaseModel, TimestampMixin):
     sProvidor = Column(String(255))
     sBrochureUrl = Column(Text)
     sCertificateUrl = Column(Text)
+
+
+class SiteBillingConfig(Base, BaseModel, TimestampMixin):
+    """
+    Per-site proration / billing-mode config for the MoveInCost calculator.
+
+    Source: extracted from MoveInCostRetrieveWithDiscount_v4 SOAP response.
+    Sync preserves manual overrides — rows with overridden_by set are
+    skipped during pipeline runs.
+    """
+    __tablename__ = 'site_billing_config'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    SiteCode = Column(String(20), nullable=False, unique=True, index=True)
+    SiteID = Column(Integer)
+    b_anniv_date_leasing = Column(Boolean, nullable=False, default=False)
+    i_day_strt_prorating = Column(Integer, nullable=False, default=1)
+    i_day_strt_prorate_plus_next = Column(Integer, nullable=False, default=17)
+    synced_from_soap_at = Column(DateTime)
+    overridden_by = Column(String(100))
+    overridden_at = Column(DateTime)
+    notes = Column(Text)

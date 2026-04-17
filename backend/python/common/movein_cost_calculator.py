@@ -22,7 +22,7 @@ ChargeDescriptionsRetrieve data.
 
 from calendar import monthrange
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from typing import List, Optional
 
 
@@ -51,7 +51,20 @@ class CostLine:
 
 
 def _round2(value: Decimal) -> Decimal:
+    """Standard 2dp rounding (used for proration). HALF_UP."""
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _round2_tax(value: Decimal) -> Decimal:
+    """Tax-specific 2dp rounding. SiteLink truncates (ROUND_DOWN) tax.
+
+    Empirically determined on LSETUP 2026-04-17:
+    - 35.50 * 0.09 = 3.195 → SOAP returns 3.19 (truncation, not HALF_UP)
+    - 17.75 * 0.09 = 1.5975 → SOAP returns 1.59 (truncation, not HALF_DOWN)
+    Combined with the discount tax method (full_tax - disc_tax), this
+    matches SOAP exactly across all tested scenarios.
+    """
+    return value.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
 
 def _prorate(monthly_amount, move_in_day: int, days_in_month: int) -> Decimal:
@@ -63,8 +76,8 @@ def _prorate(monthly_amount, move_in_day: int, days_in_month: int) -> Decimal:
 
 
 def _tax(amount: Decimal, rate_pct) -> Decimal:
-    """Calculate tax from a percentage rate (e.g. 9.0 = 9%)."""
-    return _round2(
+    """Calculate tax from a percentage rate (e.g. 9.0 = 9%). HALF_DOWN per SiteLink."""
+    return _round2_tax(
         Decimal(str(amount)) * Decimal(str(rate_pct)) / Decimal("100")
     )
 
@@ -148,10 +161,24 @@ def calculate_movein_cost(
         # Fixed discount is capped at the prorated rent amount
         discount_amt = min(_round2(Decimal(str(fixed_discount))), rent_base)
 
-    rent_after_disc = rent_base - discount_amt
-    rent_t1 = _tax(rent_after_disc, rent_tax.tax1_rate)
-    rent_t2 = _tax(rent_after_disc, rent_tax.tax2_rate)
+    # SiteLink tax calculation when a discount is present:
+    #   tax = tax(full_base) - tax(discount)
+    # This is mathematically the same as tax on (base-discount) but with
+    # different rounding behavior at the boundary. SiteLink reports the
+    # full ChargeAmount (not net) and a separate dcDiscount field — the
+    # TaxAmount is the net after subtracting discount tax.
+    rent_full_tax1 = _tax(rent_base, rent_tax.tax1_rate)
+    rent_full_tax2 = _tax(rent_base, rent_tax.tax2_rate)
+    if discount_amt > 0:
+        rent_disc_tax1 = _tax(discount_amt, rent_tax.tax1_rate)
+        rent_disc_tax2 = _tax(discount_amt, rent_tax.tax2_rate)
+    else:
+        rent_disc_tax1 = Decimal("0")
+        rent_disc_tax2 = Decimal("0")
+    rent_t1 = rent_full_tax1 - rent_disc_tax1
+    rent_t2 = rent_full_tax2 - rent_disc_tax2
 
+    rent_after_disc = rent_base - discount_amt
     charges.append(CostLine(
         description="First Monthly Rent Fee",
         charge_amount=rent_base,
@@ -246,3 +273,42 @@ def calculate_movein_cost(
 def estimate_total(charges: List[CostLine]) -> Decimal:
     """Sum all charge line totals."""
     return sum((c.total for c in charges), Decimal("0"))
+
+
+def load_site_billing_config(site_code: str):
+    """
+    Load proration / billing-mode config for a site from site_billing_config.
+
+    Returns a dict with keys:
+        anniversary_billing: bool
+        day_start_prorating: int
+        day_start_prorate_plus_next: int
+
+    Falls back to defaults (1st-of-month, threshold day 17) if the site
+    has no row yet — caller should run cc_site_billing_config_to_sql.py
+    to populate.
+    """
+    from sqlalchemy import create_engine, text
+    from common.config_loader import get_database_url
+
+    engine = create_engine(get_database_url('pbi'))
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT b_anniv_date_leasing,
+                   i_day_strt_prorating,
+                   i_day_strt_prorate_plus_next
+            FROM site_billing_config
+            WHERE "SiteCode" = :site
+        """), {"site": site_code}).first()
+
+    if not row:
+        return {
+            "anniversary_billing": False,
+            "day_start_prorating": 1,
+            "day_start_prorate_plus_next": 17,
+        }
+    return {
+        "anniversary_billing": bool(row[0]),
+        "day_start_prorating": int(row[1]),
+        "day_start_prorate_plus_next": int(row[2]),
+    }

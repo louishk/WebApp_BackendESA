@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Billing Config: {{ config.SiteCode }} - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Edit Billing Config — {{ config.SiteCode }}</h1>
+    <p><a href="{{ url_for('admin.site_billing_config_list') }}">&larr; Back to Site Billing Config</a></p>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="flash flash-{{ category }}" style="padding: 1rem; margin-bottom: 1rem; border-radius: 4px; background: {% if category == 'success' %}#d1fae5{% elif category == 'error' %}#fee2e2{% else %}#dbeafe{% endif %};">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+{% if config.overridden_by %}
+<div class="card" style="background:#fef3c7;border-left:4px solid #f59e0b;">
+    <strong>This site has a manual override.</strong>
+    Last edited by {{ config.overridden_by }}
+    {% if config.overridden_at %}on {{ config.overridden_at.strftime('%Y-%m-%d %H:%M') }} UTC{% endif %}.
+    The sync pipeline will not overwrite this until you clear the override.
+</div>
+{% endif %}
+
+<div class="card">
+    <form method="POST">
+        <div style="margin-bottom:1.5rem;">
+            <label style="display:flex;align-items:center;gap:0.5rem;font-weight:600;">
+                <input type="checkbox" name="b_anniv_date_leasing"
+                       {% if config.b_anniv_date_leasing %}checked{% endif %}>
+                Anniversary billing (no proration — full month from move-in date)
+            </label>
+            <p style="color:#666;font-size:0.85em;margin-top:0.25rem;margin-left:1.5rem;">
+                Uncheck for 1st-of-month billing with proration.
+            </p>
+        </div>
+
+        <div style="margin-bottom:1.5rem;">
+            <label style="font-weight:600;display:block;margin-bottom:0.25rem;">
+                iDayStrtProrating (proration start day)
+            </label>
+            <input type="number" name="i_day_strt_prorating" min="1" max="31"
+                   value="{{ config.i_day_strt_prorating }}"
+                   style="width:100px;padding:0.5rem;border:1px solid #ccc;border-radius:4px;">
+            <p style="color:#666;font-size:0.85em;margin-top:0.25rem;">
+                Day of month proration starts. Default: 1.
+            </p>
+        </div>
+
+        <div style="margin-bottom:1.5rem;">
+            <label style="font-weight:600;display:block;margin-bottom:0.25rem;">
+                iDayStrtProratePlusNext (X — second-month threshold)
+            </label>
+            <input type="number" name="i_day_strt_prorate_plus_next" min="1" max="31"
+                   value="{{ config.i_day_strt_prorate_plus_next }}"
+                   style="width:100px;padding:0.5rem;border:1px solid #ccc;border-radius:4px;">
+            <p style="color:#666;font-size:0.85em;margin-top:0.25rem;">
+                Move-ins on day &gt; X also charge a full second month.
+                LSETUP=17, other ESA sites=24 (anniversary mode, value unused).
+            </p>
+        </div>
+
+        <div style="margin-bottom:1.5rem;">
+            <label style="font-weight:600;display:block;margin-bottom:0.25rem;">Notes</label>
+            <textarea name="notes" rows="3"
+                      style="width:100%;max-width:600px;padding:0.5rem;border:1px solid #ccc;border-radius:4px;"
+                      placeholder="Reason for override (optional)">{{ config.notes or '' }}</textarea>
+        </div>
+
+        <div style="margin-top:1.5rem;display:flex;gap:0.5rem;">
+            <button type="submit" class="btn">Save Changes</button>
+            <a href="{{ url_for('admin.site_billing_config_list') }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="margin-top:1rem;background:#f3f4f6;">
+    <h3 style="margin-top:0;">Last Sync from SOAP</h3>
+    <p style="color:#666;">
+        {% if config.synced_from_soap_at %}
+            {{ config.synced_from_soap_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+        {% else %}
+            Never synced
+        {% endif %}
+    </p>
+</div>
+{% endblock %}

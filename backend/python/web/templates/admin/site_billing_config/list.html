@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Site Billing Config - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Site Billing Configuration</h1>
+    <p>Per-site proration and billing-mode settings used by the MoveInCost calculator.</p>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="flash flash-{{ category }}" style="padding: 1rem; margin-bottom: 1rem; border-radius: 4px; background: {% if category == 'success' %}#d1fae5{% elif category == 'error' %}#fee2e2{% else %}#dbeafe{% endif %};">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+<div class="card">
+    <h2>Billing Mode Reference</h2>
+    <p style="color:#666;font-size:0.9rem;margin-bottom:0.5rem;">
+        <strong>Anniversary billing:</strong> tenant pays full month from move-in date each cycle. No proration.<br>
+        <strong>1st-of-month billing:</strong>
+        <ul style="margin-left:1.5rem;font-size:0.9rem;color:#666;">
+            <li>Day 1 → full month rent</li>
+            <li>Day 2 to <em>X</em> → prorated current month</li>
+            <li>Day <em>X+1</em> to end-of-month → prorated current + full next month</li>
+        </ul>
+        Where <em>X</em> = <code>iDayStrtProratePlusNext</code>.
+    </p>
+</div>
+
+<div class="card" style="margin-top:1rem;">
+    <h2>Sites ({{ configs|length }})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Site</th>
+                <th>Billing Mode</th>
+                <th>Prorate Start (X)</th>
+                <th>Plus-Next Threshold</th>
+                <th>Last Synced</th>
+                <th>Override</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in configs %}
+            <tr>
+                <td><strong>{{ c.SiteCode }}</strong>{% if c.SiteID %} <span style="color:#999;font-size:0.85em;">#{{ c.SiteID }}</span>{% endif %}</td>
+                <td>
+                    {% if c.b_anniv_date_leasing %}
+                        <span style="color:#0369a1;">Anniversary</span>
+                    {% else %}
+                        <span style="color:#7c2d12;">1st-of-month</span>
+                    {% endif %}
+                </td>
+                <td>{{ c.i_day_strt_prorating }}</td>
+                <td>{{ c.i_day_strt_prorate_plus_next }}</td>
+                <td style="color:#666;font-size:0.85em;">
+                    {% if c.synced_from_soap_at %}
+                        {{ c.synced_from_soap_at.strftime('%Y-%m-%d %H:%M') }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>
+                    {% if c.overridden_by %}
+                        <span style="color:#92400e;font-size:0.85em;" title="Overridden by {{ c.overridden_by }} on {{ c.overridden_at.strftime('%Y-%m-%d %H:%M') if c.overridden_at }}">
+                            {{ c.overridden_by }}
+                        </span>
+                    {% else %}
+                        <span style="color:#999;">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <a href="{{ url_for('admin.site_billing_config_edit', config_id=c.id) }}" class="btn btn-sm">Edit</a>
+                    {% if c.overridden_by %}
+                    <form method="POST" action="{{ url_for('admin.site_billing_config_clear_override', config_id=c.id) }}" style="display:inline;" onsubmit="return confirm('Clear override and resync from SOAP on next pipeline run?');">
+                        <button type="submit" class="btn btn-sm btn-secondary">Clear Override</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" style="text-align:center;color:#666;">No site billing configs found. Run cc_site_billing_config_to_sql.py to populate.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card" style="margin-top:1rem;">
+    <h2>Sync Pipeline</h2>
+    <p style="color:#666;font-size:0.9rem;">
+        The <code>ccws_site_billing_config</code> pipeline calls <code>MoveInCostRetrieveWithDiscount_v4</code>
+        on a known unit per site to extract these values from SiteLink. Sites with a manual
+        override are skipped during sync.
+    </p>
+</div>
+{% endblock %}

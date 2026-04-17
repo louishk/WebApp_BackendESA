@@ -223,6 +223,35 @@ def delete_role(role_id):
 # User Management (Admin only)
 # =============================================================================
 
+@admin_bp.route('/api/users')
+@login_required
+@admin_required
+def api_list_users():
+    """JSON list of users with roles + ECRI settings (used by ECRI admin pages)."""
+    from web.models.user import User
+    db = get_session()
+    try:
+        users = db.query(User).order_by(User.username).all()
+        return jsonify({
+            'users': [
+                {
+                    'id': u.id,
+                    'username': u.username,
+                    'email': u.email,
+                    'department': getattr(u, 'department', None),
+                    'roles': [{'id': r.id, 'name': r.name} for r in u.roles],
+                    'ecri_entitled': bool(getattr(u, 'ecri_entitled', False)),
+                    'ecri_max_pct_reduction': float(u.ecri_max_pct_reduction) if getattr(u, 'ecri_max_pct_reduction', None) is not None else 0,
+                    'ecri_max_abs_reduction': float(u.ecri_max_abs_reduction) if getattr(u, 'ecri_max_abs_reduction', None) is not None else 0,
+                    'allowed_site_ids': list(getattr(u, 'allowed_site_ids', None) or []),
+                }
+                for u in users
+            ]
+        })
+    finally:
+        db.close()
+
+
 @admin_bp.route('/users')
 @login_required
 @admin_required
@@ -1002,6 +1031,129 @@ def type_mappings():
 def services_page():
     """Service management page."""
     return render_template('admin/services.html')
+
+
+# =============================================================================
+# Site Billing Config — proration / billing-mode per site
+# =============================================================================
+
+def _get_pbi_session():
+    """Get PBI database session for site billing config (Azure-hosted)."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from common.config_loader import get_database_url
+    engine = create_engine(get_database_url('pbi'))
+    return sessionmaker(bind=engine)()
+
+
+@admin_bp.route('/site-billing-config')
+@login_required
+@config_required
+def site_billing_config_list():
+    """View per-site proration and billing-mode configuration."""
+    from common.models import SiteBillingConfig
+    session = _get_pbi_session()
+    try:
+        configs = session.query(SiteBillingConfig).order_by(
+            SiteBillingConfig.SiteCode).all()
+        rows = [{
+            'id': c.id,
+            'SiteCode': c.SiteCode,
+            'SiteID': c.SiteID,
+            'b_anniv_date_leasing': c.b_anniv_date_leasing,
+            'i_day_strt_prorating': c.i_day_strt_prorating,
+            'i_day_strt_prorate_plus_next': c.i_day_strt_prorate_plus_next,
+            'synced_from_soap_at': c.synced_from_soap_at,
+            'overridden_by': c.overridden_by,
+            'overridden_at': c.overridden_at,
+            'notes': c.notes,
+        } for c in configs]
+    finally:
+        session.close()
+    return render_template('admin/site_billing_config/list.html', configs=rows)
+
+
+@admin_bp.route('/site-billing-config/<int:config_id>/edit',
+                methods=['GET', 'POST'])
+@login_required
+@config_required
+def site_billing_config_edit(config_id):
+    """Edit one site's billing config (creates an override)."""
+    from common.models import SiteBillingConfig
+    from datetime import datetime, timezone
+    session = _get_pbi_session()
+    try:
+        cfg = session.query(SiteBillingConfig).get(config_id)
+        if not cfg:
+            flash('Config not found', 'error')
+            return redirect(url_for('admin.site_billing_config_list'))
+
+        if request.method == 'POST':
+            try:
+                anniv = request.form.get('b_anniv_date_leasing') == 'on'
+                day_start = int(request.form.get('i_day_strt_prorating', 1))
+                day_plus_next = int(
+                    request.form.get('i_day_strt_prorate_plus_next', 17))
+                notes = (request.form.get('notes') or '').strip()[:1000]
+            except (TypeError, ValueError):
+                flash('Invalid numeric input', 'error')
+                return redirect(url_for(
+                    'admin.site_billing_config_edit', config_id=config_id))
+
+            if not (1 <= day_start <= 31):
+                flash('iDayStrtProrating must be 1-31', 'error')
+                return redirect(url_for(
+                    'admin.site_billing_config_edit', config_id=config_id))
+            if not (1 <= day_plus_next <= 31):
+                flash('iDayStrtProratePlusNext must be 1-31', 'error')
+                return redirect(url_for(
+                    'admin.site_billing_config_edit', config_id=config_id))
+
+            cfg.b_anniv_date_leasing = anniv
+            cfg.i_day_strt_prorating = day_start
+            cfg.i_day_strt_prorate_plus_next = day_plus_next
+            cfg.notes = notes
+            cfg.overridden_by = current_user.email or current_user.username
+            cfg.overridden_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            session.commit()
+
+            audit_log(AuditEvent.CONFIG_UPDATED,
+                      f"site_billing_config site={cfg.SiteCode} "
+                      f"anniv={anniv} prorate_start={day_start} "
+                      f"prorate_plus_next={day_plus_next}")
+            flash(f'Updated billing config for {cfg.SiteCode}', 'success')
+            return redirect(url_for('admin.site_billing_config_list'))
+
+        return render_template(
+            'admin/site_billing_config/edit.html', config=cfg)
+    finally:
+        session.close()
+
+
+@admin_bp.route('/site-billing-config/<int:config_id>/clear-override',
+                methods=['POST'])
+@login_required
+@config_required
+def site_billing_config_clear_override(config_id):
+    """Clear manual override so the next pipeline run resyncs from SOAP."""
+    from common.models import SiteBillingConfig
+    session = _get_pbi_session()
+    try:
+        cfg = session.query(SiteBillingConfig).get(config_id)
+        if not cfg:
+            flash('Config not found', 'error')
+            return redirect(url_for('admin.site_billing_config_list'))
+        site = cfg.SiteCode
+        cfg.overridden_by = None
+        cfg.overridden_at = None
+        session.commit()
+        audit_log(AuditEvent.CONFIG_UPDATED,
+                  f"site_billing_config override cleared site={site}")
+        flash(f'Override cleared for {site}. Next sync will refresh from SOAP.',
+              'success')
+    finally:
+        session.close()
+    return redirect(url_for('admin.site_billing_config_list'))
 
 
 # =============================================================================

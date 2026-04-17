@@ -292,7 +292,7 @@
                 {% endif %}
                 {% set has_revenue = current_user.can_access_revenue_tools() or current_user.can_access_ecri() or current_user.can_access_discount_tools() %}
                 {% if has_revenue %}
-                    <a href="{{ url_for('revenue.dashboard') if current_user.can_access_revenue_tools() else (url_for('ecri.dashboard') if current_user.can_access_ecri() else url_for('discount_plans.list_plans')) }}" class="{{ 'active' if request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'discount_plans' in request.endpoint) else '' }}">Revenue</a>
+                    <a href="{{ url_for('revenue.dashboard') if current_user.can_access_revenue_tools() else (url_for('ecri.dashboard') if current_user.can_access_ecri() else url_for('discount_plans.list_plans')) }}" class="{{ 'active' if request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'discount_plans' in request.endpoint or 'reservation_fees' in request.endpoint) else '' }}">Revenue</a>
                 {% endif %}
                 {% set has_any_tool = current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_smart_lock() or current_user.can_access_scheduler() or current_user.can_manage_configs() %}
                 {% if has_any_tool %}
@@ -314,11 +314,12 @@
     </div>
 
     {# --- Revenue sub-navbar --- #}
-    {% set _in_revenue = request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'discount_plans' in request.endpoint) %}
+    {% set _in_revenue = request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'discount_plans' in request.endpoint or 'reservation_fees' in request.endpoint) %}
     {% if _in_revenue %}
     <div class="sub-navbar">
         {% if current_user.can_access_revenue_tools() %}
-        <a href="{{ url_for('revenue.dashboard') }}" class="{{ 'active' if request.endpoint and 'revenue' in request.endpoint else '' }}">Revenue Analysis</a>
+        <a href="{{ url_for('revenue.dashboard') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('revenue.') else '' }}">Revenue Analysis</a>{# scoped to revenue.* so reservation_fees doesn't highlight here #}
+        <a href="{{ url_for('reservation_fees.page') }}" class="{{ 'active' if request.endpoint and 'reservation_fees' in request.endpoint else '' }}">Reservation Fees</a>
         {% endif %}
         {% if current_user.can_access_ecri() %}
         <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
@@ -349,8 +350,11 @@
         {% endif %}
         {% if current_user.can_access_scheduler() %}
         <a href="{{ url_for('scheduler.dashboard') }}" class="{{ 'active' if request.endpoint and 'scheduler' in request.endpoint else '' }}">Scheduler</a>
+        <a href="{{ url_for('orchestrator_ui.dashboard') }}" class="{{ 'active' if request.endpoint and 'orchestrator_ui' in request.endpoint else '' }}">Orchestrator</a>
+        <a href="{{ url_for('tools.call_scoring') }}" class="{{ 'active' if request.endpoint == 'tools.call_scoring' else '' }}">Call Scoring</a>
         {% endif %}
     </div>
+    {% endif %}
     {# --- Level 2: Smart Lock --- #}
     {% if request.endpoint and 'smart_lock' in request.endpoint %}
     <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
@@ -368,6 +372,14 @@
         <a href="{{ url_for('scheduler.settings_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.settings_page' else '' }}">Settings</a>
     </div>
     {% endif %}
+    {# --- Level 2: Orchestrator --- #}
+    {% if request.endpoint and 'orchestrator_ui' in request.endpoint %}
+    <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
+        <a href="{{ url_for('orchestrator_ui.dashboard') }}" class="{{ 'active' if request.endpoint == 'orchestrator_ui.dashboard' else '' }}">Dashboard</a>
+        <a href="{{ url_for('orchestrator_ui.runs') }}" class="{{ 'active' if request.endpoint == 'orchestrator_ui.runs' else '' }}">Run History</a>
+        <a href="/admin/services" class="">Services Admin</a>
+    </div>
+    {% endif %}
     {# --- Level 2: ECRI --- #}
     {% if request.endpoint and 'ecri' in request.endpoint %}
     <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
@@ -375,6 +387,15 @@
         <a href="{{ url_for('ecri.eligibility') }}" class="{{ 'active' if request.endpoint == 'ecri.eligibility' else '' }}">Eligibility</a>
         {% if current_user.can_manage_ecri() %}
         <a href="{{ url_for('ecri.batch_create') }}" class="{{ 'active' if request.endpoint == 'ecri.batch_create' else '' }}">New Batch</a>
+        {% endif %}
+        {% if current_user.can_access_ecri() %}
+        <a href="{{ url_for('ecri.objections_dashboard') }}" class="{{ 'active' if request.endpoint == 'ecri.objections_dashboard' else '' }}">Objections</a>
+        {% endif %}
+        {% if current_user.can_manage_ecri_reasons() %}
+        <a href="{{ url_for('ecri.admin_ecri_reasons') }}" class="{{ 'active' if request.endpoint == 'ecri.admin_ecri_reasons' else '' }}">Reasons</a>
+        {% endif %}
+        {% if current_user.can_manage_users() %}
+        <a href="{{ url_for('ecri.admin_ecri_user_limits') }}" class="{{ 'active' if request.endpoint == 'ecri.admin_ecri_user_limits' else '' }}">User Limits</a>
         {% endif %}
     </div>
     {% endif %}
@@ -384,7 +405,6 @@
         <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint == 'discount_plans.list_plans' or 'edit' in request.endpoint or 'create' in request.endpoint or 'brief' in request.endpoint else '' }}">Plans</a>
         <a href="{{ url_for('discount_plans.config_page') }}" class="{{ 'active' if 'config' in request.endpoint else '' }}">Config</a>
     </div>
-    {% endif %}
     {% endif %}
 
     {% if request.endpoint and (request.endpoint == 'main.pages_list' or request.endpoint == 'main.serve_page' or (request.endpoint and 'admin' in request.endpoint and 'page' in request.endpoint and 'services' not in request.endpoint)) %}
@@ -411,12 +431,13 @@
     </div>
     {% endif %}
 
-    {% if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint or 'admin_siteinfo' in request.endpoint or 'services_page' in request.endpoint) and 'discount_plans' not in request.endpoint %}
+    {% if request.endpoint and ('list_configs' in request.endpoint or 'edit_config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint or 'admin_siteinfo' in request.endpoint or 'services_page' in request.endpoint or 'site_billing_config' in request.endpoint) and 'discount_plans' not in request.endpoint %}
     <div class="sub-navbar">
-        <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if 'config' in request.endpoint else '' }}">Config</a>
+        <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if 'list_configs' in request.endpoint or 'edit_config' in request.endpoint else '' }}">Config</a>
         <a href="{{ url_for('admin.list_secrets') }}" class="{{ 'active' if 'secret' in request.endpoint else '' }}">Secrets</a>
         <a href="{{ url_for('admin.type_mappings') }}" class="{{ 'active' if 'type_mapping' in request.endpoint else '' }}">Type Mappings</a>
         <a href="{{ url_for('admin_siteinfo.list_sites') }}" class="{{ 'active' if 'admin_siteinfo' in request.endpoint else '' }}">Site Info</a>
+        <a href="{{ url_for('admin.site_billing_config_list') }}" class="{{ 'active' if 'site_billing_config' in request.endpoint else '' }}">Billing Config</a>
         <a href="{{ url_for('admin.services_page') }}" class="{{ 'active' if 'services_page' in request.endpoint else '' }}">Services</a>
     </div>
     {% endif %}
