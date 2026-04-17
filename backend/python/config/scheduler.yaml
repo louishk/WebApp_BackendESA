@@ -124,6 +124,14 @@ pipelines:
     sql_chunk_size: 500
     location_codes: *location_codes
 
+  ccws_charge_descriptions:
+    sql_chunk_size: 500
+    location_codes: *location_codes
+
+  ccws_insurance_coverage:
+    sql_chunk_size: 500
+    location_codes: *location_codes
+
   reservations_sync:
     sql_chunk_size: 500
     location_codes: *location_codes

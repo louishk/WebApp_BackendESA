@@ -134,6 +134,46 @@ pipelines:
     data_freshness:
       table: ccws_discount
       date_column: updated_at
+  ccws_charge_descriptions:
+    display_name: CCWS Charge Descriptions
+    description: Fetch per-site charge type config (tax rates, prices) from ChargeDescriptionsRetrieve
+    module_path: datalayer.cc_charge_descriptions_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 30 5 * * 0
+    priority: 8
+    resource_group: soap_api
+    max_db_connections: 2
+    estimated_duration_seconds: 300
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 1200
+    data_freshness:
+      table: ccws_charge_descriptions
+      date_column: updated_at
+  ccws_insurance_coverage:
+    display_name: CCWS Insurance Coverage
+    description: Fetch per-site insurance coverage plans from InsuranceCoverageRetrieve_V2
+    module_path: datalayer.cc_insurance_coverage_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 45 5 * * 0
+    priority: 8
+    resource_group: soap_api
+    max_db_connections: 2
+    estimated_duration_seconds: 180
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 600
+    data_freshness:
+      table: ccws_insurance_coverage
+      date_column: updated_at
   sugarcrm:
     display_name: SugarCRM
     description: Fetch CRM data (Leads, Contacts, Accounts)
