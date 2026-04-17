@@ -79,6 +79,7 @@ def calculate_movein_cost(
     deposit_tax: Optional[ChargeTypeTax] = None,
     insurance_tax: Optional[ChargeTypeTax] = None,
     pc_discount=0,
+    fixed_discount=0,
     insurance_premium=0,
     anniversary_billing: bool = False,
     day_start_prorate_plus_next: int = 17,
@@ -96,16 +97,29 @@ def calculate_movein_cost(
         deposit_tax: ChargeTypeTax for SecDep (defaults to 0%)
         insurance_tax: ChargeTypeTax for Insurance (defaults to rent_tax;
             on LSETUP this is 8%, distinct from the 9% GST on rent)
-        pc_discount: Percentage discount on rent (0-100)
+        pc_discount: Percentage discount on first-month rent (0-100).
+            For SiteLink "Recurring Discount" plans only. Plans like
+            "Free Month" or "X Months Free" are prepaid promotions with
+            different multi-month math — the calculator does NOT model
+            those; fall back to SOAP for accurate totals.
+        fixed_discount: Fixed-dollar discount amount applied to first-month
+            rent (capped at the prorated amount).
         insurance_premium: Monthly insurance premium (0 = no insurance)
         anniversary_billing: True for anniversary mode (no proration)
         day_start_prorate_plus_next: 1st-of-month threshold for second
-            month charge — late move-ins on day >= this value get billed
+            month charge — late move-ins on day > this value get billed
             for the partial first month + a full second month
 
     Returns:
         List[CostLine] with each charge line (rent, admin, deposit,
         optional second month rent, optional insurance).
+
+    Limitations (returns wrong total — fall back to SOAP):
+        - "Free Month"/"X Months Free" / prepaid concessions
+        - 100% discount plans (require multi-month prepay)
+        - "Recurring Discount" applied to second-month line: SiteLink
+          only applies it to the first month in the move-in cost call,
+          so the 2nd month rent here is full-price (no discount).
     """
     if admin_tax is None:
         admin_tax = rent_tax
@@ -130,6 +144,9 @@ def calculate_movein_cost(
         discount_amt = _round2(
             rent_base * Decimal(str(pc_discount)) / Decimal("100")
         )
+    elif fixed_discount and Decimal(str(fixed_discount)) > 0:
+        # Fixed discount is capped at the prorated rent amount
+        discount_amt = min(_round2(Decimal(str(fixed_discount))), rent_base)
 
     rent_after_disc = rent_base - discount_amt
     rent_t1 = _tax(rent_after_disc, rent_tax.tax1_rate)
@@ -180,22 +197,18 @@ def calculate_movein_cost(
     )
 
     if late_movein:
+        # SiteLink doesn't apply move-in discounts to the 2nd month line —
+        # only to the first month. Confirmed by LSETUP test 2026-04-17.
         full_rent = _round2(Decimal(str(std_rate)))
-        disc2 = Decimal("0")
-        if pc_discount and Decimal(str(pc_discount)) > 0:
-            disc2 = _round2(
-                full_rent * Decimal(str(pc_discount)) / Decimal("100")
-            )
-        rent2_after = full_rent - disc2
-        rent2_t1 = _tax(rent2_after, rent_tax.tax1_rate)
-        rent2_t2 = _tax(rent2_after, rent_tax.tax2_rate)
+        rent2_t1 = _tax(full_rent, rent_tax.tax1_rate)
+        rent2_t2 = _tax(full_rent, rent_tax.tax2_rate)
         charges.append(CostLine(
             description="Second Monthly Rent Fee",
             charge_amount=full_rent,
-            discount=disc2,
+            discount=Decimal("0"),
             tax1=rent2_t1,
             tax2=rent2_t2,
-            total=rent2_after + rent2_t1 + rent2_t2,
+            total=full_rent + rent2_t1 + rent2_t2,
         ))
 
     # --- Insurance ---
