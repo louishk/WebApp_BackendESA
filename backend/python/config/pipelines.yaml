@@ -117,7 +117,7 @@ pipelines:
   ccws_discount_plans:
     display_name: CCWS Discount Plans
     description: Fetch discount/concession plan data from DiscountPlansRetrieve SOAP API
-    module_path: datalayer.cc_discount_plans_to_sql
+    module_path: datalayer.ccws_discount_plans_to_sql
     enabled: true
     schedule:
       type: cron
@@ -137,7 +137,7 @@ pipelines:
   ccws_charge_descriptions:
     display_name: CCWS Charge Descriptions
     description: Fetch per-site charge type config (tax rates, prices) from ChargeDescriptionsRetrieve
-    module_path: datalayer.cc_charge_descriptions_to_sql
+    module_path: datalayer.ccws_charge_descriptions_to_sql
     enabled: true
     schedule:
       type: cron
@@ -157,7 +157,7 @@ pipelines:
   ccws_insurance_coverage:
     display_name: CCWS Insurance Coverage
     description: Fetch per-site insurance coverage plans from InsuranceCoverageRetrieve_V2
-    module_path: datalayer.cc_insurance_coverage_to_sql
+    module_path: datalayer.ccws_insurance_coverage_to_sql
     enabled: true
     schedule:
       type: cron

@@ -1,5 +1,5 @@
 """
-CC Site Billing Config to SQL Pipeline
+CCWS Site Billing Config to SQL Pipeline
 
 For each site, calls MoveInCostRetrieveWithDiscount_v4 on a known available
 unit and extracts the proration/billing-mode flags from the response:
@@ -7,12 +7,12 @@ unit and extracts the proration/billing-mode flags from the response:
   - iDayStrtProrating
   - iDayStrtProratePlusNext
 
-Upserts into site_billing_config but PRESERVES manual overrides — rows
+Upserts into ccws_site_billing_config but PRESERVES manual overrides — rows
 where overridden_by IS NOT NULL are skipped (admin UI lets staff lock
 specific values).
 
 Usage:
-    python cc_site_billing_config_to_sql.py
+    python ccws_site_billing_config_to_sql.py
 """
 
 import sys
@@ -29,7 +29,7 @@ from common import (
     create_engine_from_config, SessionManager, Base,
     convert_to_bool, convert_to_int,
 )
-from common.models import SiteBillingConfig
+from common.models import CcwsSiteBillingConfig
 from common.config import get_pipeline_config
 from common.config_loader import get_database_url
 
@@ -108,7 +108,7 @@ def main():
     )
 
     pbi_engine = create_engine(get_database_url('pbi'))
-    Base.metadata.create_all(pbi_engine, tables=[SiteBillingConfig.__table__])
+    Base.metadata.create_all(pbi_engine, tables=[CcwsSiteBillingConfig.__table__])
     session_mgr = SessionManager(pbi_engine)
 
     print("=" * 70)
@@ -126,7 +126,7 @@ def main():
         for site_code in location_codes:
             site_code = site_code.strip()
             with session_mgr.session_scope() as session:
-                existing = session.query(SiteBillingConfig).filter_by(
+                existing = session.query(CcwsSiteBillingConfig).filter_by(
                     SiteCode=site_code).first()
                 if existing and existing.overridden_by:
                     pbar.set_postfix({"site": site_code, "status": "OVERRIDDEN"})
@@ -143,7 +143,7 @@ def main():
 
             site_id, cfg = result
             with session_mgr.session_scope() as session:
-                existing = session.query(SiteBillingConfig).filter_by(
+                existing = session.query(CcwsSiteBillingConfig).filter_by(
                     SiteCode=site_code).first()
                 if existing:
                     existing.SiteID = site_id
@@ -152,7 +152,7 @@ def main():
                     existing.i_day_strt_prorate_plus_next = cfg["i_day_strt_prorate_plus_next"]
                     existing.synced_from_soap_at = datetime.utcnow()
                 else:
-                    session.add(SiteBillingConfig(
+                    session.add(CcwsSiteBillingConfig(
                         SiteCode=site_code, SiteID=site_id,
                         synced_from_soap_at=datetime.utcnow(),
                         **cfg,

@@ -3761,7 +3761,7 @@ class CcwsInsuranceCoverage(Base, BaseModel, TimestampMixin):
     sCertificateUrl = Column(Text)
 
 
-class SiteBillingConfig(Base, BaseModel, TimestampMixin):
+class CcwsSiteBillingConfig(Base, BaseModel, TimestampMixin):
     """
     Per-site proration / billing-mode config for the MoveInCost calculator.
 
@@ -3769,7 +3769,7 @@ class SiteBillingConfig(Base, BaseModel, TimestampMixin):
     Sync preserves manual overrides — rows with overridden_by set are
     skipped during pipeline runs.
     """
-    __tablename__ = 'site_billing_config'
+    __tablename__ = 'ccws_site_billing_config'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     SiteCode = Column(String(20), nullable=False, unique=True, index=True)

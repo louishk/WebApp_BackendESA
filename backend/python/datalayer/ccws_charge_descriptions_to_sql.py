@@ -1,20 +1,19 @@
 """
-CC Insurance Coverage to SQL Pipeline
+CCWS Charge Descriptions to SQL Pipeline
 
-Fetches insurance coverage plans from InsuranceCoverageRetrieve_V2 SOAP API
-and pushes to PostgreSQL.
+Fetches charge type configuration (tax rates, default prices) from
+ChargeDescriptionsRetrieve SOAP API and pushes to PostgreSQL.
 
-NOTE: V2 is used (not V3). V3 returns 0 results on LSETUP.
-
-Provides coverage amounts and premiums needed by the booking engine and
-the internal MoveInCost calculator.
+This is the missing puzzle piece for the internal MoveInCost calculator:
+- Per-charge-type tax rates (Rent=9%, Insurance=8%, POS=7%, etc.)
+- Default prices for AdminFee and other site-configured fees
 
 Usage:
-    python cc_insurance_coverage_to_sql.py
+    python ccws_charge_descriptions_to_sql.py
 
 Configuration (in pipelines.yaml):
-    pipelines.ccws_insurance_coverage.location_codes: List of location codes
-    pipelines.ccws_insurance_coverage.sql_chunk_size: Batch size (default: 500)
+    pipelines.ccws_charge_descriptions.location_codes: List of location codes
+    pipelines.ccws_charge_descriptions.sql_chunk_size: Batch size (default: 500)
 """
 
 import sys
@@ -31,40 +30,44 @@ from common import (
     SessionManager,
     UpsertOperations,
     Base,
+    convert_to_bool,
     convert_to_int,
     convert_to_decimal,
+    convert_to_datetime,
     deduplicate_records,
 )
-from common.models import CcwsInsuranceCoverage
+from common.models import CcwsChargeDescription
 from common.config import get_pipeline_config
 
 
 CALL_CENTER_WS_URL = "https://api.smdservers.net/CCWs_3.5/CallCenterWs.asmx"
 NAMESPACE = "http://tempuri.org/CallCenterWs/CallCenterWs"
-SOAP_ACTION = f"{NAMESPACE}/InsuranceCoverageRetrieve_V2"
+SOAP_ACTION = f"{NAMESPACE}/ChargeDescriptionsRetrieve"
 
 
 def transform_record(record: Dict[str, Any], site_code: str) -> Dict[str, Any]:
     """Transform API record to DB-ready format."""
     return {
-        'InsurCoverageID': convert_to_int(record.get('InsurCoverageID')),
+        'ChargeDescID': convert_to_int(record.get('ChargeDescID')),
         'SiteID': convert_to_int(record.get('SiteID')),
         'SiteCode': site_code,
-        'dcCoverage': convert_to_decimal(record.get('dcCoverage')),
-        'dcPremium': convert_to_decimal(record.get('dcPremium')),
-        'dcPCTheft': convert_to_decimal(record.get('dcPCTheft')),
-        'sCoverageDesc': record.get('sCoverageDesc'),
-        'sProvidor': record.get('sProvidor'),
-        'sBrochureUrl': record.get('sBrochureUrl'),
-        'sCertificateUrl': record.get('sCertificateUrl'),
+        'sChgDesc': record.get('sChgDesc'),
+        'sChgCategory': record.get('sChgCategory'),
+        'dcPrice': convert_to_decimal(record.get('dcPrice')),
+        'dcTax1Rate': convert_to_decimal(record.get('dcTax1Rate')),
+        'dcTax2Rate': convert_to_decimal(record.get('dcTax2Rate')),
+        'bApplyAtMoveIn': convert_to_bool(record.get('bApplyAtMoveIn')),
+        'bProrateAtMoveIn': convert_to_bool(record.get('bProrateAtMoveIn')),
+        'bPermanent': convert_to_bool(record.get('bPermanent')),
+        'dDisabled': convert_to_datetime(record.get('dDisabled')),
     }
 
 
-def fetch_insurance_coverage(
+def fetch_charge_descriptions(
     soap_client: SOAPClient,
     location_codes: List[str]
 ) -> List[Dict[str, Any]]:
-    """Fetch insurance coverage plans for multiple locations."""
+    """Fetch charge descriptions for multiple locations."""
     all_data = []
 
     with tqdm(total=len(location_codes), desc="  Fetching locations", unit="loc") as pbar:
@@ -72,7 +75,7 @@ def fetch_insurance_coverage(
             site_code = location_code.strip()
             try:
                 results = soap_client.call(
-                    operation="InsuranceCoverageRetrieve_V2",
+                    operation="ChargeDescriptionsRetrieve",
                     parameters={"sLocationCode": site_code},
                     soap_action=SOAP_ACTION,
                     namespace=NAMESPACE,
@@ -81,10 +84,10 @@ def fetch_insurance_coverage(
 
                 for record in results:
                     transformed = transform_record(record, site_code)
-                    if transformed['InsurCoverageID'] and transformed['SiteID']:
+                    if transformed['ChargeDescID'] and transformed['SiteID']:
                         all_data.append(transformed)
 
-                pbar.set_postfix({"location": site_code, "plans": len(results)})
+                pbar.set_postfix({"location": site_code, "charges": len(results)})
                 pbar.update(1)
 
             except Exception as e:
@@ -94,7 +97,7 @@ def fetch_insurance_coverage(
                 continue
 
     original_count = len(all_data)
-    all_data = deduplicate_records(all_data, ['SiteID', 'InsurCoverageID'])
+    all_data = deduplicate_records(all_data, ['SiteID', 'ChargeDescID'])
     if len(all_data) < original_count:
         tqdm.write(f"  ℹ Deduplicated: {original_count} → {len(all_data)} records")
 
@@ -106,7 +109,7 @@ def push_to_database(
     config: DataLayerConfig,
     chunk_size: int = 500
 ) -> None:
-    """Upsert insurance coverage data to PostgreSQL."""
+    """Upsert charge description data to PostgreSQL."""
     if not data:
         print("  ⚠ No data to push")
         return
@@ -118,9 +121,9 @@ def push_to_database(
     engine = create_engine_from_config(db_config)
 
     with tqdm(total=1, desc="  Preparing database", bar_format='{desc}') as pbar:
-        Base.metadata.create_all(engine, tables=[CcwsInsuranceCoverage.__table__])
+        Base.metadata.create_all(engine, tables=[CcwsChargeDescription.__table__])
         pbar.update(1)
-    tqdm.write("  ✓ Table 'ccws_insurance_coverage' ready")
+    tqdm.write("  ✓ Table 'ccws_charge_descriptions' ready")
 
     session_manager = SessionManager(engine)
     num_chunks = (len(data) + chunk_size - 1) // chunk_size
@@ -132,9 +135,9 @@ def push_to_database(
             for i in range(0, len(data), chunk_size):
                 chunk = data[i:i + chunk_size]
                 upsert_ops.upsert_batch(
-                    model=CcwsInsuranceCoverage,
+                    model=CcwsChargeDescription,
                     records=chunk,
-                    constraint_columns=['SiteID', 'InsurCoverageID'],
+                    constraint_columns=['SiteID', 'ChargeDescID'],
                     chunk_size=chunk_size,
                 )
                 pbar.update(len(chunk))
@@ -149,16 +152,17 @@ def main():
         raise ValueError("SOAP configuration not found")
 
     location_codes = get_pipeline_config(
-        'ccws_insurance_coverage', 'location_codes', [])
+        'ccws_charge_descriptions', 'location_codes', [])
     if not location_codes:
+        # Fall back to discount plans location list (same set of sites)
         location_codes = get_pipeline_config(
             'ccws_discount_plans', 'location_codes', [])
     if not location_codes:
         raise ValueError(
-            "ccws_insurance_coverage location_codes not configured")
+            "ccws_charge_descriptions location_codes not configured")
 
     chunk_size = get_pipeline_config(
-        'ccws_insurance_coverage', 'sql_chunk_size', 500)
+        'ccws_charge_descriptions', 'sql_chunk_size', 500)
 
     soap_client = SOAPClient(
         base_url=CALL_CENTER_WS_URL,
@@ -171,16 +175,16 @@ def main():
     )
 
     print("=" * 70)
-    print("CC Insurance Coverage to SQL Pipeline")
+    print("CC Charge Descriptions to SQL Pipeline")
     print("=" * 70)
-    print(f"Endpoint: CallCenterWs/InsuranceCoverageRetrieve_V2")
+    print(f"Endpoint: CallCenterWs/ChargeDescriptionsRetrieve")
     print(f"Locations: {len(location_codes)} ({', '.join(location_codes[:5])}...)")
     print(f"Target: PostgreSQL - {config.databases['postgresql'].database}")
     print("=" * 70)
-    print("[STAGE:INIT] CcwsInsuranceCoverage")
+    print("[STAGE:INIT] CcwsChargeDescriptions")
 
-    print("[STAGE:FETCH] Fetching insurance coverage from SOAP API")
-    all_data = fetch_insurance_coverage(soap_client, location_codes)
+    print("[STAGE:FETCH] Fetching charge descriptions from SOAP API")
+    all_data = fetch_charge_descriptions(soap_client, location_codes)
 
     if all_data:
         print("[STAGE:PUSH] Upserting to PostgreSQL")
@@ -190,7 +194,7 @@ def main():
         for record in all_data:
             site_counts[record['SiteCode']] = site_counts.get(
                 record['SiteCode'], 0) + 1
-        print("\nCoverage plans per site:")
+        print("\nCharges per site:")
         for site, count in sorted(site_counts.items(), key=lambda x: -x[1])[:15]:
             print(f"  {site}: {count}")
     else:

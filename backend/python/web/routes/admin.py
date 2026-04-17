@@ -1051,11 +1051,11 @@ def _get_pbi_session():
 @config_required
 def site_billing_config_list():
     """View per-site proration and billing-mode configuration."""
-    from common.models import SiteBillingConfig
+    from common.models import CcwsSiteBillingConfig
     session = _get_pbi_session()
     try:
-        configs = session.query(SiteBillingConfig).order_by(
-            SiteBillingConfig.SiteCode).all()
+        configs = session.query(CcwsSiteBillingConfig).order_by(
+            CcwsSiteBillingConfig.SiteCode).all()
         rows = [{
             'id': c.id,
             'SiteCode': c.SiteCode,
@@ -1079,11 +1079,11 @@ def site_billing_config_list():
 @config_required
 def site_billing_config_edit(config_id):
     """Edit one site's billing config (creates an override)."""
-    from common.models import SiteBillingConfig
+    from common.models import CcwsSiteBillingConfig
     from datetime import datetime, timezone
     session = _get_pbi_session()
     try:
-        cfg = session.query(SiteBillingConfig).get(config_id)
+        cfg = session.query(CcwsSiteBillingConfig).get(config_id)
         if not cfg:
             flash('Config not found', 'error')
             return redirect(url_for('admin.site_billing_config_list'))
@@ -1136,10 +1136,10 @@ def site_billing_config_edit(config_id):
 @config_required
 def site_billing_config_clear_override(config_id):
     """Clear manual override so the next pipeline run resyncs from SOAP."""
-    from common.models import SiteBillingConfig
+    from common.models import CcwsSiteBillingConfig
     session = _get_pbi_session()
     try:
-        cfg = session.query(SiteBillingConfig).get(config_id)
+        cfg = session.query(CcwsSiteBillingConfig).get(config_id)
         if not cfg:
             flash('Config not found', 'error')
             return redirect(url_for('admin.site_billing_config_list'))

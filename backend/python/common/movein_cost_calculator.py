@@ -277,7 +277,7 @@ def estimate_total(charges: List[CostLine]) -> Decimal:
 
 def load_site_billing_config(site_code: str):
     """
-    Load proration / billing-mode config for a site from site_billing_config.
+    Load proration / billing-mode config for a site from ccws_site_billing_config.
 
     Returns a dict with keys:
         anniversary_billing: bool
@@ -285,7 +285,7 @@ def load_site_billing_config(site_code: str):
         day_start_prorate_plus_next: int
 
     Falls back to defaults (1st-of-month, threshold day 17) if the site
-    has no row yet — caller should run cc_site_billing_config_to_sql.py
+    has no row yet — caller should run ccws_site_billing_config_to_sql.py
     to populate.
     """
     from sqlalchemy import create_engine, text
@@ -297,7 +297,7 @@ def load_site_billing_config(site_code: str):
             SELECT b_anniv_date_leasing,
                    i_day_strt_prorating,
                    i_day_strt_prorate_plus_next
-            FROM site_billing_config
+            FROM ccws_site_billing_config
             WHERE "SiteCode" = :site
         """), {"site": site_code}).first()
 

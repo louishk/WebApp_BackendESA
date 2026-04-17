@@ -1,4 +1,4 @@
--- 053_site_billing_config.sql
+-- 053_ccws_site_billing_config.sql
 --
 -- Per-site proration / billing mode configuration for the MoveInCost
 -- internal calculator.
@@ -15,7 +15,7 @@
 --   where X = i_day_strt_prorate_plus_next (typically 17 on LSETUP)
 -- * Anniversary (bAnnivDateLeasing=true): full month from move-in date
 
-CREATE TABLE IF NOT EXISTS site_billing_config (
+CREATE TABLE IF NOT EXISTS ccws_site_billing_config (
     id SERIAL PRIMARY KEY,
     "SiteCode" VARCHAR(20) NOT NULL UNIQUE,
     "SiteID" INTEGER,
@@ -35,5 +35,17 @@ CREATE TABLE IF NOT EXISTS site_billing_config (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_site_billing_config_code
-    ON site_billing_config ("SiteCode");
+CREATE INDEX IF NOT EXISTS idx_ccws_site_billing_config_code
+    ON ccws_site_billing_config ("SiteCode");
+
+-- If the original site_billing_config table exists from the prior
+-- migration version, rename it (and any indexes) to preserve data.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'site_billing_config') THEN
+        DROP TABLE ccws_site_billing_config;
+        ALTER TABLE site_billing_config RENAME TO ccws_site_billing_config;
+        ALTER INDEX IF EXISTS idx_site_billing_config_code
+              RENAME TO idx_ccws_site_billing_config_code;
+    END IF;
+END $$;

@@ -1,5 +1,5 @@
 """
-CC Discount Plans to SQL Pipeline
+CCWS Discount Plans to SQL Pipeline
 
 Fetches discount/concession plan data from DiscountPlansRetrieveIncludingDisabled
 SOAP API (CallCenterWs) and pushes to PostgreSQL.
@@ -10,7 +10,7 @@ Features:
 - Processes in chunks for large datasets
 
 Usage:
-    python cc_discount_plans_to_sql.py
+    python ccws_discount_plans_to_sql.py
 
 Configuration (in pipelines.yaml):
     pipelines.ccws_discount_plans.location_codes: List of location codes
