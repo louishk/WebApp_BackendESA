@@ -23,6 +23,11 @@ from sqlalchemy.orm import sessionmaker
 from web.auth.jwt_auth import require_auth, require_api_scope
 from web.utils.rate_limit import rate_limit_api
 from web.utils.audit import audit_log
+from web.utils.soap_helpers import (
+    get_pbi_session, CC_NS, cc_soap_action, get_cc_soap_client,
+    validate_site_code, safe_int, safe_rate, sanitize_log, clamp,
+    default_date, parse_date, require_date,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,130 +36,17 @@ reservations_bp = Blueprint('reservations', __name__, url_prefix='/api/reservati
 # Placeholder DOB — SMD requires a non-empty datetime for dDOB
 _PLACEHOLDER_DOB = "1900-01-01T00:00:00"
 
-
-# =============================================================================
-# Helpers
-# =============================================================================
-
-_pbi_engine = None
-_pbi_session_factory = None
-
-
-def get_pbi_session():
-    """Get PBI database session."""
-    global _pbi_engine, _pbi_session_factory
-    if _pbi_engine is None:
-        from common.config_loader import get_database_url
-        from sqlalchemy import create_engine
-        pbi_url = get_database_url('pbi')
-        _pbi_engine = create_engine(
-            pbi_url,
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,
-            pool_recycle=300,
-        )
-        _pbi_session_factory = sessionmaker(bind=_pbi_engine)
-    return _pbi_session_factory()
-
-
-CC_NS = "http://tempuri.org/CallCenterWs/CallCenterWs"
-
-
-def _cc_soap_action(operation):
-    return f"{CC_NS}/{operation}"
-
-
-def _get_cc_soap_client():
-    """Create a CallCenterWs SOAP client."""
-    from common.config import DataLayerConfig
-    from common.soap_client import SOAPClient
-
-    config = DataLayerConfig.from_env()
-    if not config.soap:
-        raise RuntimeError("SOAP configuration not available")
-
-    cc_url = config.soap.base_url.replace('ReportingWs.asmx', 'CallCenterWs.asmx')
-    return SOAPClient(
-        base_url=cc_url,
-        corp_code=config.soap.corp_code,
-        corp_user=config.soap.corp_user,
-        api_key=config.soap.api_key,
-        corp_password=config.soap.corp_password,
-        timeout=config.soap.timeout,
-        retries=config.soap.retries,
-    )
-
-
-def _validate_site_code(site_code):
-    """Validate site_code exists in SiteInfo. Returns site or None."""
-    from common.models import SiteInfo
-    pbi_session = get_pbi_session()
-    try:
-        return pbi_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
-    finally:
-        pbi_session.close()
-
-
-def _default_date(offset_days):
-    """Return an ISO date string offset from today (UTC). Never empty."""
-    return (datetime.now(timezone.utc).date() + timedelta(days=offset_days)).isoformat()
-
-
-def _parse_date(value, fallback_offset_days):
-    """Validate date as YYYY-MM-DD and return it, or fall back to a default. Never empty."""
-    if value:
-        try:
-            datetime.strptime(str(value), '%Y-%m-%d')
-            return str(value)
-        except (ValueError, TypeError):
-            pass
-    return _default_date(fallback_offset_days)
-
-
-def _require_date(value):
-    """Validate a required date field. Returns (date_str, error_msg)."""
-    if not value:
-        return None, 'Date is required'
-    try:
-        datetime.strptime(str(value), '%Y-%m-%d')
-        return str(value), None
-    except (ValueError, TypeError):
-        return None, 'Date must be YYYY-MM-DD format'
-
-
-def _safe_int(value, default=0, min_val=None, max_val=None):
-    """Coerce to int with bounds checking. Returns (int_val, error_msg)."""
-    try:
-        result = int(value) if value is not None else default
-    except (ValueError, TypeError):
-        return None, 'Must be an integer'
-    if min_val is not None and result < min_val:
-        return None, f'Must be >= {min_val}'
-    if max_val is not None and result > max_val:
-        return None, f'Must be <= {max_val}'
-    return result, None
-
-
-def _safe_rate(value, default=0):
-    """Coerce quoted_rate to a valid decimal string. Returns (str_val, error_msg)."""
-    try:
-        rate = float(value) if value is not None else default
-    except (ValueError, TypeError):
-        return None, 'Must be a number'
-    if rate < 0 or rate > 1_000_000:
-        return None, 'Rate out of range (0–1000000)'
-    return f"{rate:.2f}", None
-
-
-def _sanitize_log(value):
-    """Strip newlines and pipe chars from user input before audit logging."""
-    return str(value).replace('\n', ' ').replace('\r', ' ').replace('|', '-')[:200]
-
-
-def _clamp(value, max_len):
-    """Truncate string to max_len."""
-    return str(value)[:max_len] if value else ''
+# Backward-compat aliases (private names used throughout this file)
+_cc_soap_action = cc_soap_action
+_get_cc_soap_client = get_cc_soap_client
+_validate_site_code = validate_site_code
+_safe_int = safe_int
+_safe_rate = safe_rate
+_sanitize_log = sanitize_log
+_clamp = clamp
+_default_date = default_date
+_parse_date = parse_date
+_require_date = require_date
 
 
 def _record_reservation(**kwargs):
@@ -1237,6 +1129,170 @@ def reservation_fee_retrieve():
 
 
 # =============================================================================
+# POST /api/reservations/fee/add — record paid reservation fee (dummy CC)
+# =============================================================================
+
+@reservations_bp.route('/fee/add', methods=['POST'])
+@require_auth
+@require_api_scope('reservations:write')
+@rate_limit_api(max_requests=5, window_seconds=60)
+def add_reservation_fee():
+    """
+    ReservationFeeAddWithSource_v2 — charge reservation fee with dummy CC.
+
+    SiteLink has no payment processor, so dummy CC values pass validation.
+    iCreditCardType=5 is the only value that works on LSETUP (0-4 fail).
+
+    Use this AFTER Stripe has confirmed the customer's payment externally.
+
+    JSON body:
+        site_code       — location code             [required]
+        tenant_id       — tenant ID                 [required]
+        waiting_id      — reservation WaitingID     [required]
+        billing_name    — billing name              [optional]
+        billing_address — billing address           [optional]
+        billing_zip     — billing postal code       [optional]
+        test_mode       — dry run                   [optional, default: false]
+    """
+    from common.soap_client import SOAPFaultError
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    site_code = data.get('site_code', '').strip()
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    tenant_id, err = _safe_int(data.get('tenant_id'), min_val=1)
+    if err:
+        return jsonify({'error': f'tenant_id: {err}'}), 400
+
+    waiting_id, err = _safe_int(data.get('waiting_id'), min_val=1)
+    if err:
+        return jsonify({'error': f'waiting_id: {err}'}), 400
+
+    billing_name = (data.get('billing_name') or 'ESA Booking').strip()[:100]
+    billing_address = (data.get('billing_address') or '').strip()[:200]
+    billing_zip = (data.get('billing_zip') or '000000').strip()[:20]
+    test_mode = bool(data.get('test_mode', False))
+
+    soap_client = None
+    try:
+        soap_client = _get_cc_soap_client()
+        results = soap_client.call(
+            operation="ReservationFeeAddWithSource_v2",
+            parameters={
+                "sLocationCode": site_code,
+                "iTenantID": str(tenant_id),
+                "iWaitingListID": str(waiting_id),
+                "iCreditCardType": "5",
+                "sCreditCardNumber": "4111111111111111",
+                "sCreditCardCVV": "123",
+                "dExpirationDate": "2030-01-01T00:00:00",
+                "sBillingName": billing_name,
+                "sBillingAddress": billing_address,
+                "sBillingZipCode": billing_zip,
+                "bTestMode": "true" if test_mode else "false",
+                "iSource": "0",
+            },
+            soap_action=_cc_soap_action("ReservationFeeAddWithSource_v2"),
+            namespace=CC_NS,
+            result_tag="RT",
+        )
+
+        ret_code = results[0].get('Ret_Code') if results else None
+        ret_msg = results[0].get('Ret_Msg', '') if results else ''
+
+        if ret_code is None or int(ret_code) <= 0:
+            logger.error(f"ReservationFeeAddWithSource_v2 failed: "
+                         f"ret_code={ret_code} msg={ret_msg}")
+            return jsonify({'error': 'Reservation fee failed',
+                            'detail': ret_msg}), 502
+
+        logger.info(f"Reservation fee added: site={site_code} "
+                    f"tenant={tenant_id} waiting={waiting_id}")
+
+        return jsonify({
+            'status': 'success',
+            'site_code': site_code,
+            'tenant_id': tenant_id,
+            'waiting_id': waiting_id,
+            'ret_code': ret_code,
+        })
+
+    except SOAPFaultError as e:
+        logger.error(f"SOAP fault ReservationFeeAddWithSource_v2: {e}")
+        return jsonify({'error': 'SOAP API error'}), 502
+    except RuntimeError as e:
+        logger.error(f"Config error: {e}")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+    except Exception as e:
+        logger.error(f"Unexpected error ReservationFeeAddWithSource_v2: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+    finally:
+        if soap_client:
+            soap_client.close()
+
+
+# =============================================================================
+# GET /api/reservations/discount-plans — active discounts from DB
+# =============================================================================
+
+@reservations_bp.route('/discount-plans', methods=['GET'])
+@require_auth
+@require_api_scope('reservations:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def discount_plans_list():
+    """
+    Retrieve active discount plans for a site from ccws_discount.
+
+    DiscountPlansRetrieve SOAP returns empty — read from synced DB instead.
+    Booking engine uses ConcessionID to apply discounts at reservation/move-in.
+
+    Query params:
+        site_code — location code [required]
+    """
+    site_code = request.args.get('site_code', '').strip()
+    if not site_code:
+        return jsonify({'error': 'site_code query parameter is required'}), 400
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    session = get_pbi_session()
+    try:
+        rows = session.execute(text("""
+            SELECT cd."ConcessionID", cd."sPlanName", cd."sDescription",
+                   cd."dcPCDiscount", cd."dcFixedDiscount", cd."iAmtType",
+                   cd."bForAllUnits", cd."dPlanStrt", cd."dPlanEnd",
+                   cd."bNeverExpires", cd."iExpirMonths"
+            FROM ccws_discount cd
+            JOIN siteinfo si ON cd."SiteID" = si."SiteID"
+            WHERE si."SiteCode" = :site_code
+              AND cd."dDisabled" IS NULL
+              AND cd."dDeleted" IS NULL
+            ORDER BY cd."ConcessionID"
+        """), {"site_code": site_code}).fetchall()
+
+        plans = [dict(row._mapping) for row in rows]
+
+        return jsonify({
+            'status': 'success',
+            'site_code': site_code,
+            'count': len(plans),
+            'data': plans,
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching discount plans for {site_code}: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+    finally:
+        session.close()
+
+
+# =============================================================================
 # POST /api/reservations/track — external reservation tracking
 # =============================================================================
 
@@ -1750,3 +1806,744 @@ def reservation_track_batch():
 
     finally:
         session.close()
+
+
+# =============================================================================
+# GET /api/reservations/move-in/cost — MoveInCostRetrieve variants
+# =============================================================================
+
+_VALID_PAY_METHODS = {0, 1, 2, 3, 4}  # 0=none, 1=CC, 2=cash, 3=check, 4=ACH
+
+_COST_VARIANTS = {
+    'standard',         # MoveInCostRetrieveWithDiscount_v4 (default)
+    '28day',            # MoveInCostRetrieveWithDiscount_28DayBilling_v3
+    'reservation',      # MoveInCostRetrieveWithDiscount_Reservation_v4
+    'push_rate',        # MoveInCostRetrieveWithPushRate_v2
+}
+
+
+@reservations_bp.route('/move-in/cost')
+@require_auth
+@require_api_scope('reservations:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def move_in_cost():
+    """
+    Get move-in cost breakdown via SOAP MoveInCostRetrieve variants.
+
+    Returns multiple charge rows (rent, admin fee, deposit, etc.).
+    Sum `total` across all rows for the exact payment amount required
+    by MoveInReservation_v6 / MoveInWithDiscount_v7.
+
+    Query parameters:
+        site_code      — location code             [required]
+        unit_id        — unit ID                    [required]
+        move_in_date   — move-in date (YYYY-MM-DD)  [default: tomorrow]
+        concession_id  — discount plan ID           [default: 0]
+        insurance_id   — insurance coverage ID      [default: 0]
+        variant        — cost calculation variant   [default: standard]
+                         standard     — MoveInCostRetrieveWithDiscount_v4
+                         28day        — MoveInCostRetrieveWithDiscount_28DayBilling_v3
+                         reservation  — MoveInCostRetrieveWithDiscount_Reservation_v4
+                                        (requires waiting_id)
+                         push_rate    — MoveInCostRetrieveWithPushRate_v2
+        waiting_id     — reservation WaitingID      [required for variant=reservation]
+        promo_id       — promo global number        [default: 0, for variant=reservation]
+    """
+    from common.soap_client import SOAPFaultError
+
+    site_code = request.args.get('site_code', '').strip()
+    unit_id = request.args.get('unit_id')
+
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+    if not unit_id:
+        return jsonify({'error': 'unit_id is required'}), 400
+
+    unit_id, uid_err = _safe_int(unit_id, min_val=1)
+    if uid_err:
+        return jsonify({'error': f'unit_id: {uid_err}'}), 400
+
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    move_in_date = _parse_date(request.args.get('move_in_date'), 1)
+
+    concession_id, cid_err = _safe_int(request.args.get('concession_id', 0), min_val=0)
+    if cid_err:
+        return jsonify({'error': f'concession_id: {cid_err}'}), 400
+
+    insurance_id, iid_err = _safe_int(request.args.get('insurance_id', 0), min_val=0)
+    if iid_err:
+        return jsonify({'error': f'insurance_id: {iid_err}'}), 400
+
+    variant = request.args.get('variant', 'standard').strip().lower()
+    if variant not in _COST_VARIANTS:
+        return jsonify({'error': f'variant must be one of: {", ".join(sorted(_COST_VARIANTS))}'}), 400
+
+    # Reservation variant requires waiting_id
+    waiting_id = 0
+    promo_id = 0
+    if variant == 'reservation':
+        wid_raw = request.args.get('waiting_id')
+        if not wid_raw:
+            return jsonify({'error': 'waiting_id is required for variant=reservation'}), 400
+        waiting_id, wid_err = _safe_int(wid_raw, min_val=1)
+        if wid_err:
+            return jsonify({'error': f'waiting_id: {wid_err}'}), 400
+        promo_id, _ = _safe_int(request.args.get('promo_id', 0), min_val=0)
+
+    # Build SOAP operation + parameters based on variant
+    if variant == '28day':
+        operation = "MoveInCostRetrieveWithDiscount_28DayBilling_v3"
+        params = {
+            "sLocationCode": site_code,
+            "iUnitID": str(unit_id),
+            "dMoveInDate": move_in_date,
+            "InsuranceCoverageID": str(insurance_id),
+            "ConcessionPlanID": str(concession_id),
+            "ChannelType": "0",
+            "bApplyInsuranceCredit": "false",
+        }
+    elif variant == 'reservation':
+        operation = "MoveInCostRetrieveWithDiscount_Reservation_v4"
+        params = {
+            "sLocationCode": site_code,
+            "iUnitID": str(unit_id),
+            "dMoveInDate": move_in_date,
+            "InsuranceCoverageID": str(insurance_id),
+            "ConcessionPlanID": str(concession_id),
+            "WaitingID": str(waiting_id),
+            "bApplyInsuranceCredit": "false",
+            "iPromoGlobalNum": str(promo_id),
+            "sCreditCardNum": "",
+        }
+    elif variant == 'push_rate':
+        operation = "MoveInCostRetrieveWithPushRate_v2"
+        params = {
+            "sLocationCode": site_code,
+            "iUnitID": str(unit_id),
+            "dMoveInDate": move_in_date,
+            "InsuranceCoverageID": str(insurance_id),
+            "ConcessionPlanID": str(concession_id),
+            "bApplyInsuranceCredit": "false",
+        }
+    else:  # standard
+        operation = "MoveInCostRetrieveWithDiscount_v4"
+        params = {
+            "sLocationCode": site_code,
+            "iUnitID": str(unit_id),
+            "dMoveInDate": move_in_date,
+            "InsuranceCoverageID": str(insurance_id),
+            "ConcessionPlanID": str(concession_id),
+            "ChannelType": "0",
+            "bApplyInsuranceCredit": "false",
+            "sCreditCardNum": "",
+        }
+
+    soap_client = None
+    try:
+        soap_client = _get_cc_soap_client()
+        results = soap_client.call(
+            operation=operation,
+            parameters=params,
+            soap_action=_cc_soap_action(operation),
+            namespace=CC_NS,
+            result_tag="Table",
+        )
+
+        if not results:
+            return jsonify({
+                'site_code': site_code,
+                'unit_id': unit_id,
+                'variant': variant,
+                'operation': operation,
+                'charges': [],
+                'total': 0,
+                'move_in_date': move_in_date,
+            })
+
+        charges = []
+        total = 0
+        for row in results:
+            charge_amount = float(row.get('ChargeAmount', 0))
+            tax1 = float(row.get('TaxAmount', 0))
+            tax2 = float(row.get('TaxAmount2', 0))
+            line_total = float(row.get('dcTotal', 0))
+            total += line_total
+
+            charges.append({
+                'description': row.get('ChargeDescription', ''),
+                'amount': charge_amount,
+                'tax': round(tax1 + tax2, 2),
+                'total': line_total,
+                'required': row.get('bMoveInRequired') == 'true',
+                'start_date': row.get('StartDate'),
+                'end_date': row.get('EndDate'),
+            })
+
+        return jsonify({
+            'site_code': site_code,
+            'unit_id': unit_id,
+            'variant': variant,
+            'operation': operation,
+            'unit_name': results[0].get('UnitName', ''),
+            'unit_type': results[0].get('TypeName', ''),
+            'push_rate': float(results[0].get('dcPushRate', 0)),
+            'tenant_rate': float(results[0].get('dcTenantRate', 0)),
+            'web_rate': float(results[0].get('WebRate', 0)),
+            'discount': float(results[0].get('dcDiscount', 0)),
+            'concession_id': int(results[0].get('ConcessionID', -999)),
+            'charges': charges,
+            'total': round(total, 2),
+            'move_in_date': move_in_date,
+            'currency_decimals': int(results[0].get('iCurrencyDecimalPlaces', 2)),
+        })
+
+    except SOAPFaultError as e:
+        logger.error(f"SOAP fault MoveInCostRetrieve: {e}")
+        return jsonify({'error': 'SOAP API error'}), 502
+
+    except RuntimeError as e:
+        logger.error(f"Config error: {e}")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error MoveInCostRetrieve: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+
+    finally:
+        if soap_client:
+            soap_client.close()
+
+
+# =============================================================================
+# POST /api/reservations/move-in — MoveInReservation_v6
+# =============================================================================
+
+@reservations_bp.route('/move-in', methods=['POST'])
+@require_auth
+@require_api_scope('reservations:write')
+@rate_limit_api(max_requests=5, window_seconds=60)
+def move_in_reservation():
+    """
+    Move-in from an existing reservation via MoveInReservation_v6.
+
+    Supports CC bypass via iPayMethod=2 (cash). Payment amount must
+    match the exact total from GET /api/reservations/move-in/cost.
+
+    JSON body:
+        site_code       — location code                [required]
+        waiting_id      — reservation WaitingID         [required]
+        tenant_id       — tenant ID                     [required]
+        unit_id         — unit ID                       [required]
+        payment_amount  — exact total from cost API     [required]
+        start_date      — lease start (YYYY-MM-DD)      [default: tomorrow]
+        end_date        — lease end (YYYY-MM-DD)        [default: start+365]
+        pay_method      — 1=CC, 2=cash, 3=check, 4=ACH [default: 2]
+        concession_id   — discount plan ID              [default: 0]
+        insurance_id    — insurance coverage ID          [default: 0]
+        source_id       — source ID                     [default: 0]
+        test_mode       — true for dry run              [default: false]
+    """
+    from common.soap_client import SOAPFaultError
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    # Required fields
+    site_code = data.get('site_code', '').strip()
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+
+    waiting_id = data.get('waiting_id')
+    if not waiting_id:
+        return jsonify({'error': 'waiting_id is required'}), 400
+    waiting_id, wid_err = _safe_int(waiting_id, min_val=1)
+    if wid_err:
+        return jsonify({'error': f'waiting_id: {wid_err}'}), 400
+
+    tenant_id = data.get('tenant_id')
+    if not tenant_id:
+        return jsonify({'error': 'tenant_id is required'}), 400
+    tenant_id, tid_err = _safe_int(tenant_id, min_val=1)
+    if tid_err:
+        return jsonify({'error': f'tenant_id: {tid_err}'}), 400
+
+    unit_id = data.get('unit_id')
+    if not unit_id:
+        return jsonify({'error': 'unit_id is required'}), 400
+    unit_id, uid_err = _safe_int(unit_id, min_val=1)
+    if uid_err:
+        return jsonify({'error': f'unit_id: {uid_err}'}), 400
+
+    payment_amount = data.get('payment_amount')
+    if payment_amount is None:
+        return jsonify({'error': 'payment_amount is required'}), 400
+    try:
+        payment_amount = float(payment_amount)
+        if payment_amount <= 0:
+            return jsonify({'error': 'payment_amount must be greater than zero'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'payment_amount must be a number'}), 400
+
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    # Optional fields
+    start_date = _parse_date(data.get('start_date'), 1)
+    end_default = (datetime.strptime(start_date, '%Y-%m-%d').date() + timedelta(days=365)).isoformat()
+    end_date = _parse_date(data.get('end_date'), 365) if data.get('end_date') else end_default
+
+    pay_method, pm_err = _safe_int(data.get('pay_method', 2), min_val=0, max_val=4)
+    if pm_err:
+        return jsonify({'error': f'pay_method: {pm_err}'}), 400
+    if pay_method not in _VALID_PAY_METHODS:
+        return jsonify({'error': 'pay_method must be 0-4'}), 400
+
+    concession_id, cid_err = _safe_int(data.get('concession_id', 0), min_val=0)
+    if cid_err:
+        return jsonify({'error': f'concession_id: {cid_err}'}), 400
+
+    insurance_id, iid_err = _safe_int(data.get('insurance_id', 0), min_val=0)
+    if iid_err:
+        return jsonify({'error': f'insurance_id: {iid_err}'}), 400
+
+    source_id, sid_err = _safe_int(data.get('source_id', 0), min_val=0)
+    if sid_err:
+        return jsonify({'error': f'source_id: {sid_err}'}), 400
+
+    test_mode = str(data.get('test_mode', False)).lower() in ('true', '1', 'yes')
+
+    soap_client = None
+    try:
+        soap_client = _get_cc_soap_client()
+        results = soap_client.call(
+            operation="MoveInReservation_v6",
+            parameters={
+                "sLocationCode": site_code,
+                "WaitingID": str(waiting_id),
+                "TenantID": str(tenant_id),
+                "UnitID": str(unit_id),
+                "dStartDate": start_date,
+                "dEndDate": end_date,
+                "dcPaymentAmount": f"{payment_amount:.2f}",
+                "iCreditCardType": "0",
+                "sCreditCardNumber": "",
+                "sCreditCardCVV": "",
+                "dExpirationDate": "2030-01-01T00:00:00",
+                "sBillingName": "",
+                "sBillingAddress": "",
+                "sBillingZipCode": "",
+                "InsuranceCoverageID": str(insurance_id),
+                "ConcessionPlanID": str(concession_id),
+                "iPayMethod": str(pay_method),
+                "sABARoutingNum": "",
+                "sAccountNum": "",
+                "iAccountType": "0",
+                "iSource": str(source_id),
+                "bTestMode": str(test_mode).lower(),
+                "bApplyInsuranceCredit": "false",
+                "iPromoGlobalNum": "0",
+            },
+            soap_action=_cc_soap_action("MoveInReservation_v6"),
+            namespace=CC_NS,
+            result_tag="RT",
+        )
+
+        ret_code = None
+        lease_num = None
+        ret_msg = None
+        if results:
+            ret_code = results[0].get('Ret_Code')
+            lease_num = results[0].get('iLeaseNum')
+            ret_msg = results[0].get('Ret_Msg')
+
+        success = ret_code is not None and int(ret_code) > 0
+
+        if success:
+            logger.info(
+                f"MoveInReservation_v6 site={site_code} unit={unit_id} "
+                f"tenant={tenant_id} waiting_id={waiting_id}: "
+                f"ledger_id={ret_code} lease_num={lease_num} test_mode={test_mode}"
+            )
+            audit_log(
+                'MOVE_IN_COMPLETED',
+                f"site={site_code} unit={unit_id} tenant={tenant_id} "
+                f"waiting_id={waiting_id} ledger_id={ret_code} "
+                f"pay_method={pay_method} test_mode={test_mode}"
+            )
+
+            # Update tracking table
+            _update_reservation_status(site_code, waiting_id, 'moved_in', 'moved_in_at')
+        else:
+            logger.warning(
+                f"MoveInReservation_v6 failed: site={site_code} unit={unit_id} "
+                f"ret_code={ret_code} ret_msg={ret_msg}"
+            )
+
+        return jsonify({
+            'success': success,
+            'site_code': site_code,
+            'unit_id': unit_id,
+            'tenant_id': tenant_id,
+            'waiting_id': waiting_id,
+            'ledger_id': int(ret_code) if success else None,
+            'lease_num': int(lease_num) if lease_num else None,
+            'ret_code': ret_code,
+            'message': ret_msg if not success else 'Move-in completed',
+            'test_mode': test_mode,
+        })
+
+    except SOAPFaultError as e:
+        logger.error(f"SOAP fault MoveInReservation_v6: {e}")
+        return jsonify({'success': False, 'error': 'SOAP API error'}), 502
+
+    except RuntimeError as e:
+        logger.error(f"Config error: {e}")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error MoveInReservation_v6: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
+    finally:
+        if soap_client:
+            soap_client.close()
+
+
+# =============================================================================
+# POST /api/reservations/move-in/direct — MoveInWithDiscount_v7
+# =============================================================================
+
+@reservations_bp.route('/move-in/direct', methods=['POST'])
+@require_auth
+@require_api_scope('reservations:write')
+@rate_limit_api(max_requests=5, window_seconds=60)
+def move_in_direct():
+    """
+    Direct move-in via MoveInWithDiscount_v7 (no reservation required).
+
+    Supports CC bypass via pay_method=2 (cash). Payment amount must
+    match the exact total from GET /api/reservations/move-in/cost.
+
+    JSON body:
+        site_code           — location code                [required]
+        tenant_id           — tenant ID                     [required]
+        unit_id             — unit ID                       [required]
+        payment_amount      — exact total from cost API     [required]
+        billing_frequency   — billing frequency (site-specific) [required]
+        start_date          — lease start (YYYY-MM-DD)      [default: tomorrow]
+        end_date            — lease end (YYYY-MM-DD)        [default: start+365]
+        pay_method          — 1=CC, 2=cash, 3=check, 4=ACH [default: 2]
+        concession_id       — discount plan ID              [default: 0]
+        insurance_id        — insurance coverage ID          [default: 0]
+        source_id           — source ID                     [default: 0]
+        source_name         — source label                  [default: "ESA Backend"]
+        use_push_rate       — use push rate                 [default: false]
+        waiting_id          — link to reservation           [default: 0]
+        test_mode           — true for dry run              [default: false]
+    """
+    from common.soap_client import SOAPFaultError
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    # Required fields
+    site_code = data.get('site_code', '').strip()
+    if not site_code:
+        return jsonify({'error': 'site_code is required'}), 400
+
+    tenant_id = data.get('tenant_id')
+    if not tenant_id:
+        return jsonify({'error': 'tenant_id is required'}), 400
+    tenant_id, tid_err = _safe_int(tenant_id, min_val=1)
+    if tid_err:
+        return jsonify({'error': f'tenant_id: {tid_err}'}), 400
+
+    unit_id = data.get('unit_id')
+    if not unit_id:
+        return jsonify({'error': 'unit_id is required'}), 400
+    unit_id, uid_err = _safe_int(unit_id, min_val=1)
+    if uid_err:
+        return jsonify({'error': f'unit_id: {uid_err}'}), 400
+
+    payment_amount = data.get('payment_amount')
+    if payment_amount is None:
+        return jsonify({'error': 'payment_amount is required'}), 400
+    try:
+        payment_amount = float(payment_amount)
+        if payment_amount <= 0:
+            return jsonify({'error': 'payment_amount must be greater than zero'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'payment_amount must be a number'}), 400
+
+    billing_freq = data.get('billing_frequency')
+    if billing_freq is None:
+        return jsonify({'error': 'billing_frequency is required (site-specific value)'}), 400
+    billing_freq, bf_err = _safe_int(billing_freq, min_val=0)
+    if bf_err:
+        return jsonify({'error': f'billing_frequency: {bf_err}'}), 400
+
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    # Optional fields
+    start_date = _parse_date(data.get('start_date'), 1)
+    end_default = (datetime.strptime(start_date, '%Y-%m-%d').date() + timedelta(days=365)).isoformat()
+    end_date = _parse_date(data.get('end_date'), 365) if data.get('end_date') else end_default
+
+    pay_method, pm_err = _safe_int(data.get('pay_method', 2), min_val=0, max_val=4)
+    if pm_err:
+        return jsonify({'error': f'pay_method: {pm_err}'}), 400
+
+    concession_id, cid_err = _safe_int(data.get('concession_id', 0), min_val=0)
+    if cid_err:
+        return jsonify({'error': f'concession_id: {cid_err}'}), 400
+
+    insurance_id, iid_err = _safe_int(data.get('insurance_id', 0), min_val=0)
+    if iid_err:
+        return jsonify({'error': f'insurance_id: {iid_err}'}), 400
+
+    source_id, sid_err = _safe_int(data.get('source_id', 0), min_val=0)
+    if sid_err:
+        return jsonify({'error': f'source_id: {sid_err}'}), 400
+
+    waiting_id, wid_err = _safe_int(data.get('waiting_id', 0), min_val=0)
+    if wid_err:
+        return jsonify({'error': f'waiting_id: {wid_err}'}), 400
+
+    source_name = _clamp(data.get('source_name', 'ESA Backend'), 64)
+    use_push_rate = str(data.get('use_push_rate', False)).lower() in ('true', '1', 'yes')
+    test_mode = str(data.get('test_mode', False)).lower() in ('true', '1', 'yes')
+
+    soap_client = None
+    try:
+        soap_client = _get_cc_soap_client()
+        results = soap_client.call(
+            operation="MoveInWithDiscount_v7",
+            parameters={
+                "sLocationCode": site_code,
+                "TenantID": str(tenant_id),
+                "sAccessCode": "",
+                "UnitID": str(unit_id),
+                "dStartDate": start_date,
+                "dEndDate": end_date,
+                "dcPaymentAmount": f"{payment_amount:.2f}",
+                "iCreditCardType": "0",
+                "sCreditCardNumber": "",
+                "sCreditCardCVV": "",
+                "sCCTrack2": "",
+                "dExpirationDate": "2030-01-01T00:00:00",
+                "sBillingName": "",
+                "sBillingAddress": "",
+                "sBillingZipCode": "",
+                "InsuranceCoverageID": str(insurance_id),
+                "ConcessionPlanID": str(concession_id),
+                "iSource": str(source_id),
+                "sSource": source_name,
+                "bUsePushRate": str(use_push_rate).lower(),
+                "iPayMethod": str(pay_method),
+                "sABARoutingNum": "",
+                "sAccountNum": "",
+                "iAccountType": "0",
+                "iKeypadZoneID": "0",
+                "iTimeZoneID": "0",
+                "iBillingFrequency": str(billing_freq),
+                "WaitingID": str(waiting_id),
+                "ChannelType": "0",
+                "bTestMode": str(test_mode).lower(),
+                "bApplyInsuranceCredit": "false",
+            },
+            soap_action=_cc_soap_action("MoveInWithDiscount_v7"),
+            namespace=CC_NS,
+            result_tag="RT",
+        )
+
+        ret_code = None
+        ret_msg = None
+        if results:
+            ret_code = results[0].get('Ret_Code')
+            ret_msg = results[0].get('Ret_Msg')
+
+        success = ret_code is not None and int(ret_code) > 0
+
+        if success:
+            logger.info(
+                f"MoveInWithDiscount_v7 site={site_code} unit={unit_id} "
+                f"tenant={tenant_id}: ledger_id={ret_code} test_mode={test_mode}"
+            )
+            audit_log(
+                'MOVE_IN_COMPLETED',
+                f"site={site_code} unit={unit_id} tenant={tenant_id} "
+                f"ledger_id={ret_code} pay_method={pay_method} "
+                f"waiting_id={waiting_id} test_mode={test_mode}"
+            )
+
+            # Update tracking table if linked to a reservation
+            if waiting_id:
+                _update_reservation_status(site_code, waiting_id, 'moved_in', 'moved_in_at')
+        else:
+            logger.warning(
+                f"MoveInWithDiscount_v7 failed: site={site_code} unit={unit_id} "
+                f"ret_code={ret_code} ret_msg={ret_msg}"
+            )
+
+        return jsonify({
+            'success': success,
+            'site_code': site_code,
+            'unit_id': unit_id,
+            'tenant_id': tenant_id,
+            'ledger_id': int(ret_code) if success else None,
+            'waiting_id': waiting_id if waiting_id else None,
+            'ret_code': ret_code,
+            'message': ret_msg if not success else 'Move-in completed',
+            'test_mode': test_mode,
+        })
+
+    except SOAPFaultError as e:
+        logger.error(f"SOAP fault MoveInWithDiscount_v7: {e}")
+        return jsonify({'success': False, 'error': 'SOAP API error'}), 502
+
+    except RuntimeError as e:
+        logger.error(f"Config error: {e}")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error MoveInWithDiscount_v7: {e}")
+        return jsonify({'success': False, 'error': 'An internal error occurred'}), 500
+
+    finally:
+        if soap_client:
+            soap_client.close()
+
+
+# =============================================================================
+# GET /api/reservations/insurance-coverage — list insurance coverage options
+# =============================================================================
+
+@reservations_bp.route('/insurance-coverage', methods=['GET'])
+@require_auth
+@require_api_scope('reservations:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def insurance_coverage_retrieve():
+    """
+    Retrieve available insurance coverage options for a site.
+
+    Query params:
+        site_code — location code [required]
+        unit_id   — filter by unit ID [optional]
+    """
+    from common.soap_client import SOAPFaultError
+
+    site_code = request.args.get('site_code', '').strip()
+    if not site_code:
+        return jsonify({'error': 'site_code query parameter is required'}), 400
+
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    unit_id = request.args.get('unit_id', '0').strip()
+    unit_id_val, uid_err = _safe_int(unit_id, default=0, min_val=0)
+    if uid_err:
+        return jsonify({'error': f'unit_id: {uid_err}'}), 400
+
+    soap_client = None
+    try:
+        soap_client = _get_cc_soap_client()
+
+        results = soap_client.call(
+            operation="InsuranceCoverageRetrieve_V2",
+            parameters={
+                "sLocationCode": site_code,
+            },
+            soap_action=_cc_soap_action("InsuranceCoverageRetrieve_V2"),
+            namespace=CC_NS,
+            result_tag="Table",
+        )
+
+        return jsonify({
+            'status': 'success',
+            'site_code': site_code,
+            'count': len(results),
+            'data': results,
+        })
+
+    except SOAPFaultError as e:
+        logger.error(f"SOAP fault InsuranceCoverageRetrieve_V2: {e}")
+        return jsonify({'error': 'SOAP API error'}), 502
+
+    except RuntimeError as e:
+        logger.error(f"Config error: {e}")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error InsuranceCoverageRetrieve_V2: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+
+    finally:
+        if soap_client:
+            soap_client.close()
+
+
+# =============================================================================
+# GET /api/reservations/insurance-minimums — insurance coverage minimums
+# =============================================================================
+
+@reservations_bp.route('/insurance-minimums', methods=['GET'])
+@require_auth
+@require_api_scope('reservations:read')
+@rate_limit_api(max_requests=30, window_seconds=60)
+def insurance_coverage_minimums():
+    """
+    Retrieve insurance coverage minimum requirements for a site.
+
+    Query params:
+        site_code — location code [required]
+    """
+    from common.soap_client import SOAPFaultError
+
+    site_code = request.args.get('site_code', '').strip()
+    if not site_code:
+        return jsonify({'error': 'site_code query parameter is required'}), 400
+
+    if not _validate_site_code(site_code):
+        return jsonify({'error': 'Invalid site_code'}), 400
+
+    soap_client = None
+    try:
+        soap_client = _get_cc_soap_client()
+
+        results = soap_client.call(
+            operation="InsuranceCoverageMinimumsRetrieve",
+            parameters={
+                "sLocationCode": site_code,
+            },
+            soap_action=_cc_soap_action("InsuranceCoverageMinimumsRetrieve"),
+            namespace=CC_NS,
+            result_tag="Table",
+        )
+
+        return jsonify({
+            'status': 'success',
+            'site_code': site_code,
+            'count': len(results),
+            'data': results,
+        })
+
+    except SOAPFaultError as e:
+        logger.error(f"SOAP fault InsuranceCoverageMinimumsRetrieve: {e}")
+        return jsonify({'error': 'SOAP API error'}), 502
+
+    except RuntimeError as e:
+        logger.error(f"Config error: {e}")
+        return jsonify({'error': 'SOAP configuration not available'}), 500
+
+    except Exception as e:
+        logger.error(f"Unexpected error InsuranceCoverageMinimumsRetrieve: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+
+    finally:
+        if soap_client:
+            soap_client.close()

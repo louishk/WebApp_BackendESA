@@ -3266,6 +3266,16 @@ class ECRIBatchLedger(Base, BaseModel):
     last_increase_date = Column(Date, nullable=True)
     tenure_months = Column(Integer, nullable=True)
 
+    # Currency of the native rent amounts stored in old_rent/new_rent/increase_amt
+    # (3-letter ISO code, e.g. SGD/MYR/KRW/HKD). SGD-equivalent is computed
+    # at display time using fx_rates.
+    currency = Column(String(3), nullable=True)
+
+    # Billing-cycle-aware scheduling (added migration 032)
+    paid_thru_date = Column(Date, nullable=True)
+    next_lad = Column(Date, nullable=True)
+    bucket = Column(String(10), nullable=True)
+
     # API execution
     api_status = Column(String(20), nullable=False, default='pending', comment="pending/success/failed/skipped")
     api_response = Column(JSONB, nullable=True)
@@ -3293,8 +3303,12 @@ class ECRIBatchLedger(Base, BaseModel):
             'new_rent': float(self.new_rent) if self.new_rent else None,
             'increase_pct': float(self.increase_pct) if self.increase_pct else None,
             'increase_amt': float(self.increase_amt) if self.increase_amt else None,
+            'currency': self.currency,
             'notice_date': self.notice_date.isoformat() if self.notice_date else None,
             'effective_date': self.effective_date.isoformat() if self.effective_date else None,
+            'paid_thru_date': self.paid_thru_date.isoformat() if self.paid_thru_date else None,
+            'next_lad': self.next_lad.isoformat() if self.next_lad else None,
+            'bucket': self.bucket,
             'in_place_median_site': float(self.in_place_median_site) if self.in_place_median_site else None,
             'in_place_median_country': float(self.in_place_median_country) if self.in_place_median_country else None,
             'market_rate': float(self.market_rate) if self.market_rate else None,
@@ -3593,3 +3607,155 @@ class IglooDevice(Base, BaseModel, TimestampMixin):
         Index('idx_igloo_dev_site_id', 'site_id'),
         Index('idx_igloo_dev_property_id', 'propertyId'),
     )
+
+
+# ============================================================================
+# Zoom Phone Sync Models
+# ============================================================================
+
+class ZoomContactSync(Base, BaseModel, TimestampMixin):
+    """SugarCRM <-> Zoom External Contact mapping"""
+    __tablename__ = 'zoom_contact_sync'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sugar_id = Column(String(36), nullable=False)
+    sugar_module = Column(String(20), nullable=False)
+    zoom_contact_id = Column(String(50))
+    phone_numbers = Column(JSONB)
+    name_pushed = Column(String(200))
+    sync_status = Column(String(20), nullable=False, default='pending')
+    error_message = Column(Text)
+    last_synced_at = Column(DateTime)
+
+    __table_args__ = (
+        Index('idx_zoom_contact_sync_unique', 'sugar_id', 'sugar_module', unique=True),
+        Index('idx_zoom_contact_sync_status', 'sync_status'),
+        Index('idx_zoom_contact_sync_zoom_id', 'zoom_contact_id'),
+    )
+
+
+class ZoomCallLog(Base, BaseModel, TimestampMixin):
+    """Zoom call record cache + CRM matching state"""
+    __tablename__ = 'zoom_call_logs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    zoom_call_id = Column(String(100), unique=True, nullable=False)
+    direction = Column(String(10))
+    caller_number = Column(String(30))
+    callee_number = Column(String(30))
+    caller_name = Column(String(200))
+    callee_name = Column(String(200))
+    duration = Column(Integer)
+    answer_start = Column(DateTime)
+    call_end = Column(DateTime)
+    has_recording = Column(Boolean, default=False)
+    recording_id = Column(String(100))
+    download_url = Column(Text)
+    transcript = Column(Text)  # legacy free-form (for Zoom-provided transcripts)
+    transcript_status = Column(String(20), nullable=False, default='none')
+    transcript_original = Column(Text)
+    transcript_en = Column(Text)
+    detected_language = Column(String(20))
+    transcript_model = Column(String(50))
+    transcript_processed_at = Column(DateTime)
+    # Scoring fields (populated by call_scorer; flat columns mirror scores_json keys)
+    score_status = Column(String(20), nullable=False, default='none')
+    score_processed_at = Column(DateTime)
+    score_model = Column(String(50))
+    score_confidence = Column(Integer)
+    score_error = Column(Text)
+    quality_overall = Column(Integer)
+    call_category = Column(String(30))
+    call_subcategory = Column(String(100))
+    sentiment = Column(String(20))
+    scores_json = Column(JSONB)
+    matched_sugar_id = Column(String(36))
+    matched_sugar_module = Column(String(20))
+    sugar_call_id = Column(String(36))
+    sync_status = Column(String(20), nullable=False, default='pending')
+    error_message = Column(Text)
+    raw_json = Column(JSONB)
+
+    __table_args__ = (
+        Index('idx_zoom_call_logs_status', 'sync_status'),
+        Index('idx_zoom_call_logs_caller', 'caller_number'),
+        Index('idx_zoom_call_logs_callee', 'callee_number'),
+        Index('idx_zoom_call_logs_call_end', 'call_end'),
+    )
+
+
+class ZoomSyncState(Base, BaseModel):
+    """High-water marks for Zoom sync operations"""
+    __tablename__ = 'zoom_sync_state'
+
+    sync_name = Column(String(50), primary_key=True)
+    last_sync_at = Column(DateTime)
+    last_success_at = Column(DateTime)
+    records_processed = Column(Integer, default=0)
+    sync_metadata = Column('metadata', JSONB)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class CallScoringConfig(Base, BaseModel):
+    """Editable LLM rubric for Zoom call scoring (single-row table, name='default')."""
+    __tablename__ = 'call_scoring_config'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(50), unique=True, nullable=False, default='default')
+    config_json = Column(JSONB, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    version = Column(Integer, nullable=False, default=1)
+    updated_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class CcwsChargeDescription(Base, BaseModel, TimestampMixin):
+    """
+    Per-site charge type configuration from ChargeDescriptionsRetrieve.
+
+    Provides per-charge-type tax rates and default prices needed by the
+    internal MoveInCost calculator (admin fee amount, insurance tax rate).
+
+    Composite unique key: ChargeDescID + SiteID
+    """
+    __tablename__ = 'ccws_charge_descriptions'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ChargeDescID = Column(Integer, nullable=False, index=True)
+    SiteID = Column(Integer, nullable=False, index=True)
+    SiteCode = Column(String(20))
+    sChgDesc = Column(String(255))
+    sChgCategory = Column(String(100), index=True)
+    dcPrice = Column(Numeric(14, 4), default=0)
+    dcTax1Rate = Column(Numeric(14, 6), default=0)
+    dcTax2Rate = Column(Numeric(14, 6), default=0)
+    bApplyAtMoveIn = Column(Boolean, default=False)
+    bProrateAtMoveIn = Column(Boolean, default=False)
+    bPermanent = Column(Boolean, default=False)
+    dDisabled = Column(DateTime)
+
+
+class CcwsInsuranceCoverage(Base, BaseModel, TimestampMixin):
+    """
+    Per-site insurance coverage plans from InsuranceCoverageRetrieve_V2.
+
+    V3 returns 0 results on LSETUP — V2 is the working endpoint.
+    Provides coverage amounts and premiums for the booking engine.
+
+    Composite unique key: InsurCoverageID + SiteID
+    """
+    __tablename__ = 'ccws_insurance_coverage'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    InsurCoverageID = Column(Integer, nullable=False, index=True)
+    SiteID = Column(Integer, nullable=False, index=True)
+    SiteCode = Column(String(20))
+    dcCoverage = Column(Numeric(14, 4), default=0)
+    dcPremium = Column(Numeric(14, 4), default=0)
+    dcPCTheft = Column(Numeric(14, 4), default=0)
+    sCoverageDesc = Column(String(255))
+    sProvidor = Column(String(255))
+    sBrochureUrl = Column(Text)
+    sCertificateUrl = Column(Text)

@@ -242,6 +242,14 @@ def create_app(config=None, db_url=None):
     from web.routes.crm import crm_bp
     from web.routes.visits import visits_bp
     from web.routes.revenue import revenue_bp
+    from web.routes.tenants import tenants_bp
+    from web.routes.billing import billing_bp
+    from web.routes.units import units_bp
+    from web.routes.reservation_fees import reservation_fees_bp, reservation_fees_api_bp
+    from web.routes.sync_api import sync_api_bp
+    from web.routes.sync_ui import sync_ui_bp
+    from web.routes.orchestrator_ui import orchestrator_ui_bp
+    from sync_service.api import sync_service_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
@@ -258,10 +266,24 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(crm_bp)
     app.register_blueprint(visits_bp)
     app.register_blueprint(revenue_bp)
+    app.register_blueprint(tenants_bp)
+    app.register_blueprint(billing_bp)
+    app.register_blueprint(units_bp)
+    app.register_blueprint(reservation_fees_bp)
+    app.register_blueprint(reservation_fees_api_bp)
+    app.register_blueprint(sync_api_bp)
+    app.register_blueprint(sync_ui_bp)
+    app.register_blueprint(orchestrator_ui_bp)
+    app.register_blueprint(sync_service_bp)
 
     # Exempt API routes from CSRF (they use JWT authentication, not session cookies)
     csrf.exempt(api_bp)
     csrf.exempt(reservations_bp)
+    csrf.exempt(tenants_bp)
+    csrf.exempt(reservation_fees_api_bp)
+    csrf.exempt(billing_bp)
+    csrf.exempt(sync_api_bp)
+    csrf.exempt(sync_service_bp)
     # crm_bp and visits_bp use session auth — CSRF protection stays enabled
     # (the frontend sends X-CSRFToken header via apiHeaders())
 
