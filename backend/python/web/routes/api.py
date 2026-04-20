@@ -1887,6 +1887,7 @@ def api_inventory_units():
                 ON v.unit_id = u."UnitID"
                 AND v.site_id = u."SiteID"
             WHERE u."SiteID" IN ({placeholders})
+              AND u."deleted_at" IS NULL
             ORDER BY u."SiteID", u."sUnitName"
         """)
 
@@ -1941,6 +1942,7 @@ def api_inventory_distinct_types():
                 FROM units_info
                 WHERE "SiteID" IN ({placeholders})
                   AND "sTypeName" IS NOT NULL
+                  AND deleted_at IS NULL
                 ORDER BY "sTypeName"
             """)
             result = session.execute(query, params)
