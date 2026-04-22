@@ -114,26 +114,6 @@ pipelines:
     data_freshness:
       table: mimo
       date_column: extract_date
-  ccws_discount_plans:
-    display_name: CCWS Discount Plans
-    description: Fetch discount/concession plan data from DiscountPlansRetrieve SOAP API
-    module_path: datalayer.ccws_discount_plans_to_sql
-    enabled: true
-    schedule:
-      type: cron
-      cron: 0 5 * * 0
-    priority: 8
-    resource_group: soap_api
-    max_db_connections: 2
-    estimated_duration_seconds: 300
-    retry:
-      max_attempts: 3
-      delay_seconds: 300
-      backoff_multiplier: 2
-    timeout_seconds: 1200
-    data_freshness:
-      table: ccws_discount
-      date_column: updated_at
   ccws_charge_descriptions:
     display_name: CCWS Charge Descriptions
     description: Fetch per-site charge type config (tax rates, prices) from ChargeDescriptionsRetrieve
@@ -174,6 +154,26 @@ pipelines:
     data_freshness:
       table: ccws_insurance_coverage
       date_column: updated_at
+  ccws_site_billing_config:
+    display_name: CCWS Site Billing Config
+    description: Fetch per-site billing mode and proration config from MoveInCostRetrieveWithDiscount_v4; preserves manual overrides
+    module_path: datalayer.ccws_site_billing_config_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 15 5 * * 0
+    priority: 8
+    resource_group: soap_api
+    max_db_connections: 2
+    estimated_duration_seconds: 180
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 600
+    data_freshness:
+      table: ccws_site_billing_config
+      date_column: synced_from_soap_at
   sugarcrm:
     display_name: SugarCRM
     description: Fetch CRM data (Leads, Contacts, Accounts)
@@ -196,6 +196,10 @@ pipelines:
     data_freshness:
       table: sugarcrm_leads
       date_column: synced_at
+    sync:
+      strategy: watermark
+      watermark_field: date_modified
+      checkpoint_interval: 1000
   embedsocial:
     display_name: EmbedSocial Reviews
     description: Sync Google reviews from EmbedSocial API for review score tracking
@@ -247,7 +251,7 @@ pipelines:
     enabled: true
     schedule:
       type: cron
-      cron: 0 8 * * 1
+      cron: 0 8 * * *
     priority: 7
     resource_group: http_api
     max_db_connections: 2
@@ -280,6 +284,13 @@ pipelines:
     data_freshness:
       table: api_reservations
       date_column: soap_synced_at
+    sync:
+      strategy: lookback
+      lookback_window: 24h
+      validation:
+        min_records: 5
+        max_change_pct: 80
+        required_fields: [SiteID, UnitID]
   calendar:
     display_name: Outlook Calendar
     description: Extract calendar events from configured Outlook mailboxes via Microsoft Graph
@@ -301,43 +312,40 @@ pipelines:
     data_freshness:
       table: calendar_events
       date_column: synced_at
-  igloo:
-    display_name: Igloo Smart Locks
-    description: Sync properties and device data from Igloo API
-    module_path: datalayer.igloo_to_sql
-    enabled: true
+  zoom_contacts_sync:
+    display_name: Zoom Contacts Sync
+    description: Push SugarCRM contacts/leads to Zoom Phone External Contacts
+    module_path: datalayer.zoom_contacts_sync
+    enabled: false
     schedule:
       type: cron
-      cron: "0 3 * * *"
+      cron: "30 */3 * * *"
     default_args:
       mode: auto
     priority: 5
     resource_group: http_api
     max_db_connections: 2
-    estimated_duration_seconds: 120
+    estimated_duration_seconds: 600
     retry:
       max_attempts: 3
       delay_seconds: 300
       backoff_multiplier: 2
-    timeout_seconds: 600
+    timeout_seconds: 1800
     data_freshness:
-      table: igloo_devices
+      table: zoom_contact_sync
       date_column: updated_at
-      database: backend
-    property_site_map:
-      A38XX: 54219
-      Commonwealth: 54219
-      "L029 - Commonwealth": 54219
-  gateaccess:
-    display_name: Gate Access Data
-    description: Fetch gate access data (lock codes, lock status) from SOAP API
-    module_path: datalayer.gate_access_to_sql
-    enabled: true
+  zoom_call_log_sync:
+    display_name: Zoom Call Log Sync
+    description: Pull Zoom call logs, match CRM contacts, push as SugarCRM Calls with transcripts
+    module_path: datalayer.zoom_call_log_sync
+    enabled: false
     schedule:
       type: cron
-      cron: 0 2 * * *
-    priority: 8
-    resource_group: soap_api
+      cron: "*/30 * * * *"
+    default_args:
+      mode: auto
+    priority: 5
+    resource_group: http_api
     max_db_connections: 2
     estimated_duration_seconds: 300
     retry:
@@ -346,6 +354,18 @@ pipelines:
       backoff_multiplier: 2
     timeout_seconds: 1200
     data_freshness:
-      table: gate_access_data
+      table: zoom_call_logs
       date_column: updated_at
-      database: backend
+    sync:
+      strategy: watermark
+      watermark_field: date_modified
+      checkpoint_interval: 500
+      phases:
+        - name: fetch
+          timeout: 300
+        - name: match
+          timeout: 120
+          depends_on: fetch
+        - name: push
+          timeout: 300
+          depends_on: match

@@ -154,10 +154,6 @@ def main():
     location_codes = get_pipeline_config(
         'ccws_charge_descriptions', 'location_codes', [])
     if not location_codes:
-        # Fall back to discount plans location list (same set of sites)
-        location_codes = get_pipeline_config(
-            'ccws_discount_plans', 'location_codes', [])
-    if not location_codes:
         raise ValueError(
             "ccws_charge_descriptions location_codes not configured")
 

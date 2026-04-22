@@ -151,9 +151,6 @@ def main():
     location_codes = get_pipeline_config(
         'ccws_insurance_coverage', 'location_codes', [])
     if not location_codes:
-        location_codes = get_pipeline_config(
-            'ccws_discount_plans', 'location_codes', [])
-    if not location_codes:
         raise ValueError(
             "ccws_insurance_coverage location_codes not configured")
 

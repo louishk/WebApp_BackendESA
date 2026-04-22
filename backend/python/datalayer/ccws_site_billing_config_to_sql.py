@@ -91,10 +91,8 @@ def main():
     if not config.soap:
         raise ValueError("SOAP configuration not found")
 
-    location_codes = (
-        get_pipeline_config('ccws_site_billing_config', 'location_codes', [])
-        or get_pipeline_config('ccws_discount_plans', 'location_codes', [])
-    )
+    location_codes = get_pipeline_config(
+        'ccws_site_billing_config', 'location_codes', [])
     if not location_codes:
         raise ValueError("location_codes not configured")
 

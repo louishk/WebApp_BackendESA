@@ -120,10 +120,6 @@ pipelines:
     sql_chunk_size: 500
     location_codes: *location_codes
 
-  ccws_discount_plans:
-    sql_chunk_size: 500
-    location_codes: *location_codes
-
   ccws_charge_descriptions:
     sql_chunk_size: 500
     location_codes: *location_codes
