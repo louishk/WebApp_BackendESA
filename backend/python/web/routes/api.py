@@ -516,10 +516,10 @@ def api_data_freshness():
     config = _get_scheduler_config()
     freshness = {}
 
-    # Tables allowed for freshness queries on the backend DB (allowlist)
-    BACKEND_FRESHNESS_TABLES = frozenset({
-        'igloo_devices', 'gate_access_data',
-    })
+    # Tables allowed for freshness queries on the backend DB (allowlist).
+    # Empty — all active pipelines read from pbi/middleware. Leave the guard
+    # in place so any future backend-DB pipeline must be explicitly allowlisted.
+    BACKEND_FRESHNESS_TABLES = frozenset()
 
     # Separate queries by database
     pbi_queries = []
@@ -1108,6 +1108,31 @@ def api_services_status():
         except Exception:
             mcp_status = 'stopped'
 
+        # Orchestrator status — read directly from sync_service
+        orchestrator_status = 'stopped'
+        orchestrator_info = {}
+        try:
+            from sync_service.models import SyncPipeline, SyncServiceState
+            from sync_service.config import session_scope as sync_session
+            from sync_service.executor import get_executor
+
+            with sync_session() as s:
+                pipeline_count = s.query(SyncPipeline).count()
+                enabled_count = s.query(SyncPipeline).filter_by(enabled=True).count()
+
+            # In-process API means if Flask is up, orchestrator API is up
+            orchestrator_status = 'running'
+            exec_stats = get_executor().stats()
+            orchestrator_info = {
+                'pid': os.getpid(),
+                'pipelines_total': pipeline_count,
+                'pipelines_enabled': enabled_count,
+                'in_flight': exec_stats.get('in_flight', 0),
+            }
+        except Exception as e:
+            current_app.logger.debug(f"Orchestrator status check failed: {e}")
+            orchestrator_status = 'stopped'
+
         # Web UI is always running if we're responding
         result = {
             'web_ui': {
@@ -1127,7 +1152,13 @@ def api_services_status():
                 'active': mcp_status == 'running',
                 'status': mcp_status,
                 **mcp_info
-            }
+            },
+            'orchestrator': {
+                'service': 'Sync Orchestrator',
+                'active': orchestrator_status == 'running',
+                'status': orchestrator_status,
+                **orchestrator_info,
+            },
         }
 
         return jsonify(result)
@@ -1330,12 +1361,17 @@ def api_restart_service(service):
 @require_auth
 @require_api_scope('scheduler:read')
 def api_list_pipelines():
-    """List all pipeline configurations."""
+    """List scheduler-owned pipelines (managed_by='scheduler').
+
+    Sync orchestrator pipelines are served via /api/sync/pipelines.
+    """
     from scheduler.models import PipelineConfig
 
     session = get_session()
     try:
-        rows = session.query(PipelineConfig).order_by(PipelineConfig.priority).all()
+        rows = (session.query(PipelineConfig)
+                .filter(PipelineConfig.managed_by == 'scheduler')
+                .order_by(PipelineConfig.priority).all())
         pipelines = [row.to_dict() for row in rows]
         return jsonify({'pipelines': pipelines})
     finally:
@@ -1346,12 +1382,13 @@ def api_list_pipelines():
 @require_auth
 @require_api_scope('scheduler:read')
 def api_get_pipeline(name):
-    """Get a specific pipeline configuration."""
+    """Get a scheduler-owned pipeline configuration."""
     from scheduler.models import PipelineConfig
 
     session = get_session()
     try:
-        row = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
+        row = (session.query(PipelineConfig)
+               .filter_by(pipeline_name=name, managed_by='scheduler').first())
         if not row:
             return jsonify({'error': 'Pipeline not found'}), 404
         return jsonify(row.to_dict())
@@ -1383,13 +1420,8 @@ def api_create_pipeline():
     if not is_valid:
         return jsonify({'error': msg}), 400
 
-    managed_by = data.get('managed_by', 'scheduler')
-    if managed_by not in ('scheduler', 'orchestrator'):
-        return jsonify({'error': 'managed_by must be scheduler or orchestrator'}), 400
-
-    valid, err = _validate_sync_config(data.get('sync_config'))
-    if not valid:
-        return jsonify({'error': err}), 400
+    # This endpoint is scheduler-only. Sync pipelines are created via /api/sync/pipelines.
+    managed_by = 'scheduler'
 
     valid, err = _validate_pipeline_specific_args(data.get('pipeline_specific_args'))
     if not valid:
@@ -1424,7 +1456,7 @@ def api_create_pipeline():
                 'table': data.get('freshness_table', ''),
                 'date_column': data.get('freshness_column', ''),
             },
-            sync_config=data.get('sync_config'),
+            sync_config=None,
             pipeline_specific_args=data.get('pipeline_specific_args'),
             managed_by=managed_by,
         )
@@ -1449,7 +1481,11 @@ def api_create_pipeline():
 @require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_update_pipeline(name):
-    """Update a pipeline configuration."""
+    """Update a scheduler-owned pipeline configuration.
+
+    Sync orchestrator pipelines are managed via /api/sync/pipelines/<name>.
+    To transfer a pipeline between engines, use /api/pipelines/<name>/transfer.
+    """
     from scheduler.models import PipelineConfig
 
     data = request.get_json()
@@ -1458,7 +1494,8 @@ def api_update_pipeline(name):
 
     session = get_session()
     try:
-        row = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
+        row = (session.query(PipelineConfig)
+               .filter_by(pipeline_name=name, managed_by='scheduler').first())
         if not row:
             return jsonify({'error': 'Pipeline not found'}), 404
 
@@ -1497,20 +1534,11 @@ def api_update_pipeline(name):
             fc = dict(row.data_freshness_config or {})
             fc['date_column'] = data['freshness_column']
             row.data_freshness_config = fc
-        if 'sync_config' in data:
-            valid, err = _validate_sync_config(data['sync_config'])
-            if not valid:
-                return jsonify({'error': err}), 400
-            row.sync_config = data['sync_config']
         if 'pipeline_specific_args' in data:
             valid, err = _validate_pipeline_specific_args(data['pipeline_specific_args'])
             if not valid:
                 return jsonify({'error': err}), 400
             row.pipeline_specific_args = data['pipeline_specific_args']
-        if 'managed_by' in data:
-            if data['managed_by'] not in ('scheduler', 'orchestrator'):
-                return jsonify({'error': 'managed_by must be scheduler or orchestrator'}), 400
-            row.managed_by = data['managed_by']
 
         session.commit()
         return jsonify({'success': True, 'message': f'Pipeline {name} updated'})
@@ -1527,12 +1555,13 @@ def api_update_pipeline(name):
 @require_api_scope('scheduler:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_delete_pipeline(name):
-    """Delete a pipeline."""
+    """Delete a scheduler-owned pipeline."""
     from scheduler.models import PipelineConfig
 
     session = get_session()
     try:
-        row = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
+        row = (session.query(PipelineConfig)
+               .filter_by(pipeline_name=name, managed_by='scheduler').first())
         if not row:
             return jsonify({'error': 'Pipeline not found'}), 404
 
@@ -1543,6 +1572,74 @@ def api_delete_pipeline(name):
         session.rollback()
         current_app.logger.error(f"Failed to delete pipeline {name}: {e}")
         return jsonify({'error': 'Failed to delete pipeline'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/pipelines/ownership')
+@require_auth
+@require_api_scope('scheduler:read')
+def api_pipelines_ownership():
+    """Cross-cutting view: who handles each pipeline (scheduler or orchestrator).
+
+    Used by dashboards to show ownership without two separate API calls.
+    """
+    from common.pipeline_registry import load_ownership_map
+
+    session = get_session()
+    try:
+        ownership = load_ownership_map(session)
+        scheduler_count = sum(1 for v in ownership.values() if v == 'scheduler')
+        sync_count = sum(1 for v in ownership.values() if v == 'orchestrator')
+        return jsonify({
+            'ownership': ownership,
+            'totals': {
+                'scheduler': scheduler_count,
+                'orchestrator': sync_count,
+                'total': len(ownership),
+            },
+        })
+    finally:
+        session.close()
+
+
+@api_bp.route('/pipelines/<name>/transfer', methods=['POST'])
+@require_auth
+@require_api_scope('scheduler:write')
+@rate_limit_api(max_requests=10, window_seconds=60)
+def api_transfer_pipeline(name):
+    """Transfer a pipeline between scheduler and sync orchestrator.
+
+    Body: {"managed_by": "scheduler" | "orchestrator"}
+
+    Atomic ownership flip — the engine that loses the pipeline stops running it
+    on its next config reload, and the new owner picks it up.
+    """
+    from common.pipeline_registry import transfer_pipeline, VALID_OWNERS
+
+    data = request.get_json() or {}
+    new_owner = data.get('managed_by')
+    if new_owner not in VALID_OWNERS:
+        return jsonify({'error': f'managed_by must be one of {list(VALID_OWNERS)}'}), 400
+
+    session = get_session()
+    try:
+        ok = transfer_pipeline(session, name, new_owner)
+        if not ok:
+            return jsonify({'error': 'Pipeline not found'}), 404
+        session.commit()
+        current_app.logger.info(
+            f"Pipeline transferred: name={name} new_owner={new_owner}"
+        )
+        return jsonify({
+            'success': True,
+            'pipeline': name,
+            'managed_by': new_owner,
+        })
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"Failed to transfer pipeline {name}: {e}")
+        return jsonify({'error': 'Failed to transfer pipeline'}), 500
     finally:
         session.close()
 
@@ -3041,7 +3138,7 @@ def _validate_discount_plan_data(data, exclude_id=None):
     # Name uniqueness
     if data.get('plan_name'):
         DiscountPlan = _get_discount_plan_model()
-        session = current_app.get_db_session()
+        session = current_app.get_middleware_session()
         try:
             existing = session.query(DiscountPlan).filter_by(plan_name=data['plan_name']).first()
             if existing and (exclude_id is None or existing.id != exclude_id):
@@ -3066,7 +3163,7 @@ def api_discount_plans_list():
         site         — filter by applicable site code, e.g. "L004"
     """
     DiscountPlan = _get_discount_plan_model()
-    session = current_app.get_db_session()
+    session = current_app.get_middleware_session()
     try:
         q = session.query(DiscountPlan)
 
@@ -3107,7 +3204,7 @@ def api_discount_plans_get(plan_id):
     Query params: include_concessions=true to resolve linked Sitelink data.
     """
     DiscountPlan = _get_discount_plan_model()
-    session = current_app.get_db_session()
+    session = current_app.get_middleware_session()
     try:
         plan = session.query(DiscountPlan).get(plan_id)
         if not plan:
@@ -3118,29 +3215,25 @@ def api_discount_plans_get(plan_id):
         # Optionally resolve linked concession details
         if request.args.get('include_concessions', '').lower() == 'true' and plan.linked_concessions:
             try:
-                from common.models import CcwsDiscount, Site
-                pbi_session = get_pbi_session()
-                try:
-                    details = []
-                    for link in plan.linked_concessions:
-                        cc = (pbi_session.query(CcwsDiscount)
-                              .filter_by(SiteID=link.get('site_id'), ConcessionID=link.get('concession_id'))
-                              .first())
-                        if cc:
-                            site = pbi_session.query(Site.sSiteName, Site.sLocationCode).filter_by(SiteID=cc.SiteID).first()
-                            details.append({
-                                'site_id': cc.SiteID,
-                                'site_code': site.sLocationCode if site else None,
-                                'site_name': site.sSiteName if site else None,
-                                'concession_id': cc.ConcessionID,
-                                'plan_name': cc.sPlanName or cc.sDefPlanName,
-                                'discount_pct': float(cc.dcPCDiscount) if cc.dcPCDiscount else None,
-                                'start': cc.dPlanStrt.isoformat() if cc.dPlanStrt else None,
-                                'end': cc.dPlanEnd.isoformat() if cc.dPlanEnd else None,
-                            })
-                    result['linked_concession_details'] = details
-                finally:
-                    pbi_session.close()
+                from common.models import CcwsDiscount, SiteInfo
+                details = []
+                for link in plan.linked_concessions:
+                    cc = (session.query(CcwsDiscount)
+                          .filter_by(SiteID=link.get('site_id'), ConcessionID=link.get('concession_id'))
+                          .first())
+                    if cc:
+                        site = session.query(SiteInfo.Name, SiteInfo.SiteCode).filter_by(SiteID=cc.SiteID).first()
+                        details.append({
+                            'site_id': cc.SiteID,
+                            'site_code': site.SiteCode if site else None,
+                            'site_name': site.Name if site else None,
+                            'concession_id': cc.ConcessionID,
+                            'plan_name': cc.sPlanName or cc.sDefPlanName,
+                            'discount_pct': float(cc.dcPCDiscount) if cc.dcPCDiscount else None,
+                            'start': cc.dPlanStrt.isoformat() if cc.dPlanStrt else None,
+                            'end': cc.dPlanEnd.isoformat() if cc.dPlanEnd else None,
+                        })
+                result['linked_concession_details'] = details
             except Exception as e:
                 current_app.logger.error(f"Error resolving linked concessions for plan {plan_id}: {e}")
                 result['linked_concession_details'] = []
@@ -3158,7 +3251,7 @@ def api_discount_plans_get(plan_id):
 def api_discount_plans_get_by_name(plan_name):
     """Get a single discount plan by name (URL-encoded)."""
     DiscountPlan = _get_discount_plan_model()
-    session = current_app.get_db_session()
+    session = current_app.get_middleware_session()
     try:
         plan = session.query(DiscountPlan).filter_by(plan_name=plan_name).first()
         if not plan:
@@ -3188,7 +3281,7 @@ def api_discount_plans_create():
     if errors:
         return jsonify({'error': 'Validation', 'message': '; '.join(errors), 'errors': errors}), 400
 
-    session = current_app.get_db_session()
+    session = current_app.get_middleware_session()
     try:
         plan = DiscountPlan()
         _apply_plan_json(plan, data, is_create=True)
@@ -3229,7 +3322,7 @@ def api_discount_plans_update(plan_id):
     if errors:
         return jsonify({'error': 'Validation', 'message': '; '.join(errors), 'errors': errors}), 400
 
-    session = current_app.get_db_session()
+    session = current_app.get_middleware_session()
     try:
         plan = session.query(DiscountPlan).get(plan_id)
         if not plan:
@@ -3273,7 +3366,7 @@ def api_ccws_discount_plans(site_id):
     """
     from common.models import CcwsDiscount, SiteInfo
 
-    session = get_pbi_session()
+    session = current_app.get_middleware_session()
     try:
         site = session.query(SiteInfo).filter_by(SiteID=site_id).first()
         if not site:
@@ -3373,13 +3466,13 @@ def api_ccws_discount_plans_update_simple():
         return jsonify({'error': 'All concession_ids must be integers'}), 400
 
     # Validate site_code against database
-    pbi_session = get_pbi_session()
+    mw_session = current_app.get_middleware_session()
     try:
-        site = pbi_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
+        site = mw_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
         if not site:
             return jsonify({'error': 'Invalid site_code'}), 400
     finally:
-        pbi_session.close()
+        mw_session.close()
 
     config = DataLayerConfig.from_env()
     if not config.soap:
@@ -3484,13 +3577,13 @@ def api_ccws_discount_plans_update():
         return jsonify({'error': 'All concession_ids must be integers'}), 400
 
     # Validate site_code against database
-    pbi_session = get_pbi_session()
+    mw_session = current_app.get_middleware_session()
     try:
-        site = pbi_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
+        site = mw_session.query(SiteInfo).filter_by(SiteCode=site_code).first()
         if not site:
             return jsonify({'error': 'Invalid site_code'}), 400
     finally:
-        pbi_session.close()
+        mw_session.close()
 
     # Extract and validate update fields
     import re
@@ -3947,7 +4040,7 @@ def _sl_audit(session, action, entity_type, entity_id=None, site_id=None, unit_i
 def api_sl_keypads_list():
     """List keypads, optionally filtered by site_id."""
     site_id = request.args.get('site_id')
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         from web.models.smart_lock import SmartLockKeypad, SmartLockUnitAssignment
         from common.models import IglooDevice
@@ -4031,7 +4124,7 @@ def api_sl_keypads_create():
     except (ValueError, TypeError):
         return jsonify({'error': 'site_id must be an integer'}), 400
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         existing = session.query(SmartLockKeypad).filter_by(keypad_id=keypad_id).first()
         if existing:
@@ -4073,7 +4166,7 @@ def api_sl_keypads_batch():
         return jsonify({'error': f'Batch size cannot exceed {MAX_SL_BATCH_SIZE} items'}), 400
 
     username = _sl_username()
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         created = 0
         skipped = 0
@@ -4122,7 +4215,7 @@ def api_sl_keypads_update(pk):
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         keypad = session.query(SmartLockKeypad).get(pk)
         if not keypad:
@@ -4158,7 +4251,7 @@ def api_sl_keypads_update(pk):
 def api_sl_keypads_delete(pk):
     """Delete a keypad."""
     from web.models.smart_lock import SmartLockKeypad
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         keypad = session.query(SmartLockKeypad).get(pk)
         if not keypad:
@@ -4188,7 +4281,7 @@ def api_sl_keypads_delete(pk):
 def api_sl_padlocks_list():
     """List padlocks, optionally filtered by site_id."""
     site_id = request.args.get('site_id')
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         from web.models.smart_lock import SmartLockPadlock, SmartLockUnitAssignment
         from common.models import IglooDevice
@@ -4271,7 +4364,7 @@ def api_sl_padlocks_create():
     except (ValueError, TypeError):
         return jsonify({'error': 'site_id must be an integer'}), 400
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         existing = session.query(SmartLockPadlock).filter_by(padlock_id=padlock_id).first()
         if existing:
@@ -4313,7 +4406,7 @@ def api_sl_padlocks_batch():
         return jsonify({'error': f'Batch size cannot exceed {MAX_SL_BATCH_SIZE} items'}), 400
 
     username = _sl_username()
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         created = 0
         skipped = 0
@@ -4362,7 +4455,7 @@ def api_sl_padlocks_update(pk):
     if not data:
         return jsonify({'error': 'JSON body required'}), 400
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         padlock = session.query(SmartLockPadlock).get(pk)
         if not padlock:
@@ -4398,7 +4491,7 @@ def api_sl_padlocks_update(pk):
 def api_sl_padlocks_delete(pk):
     """Delete a padlock."""
     from web.models.smart_lock import SmartLockPadlock
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         padlock = session.query(SmartLockPadlock).get(pk)
         if not padlock:
@@ -4427,7 +4520,7 @@ def api_sl_padlocks_delete(pk):
 @require_api_scope('smart_lock:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_units():
-    """Get units (from esa_pbi) merged with smart lock assignments (from esa_backend)."""
+    """Get units (from esa_middleware.units) merged with smart lock assignments."""
     site_ids_param = request.args.get('site_ids', '')
     if not site_ids_param:
         return jsonify({'error': 'site_ids parameter is required'}), 400
@@ -4437,36 +4530,31 @@ def api_sl_units():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
-    # 1) Fetch units from esa_pbi (reduced fields)
-    pbi_session = get_pbi_session()
+    # Fetch units + assignments + keypads/padlocks from middleware (single session)
+    from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock, GateAccessData
+    from common.models import IglooDevice
+    session = current_app.get_middleware_session()
     try:
         placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids))])
         params = {f'sid{i}': sid for i, sid in enumerate(site_ids)}
-        query = text(f"""
+        rows = session.execute(text(f"""
             SELECT u."SiteID", u."UnitID", u."sUnitName", u."bRentable", u."bRented"
-            FROM units_info u
+            FROM ccws_units u
             WHERE u."SiteID" IN ({placeholders})
             ORDER BY u."SiteID", u."sUnitName"
-        """)
-        rows = pbi_session.execute(query, params).fetchall()
-        units = [{'SiteID': r[0], 'UnitID': r[1], 'sUnitName': r[2], 'bRentable': r[3], 'bRented': r[4]} for r in rows]
+        """), params).fetchall()
+        units = [{'SiteID': r[0], 'UnitID': r[1], 'sUnitName': r[2],
+                  'bRentable': r[3], 'bRented': r[4]} for r in rows]
 
-        # Get last refresh time for the loaded sites
-        refresh_query = text(f"""
-            SELECT MAX(u.updated_at) FROM units_info u WHERE u."SiteID" IN ({placeholders})
-        """)
-        refresh_row = pbi_session.execute(refresh_query, params).fetchone()
+        refresh_row = session.execute(text(
+            f'SELECT MAX(updated_at) FROM ccws_units WHERE "SiteID" IN ({placeholders})'
+        ), params).fetchone()
         last_refresh = refresh_row[0].isoformat() if refresh_row and refresh_row[0] else None
     except Exception as e:
-        current_app.logger.error(f"Smart lock units PBI query error: {e}")
+        current_app.logger.error(f"Smart lock units query error: {e}")
+        session.close()
         return jsonify({'error': 'Failed to fetch units'}), 500
-    finally:
-        pbi_session.close()
 
-    # 2) Fetch assignments + keypads/padlocks from esa_backend
-    from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock, GateAccessData
-    from common.models import IglooDevice
-    session = get_session()
     try:
         assignments = session.query(SmartLockUnitAssignment).filter(
             SmartLockUnitAssignment.site_id.in_(site_ids)
@@ -4598,24 +4686,24 @@ def api_sl_assignments_upsert():
         except (ValueError, TypeError):
             return jsonify({'error': 'site_id and unit_id must be integers'}), 400
 
-    # Validate unit_ids exist in units_info (esa_pbi)
+    # Validate unit_ids exist in ccws_units (esa_middleware)
     if parsed_items:
-        pbi_session = get_pbi_session()
+        mw_session = current_app.get_middleware_session()
         try:
             placeholders = ', '.join([f':sid{i}' for i in range(len(site_ids_set))])
             params = {f'sid{i}': sid for i, sid in enumerate(site_ids_set)}
-            query = text(f'SELECT "SiteID", "UnitID" FROM units_info WHERE "SiteID" IN ({placeholders})')
-            rows = pbi_session.execute(query, params).fetchall()
+            query = text(f'SELECT "SiteID", "UnitID" FROM ccws_units WHERE "SiteID" IN ({placeholders})')
+            rows = mw_session.execute(query, params).fetchall()
             valid_units = {(r[0], r[1]) for r in rows}
         finally:
-            pbi_session.close()
+            mw_session.close()
 
         for sid, uid, _, _, _ in parsed_items:
             if (sid, uid) not in valid_units:
                 return jsonify({'error': f'Unit {uid} not found at site {sid}'}), 400
 
     username = _sl_username()
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         upserted = 0
         for sid, uid, new_keypad_pk, new_padlock_pk, new_keypad_2_pk in parsed_items:
@@ -4764,7 +4852,7 @@ def api_sl_assignments_list():
 
     unit_ids_param = request.args.get('unit_ids', '')
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         q = session.query(SmartLockUnitAssignment).filter(
             SmartLockUnitAssignment.site_id == site_id
@@ -4835,7 +4923,7 @@ def api_sl_audit_log():
     except (ValueError, TypeError):
         return jsonify({'error': 'limit must be an integer'}), 400
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         q = session.query(SmartLockAuditLog)
         if site_id:
@@ -4858,7 +4946,7 @@ def api_sl_audit_log():
 def api_sl_config_list():
     """List smart lock site configurations."""
     from web.models.smart_lock import SmartLockSiteConfig
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         configs = session.query(SmartLockSiteConfig).order_by(
             SmartLockSiteConfig.site_code
@@ -4880,7 +4968,7 @@ def api_sl_config_list():
 def api_sl_config_enabled():
     """List only enabled smart lock sites. Lightweight endpoint for external consumers."""
     from web.models.smart_lock import SmartLockSiteConfig
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         configs = session.query(SmartLockSiteConfig).filter(
             SmartLockSiteConfig.enabled.is_(True)
@@ -4902,7 +4990,7 @@ def api_sl_config_enabled():
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_config_upsert():
-    """Enable or disable smart lock for a site."""
+    """Enable or disable smart lock for a site, and update per-site revoke policy flags."""
     from web.models.smart_lock import SmartLockSiteConfig
     data = request.get_json()
     if not data:
@@ -4917,13 +5005,19 @@ def api_sl_config_upsert():
     except (ValueError, TypeError):
         return jsonify({'error': 'site_id must be an integer'}), 400
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         config = session.query(SmartLockSiteConfig).get(site_id)
         if config:
             config.enabled = bool(enabled)
             if 'notes' in data:
                 config.notes = (data['notes'] or '').strip()[:255] or None
+            if 'revoke_on_gate_locked' in data:
+                config.revoke_on_gate_locked = bool(data['revoke_on_gate_locked'])
+            if 'revoke_on_overlocked' in data:
+                config.revoke_on_overlocked = bool(data['revoke_on_overlocked'])
+            if 'revoke_on_not_rentable' in data:
+                config.revoke_on_not_rentable = bool(data['revoke_on_not_rentable'])
             config.updated_by = _sl_username()
         else:
             # Resolve site_code and site_name from esa_pbi
@@ -4949,6 +5043,9 @@ def api_sl_config_upsert():
                 site_name=site_name,
                 notes=(data.get('notes') or '').strip()[:255] or None,
                 updated_by=_sl_username(),
+                revoke_on_gate_locked=bool(data['revoke_on_gate_locked']) if 'revoke_on_gate_locked' in data else True,
+                revoke_on_overlocked=bool(data['revoke_on_overlocked']) if 'revoke_on_overlocked' in data else True,
+                revoke_on_not_rentable=bool(data['revoke_on_not_rentable']) if 'revoke_on_not_rentable' in data else True,
             )
             session.add(config)
 
@@ -4982,7 +5079,7 @@ def api_sl_gate_code():
     if not unit_id or not location_code:
         return jsonify({'error': 'unit_id and location_code required'}), 400
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         record = session.query(GateAccessData).filter_by(
             location_code=location_code, unit_id=unit_id
@@ -5027,10 +5124,26 @@ def api_sl_gate_code():
 @require_api_scope('smart_lock:read')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_sl_pin_audit():
-    """Compare Igloo keypad PINs with SiteLink gate access codes for a site.
+    """Reconcile Igloo keypad PINs against SiteLink gate access codes.
 
-    Returns per-unit match status without exposing actual PIN values.
+    Uses the same reconciliation semantics as igloo_pin_sync:
+      synced          — should_have_pin=True + ESA-tagged PIN equals gate code
+      push_pending    — should_have_pin=True + no/stale ESA PIN (cron will push)
+      revoke_pending  — should_have_pin=False + ESA PIN still on device (cron will revoke)
+      clean           — should_have_pin=False + no ESA PIN (nothing to do)
+      no_gate_code    — rented + rentable + not locked/overlocked + no valid gate code
+
+    Each (unit × keypad) pair is evaluated independently so secondary keypads
+    (keypad_2_pk) are covered.
+
+    Response rows include a `reason` field (not_rentable | overlocked | gate_locked |
+    moved_out | null) when status is revoke_pending.
     """
+    from web.models.smart_lock import (
+        SmartLockUnitAssignment, SmartLockKeypad, GateAccessData, SmartLockSiteConfig,
+    )
+    from common.igloo_client import IglooClient, IglooAPIError
+
     site_ids_param = request.args.get('site_ids', '')
     if not site_ids_param:
         return jsonify({'error': 'site_ids parameter is required'}), 400
@@ -5039,135 +5152,185 @@ def api_sl_pin_audit():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
-    from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, GateAccessData
-    from common.igloo_client import IglooClient, IglooAPIError
+    _PIN_RE_AUDIT = re.compile(r'^\d{4,10}$')
 
-    session = get_session()
+    def _esa_tag_audit(sid, uid):
+        return f"ESA-{sid}-{uid}"
+
+    class _AuditPolicyDefaults:
+        revoke_on_gate_locked = True
+        revoke_on_overlocked = True
+        revoke_on_not_rentable = True
+
+    def _audit_revoke_reason(is_rented, b_rentable, is_gate_locked, is_overlocked, policy):
+        if policy.revoke_on_not_rentable and not b_rentable:
+            return 'not_rentable'
+        if policy.revoke_on_overlocked and is_overlocked:
+            return 'overlocked'
+        if policy.revoke_on_gate_locked and is_gate_locked:
+            return 'gate_locked'
+        return 'moved_out'
+
+    session = current_app.get_middleware_session()
     try:
-        # 1) Get all assignments with keypads for these sites
+        # Load per-site policy configs
+        site_configs = {}
+        for cfg in session.query(SmartLockSiteConfig).filter(
+            SmartLockSiteConfig.site_id.in_(site_ids)
+        ).all():
+            site_configs[cfg.site_id] = cfg
+
         assignments = session.query(SmartLockUnitAssignment).filter(
             SmartLockUnitAssignment.site_id.in_(site_ids),
-            SmartLockUnitAssignment.keypad_pk.isnot(None),
+            (SmartLockUnitAssignment.keypad_pk.isnot(None)) |
+            (SmartLockUnitAssignment.keypad_2_pk.isnot(None)),
         ).all()
 
         if not assignments:
             return jsonify({'results': [], 'count': 0})
 
-        # 2) Build keypad PK -> deviceId map
-        keypad_pks = {a.keypad_pk for a in assignments}
-        keypads = session.query(SmartLockKeypad).filter(
-            SmartLockKeypad.id.in_(keypad_pks)
-        ).all()
-        kp_map = {k.id: k.keypad_id for k in keypads}  # pk -> deviceId
+        kp_pks = set()
+        for a in assignments:
+            if a.keypad_pk:
+                kp_pks.add(a.keypad_pk)
+            if a.keypad_2_pk:
+                kp_pks.add(a.keypad_2_pk)
+        keypads = session.query(SmartLockKeypad).filter(SmartLockKeypad.id.in_(kp_pks)).all()
+        kp_map = {k.id: k.keypad_id for k in keypads}
 
-        # 3) Get gate access codes for all units
-        unit_keys = [(a.site_id, a.unit_id) for a in assignments]
-        gate_records = session.query(GateAccessData).filter(
+        gate_rows = session.query(GateAccessData).filter(
             GateAccessData.site_id.in_(site_ids)
         ).all()
-        gate_map = {(g.site_id, g.unit_id): g for g in gate_records}
+        gate_map = {(g.site_id, g.unit_id): g for g in gate_rows}
 
-        # 4) Decrypt gate codes
+        # Load bRentable from ccws_units for the requested sites
+        rentable_map = {}
+        if site_ids:
+            placeholders = ','.join(f':s{i}' for i in range(len(site_ids)))
+            params = {f's{i}': sid for i, sid in enumerate(site_ids)}
+            rows = session.execute(
+                text(
+                    f'SELECT "SiteID", "UnitID", "bRentable" '
+                    f'FROM ccws_units WHERE "SiteID" IN ({placeholders}) '
+                    f'AND deleted_at IS NULL'
+                ),
+                params,
+            ).fetchall()
+            for sid, uid, rentable in rows:
+                rentable_map[(sid, uid)] = bool(rentable)
+
         from common.gate_access_crypto import get_gate_crypto
         crypto = get_gate_crypto()
 
-        gate_codes = {}  # (site_id, unit_id) -> plaintext code
-        for key, g in gate_map.items():
-            if g.access_code_enc:
-                try:
-                    gate_codes[key] = crypto.decrypt(g.access_code_enc)
-                except Exception:
-                    pass
-
-        # 5) Fetch Igloo PINs per unique keypad deviceId
-        unique_device_ids = set(kp_map.values())
-        igloo_pins = {}  # deviceId -> [pin_values]
-        igloo_pending = {}  # deviceId -> [pending custom pins from jobs]
+        # Fetch Igloo state per unique device_id
+        unique_device_ids = {kp_map[pk] for pk in kp_pks if pk in kp_map}
+        device_access = {}
+        device_pending = {}
         try:
             client = IglooClient()
-            for device_id in unique_device_ids:
-                try:
-                    access_list = client.list_device_access(device_id)
-                    pins = []
-                    for entry in access_list:
-                        if entry.get('accessType') == 'pin' and entry.get('pin'):
-                            pins.append({
-                                'pin': entry['pin'],
-                                'name': entry.get('name', ''),
-                                'pinType': entry.get('pinType', ''),
-                                'id': entry.get('id', ''),
-                                'isCustomPin': entry.get('isCustomPin', False),
-                            })
-                    igloo_pins[device_id] = pins
-                except IglooAPIError:
-                    igloo_pins[device_id] = []
-
-                # Also check pending jobs for custom PINs not yet synced
-                try:
-                    jobs = client.list_device_jobs(device_id)
-                    pending = []
-                    for j in jobs:
-                        if j.get('status') == 'pending' and j.get('description') == 'create_bluetooth_pin':
-                            ad = j.get('accessData', {})
-                            if ad.get('customPin'):
-                                pending.append(ad['customPin'])
-                    igloo_pending[device_id] = pending
-                except IglooAPIError:
-                    igloo_pending[device_id] = []
-        except IglooAPIError as e:
+        except IglooAPIError:
             return jsonify({'error': 'Failed to connect to Igloo API'}), 502
 
-        # 6) Compare and build results
+        for device_id in unique_device_ids:
+            try:
+                device_access[device_id] = client.list_device_access(device_id)
+            except IglooAPIError:
+                device_access[device_id] = []
+            try:
+                jobs = client.list_device_jobs(device_id)
+                pending = set()
+                for j in jobs:
+                    if j.get('status') == 'pending' and j.get('description') == 'create_bluetooth_pin':
+                        cp = (j.get('accessData') or {}).get('customPin')
+                        if cp:
+                            pending.add(cp)
+                device_pending[device_id] = pending
+            except IglooAPIError:
+                device_pending[device_id] = set()
+
         results = []
         for a in assignments:
-            device_id = kp_map.get(a.keypad_pk)
-            gate_code = gate_codes.get((a.site_id, a.unit_id))
-            device_pins = igloo_pins.get(device_id, [])
-            pending_pins = igloo_pending.get(device_id, [])
+            gate = gate_map.get((a.site_id, a.unit_id))
+            plain_pin = None
+            if gate and gate.access_code_enc:
+                try:
+                    plain_pin = crypto.decrypt(gate.access_code_enc)
+                except Exception:
+                    plain_pin = None
 
-            # Determine match status
-            if not gate_code:
-                status = 'no_gate_code'
-                matching_pin = None
-            elif not device_pins and not pending_pins:
-                status = 'no_igloo_pin'
-                matching_pin = None
-            else:
-                # Check if any active Igloo PIN matches the gate code
-                matching_pin = None
-                for p in device_pins:
-                    if p['pin'] == gate_code:
-                        matching_pin = p
-                        break
+            is_rented = bool(gate and gate.is_rented)
+            is_gate_locked = bool(gate and gate.is_gate_locked)
+            is_overlocked = bool(gate and gate.is_overlocked)
+            b_rentable = rentable_map.get((a.site_id, a.unit_id), False)
+            has_valid_pin = bool(plain_pin and _PIN_RE_AUDIT.match(plain_pin))
+            policy = site_configs.get(a.site_id, _AuditPolicyDefaults())
+            tag = _esa_tag_audit(a.site_id, a.unit_id)
 
-                if matching_pin:
-                    status = 'match'
-                elif gate_code in pending_pins:
-                    status = 'pending'
-                    matching_pin = None
+            # should_have_pin base (excluding gate code validity)
+            should_have_pin_base = (
+                is_rented
+                and (not policy.revoke_on_not_rentable or b_rentable)
+                and (not policy.revoke_on_gate_locked or not is_gate_locked)
+                and (not policy.revoke_on_overlocked or not is_overlocked)
+            )
+
+            slots = []
+            if a.keypad_pk and a.keypad_pk in kp_map:
+                slots.append(('primary', a.keypad_pk, kp_map[a.keypad_pk]))
+            if a.keypad_2_pk and a.keypad_2_pk in kp_map:
+                slots.append(('secondary', a.keypad_2_pk, kp_map[a.keypad_2_pk]))
+
+            for slot_label, keypad_pk, device_id in slots:
+                access_list = device_access.get(device_id, [])
+                pending_set = device_pending.get(device_id, set())
+
+                esa_entry = next(
+                    (e for e in access_list if e.get('name') == tag),
+                    None,
+                )
+                esa_pin_value = esa_entry.get('pin') if esa_entry else None
+
+                reason = None
+                if should_have_pin_base and not has_valid_pin:
+                    status = 'no_gate_code'
+                elif should_have_pin_base and has_valid_pin:
+                    if esa_entry and esa_pin_value == plain_pin:
+                        status = 'synced'
+                    else:
+                        status = 'push_pending'
                 else:
-                    status = 'mismatch'
+                    # should_have_pin = False
+                    if esa_entry:
+                        status = 'revoke_pending'
+                        reason = _audit_revoke_reason(
+                            is_rented, b_rentable, is_gate_locked, is_overlocked, policy
+                        )
+                    else:
+                        status = 'clean'
 
-            results.append({
-                'site_id': a.site_id,
-                'unit_id': a.unit_id,
-                'keypad_pk': a.keypad_pk,
-                'device_id': device_id,
-                'status': status,
-                'has_gate_code': bool(gate_code),
-                'igloo_pin_count': len(device_pins),
-                'pending_pin_count': len(pending_pins),
-                'matching_pin_name': matching_pin['name'] if matching_pin else None,
-                'matching_pin_type': matching_pin['pinType'] if matching_pin else None,
-            })
+                results.append({
+                    'site_id': a.site_id,
+                    'unit_id': a.unit_id,
+                    'keypad_pk': keypad_pk,
+                    'keypad_slot': slot_label,
+                    'device_id': device_id,
+                    'status': status,
+                    'reason': reason,
+                    'is_rented': is_rented,
+                    'is_gate_locked': is_gate_locked,
+                    'is_overlocked': is_overlocked,
+                    'b_rentable': b_rentable,
+                    'has_gate_code': has_valid_pin,
+                    'has_esa_pin': bool(esa_entry),
+                    'pin_type': esa_entry.get('pinType') if esa_entry else None,
+                })
 
-        # Audit
         _sl_audit(session, 'pin_audit', 'igloo',
-                  detail=f'PIN audit for {len(results)} units across {len(site_ids)} site(s)')
+                  detail=f'PIN audit for {len(results)} pair(s) across {len(site_ids)} site(s)')
         session.commit()
 
         return jsonify({'results': results, 'count': len(results)})
-    except Exception as e:
+    except Exception:
         session.rollback()
         current_app.logger.exception("PIN audit error")
         return jsonify({'error': 'Failed to run PIN audit'}), 500
@@ -5199,7 +5362,7 @@ def api_sl_push_gate_pin():
     except (ValueError, TypeError):
         return jsonify({'error': 'site_id and unit_id must be integers'}), 400
 
-    session = get_session()
+    session = current_app.get_middleware_session()
     try:
         # 1) Get the assignment and its keypad
         assignment = session.query(SmartLockUnitAssignment).filter_by(
@@ -5587,83 +5750,95 @@ def api_igloo_revoke_access(device_id, access_id):
 
 
 # --- Igloo Data Sync ---
+# Moved to orchestrator: POST /api/orchestrator/pipelines/igloo/run
 
-@api_bp.route('/igloo/sync', methods=['POST'])
+
+# =============================================================================
+# Call Scoring Rubric — admin endpoints
+# =============================================================================
+
+@api_bp.route('/call-scoring/config', methods=['GET'])
 @require_auth
-@_require_sl_session_access
-@require_api_scope('smart_lock:write')
-@rate_limit_api(max_requests=5, window_seconds=60)
-def api_igloo_sync():
-    """Trigger Igloo data refresh via scheduler pipeline."""
+def api_call_scoring_get():
+    """Return the active scoring rubric for the editor UI."""
     try:
-        from scheduler.executor import PipelineExecutor
+        from common.scoring_config import get_active_config, _get_engine
+        from sqlalchemy import text as _text
+        cfg = get_active_config(force_refresh=True)
+        version = cfg.get('_version', 1)
 
-        config = _get_scheduler_config()
-        if 'igloo' not in config.pipelines:
-            return jsonify({'error': 'Igloo pipeline not configured'}), 404
-
-        p = config.pipelines['igloo']
-        execution_id = uuid4()
-        final_args = dict(p.default_args)
-        final_args['mode'] = 'auto'
-        db_url = current_app.db_url
-
-        def run_pipeline():
-            from scheduler.models import JobHistory
-            from sqlalchemy import create_engine as sa_create_engine
-            from sqlalchemy.orm import sessionmaker as sa_sessionmaker
-
-            engine = sa_create_engine(db_url)
-            Session = sa_sessionmaker(bind=engine)
-            session = Session()
-
-            job_history = JobHistory(
-                job_id=f"igloo_{execution_id}",
-                pipeline_name='igloo',
-                execution_id=execution_id,
-                status='running',
-                priority=p.priority,
-                scheduled_at=datetime.utcnow(),
-                started_at=datetime.utcnow(),
-                mode='auto',
-                parameters=final_args,
-                triggered_by='web',
-            )
-            try:
-                session.add(job_history)
-                session.commit()
-
-                executor = PipelineExecutor()
-                result = executor.execute_streaming(
-                    module_path=p.module_path,
-                    args=final_args,
-                    execution_id=execution_id,
-                    timeout_seconds=p.timeout_seconds,
-                )
-
-                job_history.status = 'completed' if result.success else 'failed'
-                job_history.completed_at = datetime.utcnow()
-                if not result.success:
-                    job_history.error_message = 'Pipeline execution failed'
-                session.commit()
-            except Exception as exc:
-                job_history.status = 'failed'
-                job_history.error_message = f'{type(exc).__name__}: pipeline execution failed'
-                job_history.completed_at = datetime.utcnow()
-                session.commit()
-                logging.getLogger(__name__).error("Igloo sync pipeline failed: %s", exc)
-            finally:
-                session.close()
-                engine.dispose()
-
-        thread = threading.Thread(target=run_pipeline, daemon=True)
-        thread.start()
+        # Also fetch updated_at / updated_by for the UI header
+        engine = _get_engine()
+        with engine.connect() as conn:
+            row = conn.execute(_text("""
+                SELECT updated_at, updated_by
+                FROM call_scoring_config
+                WHERE name = 'default' AND is_active = TRUE
+                LIMIT 1
+            """)).fetchone()
 
         return jsonify({
-            'success': True,
-            'execution_id': str(execution_id),
-            'message': 'Igloo sync started',
+            'config': cfg,
+            'version': version,
+            'updated_at': row[0].isoformat() if row and row[0] else None,
+            'updated_by': row[1] if row else None,
         })
-    except Exception as e:
-        current_app.logger.exception("Igloo sync trigger error")
-        return jsonify({'error': 'Failed to trigger Igloo sync'}), 500
+    except Exception:
+        current_app.logger.exception("Failed to load call scoring config")
+        return jsonify({'error': 'Failed to load config'}), 500
+
+
+@api_bp.route('/call-scoring/config', methods=['POST'])
+@require_auth
+def api_call_scoring_save():
+    """Persist a new version of the scoring rubric."""
+    try:
+        from common.scoring_config import save_config, validate_config
+
+        body = request.get_json(silent=True) or {}
+        cfg = body.get('config')
+        if not isinstance(cfg, dict):
+            return jsonify({'error': 'Body must contain a "config" object'}), 400
+
+        errors = validate_config(cfg)
+        if errors:
+            return jsonify({'error': 'Validation failed', 'errors': errors}), 400
+
+        username = g.current_user.get('sub') if hasattr(g, 'current_user') else 'unknown'
+        new_version = save_config(cfg, updated_by=username)
+        return jsonify({'success': True, 'version': new_version})
+    except ValueError as ve:
+        return jsonify({'error': 'Validation failed', 'errors': [str(ve)]}), 400
+    except Exception:
+        current_app.logger.exception("Failed to save call scoring config")
+        return jsonify({'error': 'Failed to save config'}), 500
+
+
+@api_bp.route('/call-scoring/test', methods=['POST'])
+@require_auth
+def api_call_scoring_test():
+    """Run the scorer against a pasted transcript using a (possibly draft) config."""
+    try:
+        from common.call_scorer import score_call
+
+        body = request.get_json(silent=True) or {}
+        transcript = (body.get('transcript') or '').strip()
+        if not transcript:
+            return jsonify({'error': 'transcript is required'}), 400
+        if len(transcript) > 50000:
+            return jsonify({'error': 'transcript too long (max 50000 chars)'}), 400
+
+        config_override = body.get('config') if isinstance(body.get('config'), dict) else None
+
+        result = score_call(
+            transcript=transcript,
+            direction=body.get('direction') or 'outbound',
+            agent_name=body.get('agent_name') or '',
+            customer_name=body.get('customer_name') or '',
+            duration_sec=int(body.get('duration_sec') or 0),
+            config_override=config_override,
+        )
+        return jsonify({'success': True, 'result': result})
+    except Exception:
+        current_app.logger.exception("Call scoring test failed")
+        return jsonify({'error': 'Test failed'}), 500

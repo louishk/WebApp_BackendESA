@@ -14,8 +14,8 @@ discount_plans_bp = Blueprint('discount_plans', __name__, url_prefix='/discount-
 
 
 def get_session():
-    """Get database session from app context."""
-    return current_app.get_db_session()
+    """Get middleware DB session (discount plans live in esa_middleware)."""
+    return current_app.get_middleware_session()
 
 
 _pbi_engine = None
@@ -73,14 +73,14 @@ def _get_sites_by_country():
 
 
 def _get_sitelink_discount_names():
-    """Get distinct Sitelink discount plan names from ccws_discount (PBI DB).
+    """Get distinct Sitelink discount plan names from ccws_discount (middleware DB).
     Only returns active plans (not deleted/disabled/archived) with valid periods.
     """
     try:
         from common.models import CcwsDiscount
         from sqlalchemy import distinct, or_
         from datetime import datetime
-        session = _get_pbi_session()
+        session = get_session()
         try:
             now = datetime.utcnow()
             rows = (session.query(distinct(CcwsDiscount.sPlanName))
@@ -482,16 +482,17 @@ def view_brief(plan_id):
                 try:
                     # Collect all site IDs for batch lookup
                     link_site_ids = list({link.get('site_id') for link in plan.linked_concessions if link.get('site_id')})
-                    # Build SiteID -> SiteCode map
+                    # Build SiteID -> SiteCode map (prefer SiteInfo for standardized L001 format)
                     sid_to_code = {}
                     if link_site_ids:
-                        site_rows = pbi_session.query(Site.SiteID, Site.sLocationCode).filter(Site.SiteID.in_(link_site_ids)).all()
-                        sid_to_code = {s.SiteID: s.sLocationCode for s in site_rows if s.sLocationCode}
+                        info_rows = pbi_session.query(SiteInfo.SiteID, SiteInfo.SiteCode).filter(SiteInfo.SiteID.in_(link_site_ids)).all()
+                        sid_to_code = {si.SiteID: si.SiteCode for si in info_rows if si.SiteCode}
                         missing = [sid for sid in link_site_ids if sid not in sid_to_code]
                         if missing:
-                            info_rows = pbi_session.query(SiteInfo.SiteID, SiteInfo.SiteCode).filter(SiteInfo.SiteID.in_(missing)).all()
-                            for si in info_rows:
-                                sid_to_code[si.SiteID] = si.SiteCode
+                            site_rows = pbi_session.query(Site.SiteID, Site.sLocationCode).filter(Site.SiteID.in_(missing)).all()
+                            for s in site_rows:
+                                if s.sLocationCode:
+                                    sid_to_code[s.SiteID] = s.sLocationCode
 
                     for link in plan.linked_concessions:
                         cc = (pbi_session.query(CcwsDiscount)
@@ -677,22 +678,21 @@ def api_concessions_by_plan_name():
             .order_by(CcwsDiscount.SiteID)
             .all())
 
-            # Get site names + site codes via Site and SiteInfo
+            # Get site names + site codes via SiteInfo (preferred) and Site (fallback)
             site_ids = list({r.SiteID for r in results})
             site_map = {}
             if site_ids:
                 from common.models import SiteInfo
-                sites = pbi_session.query(Site.SiteID, Site.sSiteName, Site.sLocationCode).filter(Site.SiteID.in_(site_ids)).all()
-                site_map = {s.SiteID: {'name': s.sSiteName, 'code': s.sLocationCode} for s in sites}
-                # Fallback: if sLocationCode is missing, try SiteInfo.SiteCode
-                missing = [sid for sid in site_ids if not site_map.get(sid, {}).get('code')]
+                # SiteInfo.SiteCode is the standardized L001 format used by form checkboxes
+                infos = pbi_session.query(SiteInfo.SiteID, SiteInfo.SiteCode, SiteInfo.Name).filter(SiteInfo.SiteID.in_(site_ids)).all()
+                for si in infos:
+                    site_map[si.SiteID] = {'name': si.Name or f'Site {si.SiteID}', 'code': si.SiteCode}
+                # Fallback to Site table for any SiteIDs not in SiteInfo
+                missing = [sid for sid in site_ids if sid not in site_map]
                 if missing:
-                    infos = pbi_session.query(SiteInfo.SiteID, SiteInfo.SiteCode).filter(SiteInfo.SiteID.in_(missing)).all()
-                    for si in infos:
-                        if si.SiteID in site_map:
-                            site_map[si.SiteID]['code'] = si.SiteCode
-                        else:
-                            site_map[si.SiteID] = {'name': f'Site {si.SiteID}', 'code': si.SiteCode}
+                    sites = pbi_session.query(Site.SiteID, Site.sSiteName, Site.sLocationCode).filter(Site.SiteID.in_(missing)).all()
+                    for s in sites:
+                        site_map[s.SiteID] = {'name': s.sSiteName or f'Site {s.SiteID}', 'code': s.sLocationCode}
 
             return jsonify([{
                 'concession_id': r.ConcessionID,

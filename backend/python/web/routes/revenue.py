@@ -136,14 +136,18 @@ def api_rate_benchmarking():
             ORDER BY ui.label_type_code, ui.label_climate_code, ui.label_size_range
         """), {'site_id': site_id}).fetchall()
 
-        # --- Discount reference (lowest active plan %) ---
-        disc_ref = session.execute(text("""
-            SELECT MIN("dcPCDiscount") AS min_pct_discount
-            FROM ccws_discount
-            WHERE "SiteID" = :site_id
-              AND ("bNeverExpires" = true OR "dPlanEnd" >= CURRENT_DATE)
-              AND "dcPCDiscount" > 0
-        """), {'site_id': site_id}).fetchone()
+        # --- Discount reference (lowest active plan %) — read from middleware ---
+        mw_session = current_app.get_middleware_session()
+        try:
+            disc_ref = mw_session.execute(text("""
+                SELECT MIN("dcPCDiscount") AS min_pct_discount
+                FROM ccws_discount
+                WHERE "SiteID" = :site_id
+                  AND ("bNeverExpires" = true OR "dPlanEnd" >= CURRENT_DATE)
+                  AND "dcPCDiscount" > 0
+            """), {'site_id': site_id}).fetchone()
+        finally:
+            mw_session.close()
 
         min_discount_pct = float(disc_ref[0]) if disc_ref and disc_ref[0] else None
 
