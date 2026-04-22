@@ -19,10 +19,15 @@ logger = logging.getLogger(__name__)
 admin_siteinfo_bp = Blueprint('admin_siteinfo', __name__, url_prefix='/admin/siteinfo')
 
 # ---------------------------------------------------------------------------
-# PBI engine (lazy singleton)
+# PBI engine (lazy singleton) — canonical during transition to mw_siteinfo
 # ---------------------------------------------------------------------------
 
 _pbi_engine = None
+_mw_engine = None
+
+# Middleware mirror table — dual-writes run here as best-effort.
+# Remove once siteinfo is fully split off PBI.
+MW_SITEINFO_TABLE = 'mw_siteinfo'
 
 
 def _get_pbi_engine():
@@ -39,6 +44,32 @@ def _get_pbi_session():
     from sqlalchemy.orm import sessionmaker
     Session = sessionmaker(bind=_get_pbi_engine())
     return Session()
+
+
+def _get_mw_engine():
+    global _mw_engine
+    if _mw_engine is None:
+        from common.config_loader import get_database_url
+        from sqlalchemy import create_engine
+        mw_url = get_database_url('middleware')
+        _mw_engine = create_engine(mw_url, pool_size=3, max_overflow=5, pool_pre_ping=True, pool_recycle=300)
+    return _mw_engine
+
+
+def _mirror_to_mw(sql_template: str, params: dict | None = None) -> str | None:
+    """Best-effort dual-write to mw_siteinfo. Returns error string on failure, None on success.
+
+    Does NOT raise — PBI is canonical; caller decides whether to warn the user.
+    Pass a SQL string with {table} placeholder for the target table name.
+    """
+    try:
+        ddl = sql_template.format(table=MW_SITEINFO_TABLE)
+        with _get_mw_engine().begin() as conn:
+            conn.execute(text(ddl), params or {})
+        return None
+    except Exception as e:
+        logger.exception("mw_siteinfo mirror write failed")
+        return str(e)[:200]
 
 # ---------------------------------------------------------------------------
 # Validation constants
@@ -220,7 +251,16 @@ def create_site():
             session.commit()
 
             audit_log(AuditEvent.CONFIG_UPDATED, details='siteinfo: row created', user=current_user.username)
-            flash('Site created successfully.', 'success')
+
+            mirror_err = _mirror_to_mw(
+                f'INSERT INTO {{table}} ({col_names}) VALUES ({placeholders}) '
+                f'ON CONFLICT ("SiteID") DO NOTHING',
+                non_null,
+            )
+            if mirror_err:
+                flash('Site created in PBI; mw_siteinfo mirror failed — see logs.', 'warning')
+            else:
+                flash('Site created successfully.', 'success')
             return redirect(url_for('admin_siteinfo.list_sites'))
         except Exception:
             logger.exception("Failed to create siteinfo row")
@@ -272,7 +312,15 @@ def edit_site(site_id):
             audit_log(AuditEvent.CONFIG_UPDATED,
                       details=f'siteinfo: row updated SiteID={site_id}',
                       user=current_user.username)
-            flash('Site updated successfully.', 'success')
+
+            mirror_err = _mirror_to_mw(
+                f'UPDATE {{table}} SET {set_clause} WHERE "SiteID" = :_site_id',
+                params,
+            )
+            if mirror_err:
+                flash('Site updated in PBI; mw_siteinfo mirror failed — see logs.', 'warning')
+            else:
+                flash('Site updated successfully.', 'success')
             return redirect(url_for('admin_siteinfo.list_sites'))
         except Exception:
             logger.exception("Failed to update siteinfo row SiteID=%s", site_id)
@@ -325,7 +373,15 @@ def delete_site(site_id):
         audit_log(AuditEvent.CONFIG_UPDATED,
                   details=f'siteinfo: row deleted SiteID={site_id}',
                   user=current_user.username)
-        flash('Site deleted successfully.', 'success')
+
+        mirror_err = _mirror_to_mw(
+            'DELETE FROM {table} WHERE "SiteID" = :id',
+            {'id': site_id},
+        )
+        if mirror_err:
+            flash('Site deleted in PBI; mw_siteinfo mirror failed — see logs.', 'warning')
+        else:
+            flash('Site deleted successfully.', 'success')
     except Exception:
         logger.exception("Failed to delete siteinfo row SiteID=%s", site_id)
         session.rollback()
@@ -401,7 +457,14 @@ def add_column():
         audit_log(AuditEvent.CONFIG_UPDATED,
                   details=f'siteinfo: column added {col_name} {type_expr}',
                   user=current_user.username)
-        flash(f'Column "{col_name}" ({type_expr}) added successfully.', 'success')
+
+        mirror_err = _mirror_to_mw(
+            f'ALTER TABLE {{table}} ADD COLUMN IF NOT EXISTS "{col_name}" {type_expr}',
+        )
+        if mirror_err:
+            flash(f'Column "{col_name}" added on PBI; mw_siteinfo mirror failed — see logs.', 'warning')
+        else:
+            flash(f'Column "{col_name}" ({type_expr}) added successfully.', 'success')
     except Exception:
         logger.exception("Failed to add column %s to siteinfo", col_name)
         session.rollback()
@@ -446,7 +509,14 @@ def delete_column(col_name):
         audit_log(AuditEvent.CONFIG_UPDATED,
                   details=f'siteinfo: column dropped {col_name}',
                   user=current_user.username)
-        flash(f'Column "{col_name}" dropped successfully.', 'success')
+
+        mirror_err = _mirror_to_mw(
+            f'ALTER TABLE {{table}} DROP COLUMN IF EXISTS "{col_name}"',
+        )
+        if mirror_err:
+            flash(f'Column "{col_name}" dropped on PBI; mw_siteinfo mirror failed — see logs.', 'warning')
+        else:
+            flash(f'Column "{col_name}" dropped successfully.', 'success')
     except Exception:
         logger.exception("Failed to drop column %s from siteinfo", col_name)
         session.rollback()

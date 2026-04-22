@@ -23,7 +23,7 @@ ChargeDescriptionsRetrieve data.
 from calendar import monthrange
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 
 @dataclass
@@ -96,7 +96,7 @@ def calculate_movein_cost(
     insurance_premium=0,
     anniversary_billing: bool = False,
     day_start_prorate_plus_next: int = 17,
-) -> List[CostLine]:
+) -> Tuple[List[CostLine], Optional[str]]:
     """
     Calculate estimated move-in cost.
 
@@ -124,10 +124,20 @@ def calculate_movein_cost(
             for the partial first month + a full second month
 
     Returns:
-        List[CostLine] with each charge line (rent, admin, deposit,
-        optional second month rent, optional insurance).
+        Tuple of (List[CostLine], Optional[str]) where the second element
+        is a reason code string when confidence is low, None when high.
 
-    Limitations (returns wrong total — fall back to SOAP):
+        Reason codes:
+            "free_month_plan"            — 100% pc_discount (free-month concession,
+                                           multi-month math not modelled)
+            "late_move_in_with_discount" — late move-in day with any discount applied
+                                           (discount interaction with 2nd month unclear)
+            "prepaid_multi_month"        — fixed_discount >= std_rate (full-month
+                                           prepay pattern, calculator understimates)
+            "unknown_discount_structure" — discount present but doesn't match any
+                                           known pattern above
+
+    Limitations (returns wrong total — fall back to SOAP when reason is not None):
         - "Free Month"/"X Months Free" / prepaid concessions
         - 100% discount plans (require multi-month prepay)
         - "Recurring Discount" applied to second-month line: SiteLink
@@ -140,6 +150,18 @@ def calculate_movein_cost(
         deposit_tax = ChargeTypeTax("SecDep")
     if insurance_tax is None:
         insurance_tax = rent_tax
+
+    # --- Confidence detection ---
+    _pc = Decimal(str(pc_discount)) if pc_discount else Decimal("0")
+    _fixed = Decimal(str(fixed_discount)) if fixed_discount else Decimal("0")
+    _rate = Decimal(str(std_rate))
+    _has_discount = _pc > 0 or _fixed > 0
+    _low_confidence_reason: Optional[str] = None
+
+    if _pc >= Decimal("100"):
+        _low_confidence_reason = "free_month_plan"
+    elif _fixed >= _rate:
+        _low_confidence_reason = "prepaid_multi_month"
 
     day = move_in_date.day
     _, days_in_month = monthrange(move_in_date.year, move_in_date.month)
@@ -223,6 +245,16 @@ def calculate_movein_cost(
         and day > day_start_prorate_plus_next
     )
 
+    # Detect late-move-in + discount interaction (unreliable case)
+    if _low_confidence_reason is None and late_movein and _has_discount:
+        _low_confidence_reason = "late_move_in_with_discount"
+    elif _low_confidence_reason is None and _has_discount:
+        # Discount present but doesn't match any specifically modelled pattern —
+        # mark as unknown only if the discount is unusually large (>50% of rate),
+        # which may indicate a promotional structure we can't model.
+        if _pc > Decimal("50") or _fixed > _rate * Decimal("0.5"):
+            _low_confidence_reason = "unknown_discount_structure"
+
     if late_movein:
         # SiteLink doesn't apply move-in discounts to the 2nd month line —
         # only to the first month. Confirmed by LSETUP test 2026-04-17.
@@ -267,7 +299,7 @@ def calculate_movein_cost(
                 total=ins2_base + ins2_t1,
             ))
 
-    return charges
+    return charges, _low_confidence_reason
 
 
 def estimate_total(charges: List[CostLine]) -> Decimal:
@@ -291,7 +323,7 @@ def load_site_billing_config(site_code: str):
     from sqlalchemy import create_engine, text
     from common.config_loader import get_database_url
 
-    engine = create_engine(get_database_url('pbi'))
+    engine = create_engine(get_database_url('middleware'))
     with engine.connect() as conn:
         row = conn.execute(text("""
             SELECT b_anniv_date_leasing,
