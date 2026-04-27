@@ -3,10 +3,40 @@
 {% block title %}Discount Plans - ESA Backend{% endblock %}
 
 {% block content %}
+<style>
+/* Slim dashboard — squeeze more rows per screen. */
+.slim-plan-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.slim-plan-table th {
+    background: var(--esa-gray, #f3f4f6);
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #4b5563;
+    border-bottom: 1px solid #d1d5db;
+    white-space: nowrap;
+}
+.slim-plan-table td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: middle;
+    line-height: 1.25;
+}
+.slim-plan-table tr:hover td { background: #f9fafb; }
+.slim-plan-table .pill {
+    display: inline-block; padding: 0.05rem 0.4rem; border-radius: 3px;
+    font-size: 0.68rem; margin: 1px; line-height: 1.2;
+}
+.slim-plan-table .btn.btn-sm { padding: 0.2rem 0.45rem; font-size: 0.72rem; }
+</style>
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
-    <h1>Discount Plans</h1>
+    <h1 style="font-size: 1.3rem; margin: 0;">Discount Plans</h1>
     {% if current_user.can_manage_configs() %}
-    <a href="{{ url_for('discount_plans.create_plan') }}" class="btn">Add Plan</a>
+    <div style="display: flex; gap: 0.5rem;">
+        <a href="{{ url_for('discount_plans.ai_extract') }}" class="btn btn-secondary" title="Paste a promo brief and auto-generate drafts">AI Extract</a>
+        <a href="{{ url_for('discount_plans.create_plan') }}" class="btn">Add Plan</a>
+    </div>
     {% endif %}
 </div>
 
@@ -34,82 +64,146 @@
 <div class="card">
     <h2>All Plans ({{ plans|length }})</h2>
     <div style="overflow-x: auto;">
-    <table>
+    <table class="slim-plan-table">
         <thead>
             <tr>
-                <th>#</th>
-                <th>Plan Type</th>
-                <th>Plan Name</th>
-                <th>Storage Type</th>
-                <th>Sitelink Name</th>
-                <th>Period</th>
+                <th style="width:32px;">#</th>
+                <th>Plan</th>
+                <th>Countries</th>
                 <th>Sites</th>
+                <th>Period</th>
                 <th>Discount</th>
+                <th>Duration (mo)</th>
                 <th>Payment</th>
-                <th>Extra Fields</th>
+                <th title="Vacant units the plan reaches after all restriction + exclusion filtering">Units</th>
+                <th title="Setup audit">Audit</th>
                 <th>Status</th>
                 <th>Actions</th>
             </tr>
         </thead>
         <tbody>
-            {% for plan in plans %}
-            <tr>
-                <td>{{ plan.sort_order }}</td>
+            {# --- Bucket plans by group_name, ungrouped first --- #}
+            {% set _grouped = {} %}
+            {% for p in plans %}
+                {% set key = p.group_name or '' %}
+                {% if _grouped.setdefault(key, []).append(p) %}{% endif %}
+            {% endfor %}
+            {% set _group_keys = ([''] if '' in _grouped else []) + (_grouped.keys() | reject('equalto', '') | list | sort) %}
+
+            {% for _g_key in _group_keys %}
+                {% set _group_plans = _grouped[_g_key] %}
+                {% if _g_key %}
+                    {% set _g_units = namespace(total=0) %}
+                    {% for p in _group_plans %}{% set _g_units.total = _g_units.total + (cand_counts.get(p.id, 0) or 0) %}{% endfor %}
+                    <tr class="group-header" data-group="{{ _g_key }}" style="background: #eef2ff; cursor: pointer;" onclick="toggleGroup(this)">
+                        <td colspan="12" style="padding: 0.35rem 0.6rem;">
+                            <span class="chev" style="display:inline-block;width:12px;font-weight:700;color:#4f46e5;">▼</span>
+                            <strong style="color: #4338ca;">{{ _g_key }}</strong>
+                            <span style="color:#6b7280;font-size:0.75rem;margin-left:0.5rem;">
+                                {{ _group_plans | length }} plan(s) · {{ "{:,}".format(_g_units.total) }} unit(s)
+                            </span>
+                        </td>
+                    </tr>
+                {% endif %}
+            {% for plan in _group_plans %}
+            {% set _restr = plan.restrictions or {} %}
+            {% set _min = _restr.get('min_duration_months') if _restr else none %}
+            {% set _max = _restr.get('max_duration_months') if _restr else none %}
+            {% set _audit = audits.get(plan.id, {'status': 'ok', 'issues': []}) %}
+            {% set _n_units = cand_counts.get(plan.id, 0) %}
+            {% set _n_sites = (plan.applicable_sites.values() | list | select | list | length) if plan.applicable_sites else 0 %}
+            <tr{% if _g_key %} class="group-row" data-parent-group="{{ _g_key }}"{% endif %}>
+                <td style="color:#6b7280;">{{ plan.sort_order }}</td>
                 <td>
-                    <span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">{{ plan.plan_type }}</span>
+                    <div style="display:flex;flex-direction:column;gap:0.1rem;">
+                        <strong>{{ plan.plan_name }}</strong>
+                        <div style="font-size:0.68rem;color:#6b7280;">
+                            <span class="pill" style="background:var(--esa-navy);color:#fff;">{{ plan.plan_type }}</span>
+                            {% if plan.storage_type %}<span class="pill" style="background:#f3f4f6;color:#374151;">{{ plan.storage_type }}</span>{% endif %}
+                        </div>
+                    </div>
                 </td>
-                <td><strong>{{ plan.plan_name }}</strong></td>
-                <td>{{ plan.storage_type or '-' }}</td>
-                <td>{{ plan.sitelink_discount_name or '-' }}</td>
                 <td>
-                    {% if plan.promo_period_start or plan.promo_period_end %}
-                        {{ plan.promo_period_start or '?' }} — {{ plan.promo_period_end or '?' }}
-                    {% else %}
-                        -
-                    {% endif %}
-                </td>
-                <td>
+                    {% set _plan_countries = [] %}
                     {% if plan.applicable_sites %}
-                        {% for code in site_codes %}
-                            {% if plan.applicable_sites.get(code) %}
-                                <span style="display: inline-block; background: #d1fae5; color: #059669; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.7rem; margin: 1px;" title="{{ site_name_map.get(code, '') }}">{{ code }}</span>
-                            {% endif %}
+                        {% for country, cs in sites_by_country.items() %}
+                            {% set _match = namespace(hit=false) %}
+                            {% for s in cs %}{% if plan.applicable_sites.get(s.code) %}{% set _match.hit = true %}{% endif %}{% endfor %}
+                            {% if _match.hit %}{% set _ = _plan_countries.append(country) %}{% endif %}
                         {% endfor %}
-                    {% else %}
-                        -
                     {% endif %}
+                    {% for c in _plan_countries %}<span class="pill" style="background:var(--esa-navy);color:#fff;">{{ c }}</span>{% endfor %}
+                    {% if not _plan_countries %}<span style="color:#9ca3af;">—</span>{% endif %}
                 </td>
-                <td>{{ plan.discount_value or '-' }}</td>
-                <td>{{ plan.payment_terms or '-' }}</td>
+                <td title="{% if plan.applicable_sites %}{% for code in site_codes %}{% if plan.applicable_sites.get(code) %}{{ code }} {% endif %}{% endfor %}{% endif %}">
+                    {% if _n_sites %}<strong>{{ _n_sites }}</strong>{% else %}<span style="color:#9ca3af;">—</span>{% endif %}
+                </td>
+                <td style="white-space:nowrap;font-size:0.72rem;color:#4b5563;">
+                    {% if plan.promo_period_start or plan.promo_period_end %}
+                        {{ plan.promo_period_start.strftime('%Y-%m-%d') if plan.promo_period_start else '?' }}<br>
+                        <span style="color:#9ca3af;">→</span>
+                        {{ plan.promo_period_end.strftime('%Y-%m-%d') if plan.promo_period_end else '?' }}
+                    {% else %}<span style="color:#9ca3af;">—</span>{% endif %}
+                </td>
+                <td style="white-space:nowrap;">
+                    {% if plan.discount_numeric is not none and plan.discount_type %}
+                        {% if plan.discount_type == 'percentage' %}<strong style="color:#059669;">{{ plan.discount_numeric }}%</strong>
+                        {% elif plan.discount_type == 'fixed_amount' %}<strong style="color:#059669;">{{ plan.discount_numeric }}</strong>
+                        {% elif plan.discount_type == 'free_period' %}<strong style="color:#059669;">{{ plan.discount_numeric }} free</strong>
+                        {% else %}{{ plan.discount_numeric }}{% endif %}
+                        {% if plan.discount_segmentation %}<div style="font-size:0.66rem;color:#6b7280;">{{ plan.discount_segmentation }}</div>{% endif %}
+                    {% elif plan.discount_value %}{{ plan.discount_value }}
+                    {% else %}<span style="color:#9ca3af;">—</span>{% endif %}
+                </td>
+                <td style="white-space:nowrap;font-size:0.76rem;">
+                    {% if _min is not none or _max is not none %}
+                        <strong>{{ _min if _min is not none else '—' }}</strong>
+                        <span style="color:#9ca3af;">–</span>
+                        <strong>{{ _max if _max is not none else '∞' }}</strong>
+                    {% else %}<span style="color:#9ca3af;">—</span>{% endif %}
+                </td>
+                <td style="font-size:0.76rem;">{{ plan.payment_terms or '—' }}</td>
+                <td style="text-align:right;font-variant-numeric:tabular-nums;">
+                    {% if _n_units %}<strong>{{ "{:,}".format(_n_units) }}</strong>
+                    {% else %}<span style="color:#9ca3af;">0</span>{% endif %}
+                </td>
                 <td>
-                    {% if plan.custom_fields and plan.custom_fields|length > 0 %}
-                        <span class="status" style="background: #dbeafe; color: #2563eb; font-size: 0.75rem;">{{ plan.custom_fields|length }} field{{ 's' if plan.custom_fields|length > 1 }}</span>
+                    {% if _audit.status == 'ok' %}
+                        <span class="pill" style="background:#d1fae5;color:#059669;" title="All checks passed">✓ OK</span>
+                    {% elif _audit.status == 'warn' %}
+                        <span class="pill" style="background:#fef3c7;color:#92400e;" title="{{ _audit.issues | join(' · ') }}">! {{ _audit.issues | length }}</span>
                     {% else %}
-                        -
+                        <span class="pill" style="background:#fee2e2;color:#dc2626;" title="{{ _audit.issues | join(' · ') }}">✗ {{ _audit.issues | length }}</span>
                     {% endif %}
                 </td>
                 <td>
                     {% if plan.is_active %}
-                        <span class="status status-completed">Active</span>
+                        <span class="pill" style="background:#d1fae5;color:#059669;">Active</span>
                     {% else %}
-                        <span class="status status-pending">Inactive</span>
+                        <span class="pill" style="background:#f3f4f6;color:#6b7280;">Draft</span>
                     {% endif %}
                 </td>
-                <td style="white-space: nowrap;">
-                    <a href="{{ url_for('discount_plans.view_brief', plan_id=plan.id) }}" class="btn btn-sm btn-secondary" title="View Brief">Brief</a>
+                <td style="white-space:nowrap;">
+                    <a href="{{ url_for('discount_plans.view_brief', plan_id=plan.id) }}" class="btn btn-sm btn-secondary" title="View Brief">B</a>
                     {% if current_user.can_manage_configs() %}
-                    <a href="{{ url_for('discount_plans.edit_plan', plan_id=plan.id) }}" class="btn btn-sm btn-secondary">Edit</a>
-                    <form action="{{ url_for('discount_plans.delete_plan', plan_id=plan.id) }}" method="POST" style="display: inline;"
-                          onsubmit="return confirm('Delete plan &quot;{{ plan.plan_name }}&quot;?');">
+                    <a href="{{ url_for('discount_plans.edit_plan', plan_id=plan.id) }}" class="btn btn-sm btn-secondary" title="Edit">E</a>
+                    <form action="{{ url_for('discount_plans.duplicate_plan', plan_id=plan.id) }}" method="POST" style="display:inline;"
+                          onsubmit="return confirm('Duplicate plan &quot;{{ plan.plan_name }}&quot;?');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn btn-sm" style="background: #dc2626;">Delete</button>
+                        <button type="submit" class="btn btn-sm btn-secondary" title="Duplicate">D</button>
+                    </form>
+                    <form action="{{ url_for('discount_plans.delete_plan', plan_id=plan.id) }}" method="POST" style="display:inline;"
+                          onsubmit="return confirm('Delete &quot;{{ plan.plan_name }}&quot;?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm" style="background:#dc2626;" title="Delete">×</button>
                     </form>
                     {% endif %}
                 </td>
             </tr>
             {% endfor %}
+            {% endfor %}
             {% if not plans %}
-            <tr><td colspan="11" style="text-align: center; color: #888; padding: 2rem;">No discount plans yet. Click "Add Plan" to create one.</td></tr>
+            <tr><td colspan="12" style="text-align: center; color: #888; padding: 2rem;">No discount plans yet. Click "Add Plan" to create one.</td></tr>
             {% endif %}
         </tbody>
     </table>
@@ -119,6 +213,30 @@
 
 {% block scripts %}
 <script>
-// Disable auto-refresh on list pages
+// Collapse / expand a group in the plans list.
+function toggleGroup(headerRow) {
+    var key = headerRow.getAttribute('data-group');
+    var rows = document.querySelectorAll('tr.group-row[data-parent-group="' + CSS.escape(key) + '"]');
+    var collapsed = headerRow.classList.toggle('collapsed');
+    var chev = headerRow.querySelector('.chev');
+    if (chev) chev.textContent = collapsed ? '▶' : '▼';
+    rows.forEach(function(r) { r.style.display = collapsed ? 'none' : ''; });
+    // Remember state across navigations within the session.
+    try {
+        var stored = JSON.parse(sessionStorage.getItem('discount-plans-collapsed') || '{}');
+        stored[key] = collapsed;
+        sessionStorage.setItem('discount-plans-collapsed', JSON.stringify(stored));
+    } catch (_) {}
+}
+// Restore saved collapse state on page load.
+(function() {
+    try {
+        var stored = JSON.parse(sessionStorage.getItem('discount-plans-collapsed') || '{}');
+        document.querySelectorAll('tr.group-header').forEach(function(h) {
+            var key = h.getAttribute('data-group');
+            if (stored[key]) toggleGroup(h);
+        });
+    } catch (_) {}
+})();
 </script>
 {% endblock %}

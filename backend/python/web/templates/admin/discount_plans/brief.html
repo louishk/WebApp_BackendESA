@@ -142,7 +142,7 @@
             <td class="notes-cell"></td>
         </tr>
         <tr>
-            <td class="item-cell">Booking Period</td>
+            <td class="item-cell">Lease Start Period</td>
             <td class="value-cell">
                 {% if plan.booking_period_start or plan.booking_period_end %}
                     {{ plan.booking_period_start or '?' }} to {{ plan.booking_period_end or '?' }}
@@ -174,6 +174,12 @@
                     {% for offer in plan.offers %}
                         <div>{{ offer.get('tier', '') }} {{ offer.get('discount', '') }}{% if offer.get('note') %}*{% endif %}</div>
                     {% endfor %}
+                {% elif plan.discount_numeric is not none and plan.discount_type %}
+                    {% if plan.discount_type == 'percentage' %}{{ plan.discount_numeric }}%
+                    {% elif plan.discount_type == 'fixed_amount' %}{{ plan.discount_numeric }}
+                    {% elif plan.discount_type == 'free_period' %}{{ plan.discount_numeric }} free
+                    {% else %}{{ plan.discount_numeric }}
+                    {% endif %}
                 {% elif plan.discount_value %}
                     {{ plan.discount_value }}
                 {% else %}
@@ -193,11 +199,6 @@
             <td class="item-cell">Hidden Rate</td>
             <td class="value-cell">{{ 'Yes' if plan.hidden_rate else 'No' }}</td>
             <td class="notes-cell"></td>
-        </tr>
-        <tr>
-            <td class="item-cell">Available for ChatBot</td>
-            <td class="value-cell">{{ 'Yes' if plan.available_for_chatbot else 'No' }}</td>
-            <td class="notes-cell">{{ plan.chatbot_notes or '' }}</td>
         </tr>
         <tr>
             <td class="item-cell">Switch To Us</td>
@@ -310,23 +311,6 @@
                 </div>
             </td>
         </tr>
-        {% endif %}
-
-        <!-- ============================================================ -->
-        <!-- Custom Fields (extensible) -->
-        <!-- ============================================================ -->
-        {% if plan.custom_fields %}
-        {% set cf_items = plan.custom_fields.items() | list %}
-        {% for key, value in cf_items %}
-        <tr>
-            {% if loop.first %}
-            <td class="dept-cell" rowspan="{{ cf_items|length }}">EXTRA</td>
-            {% endif %}
-            <td class="item-cell">{{ key }}</td>
-            <td class="value-cell">{{ value }}</td>
-            <td class="notes-cell"></td>
-        </tr>
-        {% endfor %}
         {% endif %}
 
     </tbody>

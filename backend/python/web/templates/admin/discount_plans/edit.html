@@ -4,24 +4,25 @@
 
 {% block content %}
 <style>
-    .form-section { margin-bottom: 1.5rem; }
+    .form-section { margin-bottom: 1rem; }
     .form-section h3 {
         color: var(--esa-navy);
         font-size: 1rem;
         padding-bottom: 0.4rem;
         border-bottom: 2px solid var(--esa-red);
         display: inline-block;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.6rem;
     }
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1.5rem; }
-    .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem 1.5rem; }
-    .form-group { margin-bottom: 0.5rem; }
+    .form-grid   { display: grid; grid-template-columns: 1fr 1fr;           gap: 0.4rem 1rem; }
+    .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr;       gap: 0.4rem 1rem; }
+    .form-grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;   gap: 0.4rem 1rem; }
+    .form-group { margin-bottom: 0.3rem; }
     .form-group label {
         display: block;
         font-weight: 600;
-        font-size: 0.85rem;
+        font-size: 0.78rem;
         color: var(--esa-navy);
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.1rem;
     }
     .form-group input[type="text"],
     .form-group input[type="number"],
@@ -30,14 +31,16 @@
     .form-group select,
     .form-group textarea {
         width: 100%;
-        padding: 0.5rem 0.75rem;
+        padding: 0.28rem 0.5rem;
         border: 1px solid var(--esa-gray-dark);
-        border-radius: 4px;
-        font-size: 0.9rem;
+        border-radius: 3px;
+        font-size: 0.82rem;
+        line-height: 1.2;
         font-family: inherit;
     }
-    .form-group textarea { resize: vertical; min-height: 60px; }
-    .form-group .hint { font-size: 0.75rem; color: #888; margin-top: 0.15rem; }
+    .form-group select { height: 28px; }
+    .form-group textarea { resize: vertical; min-height: 48px; }
+    .form-group .hint { font-size: 0.75rem; color: #888; margin-top: 0.12rem; }
     .form-full { grid-column: 1 / -1; }
     .site-country-group { margin-bottom: 0.75rem; }
     .site-country-group h4 { font-size: 0.85rem; color: var(--esa-navy); margin-bottom: 0.3rem; font-weight: 700; }
@@ -56,6 +59,34 @@
     .date-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .translate-langs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.3rem; }
     .translate-langs label { display: flex; align-items: center; gap: 0.25rem; font-size: 0.85rem; font-weight: 500; cursor: pointer; }
+    /* Collapsible section summary styling */
+    details.sub-section { margin-top: 0.6rem; border-top: 1px solid var(--esa-gray); padding-top: 0.4rem; }
+    details.sub-section > summary {
+        cursor: pointer; font-weight: 600; font-size: 0.82rem; color: var(--esa-navy);
+        list-style: none; display: flex; align-items: center; gap: 0.4rem;
+        padding: 0.2rem 0;
+        user-select: none;
+    }
+    details.sub-section > summary::before { content: '▶'; font-size: 0.65rem; transition: transform 0.15s; }
+    details.sub-section[open] > summary::before { transform: rotate(90deg); }
+    details.sub-section > summary::-webkit-details-marker { display: none; }
+
+    /* Top-level collapsible card (each section of the form) */
+    details.card.form-section > summary {
+        cursor: pointer; list-style: none; user-select: none;
+        display: flex; align-items: center; gap: 0.4rem;
+        margin: 0 0 0.4rem 0;
+    }
+    details.card.form-section > summary::-webkit-details-marker { display: none; }
+    details.card.form-section > summary::before {
+        content: '▶'; font-size: 0.7rem; color: var(--esa-navy);
+        transition: transform 0.15s;
+    }
+    details.card.form-section[open] > summary::before { transform: rotate(90deg); }
+    details.card.form-section > summary h3 {
+        margin: 0; display: inline-block; padding-bottom: 0.2rem; border-bottom-width: 2px;
+    }
+    .card { padding: 0.75rem 1rem; }
     @keyframes pulse-translate {
         0%, 100% { opacity: 0.6; }
         50% { opacity: 1; }
@@ -84,11 +115,11 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
     <!-- ================================================================= -->
-    <!-- Plan Identification -->
+    <!-- Plan Identification (4-col inline) -->
     <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Plan Identification</h3>
-        <div class="form-grid">
+    <details class="card form-section" open>
+        <summary><h3>Plan Identification</h3></summary>
+        <div class="form-grid-4">
             <div class="form-group">
                 <label>Plan Type *</label>
                 <select name="plan_type" required>
@@ -103,16 +134,6 @@
                 <input type="text" name="plan_name" value="{{ plan.plan_name if plan else form_data.get('plan_name', '') }}" required placeholder="e.g. Standard Rate, Prepaid - 6M">
             </div>
             <div class="form-group">
-                <label>Sitelink Discount Name</label>
-                <select name="sitelink_discount_name">
-                    <option value="">-- Select or leave blank --</option>
-                    {% for sname in sitelink_discount_names %}
-                    <option value="{{ sname }}" {{ 'selected' if (plan and plan.sitelink_discount_name == sname) or form_data.get('sitelink_discount_name') == sname }}>{{ sname }}</option>
-                    {% endfor %}
-                </select>
-                <div class="hint">Discount plan name from Sitelink</div>
-            </div>
-            <div class="form-group">
                 <label>Storage Type</label>
                 <select name="storage_type">
                     <option value="">-- Select --</option>
@@ -125,65 +146,77 @@
                 <label>Sort Order</label>
                 <input type="number" name="sort_order" value="{{ plan.sort_order if plan else form_data.get('sort_order', '0') }}" min="0">
             </div>
+            <div class="form-group" style="grid-column: span 2;">
+                <label>Group <span style="font-weight: 400; color: #888; font-size: 0.72rem;">(optional)</span></label>
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.4rem; align-items: stretch;">
+                    <input type="text" id="group_name_input" name="group_name"
+                           value="{{ plan.group_name if plan else form_data.get('group_name', '') }}"
+                           placeholder="Type new or pick existing →">
+                    <select id="group_name_picker" style="max-width: 200px;"
+                            onchange="if(this.value){document.getElementById('group_name_input').value=this.value;this.selectedIndex=0;}">
+                        <option value="">— pick existing ({{ existing_groups | length }}) —</option>
+                        {% for g in existing_groups %}
+                        <option value="{{ g }}">{{ g }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="hint">Pick an existing group to reuse it, or type a new one. Plans sharing a group collapse together on the list.</div>
+            </div>
         </div>
-        <details id="sitelink-details" style="margin-top: 0.75rem; border-top: 1px solid var(--esa-gray-dark); padding-top: 0.5rem;">
+
+        <!-- Sitelink Concession Linkage — unchanged, left inside Plan Identification -->
+        <details id="sitelink-details" open style="margin-top: 0.75rem; border-top: 1px solid var(--esa-gray-dark); padding-top: 0.5rem;">
             <summary style="cursor: pointer; font-weight: 600; font-size: 0.85rem; color: var(--esa-navy);">
-                Sitelink Linkage &amp; Comparison
+                Sitelink Concession Linkage
                 <span id="linked-count-badge" style="display: none; background: #6366f1; color: #fff; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 10px; margin-left: 0.3rem;">0</span>
             </summary>
             <div style="margin-top: 0.5rem;">
-                <div id="sitelink-loading" style="display: none; font-size: 0.85rem; color: #6366f1; margin-bottom: 0.5rem;">Loading concessions...</div>
                 <div class="form-group">
-                    <label>Linked Entries (<span id="linked-count">0</span>)</label>
-                    <div id="linked-concessions-display" style="max-height: 250px; overflow-y: auto;">
+                    <label>Search concessions to link</label>
+                    <div style="display: flex; gap: 0.4rem; align-items: center;">
+                        <input type="text" id="concession-search-input" placeholder="Type plan name or leave blank..." style="flex: 2; padding: 0.4rem 0.6rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.85rem;">
+                        <select id="concession-search-site" style="flex: 1; padding: 0.4rem 0.6rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.85rem;">
+                            <option value="">All sites</option>
+                        </select>
+                        <button type="button" id="concession-search-btn" class="btn btn-sm btn-secondary">Search</button>
+                    </div>
+                    <div id="concession-search-results" style="max-height: 220px; overflow-y: auto; margin-top: 0.3rem; border: 1px solid var(--esa-gray); border-radius: 4px; padding: 0.3rem; display: none;"></div>
+                    <div class="hint">Each row: <code>site_code · #ConcessionID · sPlanName</code>. Click "Add" to link.</div>
+                </div>
+                <div class="form-group" style="margin-top: 0.5rem;">
+                    <label>Linked Concessions (<span id="linked-count">0</span>)</label>
+                    <div id="linked-concessions-display" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--esa-gray); border-radius: 4px; padding: 0.3rem;">
                         <!-- Populated by JS -->
                     </div>
                 </div>
                 <div class="form-group" style="margin-top: 0.5rem;">
-                    <label>Site Comparison</label>
+                    <label>Site Coverage Check <span style="font-weight: 400; color: #888; font-size: 0.75rem;">(soft verification)</span></label>
                     <div id="site-comparison" style="font-size: 0.85rem;">
-                        <span style="color: #888;">Select a Sitelink Discount Name to see comparison.</span>
+                        <span style="color: #888;">Link concessions above to see coverage.</span>
                     </div>
                 </div>
                 <input type="hidden" name="linked_concessions_json" id="linked-concessions-json"
-                       value="{{ (plan.linked_concessions | tojson) if plan and plan.linked_concessions else '[]' }}">
+                       value='{{ (plan.linked_concessions | tojson) if plan and plan.linked_concessions else "[]" }}'>
             </div>
         </details>
-    </div>
+    </details>
 
     <!-- ================================================================= -->
-    <!-- Description -->
+    <!-- Availability -->
     <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Description</h3>
-        <div class="form-grid">
-            <div class="form-group">
-                <label>Objective</label>
-                <textarea name="objective" rows="2" placeholder="Business objective of this plan">{{ plan.objective if plan else form_data.get('objective', '') }}</textarea>
-            </div>
-            <div class="form-group">
-                <label>Notes</label>
-                <textarea name="notes" rows="2" placeholder="Internal notes">{{ plan.notes if plan else form_data.get('notes', '') }}</textarea>
-            </div>
-        </div>
-    </div>
-
-    <!-- ================================================================= -->
-    <!-- Availability / Sites -->
-    <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Availability</h3>
-        <div class="form-grid">
-            <div class="form-group">
+    <details class="card form-section" open>
+        <summary><h3>Availability</h3></summary>
+        <div class="form-grid-4">
+            <div class="form-group" style="grid-column: span 2;">
                 <label>Promotion Period</label>
                 <div class="date-pair">
                     <input type="date" name="promo_period_start" value="{{ plan.promo_period_start.isoformat() if plan and plan.promo_period_start else form_data.get('promo_period_start', '') }}" placeholder="Start">
                     <input type="date" name="promo_period_end" value="{{ plan.promo_period_end.isoformat() if plan and plan.promo_period_end else form_data.get('promo_period_end', '') }}" placeholder="End">
                 </div>
             </div>
-            <div class="form-group" id="booking-period-group">
+            <div class="form-group" id="booking-period-group" style="grid-column: span 2;">
                 <label>
-                    Booking Period
+                    Lease Start Period
                     <label style="display: inline; font-weight: 400; font-size: 0.8rem; margin-left: 0.5rem; cursor: pointer;">
                         <input type="checkbox" id="booking-same-as-promo"> Same as Promo
                     </label>
@@ -193,8 +226,6 @@
                     <input type="date" name="booking_period_end" id="booking_period_end" value="{{ plan.booking_period_end.isoformat() if plan and plan.booking_period_end else form_data.get('booking_period_end', '') }}" placeholder="End">
                 </div>
             </div>
-        </div>
-        <div class="form-grid" style="margin-top: 0.75rem;">
             <div class="form-group">
                 <label>Move-In Range</label>
                 <select name="move_in_range">
@@ -204,53 +235,107 @@
                     {% endfor %}
                 </select>
             </div>
-        </div>
-        <div class="form-group" style="margin-top: 0.75rem;">
-            <label>Applicable Sites</label>
-            <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 0.5rem; font-size: 0.85rem;">
-                <label style="cursor: pointer; font-weight: 500;">
-                    <input type="radio" name="site_mode" value="country" id="site-mode-country" onchange="setSiteMode('country')"> By Country
-                </label>
-                <label style="cursor: pointer; font-weight: 500;">
-                    <input type="radio" name="site_mode" value="site" id="site-mode-site" onchange="setSiteMode('site')"> By Site
-                </label>
-                <a href="javascript:void(0)" onclick="selectAllSites()" style="font-size: 0.8rem; color: var(--esa-navy);">Select All</a>
-                <a href="javascript:void(0)" onclick="deselectAllSites()" style="font-size: 0.8rem; color: #dc2626;">Clear All</a>
-            </div>
-            <div id="site-selection-container">
-            {% for country, country_sites in sites_by_country.items() %}
-            <div class="site-country-group" data-country="{{ country }}">
-                <h4>
-                    <label style="cursor: pointer; font-weight: 700; font-size: 0.85rem;">
-                        <input type="checkbox" class="country-checkbox" data-country="{{ country }}" onchange="toggleCountry(this)">
-                        {{ country }}
-                    </label>
-                </h4>
-                <div class="site-checkboxes site-individual-checkboxes">
-                    {% for site in country_sites %}
-                    <label>
-                        <input type="checkbox" name="site_code" value="{{ site.code }}" data-country="{{ country }}"
-                               {{ 'checked' if plan and plan.applicable_sites and plan.applicable_sites.get(site.code) }}>
-                        {{ site.code }} - {{ site.name }}
-                    </label>
+            <div class="form-group">
+                <label>Lock-In Period</label>
+                <select name="lock_in_period">
+                    <option value="">-- Select --</option>
+                    {% for opt in config_options.get('lock_in_period', []) %}
+                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.lock_in_period == opt) or form_data.get('lock_in_period') == opt }}>{{ opt }}</option>
                     {% endfor %}
+                </select>
+            </div>
+        </div>
+    </details>
+
+    <!-- ================================================================= -->
+    <!-- Restrictions (new card — Applicable Sites moved here) -->
+    <!-- ================================================================= -->
+    <details class="card form-section" open>
+        <summary><h3>Restrictions
+            <span id="restriction-count-pill" style="margin-left: 0.5rem; font-size: 0.75rem; font-weight: 500; background: #059669; color: #fff; padding: 0.15rem 0.5rem; border-radius: 10px; display: none;">— matching units</span>
+        </h3></summary>
+
+        <div class="form-grid" style="align-items: start;">
+            <div class="form-group">
+                <label>Applicable Sites</label>
+                <div id="applicable-sites-filter" style="min-width: 280px; max-width: 420px;"></div>
+                <div id="applicable-sites-hidden"></div>
+                <div class="hint">Multi-select with country grouping and search.</div>
+                <script type="application/json" id="applicable-sites-preload">
+                    {{ (plan.applicable_sites | tojson) if plan and plan.applicable_sites else '{}' }}
+                </script>
+            </div>
+            <div class="form-group">
+                <label>Matching Vacant Units</label>
+                <div id="restriction-count-card" style="padding: 0.6rem 0.8rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; background: #f9fafb; font-size: 0.85rem;">
+                    <div style="display: flex; align-items: baseline; gap: 0.4rem;">
+                        <span id="restriction-count-value" style="font-size: 1.5rem; font-weight: 700; color: var(--esa-navy);">—</span>
+                        <span style="color: #6b7280; font-size: 0.8rem;">units match the current restrictions</span>
+                    </div>
+                    <div id="restriction-count-bysite" style="margin-top: 0.3rem; font-size: 0.75rem; color: #4b5563; line-height: 1.5;"></div>
+                    <div id="restriction-count-status" style="margin-top: 0.2rem; font-size: 0.72rem; color: #9ca3af;">Pick applicable sites to see the count.</div>
                 </div>
             </div>
-            {% endfor %}
+        </div>
+
+        {% set _restr = plan.restrictions if plan and plan.restrictions else {} %}
+        <div class="form-grid-4" style="margin-top: 0.5rem;">
+            <div class="form-group">
+                <label>Min Duration (months)</label>
+                <input type="number" name="min_duration_months" min="0" step="1"
+                       value="{{ _restr.get('min_duration_months', '') if _restr else '' }}"
+                       placeholder="e.g. 6">
+            </div>
+            <div class="form-group">
+                <label>Max Duration (months)</label>
+                <input type="number" name="max_duration_months" min="0" step="1"
+                       value="{{ _restr.get('max_duration_months', '') if _restr else '' }}"
+                       placeholder="e.g. 12 — blank = no cap">
+            </div>
+            <div class="form-group" style="grid-column: span 2; align-self: end;">
+                <div class="hint">Tenant lease length limits. Empty = no limit on that side. Recommender uses these to match a booking's requested tenure.</div>
             </div>
         </div>
-    </div>
+
+        <details class="sub-section" open>
+            <summary>Unit Feature Restrictions (SOP COM01)
+                <span id="restriction-summary-chip" style="margin-left: 0.4rem; font-size: 0.72rem; color: #6b7280;"></span>
+            </summary>
+            <div class="hint" style="margin-top: 0.3rem;">
+                Tick the values allowed on this plan. A dim with nothing ticked = no restriction on that feature. Rented units aren't counted — the live total only considers <code>ccws_available_units</code>.
+            </div>
+            <div id="restriction-dims" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.6rem; margin-top: 0.5rem;">
+                <!-- Populated by JS from /api/dim-options -->
+            </div>
+            <input type="hidden" name="restrictions_json" id="restrictions-json"
+                   value='{{ (plan.restrictions | tojson) if plan and plan.restrictions else "{}" }}'>
+        </details>
+
+        <details class="sub-section" open>
+            <summary>Distribution Channel</summary>
+            <div class="hint" style="margin-top: 0.3rem;">
+                Channels this plan is eligible for. Empty = all channels. Passed through to every candidate row so the recommender can filter by the originating channel of a booking.
+            </div>
+            <div class="site-checkboxes" style="margin-top: 0.35rem;">
+                {% set channel_list = (plan.distribution_channel or '').split(', ') if plan else form_data.getlist('distribution_channel') %}
+                {% for opt in config_options.get('distribution_channel', []) %}
+                <label>
+                    <input type="checkbox" name="distribution_channel" value="{{ opt }}"
+                           {{ 'checked' if opt in channel_list }}>
+                    {{ opt }}
+                </label>
+                {% endfor %}
+            </div>
+        </details>
+    </details>
 
     <!-- ================================================================= -->
     <!-- Discount Details -->
     <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Discount Details</h3>
-        <div class="form-grid">
-            <div class="form-group">
-                <label>Discount Value</label>
-                <input type="text" name="discount_value" value="{{ plan.discount_value if plan else form_data.get('discount_value', '') }}" placeholder="e.g. 5%, 300HKD, First 2 Weeks Free">
-            </div>
+    <details class="card form-section" open>
+        <summary><h3>Discount Details</h3></summary>
+        <!-- Row 1: type / numeric / segmentation -->
+        <div class="form-grid-3">
             <div class="form-group">
                 <label>Discount Type</label>
                 <select name="discount_type">
@@ -264,35 +349,35 @@
                 <label>Discount Numeric</label>
                 <input type="number" name="discount_numeric" step="0.01"
                        value="{{ plan.discount_numeric if plan and plan.discount_numeric is not none else form_data.get('discount_numeric', '') }}"
-                       placeholder="Numeric value for calculations">
+                       placeholder="e.g. 5 for 5% — or the dollar amount">
             </div>
             <div class="form-group">
-                <label>Discount Segmentation</label>
-                <select name="discount_segmentation">
-                    <option value="">-- Select --</option>
-                    {% for opt in config_options.get('discount_segmentation', []) %}
-                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.discount_segmentation == opt) or form_data.get('discount_segmentation') == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group form-full">
-                <label>Clawback Condition</label>
-                <input type="text" name="clawback_condition" value="{{ plan.clawback_condition if plan else form_data.get('clawback_condition', '') }}" placeholder="e.g. If Tenure less than 6M, 2 weeks will be charged">
+                <label>Segmentation <span style="font-weight: 400; color: #888; font-size: 0.72rem;">(auto)</span></label>
+                <input type="text" id="discount-segmentation-preview" value="{{ plan.discount_segmentation if plan else '' }}" readonly style="background: #f9fafb; color: #374151;">
             </div>
         </div>
-        <div class="form-group" style="margin-top: 0.75rem;">
-            <label>Offer Tiers (JSON)</label>
-            <textarea name="offers_json" rows="3" placeholder='[{"tier": "Flexi", "discount": "45% off"}, {"tier": "LT12M", "discount": "50% off", "note": "with free transportation"}]'>{{ (plan.offers | tojson) if plan and plan.offers else form_data.get('offers_json', '') }}</textarea>
-            <div class="hint">For multi-tier promotions. JSON array of objects with "tier", "discount", and optional "note" fields.</div>
+        <!-- Row 2: clawback -->
+        <div class="form-group" style="margin-top: 0.4rem;">
+            <label>Clawback Condition</label>
+            <input type="text" name="clawback_condition" value="{{ plan.clawback_condition if plan else form_data.get('clawback_condition', '') }}" placeholder="e.g. If Tenure less than 6M, 2 weeks will be charged">
         </div>
-    </div>
+        <!-- Offer Tiers — collapsible -->
+        <details class="sub-section">
+            <summary>Offer Tiers (JSON)</summary>
+            <div style="margin-top: 0.5rem;">
+                <textarea name="offers_json" rows="3" placeholder='[{"tier": "Flexi", "discount": "45% off"}, {"tier": "LT12M", "discount": "50% off", "note": "with free transportation"}]'>{{ (plan.offers | tojson) if plan and plan.offers else form_data.get('offers_json', '') }}</textarea>
+                <div class="hint">For multi-tier promotions. JSON array of objects with "tier", "discount", and optional "note" fields.</div>
+            </div>
+        </details>
+    </details>
 
     <!-- ================================================================= -->
     <!-- Terms & Conditions -->
     <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Terms &amp; Conditions</h3>
-        <div class="form-grid">
+    <details class="card form-section" open>
+        <summary><h3>Terms &amp; Conditions</h3></summary>
+        <!-- 4-col row: deposit / payment_terms / termination_notice / extra_offer -->
+        <div class="form-grid-4">
             <div class="form-group">
                 <label>Deposit</label>
                 <select name="deposit">
@@ -321,201 +406,173 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Lock-In Period</label>
-                <select name="lock_in_period">
-                    <option value="">-- Select --</option>
-                    {% for opt in config_options.get('lock_in_period', []) %}
-                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.lock_in_period == opt) or form_data.get('lock_in_period') == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
                 <label>Extra Offer</label>
                 <input type="text" name="extra_offer" value="{{ plan.extra_offer if plan else form_data.get('extra_offer', '') }}" placeholder="e.g. -20% Off Merchandise">
             </div>
         </div>
 
-        <div style="margin-top: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                <div>
-                    <label style="font-weight: 600; color: var(--esa-navy); font-size: 0.85rem;">T&amp;C Clauses</label>
-                    <div class="hint">Each row has a category label, English clause, and optional Chinese clause.</div>
+        <!-- T&C Clauses editor — collapsible -->
+        <details class="sub-section" open>
+            <summary>T&amp;C Clauses</summary>
+            <div style="margin-top: 0.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <div class="hint" style="margin: 0;">Each row has a category label, English clause, and optional Chinese clause.</div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <select id="copy-tc-source" style="padding: 0.3rem 0.5rem; border: 1px solid var(--esa-gray-dark); border-radius: 3px; font-size: 0.8rem; max-width: 220px;">
+                            <option value="">Copy T&amp;Cs from plan...</option>
+                        </select>
+                        <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="copyTcsFromPlan()">Copy</button>
+                    </div>
                 </div>
-                <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <select id="copy-tc-source" style="padding: 0.3rem 0.5rem; border: 1px solid var(--esa-gray-dark); border-radius: 3px; font-size: 0.8rem; max-width: 220px;">
-                        <option value="">Copy T&amp;Cs from plan...</option>
-                    </select>
-                    <button type="button" class="btn btn-sm btn-secondary" style="padding: 0.3rem 0.6rem; font-size: 0.8rem;" onclick="copyTcsFromPlan()">Copy</button>
+                <div class="tc-row" style="margin-bottom: 0.25rem; font-weight: 600; font-size: 0.8rem; color: var(--esa-navy);">
+                    <div>Label</div>
+                    <div>English</div>
+                    <div>Chinese</div>
+                    <div></div>
+                </div>
+                <div id="tc-container">
+                    {% set tc_en = plan.terms_conditions or [] if plan else [] %}
+                    {% set tc_cn = plan.terms_conditions_cn or [] if plan else [] %}
+                    {% set tc_lab = plan.tc_labels or [] if plan else [] %}
+                    {% set tc_count = [tc_en|length, tc_cn|length, 1] | max %}
+                    {% for i in range(tc_count) %}
+                    <div class="tc-row">
+                        <div>
+                            <select name="tc_label" style="width: 100%; padding: 0.3rem; font-size: 0.82rem; border: 1px solid var(--esa-gray-dark); border-radius: 3px;">
+                                <option value="">--</option>
+                                {% for opt in config_options.get('tc_label', []) %}
+                                <option value="{{ opt }}" {{ 'selected' if i < tc_lab|length and tc_lab[i] == opt }}>{{ opt }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div>
+                            <textarea name="tc_en" rows="2" style="width:100%; font-size: 0.85rem;">{{ tc_en[i] if i < tc_en|length else '' }}</textarea>
+                        </div>
+                        <div>
+                            <textarea name="tc_cn" rows="2" style="width:100%; font-size: 0.85rem;">{{ tc_cn[i] if i < tc_cn|length else '' }}</textarea>
+                        </div>
+                        <div style="padding-top: 0.3rem;">
+                            <button type="button" onclick="removeTcRow(this)" class="btn btn-sm" style="background: #dc2626; padding: 0.3rem 0.5rem; font-size: 0.8rem;">X</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                    <button type="button" id="add-tc-row" class="btn btn-sm btn-secondary">+ Add T&amp;C</button>
                 </div>
             </div>
-            <div class="tc-row" style="margin-bottom: 0.25rem; font-weight: 600; font-size: 0.8rem; color: var(--esa-navy);">
-                <div>Label</div>
-                <div>English</div>
-                <div>Chinese</div>
-                <div></div>
+        </details>
+
+        {% if plan and plan.id %}
+        <!-- AI Translation — collapsible, closed by default -->
+        <details class="sub-section">
+            <summary>AI Translation</summary>
+            <div style="margin-top: 0.5rem; padding: 0.75rem; background: #f0f4ff; border-radius: 6px;">
+                <div class="form-grid" style="margin-top: 0;">
+                    <div class="form-group">
+                        <label>Source Language</label>
+                        <select id="translate-source">
+                            <option value="en" selected>English</option>
+                            <option value="ko">Korean</option>
+                            <option value="zh_cn">Chinese Simplified</option>
+                            <option value="zh_tw">Chinese Traditional</option>
+                            <option value="ms">Malay</option>
+                            <option value="ja">Japanese</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Target Languages</label>
+                        <div class="translate-langs" id="translate-targets">
+                            <label><input type="checkbox" value="en" data-lang="en"> English</label>
+                            <label><input type="checkbox" value="ko" data-lang="ko" checked> Korean</label>
+                            <label><input type="checkbox" value="zh_cn" data-lang="zh_cn" checked> CN (S)</label>
+                            <label><input type="checkbox" value="zh_tw" data-lang="zh_tw" checked> CN (T)</label>
+                            <label><input type="checkbox" value="ms" data-lang="ms" checked> Malay</label>
+                            <label><input type="checkbox" value="ja" data-lang="ja" checked> Japanese</label>
+                        </div>
+                    </div>
+                </div>
+                <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
+                    <button type="button" id="translate-tcs-btn" class="btn btn-sm" style="background: #6366f1;">Translate T&amp;Cs</button>
+                    <span id="translate-status" style="font-size: 0.8rem; color: #888;"></span>
+                </div>
             </div>
-            <div id="tc-container">
-                {% set tc_en = plan.terms_conditions or [] if plan else [] %}
-                {% set tc_cn = plan.terms_conditions_cn or [] if plan else [] %}
-                {% set tc_lab = plan.tc_labels or [] if plan else [] %}
-                {% set tc_count = [tc_en|length, tc_cn|length, 1] | max %}
-                {% for i in range(tc_count) %}
-                <div class="tc-row">
-                    <div>
-                        <select name="tc_label" style="width: 100%; padding: 0.3rem; font-size: 0.82rem; border: 1px solid var(--esa-gray-dark); border-radius: 3px;">
-                            <option value="">--</option>
-                            {% for opt in config_options.get('tc_label', []) %}
-                            <option value="{{ opt }}" {{ 'selected' if i < tc_lab|length and tc_lab[i] == opt }}>{{ opt }}</option>
+        </details>
+        {% endif %}
+    </details>
+
+    <!-- ================================================================= -->
+    <!-- Promotion Brief (collapsible, closed by default) -->
+    <!-- ================================================================= -->
+    <details class="card form-section">
+        <summary><h3>Promotion Brief</h3></summary>
+        <div style="margin-top: 0.5rem;">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <div class="toggle-row">
+                            <input type="checkbox" name="hidden_rate" id="hidden_rate"
+                                   {{ 'checked' if plan and plan.hidden_rate }}>
+                            <label for="hidden_rate">Hidden Rate</label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Switch To Us</label>
+                        <select name="switch_to_us">
+                            <option value="">-- Select --</option>
+                            {% for opt in config_options.get('switch_to_us', eligibility_options) %}
+                            <option value="{{ opt }}" {{ 'selected' if (plan and plan.switch_to_us == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
                             {% endfor %}
                         </select>
                     </div>
-                    <div>
-                        <textarea name="tc_en" rows="2" style="width:100%; font-size: 0.85rem;">{{ tc_en[i] if i < tc_en|length else '' }}</textarea>
-                    </div>
-                    <div>
-                        <textarea name="tc_cn" rows="2" style="width:100%; font-size: 0.85rem;">{{ tc_cn[i] if i < tc_cn|length else '' }}</textarea>
-                    </div>
-                    <div style="padding-top: 0.3rem;">
-                        <button type="button" onclick="removeTcRow(this)" class="btn btn-sm" style="background: #dc2626; padding: 0.3rem 0.5rem; font-size: 0.8rem;">X</button>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-                <button type="button" id="add-tc-row" class="btn btn-sm btn-secondary">+ Add T&amp;C</button>
-            </div>
-        </div>
-
-        {% if plan and plan.id %}
-        <div style="margin-top: 1rem; padding: 0.75rem; background: #f0f4ff; border-radius: 6px;">
-            <label style="font-weight: 600; color: var(--esa-navy); font-size: 0.85rem;">AI Translation</label>
-            <div class="form-grid" style="margin-top: 0.5rem;">
-                <div class="form-group">
-                    <label>Source Language</label>
-                    <select id="translate-source">
-                        <option value="en" selected>English</option>
-                        <option value="ko">Korean</option>
-                        <option value="zh_cn">Chinese Simplified</option>
-                        <option value="zh_tw">Chinese Traditional</option>
-                        <option value="ms">Malay</option>
-                        <option value="ja">Japanese</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Target Languages</label>
-                    <div class="translate-langs" id="translate-targets">
-                        <label><input type="checkbox" value="en" data-lang="en"> English</label>
-                        <label><input type="checkbox" value="ko" data-lang="ko" checked> Korean</label>
-                        <label><input type="checkbox" value="zh_cn" data-lang="zh_cn" checked> CN (S)</label>
-                        <label><input type="checkbox" value="zh_tw" data-lang="zh_tw" checked> CN (T)</label>
-                        <label><input type="checkbox" value="ms" data-lang="ms" checked> Malay</label>
-                        <label><input type="checkbox" value="ja" data-lang="ja" checked> Japanese</label>
+                    <div class="form-group" style="grid-column: 2;">
+                        <label>Referral Program</label>
+                        <select name="referral_program">
+                            <option value="">-- Select --</option>
+                            {% for opt in config_options.get('referral_program', eligibility_options) %}
+                            <option value="{{ opt }}" {{ 'selected' if (plan and plan.referral_program == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                 </div>
             </div>
-            <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
-                <button type="button" id="translate-tcs-btn" class="btn btn-sm" style="background: #6366f1;">Translate T&amp;Cs</button>
-                <span id="translate-status" style="font-size: 0.8rem; color: #888;"></span>
-            </div>
-        </div>
-        {% endif %}
-    </div>
-
-    <!-- ================================================================= -->
-    <!-- Promotion Brief: Eligibility & Channel -->
-    <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Promotion Brief</h3>
-        <div class="form-grid">
-            <div class="form-group">
-                <div class="toggle-row">
-                    <input type="checkbox" name="hidden_rate" id="hidden_rate"
-                           {{ 'checked' if plan and plan.hidden_rate }}>
-                    <label for="hidden_rate">Hidden Rate</label>
-                </div>
-                <div class="toggle-row">
-                    <input type="checkbox" name="available_for_chatbot" id="available_for_chatbot"
-                           {{ 'checked' if plan and plan.available_for_chatbot }}>
-                    <label for="available_for_chatbot">Available for ChatBot</label>
-                </div>
-                <div class="form-group" style="margin-top: 0.25rem;">
-                    <label>ChatBot Notes</label>
-                    <input type="text" name="chatbot_notes" value="{{ plan.chatbot_notes if plan else '' }}" placeholder="e.g. But on special condition">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>Switch To Us</label>
-                <select name="switch_to_us">
-                    <option value="">-- Select --</option>
-                    {% for opt in config_options.get('switch_to_us', eligibility_options) %}
-                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.switch_to_us == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
-                    {% endfor %}
-                </select>
-                <label style="margin-top: 0.5rem;">Referral Program</label>
-                <select name="referral_program">
-                    <option value="">-- Select --</option>
-                    {% for opt in config_options.get('referral_program', eligibility_options) %}
-                    <option value="{{ opt }}" {{ 'selected' if (plan and plan.referral_program == opt) or (not plan and opt == 'Not Eligible') }}>{{ opt }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-        </div>
-        <div class="form-group" style="margin-top: 0.75rem;">
-            <label>Distribution Channel</label>
-            <div class="site-checkboxes" style="margin-top: 0.25rem;">
-                {% set channel_list = (plan.distribution_channel or '').split(', ') if plan else form_data.getlist('distribution_channel') %}
-                {% for opt in config_options.get('distribution_channel', []) %}
-                <label>
-                    <input type="checkbox" name="distribution_channel" value="{{ opt }}"
-                           {{ 'checked' if opt in channel_list }}>
-                    {{ opt }}
-                </label>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
-
-    <!-- ================================================================= -->
-    <!-- Custom Fields (extensible key-value pairs) -->
-    <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Custom Fields</h3>
-        <p style="font-size: 0.8rem; color: #888; margin-bottom: 0.75rem;">
-            Add any additional fields that are not covered above. These are stored as flexible key-value pairs and can be extended at any time.
-        </p>
-        <div id="custom-fields-container">
-            {% if plan and plan.custom_fields %}
-                {% for key, value in plan.custom_fields.items() %}
-                <div class="cf-row" style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;">
-                    <input type="text" name="cf_key" value="{{ key }}" placeholder="Field name" style="flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">
-                    <input type="text" name="cf_value" value="{{ value }}" placeholder="Value" style="flex: 2; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">
-                    <button type="button" onclick="this.parentElement.remove()" class="btn btn-sm" style="background: #dc2626; padding: 0.4rem 0.6rem;">Remove</button>
-                </div>
-                {% endfor %}
-            {% endif %}
-        </div>
-        <button type="button" id="add-custom-field" class="btn btn-sm btn-secondary" style="margin-top: 0.5rem;">+ Add Field</button>
-    </div>
+    </details>
 
     <!-- ================================================================= -->
     <!-- Status -->
     <!-- ================================================================= -->
-    <div class="card form-section">
-        <h3>Status</h3>
+    <details class="card form-section" open>
+        <summary><h3>Status</h3></summary>
         <div class="toggle-row">
             <input type="checkbox" name="is_active" id="is_active"
                    {{ 'checked' if (plan and plan.is_active) or not plan }}>
             <label for="is_active">Active</label>
         </div>
         {% if plan %}
-        <div style="font-size: 0.8rem; color: #888; margin-top: 0.5rem;">
+        <div style="font-size: 0.8rem; color: #888; margin-top: 0.3rem;">
             Created: {{ plan.created_at.strftime('%Y-%m-%d %H:%M') if plan.created_at else '-' }} by {{ plan.created_by or '-' }}
             | Updated: {{ plan.updated_at.strftime('%Y-%m-%d %H:%M') if plan.updated_at else '-' }} by {{ plan.updated_by or '-' }}
         </div>
         {% endif %}
-    </div>
+    </details>
 
-    <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+    <!-- ================================================================= -->
+    <!-- Description (moved to bottom) -->
+    <!-- ================================================================= -->
+    <details class="card form-section">
+        <summary><h3>Description</h3></summary>
+        <div class="form-grid" style="margin-top: 0.5rem;">
+            <div class="form-group">
+                <label>Objective</label>
+                <textarea name="objective" rows="2" placeholder="Business objective of this plan">{{ plan.objective if plan else form_data.get('objective', '') }}</textarea>
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea name="notes" rows="2" placeholder="Internal notes">{{ plan.notes if plan else form_data.get('notes', '') }}</textarea>
+            </div>
+        </div>
+    </details>
+
+    <div style="display: flex; gap: 1rem; margin-top: 0.75rem; margin-bottom: 2rem;">
         <button type="submit" class="btn">{{ 'Save Changes' if plan else 'Create Plan' }}</button>
         <a href="{{ url_for('discount_plans.list_plans') }}" class="btn btn-secondary">Cancel</a>
     </div>
@@ -564,78 +621,91 @@
 })();
 
 // =========================================================================
-// Site selection: Country vs Site mode
+// Live discount segmentation preview (auto-derived from type + numeric).
+// Server re-derives on save, so this is display-only.
 // =========================================================================
-function setSiteMode(mode) {
-    var individualBoxes = document.querySelectorAll('.site-individual-checkboxes');
-    var countryBoxes = document.querySelectorAll('.country-checkbox');
-    if (mode === 'country') {
-        document.getElementById('site-mode-country').checked = true;
-        individualBoxes.forEach(function(el) { el.style.display = 'none'; });
-        // Sync country checkboxes from child states
-        countryBoxes.forEach(function(cb) {
-            var children = document.querySelectorAll('input[name="site_code"][data-country="' + cb.dataset.country + '"]');
-            var allChecked = children.length > 0 && Array.prototype.every.call(children, function(c) { return c.checked; });
-            cb.checked = allChecked;
-        });
-    } else {
-        document.getElementById('site-mode-site').checked = true;
-        individualBoxes.forEach(function(el) { el.style.display = ''; });
-    }
-}
-
-function toggleCountry(cb) {
-    var children = document.querySelectorAll('input[name="site_code"][data-country="' + cb.dataset.country + '"]');
-    children.forEach(function(c) { c.checked = cb.checked; });
-    renderComparison();
-}
-
-function selectAllSites() {
-    document.querySelectorAll('input[name="site_code"]').forEach(function(c) { c.checked = true; });
-    document.querySelectorAll('.country-checkbox').forEach(function(c) { c.checked = true; });
-    renderComparison();
-}
-
-function deselectAllSites() {
-    document.querySelectorAll('input[name="site_code"]').forEach(function(c) { c.checked = false; });
-    document.querySelectorAll('.country-checkbox').forEach(function(c) { c.checked = false; });
-    renderComparison();
-}
-
-// Auto-detect site mode on load
 (function() {
-    var countryGroups = document.querySelectorAll('.site-country-group[data-country]');
-    var allByCountry = true;
-    countryGroups.forEach(function(group) {
-        var country = group.dataset.country;
-        var children = group.querySelectorAll('input[name="site_code"]');
-        var checkedCount = Array.prototype.filter.call(children, function(c) { return c.checked; }).length;
-        if (checkedCount > 0 && checkedCount < children.length) {
-            allByCountry = false; // partial selection = site mode
-        }
-    });
-    // Check if any sites are checked at all
-    var anyChecked = document.querySelectorAll('input[name="site_code"]:checked').length > 0;
-    if (anyChecked && allByCountry) {
-        setSiteMode('country');
-    } else {
-        setSiteMode('site');
+    var typeEl = document.querySelector('select[name="discount_type"]');
+    var numEl = document.querySelector('input[name="discount_numeric"]');
+    var preview = document.getElementById('discount-segmentation-preview');
+    if (!typeEl || !numEl || !preview) return;
+
+    function bucket() {
+        if (typeEl.value !== 'percentage') return '';
+        var n = parseFloat(numEl.value);
+        if (isNaN(n)) return '';
+        if (n < 5) return '< 5%';
+        if (n < 10) return '>= 5% < 10%';
+        if (n < 20) return '>= 10% < 20%';
+        if (n < 30) return '>= 20% < 30%';
+        if (n < 40) return '>= 30% < 40%';
+        return '>= 40%';
+    }
+    function refresh() { preview.value = bucket(); }
+    typeEl.addEventListener('change', refresh);
+    numEl.addEventListener('input', refresh);
+    // Initial fill in case server preload is empty for a new plan.
+    if (!preview.value) refresh();
+})();
+
+// =========================================================================
+// Applicable Sites: SiteFilter multi-select (same picker as Smart Lock tools)
+//
+// Server-side form still expects repeated <input name="site_code"> fields.
+// We sync the SiteFilter selection into hidden inputs inside
+// #applicable-sites-hidden whenever it changes.
+// =========================================================================
+(function() {
+    var hiddenHost = document.getElementById('applicable-sites-hidden');
+    var preloadEl = document.getElementById('applicable-sites-preload');
+    var preload = {};
+    try { preload = JSON.parse((preloadEl && preloadEl.textContent) || '{}') || {}; } catch (e) { preload = {}; }
+    // Preload can be either {L001: true, L003: false} (legacy) or an array.
+    var preloadCodes = Array.isArray(preload)
+        ? preload.filter(Boolean)
+        : Object.keys(preload).filter(function(k) { return !!preload[k]; });
+
+    function renderHidden(codes) {
+        hiddenHost.innerHTML = '';
+        (codes || []).forEach(function(code) {
+            if (!code) return;
+            var inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = 'site_code';
+            inp.value = code;
+            inp.dataset.applicable = '1';
+            hiddenHost.appendChild(inp);
+        });
+        // Let anything listening on site_code changes update (site-comparison, search filter).
+        document.dispatchEvent(new CustomEvent('applicable-sites-changed', { detail: { codes: codes || [] } }));
     }
 
-    // Also sync country checkboxes when individual sites change
-    document.querySelectorAll('input[name="site_code"]').forEach(function(cb) {
-        cb.addEventListener('change', function() {
-            var countryCb = document.querySelector('.country-checkbox[data-country="' + this.dataset.country + '"]');
-            if (countryCb) {
-                var siblings = document.querySelectorAll('input[name="site_code"][data-country="' + this.dataset.country + '"]');
-                countryCb.checked = Array.prototype.every.call(siblings, function(c) { return c.checked; });
-            }
-        });
-    });
+    function siteCodesFromFilter() {
+        var ids = SiteFilter.getSelected('applicable-sites-filter');
+        var sites = SiteFilter.getSites('applicable-sites-filter') || [];
+        var byId = {};
+        sites.forEach(function(s) { byId[s.site_id] = s.site_code; });
+        return ids.map(function(id) { return byId[id]; }).filter(Boolean);
+    }
 
-    // On submit, ensure country checkboxes don't get submitted (they're just UI)
-    document.getElementById('discount-plan-form').addEventListener('submit', function() {
-        document.querySelectorAll('.country-checkbox').forEach(function(cb) { cb.disabled = true; });
+    // Synchronously seed the hidden inputs from the preload so a fast Save
+    // before the /api/sites fetch resolves still submits the right sites.
+    renderHidden(preloadCodes);
+
+    SiteFilter.init('applicable-sites-filter', {
+        mode: 'multi',
+        onChange: function() {
+            renderHidden(siteCodesFromFilter());
+        },
+    }).then(function() {
+        var sites = SiteFilter.getSites('applicable-sites-filter') || [];
+        var byCode = {};
+        sites.forEach(function(s) { byCode[s.site_code] = s.site_id; });
+        var preloadIds = preloadCodes.map(function(c) { return byCode[c]; }).filter(Boolean);
+        SiteFilter.setSelected('applicable-sites-filter', preloadIds);
+        renderHidden(preloadCodes);
+    }).catch(function() {
+        // Preload already rendered above; nothing else to do.
     });
 })();
 
@@ -714,25 +784,12 @@ function copyTcsFromPlan() {
 }
 
 // =========================================================================
-// Dynamic custom fields
-// =========================================================================
-document.getElementById('add-custom-field').addEventListener('click', function() {
-    var container = document.getElementById('custom-fields-container');
-    var row = document.createElement('div');
-    row.className = 'cf-row';
-    row.style.cssText = 'display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem;';
-    row.innerHTML =
-        '<input type="text" name="cf_key" placeholder="Field name" style="flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">' +
-        '<input type="text" name="cf_value" placeholder="Value" style="flex: 2; padding: 0.5rem 0.75rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.9rem;">' +
-        '<button type="button" onclick="this.parentElement.remove()" class="btn btn-sm" style="background: #dc2626; padding: 0.4rem 0.6rem;">Remove</button>';
-    container.appendChild(row);
-    row.querySelector('input').focus();
-});
-
-// =========================================================================
-// Sitelink Linkage & Comparison
+// Sitelink Concession Picker — search, add, remove, hydrate-on-load
+// Label format: site_code · #ConcessionID · sPlanName
 // =========================================================================
 var linkedData = JSON.parse(document.getElementById('linked-concessions-json').value || '[]');
+
+function linkKey(item) { return item.site_id + ':' + item.concession_id; }
 
 function renderLinked() {
     var display = document.getElementById('linked-concessions-display');
@@ -747,41 +804,75 @@ function renderLinked() {
     }
     if (linkedData.length === 0) {
         var msg = document.createElement('div');
-        msg.style.cssText = 'color: #888; font-size: 0.85rem;';
-        msg.textContent = 'No concessions linked. Select a Sitelink Discount Name above to auto-populate.';
+        msg.style.cssText = 'color: #888; font-size: 0.85rem; padding: 0.4rem;';
+        msg.textContent = 'No concessions linked yet. Search above to add.';
         display.appendChild(msg);
     } else {
+        // Sort by site_code then concession_id for consistent display.
+        linkedData.sort(function(a, b) {
+            var sa = (a.site_code || '') + '/' + a.concession_id;
+            var sb = (b.site_code || '') + '/' + b.concession_id;
+            return sa < sb ? -1 : sa > sb ? 1 : 0;
+        });
         linkedData.forEach(function(item) {
             var wrapper = document.createElement('div');
             wrapper.className = 'linked-item';
+            wrapper.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--esa-gray); font-size: 0.85rem;';
+
             var label = document.createElement('span');
-            label.textContent = (item.site_code || 'Site ' + item.site_id) + ' - ' + (item.plan_name || 'Concession ' + item.concession_id);
+            var code = item.site_code || ('Site ' + item.site_id);
+            var name = item.plan_name || '(unnamed)';
+            label.innerHTML = '<strong>' + code + '</strong> · #' + item.concession_id + ' · ' + _escape(name);
             wrapper.appendChild(label);
+
+            var right = document.createElement('span');
+            right.style.cssText = 'display: flex; gap: 0.4rem; align-items: center;';
             if (item.discount_pct) {
                 var pct = document.createElement('span');
-                pct.style.cssText = 'color: #059669; font-weight: 600; margin-left: 0.3rem;';
-                pct.textContent = '(' + item.discount_pct + '%)';
-                wrapper.appendChild(pct);
+                pct.style.cssText = 'color: #059669; font-weight: 600;';
+                pct.textContent = item.discount_pct + '%';
+                right.appendChild(pct);
             }
-            if (item.start || item.end) {
-                var dates = document.createElement('span');
-                dates.style.cssText = 'color: #888; font-size: 0.8rem; margin-left: 0.3rem;';
-                dates.textContent = (item.start || '?') + ' to ' + (item.end || '?');
-                wrapper.appendChild(dates);
-            }
+            var remove = document.createElement('button');
+            remove.type = 'button';
+            remove.textContent = '×';
+            remove.title = 'Unlink';
+            remove.style.cssText = 'background: #dc2626; color: #fff; border: 0; border-radius: 3px; width: 24px; height: 24px; cursor: pointer; font-weight: 700;';
+            remove.addEventListener('click', function() {
+                linkedData = linkedData.filter(function(x) { return linkKey(x) !== linkKey(item); });
+                renderLinked();
+            });
+            right.appendChild(remove);
+            wrapper.appendChild(right);
             display.appendChild(wrapper);
         });
     }
+    // Persist back to the hidden input — keep site_code + plan_name for readability.
     document.getElementById('linked-concessions-json').value = JSON.stringify(linkedData.map(function(item) {
-        return {site_id: item.site_id, concession_id: item.concession_id, site_code: item.site_code};
+        return {
+            site_id: item.site_id,
+            concession_id: item.concession_id,
+            site_code: item.site_code || '',
+            plan_name: item.plan_name || ''
+        };
     }));
     renderComparison();
+    // Keep the search-results button state in sync with linkedData so unlinked
+    // items become "+ Add" again without re-searching.
+    if (lastSearchResults) renderSearchResults(lastSearchResults);
+}
+
+function _escape(s) {
+    return String(s).replace(/[&<>"']/g, function(c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
 }
 
 function getApplicableSiteCodes() {
+    // Pull from the hidden inputs synced by the SiteFilter component.
     var codes = [];
-    document.querySelectorAll('input[name="site_code"]:checked').forEach(function(cb) {
-        codes.push(cb.value);
+    document.querySelectorAll('#applicable-sites-hidden input[name="site_code"]').forEach(function(el) {
+        if (el.value) codes.push(el.value);
     });
     return codes;
 }
@@ -819,7 +910,7 @@ function renderComparison() {
         return span;
     }
 
-    function makeSection(label, labelBg, labelColor, items, badgeBg, badgeColor) {
+    function makeSection(label, labelColor, items, badgeBg, badgeColor) {
         if (items.length === 0) return null;
         var section = document.createElement('div');
         section.style.cssText = 'margin-bottom: 0.5rem;';
@@ -834,44 +925,208 @@ function renderComparison() {
         return section;
     }
 
-    var s1 = makeSection('Matched', '#d1fae5', '#059669', matched, '#d1fae5', '#059669');
-    var s2 = makeSection('Plan Only (not in Sitelink)', '#fee2e2', '#dc2626', gaps, '#fee2e2', '#dc2626');
-    var s3 = makeSection('Sitelink Only (not in Plan)', '#fef3c7', '#d97706', extras, '#fef3c7', '#d97706');
+    // Soft verification — colors are informational, not error states.
+    var s1 = makeSection('Covered', '#3b82f6', matched, '#dbeafe', '#1e40af');
+    var s2 = makeSection('Applicable site with no linked concession', '#6b7280', gaps, '#f3f4f6', '#374151');
+    var s3 = makeSection('Linked concession on site not marked applicable', '#6b7280', extras, '#f3f4f6', '#374151');
     if (s1) panel.appendChild(s1);
     if (s2) panel.appendChild(s2);
     if (s3) panel.appendChild(s3);
+    if (!s1 && !s2 && !s3) {
+        var ok = document.createElement('span');
+        ok.style.color = '#059669';
+        ok.textContent = 'All linked concessions align with applicable sites.';
+        panel.appendChild(ok);
+    }
 }
 
-renderLinked();
-if (linkedData.length > 0) document.getElementById('sitelink-details').open = true;
-
-// Auto-fetch concessions when sitelink_discount_name changes
-var sitelinkSelect = document.querySelector('[name="sitelink_discount_name"]');
-sitelinkSelect.addEventListener('change', function() {
-    var name = this.value;
-    if (!name) {
-        linkedData = [];
-        renderLinked();
+// Populate / refresh the concession-search site dropdown from the current
+// Applicable Sites selection. Rebuilt whenever the SiteFilter fires a change.
+//
+// Scope: search is limited to applicable sites only. The default option
+// "All applicable sites" sends the full csv; each individual option sends
+// one site_code. If no applicable sites are chosen yet, the control is
+// disabled with a hint.
+function refreshConcessionSiteFilter() {
+    var sel = document.getElementById('concession-search-site');
+    var keep = sel.value;
+    var codes = getApplicableSiteCodes();
+    sel.innerHTML = '';
+    if (!codes.length) {
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'Pick applicable sites first';
+        sel.appendChild(opt);
+        sel.disabled = true;
         return;
     }
-    var loading = document.getElementById('sitelink-loading');
-    loading.style.display = 'block';
-    fetch('{{ url_for("discount_plans.api_concessions_by_plan_name") }}?name=' + encodeURIComponent(name))
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            loading.style.display = 'none';
-            if (Array.isArray(data)) {
-                linkedData = data;
-                renderLinked();
+    sel.disabled = false;
+    var allOpt = document.createElement('option');
+    allOpt.value = '__all__';
+    allOpt.textContent = 'All applicable sites (' + codes.length + ')';
+    sel.appendChild(allOpt);
+    codes.forEach(function(code) {
+        var opt = document.createElement('option');
+        opt.value = code;
+        opt.textContent = code;
+        if (code === keep) opt.selected = true;
+        sel.appendChild(opt);
+    });
+    // If the previously-selected value is no longer present, fall back to __all__.
+    if (keep !== '__all__' && codes.indexOf(keep) === -1) {
+        sel.value = '__all__';
+    } else if (keep === '__all__') {
+        sel.value = '__all__';
+    }
+}
+document.addEventListener('applicable-sites-changed', function() {
+    refreshConcessionSiteFilter();
+    renderComparison();
+});
+refreshConcessionSiteFilter();
+
+// Search handler → /api/concessions/search. The server supports q + site_id.
+var searchBtn = document.getElementById('concession-search-btn');
+var searchInput = document.getElementById('concession-search-input');
+var searchSiteSel = document.getElementById('concession-search-site');
+var searchResults = document.getElementById('concession-search-results');
+
+function resolveSiteIdFromCode(code) {
+    // We need site_id for the search endpoint's filter; fall back to no filter
+    // when we can't resolve. The server handles site_code-less queries fine.
+    // For the per-site filter we rely on the server returning site_id on each
+    // result — we don't resolve here, we simply pass q and let the results
+    // cover multiple sites, then filter client-side by selected code.
+    return null;
+}
+
+var lastSearchResults = null;
+
+function runConcessionSearch() {
+    var q = searchInput.value.trim();
+    var siteSel = searchSiteSel.value.trim();
+    var applicableCodes = getApplicableSiteCodes();
+    if (!applicableCodes.length) {
+        searchResults.style.display = 'block';
+        searchResults.innerHTML = '<div style="color:#888;font-size:0.85rem;padding:0.3rem;">Pick applicable sites above, then search.</div>';
+        return;
+    }
+    // Search is always scoped to the applicable sites.
+    var params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (siteSel === '__all__' || !siteSel) {
+        params.set('site_codes', applicableCodes.join(','));
+    } else {
+        params.set('site_code', siteSel);
+    }
+    searchResults.style.display = 'block';
+    searchResults.innerHTML = '<div style="color:#888;font-size:0.85rem;padding:0.3rem;">Searching...</div>';
+    fetch('{{ url_for("discount_plans.api_search_concessions") }}?' + params.toString())
+        .then(function(r) { return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+        .then(function(resp) {
+            if (!resp.ok || !Array.isArray(resp.body)) {
+                var msg = (resp.body && resp.body.error) || 'Search error.';
+                searchResults.innerHTML = '<div style="color:#dc2626;padding:0.3rem;">' + _escape(msg) + '</div>';
+                return;
             }
+            lastSearchResults = resp.body;
+            renderSearchResults(resp.body);
         })
-        .catch(function() { loading.style.display = 'none'; });
+        .catch(function() {
+            searchResults.innerHTML = '<div style="color:#dc2626;padding:0.3rem;">Search failed — check network or permissions.</div>';
+        });
+}
+
+function renderSearchResults(list) {
+    searchResults.innerHTML = '';
+    if (!list.length) {
+        searchResults.innerHTML = '<div style="color:#888;font-size:0.85rem;padding:0.3rem;">No results.</div>';
+        return;
+    }
+    var linkedKeys = {};
+    linkedData.forEach(function(x) { linkedKeys[linkKey(x)] = true; });
+
+    list.forEach(function(r) {
+        var row = document.createElement('div');
+        row.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--esa-gray); font-size: 0.85rem;';
+        var label = document.createElement('span');
+        var code = r.site_code || ('Site ' + r.site_id);
+        label.innerHTML = '<strong>' + _escape(code) + '</strong> · #' + r.concession_id + ' · ' + _escape(r.plan_name || '-');
+        row.appendChild(label);
+
+        var k = r.site_id + ':' + r.concession_id;
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-sm';
+        if (linkedKeys[k]) {
+            btn.textContent = 'Linked';
+            btn.disabled = true;
+            btn.style.cssText = 'background: #d1fae5; color: #059669; padding: 0.25rem 0.5rem;';
+        } else {
+            btn.textContent = '+ Add';
+            btn.style.cssText = 'background: #6366f1; color: #fff; padding: 0.25rem 0.5rem;';
+            btn.addEventListener('click', function() {
+                linkedData.push({
+                    site_id: r.site_id,
+                    concession_id: r.concession_id,
+                    site_code: r.site_code || '',
+                    plan_name: r.plan_name || '',
+                    discount_pct: r.discount_pct,
+                    start: r.start,
+                    end: r.end
+                });
+                linkedKeys[k] = true;
+                btn.textContent = 'Linked';
+                btn.disabled = true;
+                btn.style.cssText = 'background: #d1fae5; color: #059669; padding: 0.25rem 0.5rem;';
+                renderLinked();
+            });
+        }
+        row.appendChild(btn);
+        searchResults.appendChild(row);
+    });
+}
+
+searchBtn.addEventListener('click', runConcessionSearch);
+searchInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); runConcessionSearch(); }
 });
 
-// Re-render comparison when site checkboxes change
-document.querySelectorAll('input[name="site_code"]').forEach(function(cb) {
-    cb.addEventListener('change', function() { renderComparison(); });
-});
+// Hydrate missing plan_name / site_code on existing linked_concessions via by-ids.
+(function hydrateExisting() {
+    var needHydrate = linkedData.filter(function(x) {
+        return !x.plan_name || !x.site_code;
+    });
+    if (!needHydrate.length) return;
+    var items = needHydrate.map(function(x) { return x.site_id + ':' + x.concession_id; }).join(',');
+    fetch('{{ url_for("discount_plans.api_concessions_by_ids") }}?items=' + encodeURIComponent(items))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!Array.isArray(data)) return;
+            var byKey = {};
+            data.forEach(function(r) { byKey[r.site_id + ':' + r.concession_id] = r; });
+            linkedData = linkedData.map(function(x) {
+                var match = byKey[x.site_id + ':' + x.concession_id];
+                if (!match) return x;
+                return {
+                    site_id: x.site_id,
+                    concession_id: x.concession_id,
+                    site_code: x.site_code || match.site_code || '',
+                    plan_name: x.plan_name || match.plan_name || '',
+                    discount_pct: x.discount_pct != null ? x.discount_pct : match.discount_pct,
+                    start: x.start || match.start,
+                    end: x.end || match.end
+                };
+            });
+            renderLinked();
+        })
+        .catch(function() { /* silent — labels just stay as-is */ });
+})();
+
+renderLinked();
+
+// Site-comparison is re-rendered via the 'applicable-sites-changed' event
+// dispatched by the SiteFilter wiring above.
 
 // =========================================================================
 // AI Translation with source/target language selection
@@ -932,7 +1187,7 @@ document.querySelectorAll('input[name="site_code"]').forEach(function(cb) {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             btn.style.animation = '';
-            btn.textContent = 'Translate T\u0026Cs';
+            btn.textContent = 'Translate T&Cs';
             if (data.success) {
                 var langs = targetLangs.join(', ');
                 status.textContent = 'Translations saved! (' + langs + ')';
@@ -945,7 +1200,7 @@ document.querySelectorAll('input[name="site_code"]').forEach(function(cb) {
         })
         .catch(function(err) {
             btn.style.animation = '';
-            btn.textContent = 'Translate T\u0026Cs';
+            btn.textContent = 'Translate T&Cs';
             status.textContent = 'Error: ' + err.message;
             status.style.color = '#dc2626';
             btn.disabled = false;
@@ -953,5 +1208,186 @@ document.querySelectorAll('input[name="site_code"]').forEach(function(cb) {
     });
 })();
 {% endif %}
+
+// =========================================================================
+// Restrictions (SOP COM01) — 6 multi-select dim groups + live vacant-unit count
+// =========================================================================
+(function() {
+    var DIM_FIELDS = ['size_category', 'size_range', 'unit_type',
+                      'climate_type', 'unit_shape', 'pillar'];
+    var DIM_LABELS = {
+        size_category: 'Size Category',
+        size_range: 'Size Range',
+        unit_type: 'Unit Type',
+        climate_type: 'Climate',
+        unit_shape: 'Unit Shape',
+        pillar: 'Pillar',
+    };
+
+    var host = document.getElementById('restriction-dims');
+    var hidden = document.getElementById('restrictions-json');
+    var summaryChip = document.getElementById('restriction-summary-chip');
+    var countVal = document.getElementById('restriction-count-value');
+    var countBySite = document.getElementById('restriction-count-bysite');
+    var countStatus = document.getElementById('restriction-count-status');
+    if (!host || !hidden) return;
+
+    var state = {};
+    try { state = JSON.parse(hidden.value || '{}') || {}; } catch (e) { state = {}; }
+    DIM_FIELDS.forEach(function(f) {
+        if (!Array.isArray(state[f])) state[f] = [];
+    });
+
+    function persist() {
+        hidden.value = JSON.stringify(state);
+        updateSummaryChip();
+        queueCount();
+    }
+
+    function updateSummaryChip() {
+        var active = DIM_FIELDS.filter(function(f) { return state[f] && state[f].length; });
+        if (!active.length) {
+            summaryChip.textContent = 'no restriction';
+            summaryChip.style.color = '#9ca3af';
+        } else {
+            summaryChip.textContent = active.length + ' dim(s) restricted';
+            summaryChip.style.color = '#4b5563';
+        }
+    }
+
+    function renderDim(field, options) {
+        var group = document.createElement('div');
+        group.style.cssText = 'border: 1px solid var(--esa-gray); border-radius: 4px; padding: 0.4rem 0.5rem; background: #fff;';
+
+        var header = document.createElement('div');
+        header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;';
+        var title = document.createElement('strong');
+        title.style.cssText = 'font-size: 0.78rem; color: var(--esa-navy);';
+        title.textContent = DIM_LABELS[field];
+        header.appendChild(title);
+
+        var toolbar = document.createElement('span');
+        toolbar.style.cssText = 'font-size: 0.7rem;';
+        toolbar.innerHTML = '<a href="javascript:void(0)" data-act="all" style="color: var(--esa-navy); margin-right: 0.4rem;">all</a>' +
+                            '<a href="javascript:void(0)" data-act="none" style="color: #dc2626;">clear</a>';
+        header.appendChild(toolbar);
+        group.appendChild(header);
+
+        var list = document.createElement('div');
+        list.style.cssText = 'display: flex; flex-wrap: wrap; gap: 0.25rem 0.5rem;';
+        options.forEach(function(opt) {
+            var id = 'restr_' + field + '_' + opt.code;
+            var lbl = document.createElement('label');
+            lbl.style.cssText = 'display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.76rem; cursor: pointer; padding: 0.1rem 0.3rem; border-radius: 3px;';
+            lbl.title = opt.description || opt.code;
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.id = id;
+            cb.value = opt.code;
+            cb.checked = state[field].indexOf(opt.code) !== -1;
+            cb.addEventListener('change', function() {
+                var set = new Set(state[field]);
+                if (cb.checked) set.add(opt.code);
+                else set.delete(opt.code);
+                state[field] = Array.from(set);
+                persist();
+            });
+            lbl.appendChild(cb);
+            var span = document.createElement('span');
+            span.innerHTML = '<code>' + opt.code + '</code>';
+            lbl.appendChild(span);
+            list.appendChild(lbl);
+        });
+        group.appendChild(list);
+
+        toolbar.addEventListener('click', function(e) {
+            var a = e.target.closest('a[data-act]');
+            if (!a) return;
+            var act = a.dataset.act;
+            var cbs = list.querySelectorAll('input[type="checkbox"]');
+            state[field] = [];
+            cbs.forEach(function(cb) {
+                cb.checked = (act === 'all');
+                if (cb.checked) state[field].push(cb.value);
+            });
+            persist();
+        });
+
+        return group;
+    }
+
+    function applicableSiteCodes() {
+        var codes = [];
+        document.querySelectorAll('#applicable-sites-hidden input[name="site_code"]').forEach(function(el) {
+            if (el.value) codes.push(el.value);
+        });
+        return codes;
+    }
+
+    var _t = null;
+    function queueCount() {
+        if (_t) clearTimeout(_t);
+        _t = setTimeout(refreshCount, 250);
+    }
+
+    function refreshCount() {
+        var codes = applicableSiteCodes();
+        if (!codes.length) {
+            countVal.textContent = '—';
+            countBySite.textContent = '';
+            countStatus.textContent = 'Pick applicable sites to see the count.';
+            return;
+        }
+        countStatus.textContent = 'Counting…';
+        fetch('{{ url_for("discount_plans.api_unit_count") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content || ''
+            },
+            body: JSON.stringify({ site_codes: codes, restrictions: state }),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data && typeof data.count === 'number') {
+                countVal.textContent = data.count.toLocaleString();
+                var parts = Object.keys(data.by_site || {})
+                    .filter(function(k) { return data.by_site[k] > 0; })
+                    .sort()
+                    .map(function(k) { return k + ': ' + data.by_site[k]; });
+                countBySite.textContent = parts.length ? parts.join('  ·  ') : '';
+                countStatus.textContent = data.parse_fail
+                    ? (data.parse_fail + ' unit(s) had non-SOP sTypeName and were skipped')
+                    : '';
+            } else {
+                countStatus.textContent = 'Count failed.';
+            }
+        })
+        .catch(function() {
+            countStatus.textContent = 'Count failed — check network.';
+        });
+    }
+
+    fetch('{{ url_for("discount_plans.api_dim_options") }}', { credentials: 'same-origin' })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            host.innerHTML = '';
+            DIM_FIELDS.forEach(function(f) {
+                var opts = (data && Array.isArray(data[f])) ? data[f] : [];
+                host.appendChild(renderDim(f, opts));
+            });
+            updateSummaryChip();
+            // Kick off the initial count now that the applicable-sites layer has
+            // already rendered its hidden inputs.
+            refreshCount();
+        })
+        .catch(function() {
+            host.innerHTML = '<div style="color:#dc2626;font-size:0.8rem;padding:0.4rem;">Failed to load dim options.</div>';
+        });
+
+    document.addEventListener('applicable-sites-changed', function() {
+        queueCount();
+    });
+})();
 </script>
 {% endblock %}

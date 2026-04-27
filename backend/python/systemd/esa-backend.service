@@ -21,7 +21,7 @@ ExecStart=/var/www/backend/backend/python/venv/bin/gunicorn \
     --access-logfile /var/log/esa-backend/access.log \
     --error-logfile /var/log/esa-backend/error.log \
     --capture-output \
-    --timeout 120 \
+    --timeout 300 \
     --graceful-timeout 30 \
     --max-requests 1000 \
     --max-requests-jitter 100 \

@@ -3045,7 +3045,7 @@ def _apply_plan_json(plan, data, is_create=False):
     Only touches fields that are present in the payload (PATCH semantics).
     """
     SIMPLE_STR_FIELDS = [
-        'plan_type', 'plan_name', 'sitelink_discount_name',
+        'plan_type', 'plan_name',
         'notes', 'objective',
         'period_range', 'move_in_range', 'lock_in_period',
         'discount_value', 'discount_type', 'discount_segmentation',
@@ -3061,7 +3061,7 @@ def _apply_plan_json(plan, data, is_create=False):
     JSONB_FIELDS = [
         'applicable_sites', 'offers', 'terms_conditions', 'terms_conditions_cn',
         'terms_conditions_translations',
-        'promotion_codes', 'department_notes', 'custom_fields',
+        'promotion_codes', 'department_notes',
         'linked_concessions',
     ]
 
@@ -3130,7 +3130,7 @@ def _validate_discount_plan_data(data, exclude_id=None):
         if f in data and data[f] is not None and not isinstance(data[f], list):
             errors.append(f'{f} must be a JSON array')
 
-    dict_fields = ['applicable_sites', 'department_notes', 'custom_fields', 'terms_conditions_translations']
+    dict_fields = ['applicable_sites', 'department_notes', 'terms_conditions_translations']
     for f in dict_fields:
         if f in data and data[f] is not None and not isinstance(data[f], dict):
             errors.append(f'{f} must be a JSON object')

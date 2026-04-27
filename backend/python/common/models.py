@@ -5,7 +5,7 @@ Provides type-safe database operations replacing raw SQL queries.
 
 from datetime import datetime, date
 from typing import Dict, Any
-from sqlalchemy import Column, String, Integer, BigInteger, DateTime, Date, Boolean, Numeric, Text, ForeignKey, Index, ARRAY
+from sqlalchemy import Column, String, Integer, BigInteger, DateTime, Date, Boolean, Numeric, Text, ForeignKey, Index, ARRAY, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -3172,16 +3172,22 @@ class ECRIBatch(Base, BaseModel):
 
     batch_id = Column(UUID(as_uuid=True), primary_key=True, comment="Batch UUID")
     name = Column(String(255), nullable=True, comment="Batch name/label")
+    batch_type = Column(String(16), nullable=False, default='standard',
+                        comment="standard=monthly ECRI; advance=pre-load (prepayer/recent move-in)")
     site_ids = Column(ARRAY(Integer), nullable=False, comment="Sites included in batch")
     target_increase_pct = Column(Numeric(5, 2), nullable=True, comment="Target increase percentage")
     control_group_enabled = Column(Boolean, nullable=False, default=False, comment="A/B testing mode")
     group_config = Column(JSONB, nullable=True, comment="Control group percentages config")
     total_ledgers = Column(Integer, nullable=False, default=0, comment="Count of ledgers in batch")
-    status = Column(String(20), nullable=False, default='draft', comment="draft/review/executed/cancelled")
+    status = Column(String(20), nullable=False, default='draft', comment="draft/site_review/rev_approved/executing/executed/cancelled")
     created_by = Column(String(255), nullable=True, comment="Username who created batch")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, comment="Batch creation time")
     executed_at = Column(DateTime, nullable=True, comment="When pushed to SiteLink")
     cancelled_at = Column(DateTime, nullable=True, comment="When cancelled")
+    # Workflow fields (migration 036)
+    site_review_deadline = Column(Date, nullable=True, comment="Deadline for ops exclusion requests")
+    submitted_for_review_at = Column(DateTime, nullable=True)
+    submitted_for_review_by = Column(String(255), nullable=True)
 
     # Configuration snapshot
     min_tenure_months = Column(Integer, nullable=False, default=12)
@@ -3205,6 +3211,7 @@ class ECRIBatch(Base, BaseModel):
         return {
             'batch_id': str(self.batch_id),
             'name': self.name,
+            'batch_type': self.batch_type or 'standard',
             'site_ids': self.site_ids,
             'target_increase_pct': float(self.target_increase_pct) if self.target_increase_pct else None,
             'control_group_enabled': self.control_group_enabled,
@@ -3220,6 +3227,9 @@ class ECRIBatch(Base, BaseModel):
             'discount_reference_pct': float(self.discount_reference_pct) if self.discount_reference_pct else None,
             'attribution_window_days': self.attribution_window_days,
             'notes': self.notes,
+            'site_review_deadline': self.site_review_deadline.isoformat() if self.site_review_deadline else None,
+            'submitted_for_review_at': self.submitted_for_review_at.isoformat() if self.submitted_for_review_at else None,
+            'submitted_for_review_by': self.submitted_for_review_by,
         }
 
 
@@ -3249,6 +3259,13 @@ class ECRIBatchLedger(Base, BaseModel):
     increase_pct = Column(Numeric(5, 2), nullable=False)
     increase_amt = Column(Numeric(14, 4), nullable=False)
 
+    # Plan-vs-delivered snapshot (migration 043). Set once at batch creation,
+    # never mutated by objections. new_rent/increase_pct/increase_amt may be
+    # overwritten when an objection is applied.
+    planned_new_rent = Column(Numeric(14, 4), nullable=True)
+    planned_increase_pct = Column(Numeric(5, 2), nullable=True)
+    planned_increase_amt = Column(Numeric(14, 4), nullable=True)
+
     # Dates
     notice_date = Column(Date, nullable=True)
     effective_date = Column(Date, nullable=True)
@@ -3276,16 +3293,37 @@ class ECRIBatchLedger(Base, BaseModel):
     next_lad = Column(Date, nullable=True)
     bucket = Column(String(10), nullable=True)
 
+    # Advance-scheduling snapshot (migration 055). Only populated when the
+    # parent batch has batch_type='advance'.
+    segment = Column(String(20), nullable=True,
+                     comment="advance-batch segment: recent_movein / heavy_prepayer")
+    projected_paid_thru = Column(Date, nullable=True,
+                                 comment="paid_thru used to compute effective_date on advance batches")
+    discount_expires = Column(Date, nullable=True,
+                              comment="derived move-in discount expiration (recent_movein segment only)")
+
     # API execution
     api_status = Column(String(20), nullable=False, default='pending', comment="pending/success/failed/skipped")
     api_response = Column(JSONB, nullable=True)
     api_executed_at = Column(DateTime, nullable=True)
+
+    # Site-review exclusion fields (migration 037)
+    exclusion_status = Column(String(12), nullable=False, default='none',
+                              comment="none/requested/approved/rejected")
+    exclusion_reason_code = Column(String(40), nullable=True)
+    exclusion_notes = Column(Text, nullable=True)
+    exclusion_requested_by = Column(Integer, nullable=True)
+    exclusion_requested_at = Column(DateTime, nullable=True)
+    exclusion_decided_by = Column(Integer, nullable=True)
+    exclusion_decided_at = Column(DateTime, nullable=True)
+    exclusion_decision_notes = Column(Text, nullable=True)
 
     __table_args__ = (
         Index('idx_ecri_bl_batch', 'batch_id'),
         Index('idx_ecri_bl_site_ledger', 'site_id', 'ledger_id'),
         Index('idx_ecri_bl_api_status', 'api_status'),
         Index('idx_ecri_bl_control_group', 'batch_id', 'control_group'),
+        Index('idx_ecri_bl_exclusion_status', 'batch_id', 'exclusion_status'),
     )
 
     def to_dict(self):
@@ -3303,12 +3341,18 @@ class ECRIBatchLedger(Base, BaseModel):
             'new_rent': float(self.new_rent) if self.new_rent else None,
             'increase_pct': float(self.increase_pct) if self.increase_pct else None,
             'increase_amt': float(self.increase_amt) if self.increase_amt else None,
+            'planned_new_rent': float(self.planned_new_rent) if self.planned_new_rent is not None else None,
+            'planned_increase_pct': float(self.planned_increase_pct) if self.planned_increase_pct is not None else None,
+            'planned_increase_amt': float(self.planned_increase_amt) if self.planned_increase_amt is not None else None,
             'currency': self.currency,
             'notice_date': self.notice_date.isoformat() if self.notice_date else None,
             'effective_date': self.effective_date.isoformat() if self.effective_date else None,
             'paid_thru_date': self.paid_thru_date.isoformat() if self.paid_thru_date else None,
             'next_lad': self.next_lad.isoformat() if self.next_lad else None,
             'bucket': self.bucket,
+            'segment': self.segment,
+            'projected_paid_thru': self.projected_paid_thru.isoformat() if self.projected_paid_thru else None,
+            'discount_expires': self.discount_expires.isoformat() if self.discount_expires else None,
             'in_place_median_site': float(self.in_place_median_site) if self.in_place_median_site else None,
             'in_place_median_country': float(self.in_place_median_country) if self.in_place_median_country else None,
             'market_rate': float(self.market_rate) if self.market_rate else None,
@@ -3321,6 +3365,14 @@ class ECRIBatchLedger(Base, BaseModel):
             'api_status': self.api_status,
             'api_response': self.api_response,
             'api_executed_at': self.api_executed_at.isoformat() if self.api_executed_at else None,
+            'exclusion_status': self.exclusion_status or 'none',
+            'exclusion_reason_code': self.exclusion_reason_code,
+            'exclusion_notes': self.exclusion_notes,
+            'exclusion_requested_by': self.exclusion_requested_by,
+            'exclusion_requested_at': self.exclusion_requested_at.isoformat() if self.exclusion_requested_at else None,
+            'exclusion_decided_by': self.exclusion_decided_by,
+            'exclusion_decided_at': self.exclusion_decided_at.isoformat() if self.exclusion_decided_at else None,
+            'exclusion_decision_notes': self.exclusion_decision_notes,
         }
 
 
@@ -3359,6 +3411,86 @@ class ECRIOutcome(Base, BaseModel):
             'days_after_notice': self.days_after_notice,
             'months_at_new_rent': self.months_at_new_rent,
             'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class ECRIObjection(Base, BaseModel):
+    """
+    Post-push rate objection raised by ops after tenant calls in.
+
+    Allows modifying new_rent/increase_pct for a pushed ledger.
+    Auto-approved if within user's ecri_max_pct_reduction + ecri_max_abs_reduction,
+    otherwise routes to a senior approver.
+    """
+    __tablename__ = 'ecri_objections'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    batch_ledger_id = Column(BigInteger, ForeignKey('ecri_batch_ledgers.id', ondelete='CASCADE'), nullable=False)
+    batch_id = Column(UUID(as_uuid=True), nullable=False)
+    site_id = Column(Integer, nullable=False)
+    ledger_id = Column(Integer, nullable=False)
+
+    original_increase_pct = Column(Numeric(5, 2), nullable=False)
+    original_new_rent = Column(Numeric(14, 4), nullable=False)
+    currency = Column(String(3), nullable=False, default='SGD')
+
+    new_increase_pct = Column(Numeric(5, 2), nullable=True)
+    new_new_rent = Column(Numeric(14, 4), nullable=True)
+
+    reason_code = Column(String(40), nullable=False)
+    reason_notes = Column(Text, nullable=True)
+
+    status = Column(String(20), nullable=False, default='pending_approval',
+                    comment="pending_approval/approved/rejected/applied/cancelled")
+    requires_approval = Column(Boolean, nullable=False, default=True)
+
+    raised_by_user_id = Column(Integer, nullable=False)
+    raised_by_username = Column(String(100), nullable=False)
+    raised_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    approver_user_id = Column(Integer, nullable=True)
+    approver_username = Column(String(100), nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    approval_notes = Column(Text, nullable=True)
+
+    applied_at = Column(DateTime, nullable=True)
+    applied_ret_code = Column(String(20), nullable=True)
+    applied_ret_msg = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index('idx_ecri_obj_batch_ledger', 'batch_ledger_id'),
+        Index('idx_ecri_obj_batch_id', 'batch_id'),
+        Index('idx_ecri_obj_site_ledger', 'site_id', 'ledger_id'),
+        Index('idx_ecri_obj_status', 'status'),
+        Index('idx_ecri_obj_raised_by', 'raised_by_user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'batch_ledger_id': self.batch_ledger_id,
+            'batch_id': str(self.batch_id),
+            'site_id': self.site_id,
+            'ledger_id': self.ledger_id,
+            'original_increase_pct': float(self.original_increase_pct) if self.original_increase_pct is not None else None,
+            'original_new_rent': float(self.original_new_rent) if self.original_new_rent is not None else None,
+            'currency': self.currency,
+            'new_increase_pct': float(self.new_increase_pct) if self.new_increase_pct is not None else None,
+            'new_new_rent': float(self.new_new_rent) if self.new_new_rent is not None else None,
+            'reason_code': self.reason_code,
+            'reason_notes': self.reason_notes,
+            'status': self.status,
+            'requires_approval': self.requires_approval,
+            'raised_by_user_id': self.raised_by_user_id,
+            'raised_by_username': self.raised_by_username,
+            'raised_at': self.raised_at.isoformat() if self.raised_at else None,
+            'approver_user_id': self.approver_user_id,
+            'approver_username': self.approver_username,
+            'approved_at': self.approved_at.isoformat() if self.approved_at else None,
+            'approval_notes': self.approval_notes,
+            'applied_at': self.applied_at.isoformat() if self.applied_at else None,
+            'applied_ret_code': self.applied_ret_code,
+            'applied_ret_msg': self.applied_ret_msg,
         }
 
 
@@ -3736,6 +3868,10 @@ class CcwsChargeDescription(Base, BaseModel, TimestampMixin):
     bPermanent = Column(Boolean, default=False)
     dDisabled = Column(DateTime)
 
+    __table_args__ = (
+        UniqueConstraint('ChargeDescID', 'SiteID', name='ccws_charge_descriptions_ChargeDescID_SiteID_key'),
+    )
+
 
 class CcwsInsuranceCoverage(Base, BaseModel, TimestampMixin):
     """
@@ -3760,6 +3896,36 @@ class CcwsInsuranceCoverage(Base, BaseModel, TimestampMixin):
     sBrochureUrl = Column(Text)
     sCertificateUrl = Column(Text)
 
+    __table_args__ = (
+        UniqueConstraint('InsurCoverageID', 'SiteID', name='ccws_insurance_coverage_InsurCoverageID_SiteID_key'),
+    )
+
+
+class StripeWebhookEvent(Base, BaseModel):
+    """
+    Idempotency log for inbound Stripe webhook events.
+
+    event_id (evt_xxx) is Stripe's unique identifier and acts as the
+    idempotency key — enforced by UNIQUE constraint.  On INSERT conflict
+    the handler returns 200 immediately without reprocessing.
+
+    status lifecycle: received → processed | failed
+    """
+    __tablename__ = 'stripe_webhook_events'
+
+    id                = Column(BigInteger, primary_key=True, autoincrement=True)
+    event_id          = Column(Text, nullable=False, unique=True)
+    event_type        = Column(Text, nullable=False)
+    payment_intent_id = Column(Text, nullable=True)
+    received_at       = Column(DateTime, nullable=False, default=datetime.utcnow)
+    processed_at      = Column(DateTime, nullable=True)
+    status            = Column(String(20), nullable=False, default='received')
+    error_message     = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index('idx_swe_payment_intent_id', 'payment_intent_id'),
+    )
+
 
 class CcwsSiteBillingConfig(Base, BaseModel, TimestampMixin):
     """
@@ -3781,3 +3947,346 @@ class CcwsSiteBillingConfig(Base, BaseModel, TimestampMixin):
     overridden_by = Column(String(100))
     overridden_at = Column(DateTime)
     notes = Column(Text)
+
+
+class CcwsReservation(Base, BaseModel, TimestampMixin):
+    """
+    Raw reservation records from CallCenterWs ReservationList_v3.
+
+    One row per SiteCode + WaitingID. PascalCase field names mirror
+    the SOAP response shape.
+
+    Stored in esa_middleware (orchestrator-managed).
+    """
+    __tablename__ = 'ccws_reservations'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    SiteCode = Column(String(20), nullable=False, index=True)
+    WaitingID = Column(Integer, nullable=False, index=True)
+    iGlobalWaitingNum = Column(Integer)
+    TenantID = Column(Integer)
+    UnitID = Column(Integer)
+
+    sFName = Column(String(100))
+    sLName = Column(String(100))
+    sEmail = Column(String(255))
+    sPhone = Column(String(50))
+    sMobile = Column(String(50))
+
+    dcRate_Quoted = Column(Numeric(14, 4))
+    ConcessionID = Column(Integer)
+    iInquiryType = Column(Integer)
+    QTRentalTypeID = Column(Integer)
+    dcPaidReserveFee = Column(Numeric(14, 4))
+    iReserveFeeReceiptID = Column(Integer)
+    iWaitingStatus = Column(Integer)
+
+    dNeeded = Column(DateTime)
+    dExpires = Column(DateTime)
+    dFollowup = Column(DateTime)
+    dCreated = Column(DateTime)
+    dPlaced = Column(DateTime)
+    dUpdated = Column(DateTime)
+    dConverted_ToMoveIn = Column(DateTime)
+
+    sComment = Column(Text)
+    sSource = Column(String(100))
+
+    __table_args__ = (
+        Index('idx_ccws_reservations_site_waiting', 'SiteCode', 'WaitingID', unique=True),
+        Index('idx_ccws_reservations_status', 'iWaitingStatus'),
+    )
+
+
+class CcwsRentTaxRate(Base, BaseModel, TimestampMixin):
+    """
+    Per-site rent tax rates from RentTaxRatesRetrieve.
+
+    SOAP returns only tax1/tax2 rates; we annotate with SiteCode from the
+    request so rows are addressable by location.
+    """
+    __tablename__ = 'ccws_rent_tax_rates'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    SiteCode = Column(String(20), nullable=False, unique=True, index=True)
+    dcTax1Rate = Column(Numeric(14, 6))
+    dcTax2Rate = Column(Numeric(14, 6))
+
+
+class CcwsAvailableUnit(Base, BaseModel, TimestampMixin):
+    """
+    Currently-available units from UnitsInformationAvailableUnitsOnly_v2.
+
+    Snapshot of unrented, rentable inventory. Natural key (SiteID, UnitID).
+    """
+    __tablename__ = 'ccws_available_units'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    SiteID = Column(Integer, nullable=False, index=True)
+    UnitID = Column(Integer, nullable=False, index=True)
+    sLocationCode = Column(String(20), index=True)
+    UnitTypeID = Column(Integer, index=True)
+    sTypeName = Column(String(100))
+    sUnitName = Column(String(100))
+    sUnitNote = Column(String(500))
+    sUnitDesc = Column(String(500))
+    dcWidth = Column(Numeric(10, 4))
+    dcLength = Column(Numeric(10, 4))
+    iFloor = Column(Integer)
+    dcMapTop = Column(Numeric(10, 4))
+    dcMapLeft = Column(Numeric(10, 4))
+    dcMapTheta = Column(Numeric(10, 4))
+    bMapReversWL = Column(Boolean)
+    iEntryLoc = Column(Integer)
+    iDoorType = Column(Integer)
+    iADA = Column(Integer)
+    bClimate = Column(Boolean)
+    bPower = Column(Boolean)
+    bInside = Column(Boolean)
+    bAlarm = Column(Boolean)
+    bRentable = Column(Boolean)
+    bMobile = Column(Boolean)
+    bServiceRequired = Column(Boolean)
+    bExcludeFromWebsite = Column(Boolean)
+    bRented = Column(Boolean)
+    bWaitingListReserved = Column(Boolean)
+    bCorporate = Column(Boolean)
+    iDaysVacant = Column(Integer)
+    iDaysRented = Column(Integer)
+    iDefLeaseNum = Column(Integer)
+    DefaultCoverageID = Column(Integer)
+    dcStdRate = Column(Numeric(14, 4))
+    dcBoardRate = Column(Numeric(14, 4))
+    dcPushRate = Column(Numeric(14, 4))
+    dcPushRate_NotRounded = Column(Numeric(14, 4))
+    dcRM_RoundTo = Column(Numeric(14, 4))
+    dcStdSecDep = Column(Numeric(14, 4))
+    dcStdWeeklyRate = Column(Numeric(14, 4))
+    dcWebRate = Column(Numeric(14, 4))
+    dcPreferredRate = Column(Numeric(14, 4))
+    iPreferredChannelType = Column(Integer)
+    bPreferredIsPushRate = Column(Boolean)
+    dcTax1Rate = Column(Numeric(14, 6))
+    dcTax2Rate = Column(Numeric(14, 6))
+
+    __table_args__ = (
+        UniqueConstraint('SiteID', 'UnitID', name='ccws_available_units_SiteID_UnitID_key'),
+        Index('idx_ccws_avail_units_loc', 'sLocationCode'),
+    )
+
+
+class CcwsGateAccess(Base, BaseModel, TimestampMixin):
+    """
+    Raw gate-access codes from CallCenterWs GateAccessData.
+
+    Middleware copy — schema mirrors esa_backend.gate_access_data.
+    Access codes are Fernet-encrypted at rest (same crypto as legacy).
+    Natural key: (location_code, unit_id).
+    """
+    __tablename__ = 'ccws_gate_access'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    location_code = Column(String(10), nullable=False, index=True)
+    site_id = Column(Integer, nullable=False, index=True)
+    unit_id = Column(Integer, nullable=False)
+    unit_name = Column(String(50), nullable=False)
+    is_rented = Column(Boolean, nullable=False, default=False)
+    access_code_enc = Column(Text)
+    access_code2_enc = Column(Text)
+    is_gate_locked = Column(Boolean, nullable=False, default=False)
+    is_overlocked = Column(Boolean, nullable=False, default=False)
+    keypad_zone = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint('location_code', 'unit_id', name='ccws_gate_access_loc_unit_key'),
+    )
+
+
+class CcwsUnitInfo(Base, BaseModel, TimestampMixin):
+    """
+    Full unit catalog from CallCenterWs UnitsInformation_v3.
+
+    Lives in esa_middleware as `ccws_units`; populated by the orchestrator
+    pipeline (parallel to the legacy scheduler job that writes
+    esa_pbi.units_info, which stays untouched).
+    """
+    __tablename__ = 'ccws_units'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    SiteID = Column(Integer, nullable=False, index=True)
+    UnitID = Column(Integer, nullable=False, index=True)
+    UnitTypeID = Column(Integer, index=True)
+    sLocationCode = Column(String(20), index=True)
+    sUnitName = Column(String(100))
+    sTypeName = Column(String(100), index=True)
+    sUnitNote = Column(String(500))
+    sUnitDesc = Column(String(500))
+    dcWidth = Column(Numeric(10, 4))
+    dcLength = Column(Numeric(10, 4))
+    iFloor = Column(Integer)
+    dcMapTheta = Column(Numeric(10, 4))
+    bMapReversWL = Column(Boolean)
+    iEntryLoc = Column(Integer)
+    iDoorType = Column(Integer)
+    iADA = Column(Integer)
+    bClimate = Column(Boolean)
+    bPower = Column(Boolean)
+    bInside = Column(Boolean)
+    bAlarm = Column(Boolean)
+    bRentable = Column(Boolean)
+    bMobile = Column(Boolean)
+    bServiceRequired = Column(Boolean)
+    bExcludeFromWebsite = Column(Boolean)
+    bRented = Column(Boolean, index=True)
+    bWaitingListReserved = Column(Boolean)
+    bCorporate = Column(Boolean)
+    iDaysVacant = Column(Integer)
+    iDaysRented = Column(Integer)
+    dMovedIn = Column(DateTime)
+    iDefLeaseNum = Column(Integer)
+    DefaultCoverageID = Column(Integer)
+    dcStdRate = Column(Numeric(14, 4))
+    dcWebRate = Column(Numeric(14, 4))
+    dcPushRate = Column(Numeric(14, 4))
+    dcPushRate_NotRounded = Column(Numeric(14, 4))
+    dcBoardRate = Column(Numeric(14, 4))
+    dcPreferredRate = Column(Numeric(14, 4))
+    dcStdWeeklyRate = Column(Numeric(14, 4))
+    dcStdSecDep = Column(Numeric(14, 4))
+    dcRM_RoundTo = Column(Numeric(10, 4))
+    dcTax1Rate = Column(Numeric(10, 4))
+    dcTax2Rate = Column(Numeric(10, 4))
+    iPreferredChannelType = Column(Integer)
+    bPreferredIsPushRate = Column(Boolean)
+    deleted_at = Column(Date)
+
+    __table_args__ = (
+        UniqueConstraint('SiteID', 'UnitID', name='ccws_units_SiteID_UnitID_key'),
+        Index('idx_ccws_units_loc', 'sLocationCode'),
+    )
+
+
+class UnitDiscountCandidate(Base, BaseModel):
+    """
+    Per-unit candidate discount plans.
+
+    One row per (site_id, unit_id, plan_id, concession_id). Built by the
+    UnitDiscountCandidatesPipeline — combines `ccws_units`, `ccws_discount`
+    and `mw_discount_plans.linked_concessions` into a snapshot the
+    recommendation engine can query cheaply.
+
+    sTypeName is decomposed via common.stype_name_parser into the six
+    SOP COM01 dim columns (+ case_count for wine units).
+    """
+    __tablename__ = 'mw_unit_discount_candidates'
+
+    # Composite primary key
+    site_id = Column(Integer, primary_key=True)
+    unit_id = Column(Integer, primary_key=True)
+    plan_id = Column(Integer, primary_key=True)
+    concession_id = Column(Integer, primary_key=True)
+
+    # Identity
+    site_code = Column(String(20))
+    unit_type_id = Column(Integer)
+    stype_name = Column(String(100))
+
+    # Decomposed unit attributes (SOP COM01)
+    size_category = Column(String(5))
+    size_range = Column(String(10))
+    unit_type = Column(String(10))
+    climate_type = Column(String(5))
+    unit_shape = Column(String(5))
+    pillar = Column(String(5))
+    case_count = Column(Integer)
+    parse_ok = Column(Boolean, default=False, nullable=False)
+
+    # Pricing (from ccws_units)
+    std_rate = Column(Numeric(14, 4))
+    web_rate = Column(Numeric(14, 4))
+    push_rate = Column(Numeric(14, 4))
+    board_rate = Column(Numeric(14, 4))
+    preferred_rate = Column(Numeric(14, 4))
+
+    # Concession params (from ccws_discount)
+    amt_type = Column(Integer)
+    fixed_discount = Column(Numeric(14, 4))
+    pct_discount = Column(Numeric(7, 4))
+    max_amount_off = Column(Numeric(14, 4))
+    plan_start = Column(DateTime)
+    plan_end = Column(DateTime)
+    never_expires = Column(Boolean)
+    in_month = Column(Integer)
+    prepay = Column(Boolean)
+    prepaid_months = Column(Integer)
+    b_for_all_units = Column(Boolean)
+    b_for_corp = Column(Boolean)
+    restriction_flags = Column(Integer)
+    exclude_if_less_than = Column(Integer)
+    exclude_if_more_than = Column(Integer)
+    max_occ_pct = Column(Numeric(7, 4))
+
+    # Rules (from mw_discount_plans)
+    plan_type = Column(String(40))
+    plan_name = Column(String(200))
+    promo_period_start = Column(Date)
+    promo_period_end = Column(Date)
+    booking_period_start = Column(Date)
+    booking_period_end = Column(Date)
+    move_in_range = Column(String(80))
+    lock_in_period = Column(String(80))
+    payment_terms = Column(String(80))
+    # Duration limits from plan.restrictions. Metadata only — the candidate
+    # pipeline does NOT filter on these; the recommender applies them at
+    # query time against the booking's requested tenure.
+    min_duration_months = Column(Integer)
+    max_duration_months = Column(Integer)
+    # Distribution channel — comma-separated list from the plan's Restrictions
+    # block (Direct Mail, Chatbot, etc.). Surfaced so the recommender can
+    # filter candidates by the channel a booking originates from.
+    distribution_channel = Column(String(255))
+    # Hidden-rate flag from plan — when true, the plan shouldn't be exposed to
+    # public-facing channels.
+    hidden_rate = Column(Boolean)
+    discount_type = Column(String(40))
+    discount_numeric = Column(Numeric(14, 4))
+    discount_segmentation = Column(String(80))
+    is_active = Column(Boolean)
+
+    # Smart-lock assignment (only when this unit has one). Shape:
+    #   {"keypad_ids": [12345, 67890], "padlock_id": 999}
+    # NULL when the unit has no assignment. Never filtered on — display only.
+    smart_lock = Column(JSONB)
+
+    # Computed
+    effective_rate = Column(Numeric(14, 4))
+    computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index('idx_mudc_site_unit', 'site_id', 'unit_id'),
+        Index('idx_mudc_plan', 'plan_id'),
+        Index('idx_mudc_concession', 'concession_id'),
+        Index('idx_mudc_climate_size', 'climate_type', 'size_category'),
+    )
+
+
+class RecommenderExcludedUnitType(Base, BaseModel):
+    """
+    Unit type codes that must be permanently excluded from the
+    recommendation engine's candidate pool.
+
+    Codes match `mw_dim_unit_type.code` (e.g., MB, BZ, PR). The
+    UnitDiscountCandidatesPipeline reads this table on every run and
+    drops any candidate whose parsed unit_type is in this set.
+
+    Scope is global for now — a single row per unit_type. Per-site
+    overrides can be layered on later with a separate table.
+    """
+    __tablename__ = 'mw_recommender_excluded_unit_types'
+
+    unit_type = Column(String(10), primary_key=True)
+    reason = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_by = Column(String(120))
+    updated_by = Column(String(120))

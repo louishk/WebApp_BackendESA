@@ -19,7 +19,7 @@ class DiscountPlan(Base):
     - Basic rate plan fields (Plan Type, Discount %, Sites, T&Cs...)
     - Promotion brief fields (Offers, ChatBot, Distribution, bilingual T&Cs...)
     """
-    __tablename__ = 'discount_plans'
+    __tablename__ = 'mw_discount_plans'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
 
@@ -28,7 +28,7 @@ class DiscountPlan(Base):
     # =========================================================================
     plan_type = Column(String(50), nullable=False, comment="Category: Evergreen, Tactical, Seasonal")
     plan_name = Column(String(255), nullable=False, unique=True, comment="Unique plan name")
-    sitelink_discount_name = Column(String(255), comment="Discount name as shown in Sitelink")
+    group_name = Column(String(255), index=True, comment="Bucket label; plans sharing a group_name are managed together on the list page")
 
     # =========================================================================
     # Description
@@ -114,13 +114,16 @@ class DiscountPlan(Base):
     linked_concessions = Column(JSONB, default=list, comment="Array of {site_id, concession_id} pairs linking to ccws_discount")
 
     # =========================================================================
+    # Unit-level Restrictions (SOP COM01 dims)
+    # =========================================================================
+    # Dict keyed by dim name (size_category, size_range, unit_type, climate_type,
+    # unit_shape, pillar) with value = list of allowed codes. Empty list OR
+    # missing key = "no restriction on that dim".
+    restrictions = Column(JSONB, default=dict, comment="Per-dim multi-select restrictions from SOP COM01")
+
+    # =========================================================================
     # Extensible Custom Fields
     # =========================================================================
-    # JSONB bag for arbitrary key-value pairs added from the UI.
-    # Allows new discount attributes to be created without schema migrations.
-    # Structure: {"field_label": "value", ...}
-    custom_fields = Column(JSONB, default=dict, comment="User-defined extra fields as key-value pairs")
-
     # =========================================================================
     # Status & Ordering
     # =========================================================================
@@ -142,7 +145,7 @@ class DiscountPlan(Base):
             # Identification
             'plan_type': self.plan_type,
             'plan_name': self.plan_name,
-            'sitelink_discount_name': self.sitelink_discount_name,
+            'group_name': self.group_name,
             # Description
             'notes': self.notes,
             'objective': self.objective,
@@ -191,8 +194,7 @@ class DiscountPlan(Base):
             'department_notes': self.department_notes or {},
             # Sitelink linking
             'linked_concessions': self.linked_concessions or [],
-            # Custom fields
-            'custom_fields': self.custom_fields or {},
+            'restrictions': self.restrictions or {},
             # Status
             'is_active': self.is_active,
             'sort_order': self.sort_order,

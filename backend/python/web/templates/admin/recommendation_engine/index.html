@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Recommendation Engine - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Recommendation Engine</h1>
+</div>
+
+<p style="color: #555; max-width: 720px;">
+    Configure what feeds the unit-level discount recommender. Discount plans
+    themselves are managed under
+    <a href="{{ url_for('discount_plans.list_plans') }}">Discount Plans</a>.
+</p>
+
+<div class="form-grid" style="margin-top: 1.25rem;">
+    <div class="card" style="padding: 1rem;">
+        <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Unit types</div>
+        <div style="font-size: 1.8rem; font-weight: 700; color: var(--esa-navy);">{{ unit_type_count }}</div>
+        <div style="font-size: 0.85rem; color: #555;">in mw_dim_unit_type</div>
+    </div>
+    <div class="card" style="padding: 1rem;">
+        <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Excluded unit types</div>
+        <div style="font-size: 1.8rem; font-weight: 700; color: #dc2626;">{{ excluded_count }}</div>
+        <div style="font-size: 0.85rem; color: #555;">globally removed from candidates</div>
+    </div>
+    <div class="card" style="padding: 1rem;">
+        <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Candidate rows</div>
+        <div style="font-size: 1.8rem; font-weight: 700; color: #059669;">{{ "{:,}".format(candidate_count) }}</div>
+        <div style="font-size: 0.85rem; color: #555;">in mw_unit_discount_candidates</div>
+    </div>
+</div>
+
+<!-- ===================================================================== -->
+<!-- Candidate Filtering -->
+<!-- ===================================================================== -->
+<div class="card" style="margin-top: 1.25rem; padding: 1rem;">
+    <h3 style="margin-top: 0;">Candidate Filtering</h3>
+    <p style="font-size: 0.85rem; color: #666; margin-top: 0;">
+        Rules applied at <strong>candidate build time</strong> to trim which
+        (unit × plan × concession) triples ever reach the recommender. Each
+        filter runs every time the <code>mw_unit_discount_candidates</code>
+        pipeline refreshes.
+    </p>
+    <ul style="line-height: 1.9; margin-top: 0.5rem;">
+        <li>
+            <a href="{{ url_for('recommendation_engine.unit_availability') }}"><strong>Unit Type Availability</strong></a>
+            &mdash; permanently exclude entire unit types (Mailbox, BizPlus, Parking, &hellip;).
+            <span style="font-size: 0.8rem; color: #6b7280;">Currently {{ excluded_count }} excluded.</span>
+        </li>
+        <li style="color: #9ca3af;">
+            <em>More filters coming</em>: per-site overrides, occupancy thresholds,
+            unit-shape / pillar rules.
+        </li>
+    </ul>
+</div>
+
+<!-- ===================================================================== -->
+<!-- Ranking signals (future) -->
+<!-- ===================================================================== -->
+<div class="card" style="margin-top: 1rem; padding: 1rem; opacity: 0.8;">
+    <h3 style="margin-top: 0; color: #6b7280;">Ranking Signals <span style="font-size: 0.75rem; font-weight: 400;">(coming soon)</span></h3>
+    <p style="font-size: 0.85rem; color: #666; margin: 0;">
+        Weights and priorities the engine uses to pick the best plan per unit
+        (discount %, lock-in length, hidden-rate, segmentation, &hellip;). Configured here once the engine is live.
+    </p>
+</div>
+{% endblock %}

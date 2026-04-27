@@ -72,37 +72,6 @@ def _get_sites_by_country():
         return {'Sites': [{'code': c, 'name': c} for c in fallback]}, fallback
 
 
-def _get_sitelink_discount_names():
-    """Get distinct Sitelink discount plan names from ccws_discount (middleware DB).
-    Only returns active plans (not deleted/disabled/archived) with valid periods.
-    """
-    try:
-        from common.models import CcwsDiscount
-        from sqlalchemy import distinct, or_
-        from datetime import datetime
-        session = get_session()
-        try:
-            now = datetime.utcnow()
-            rows = (session.query(distinct(CcwsDiscount.sPlanName))
-                    .filter(CcwsDiscount.sPlanName.isnot(None))
-                    .filter(CcwsDiscount.dDeleted.is_(None))
-                    .filter(CcwsDiscount.dDisabled.is_(None))
-                    .filter(CcwsDiscount.dArchived.is_(None))
-                    .filter(or_(
-                        CcwsDiscount.dPlanEnd.is_(None),
-                        CcwsDiscount.bNeverExpires.is_(True),
-                        CcwsDiscount.dPlanEnd >= now,
-                    ))
-                    .order_by(CcwsDiscount.sPlanName)
-                    .all())
-            return [r[0] for r in rows if r[0] and r[0].strip()]
-        finally:
-            session.close()
-    except Exception as e:
-        current_app.logger.warning(f"Could not load sitelink discount names: {e}")
-        return []
-
-
 def _get_config_options():
     """Load active config options grouped by field_name."""
     from web.models.discount_plan_config import DiscountPlanConfig
@@ -159,6 +128,37 @@ def _parse_date_field(form_value):
         return None
 
 
+def _derive_discount_segmentation(discount_type, discount_numeric):
+    """Bucket a percentage discount into the canonical segmentation labels.
+
+    Canonical buckets (from mw_discount_plan_config.field_name='discount_segmentation'):
+        < 5%, >= 5% < 10%, >= 10% < 20%, >= 20% < 30%, >= 30% < 40%, >= 40%
+
+    Only percentage-type discounts are bucketed. Other discount types return
+    None — the recommender shouldn't treat a fixed-amount or free-period plan
+    as a percentage bucket without knowing the base rate.
+    """
+    if discount_type != 'percentage':
+        return None
+    try:
+        n = float(discount_numeric) if discount_numeric is not None else None
+    except (TypeError, ValueError):
+        return None
+    if n is None:
+        return None
+    if n < 5:
+        return '< 5%'
+    if n < 10:
+        return '>= 5% < 10%'
+    if n < 20:
+        return '>= 10% < 20%'
+    if n < 30:
+        return '>= 20% < 30%'
+    if n < 40:
+        return '>= 30% < 40%'
+    return '>= 40%'
+
+
 def _build_plan_from_form(form, plan=None, config_options=None):
     """Extract discount plan fields from the submitted form."""
     from web.models.discount_plan import DiscountPlan
@@ -181,7 +181,7 @@ def _build_plan_from_form(form, plan=None, config_options=None):
     # Identification
     plan.plan_type = form.get('plan_type', '').strip()
     plan.plan_name = form.get('plan_name', '').strip()
-    plan.sitelink_discount_name = form.get('sitelink_discount_name', '').strip() or None
+    plan.group_name = form.get('group_name', '').strip() or None
 
     # Description
     plan.notes = form.get('notes', '').strip() or None
@@ -208,14 +208,16 @@ def _build_plan_from_form(form, plan=None, config_options=None):
     plan.storage_type = _validate_config_value(form.get('storage_type', '').strip(), 'storage_type')
 
     # Discount details
-    plan.discount_value = form.get('discount_value', '').strip() or None
     plan.discount_type = form.get('discount_type', '').strip() or None
     raw_numeric = form.get('discount_numeric', '').strip()
     try:
         plan.discount_numeric = float(raw_numeric) if raw_numeric else None
     except ValueError:
         plan.discount_numeric = None
-    plan.discount_segmentation = _validate_config_value(form.get('discount_segmentation', '').strip(), 'discount_segmentation')
+    # Segmentation is auto-derived from (discount_type, discount_numeric).
+    plan.discount_segmentation = _derive_discount_segmentation(
+        plan.discount_type, plan.discount_numeric,
+    )
     plan.clawback_condition = form.get('clawback_condition', '').strip() or None
 
     # Offers (JSON)
@@ -248,8 +250,6 @@ def _build_plan_from_form(form, plan=None, config_options=None):
 
     # Promotion brief fields
     plan.hidden_rate = form.get('hidden_rate') == 'on'
-    plan.available_for_chatbot = form.get('available_for_chatbot') == 'on'
-    plan.chatbot_notes = form.get('chatbot_notes', '').strip() or None
     plan.switch_to_us = _validate_config_value(form.get('switch_to_us', '').strip(), 'switch_to_us') or 'Not Eligible'
     plan.referral_program = _validate_config_value(form.get('referral_program', '').strip(), 'referral_program') or 'Not Eligible'
     # Distribution channel (multi-choice checkboxes, stored comma-separated, validated against config)
@@ -258,19 +258,40 @@ def _build_plan_from_form(form, plan=None, config_options=None):
     valid_channels = [c.strip() for c in dist_channels if c.strip() and (not allowed_channels or c.strip() in allowed_channels)]
     plan.distribution_channel = ', '.join(valid_channels) or None
 
-    # Custom fields - dynamic key/value pairs from the form
-    cf_keys = form.getlist('cf_key')
-    cf_vals = form.getlist('cf_value')
-    custom = {}
-    for k, v in zip(cf_keys, cf_vals):
-        k = k.strip()
-        v = v.strip()
-        if k:
-            custom[k] = v
-    plan.custom_fields = custom if custom else {}
-
     # Linked Sitelink concessions
     plan.linked_concessions = _parse_json_field(form.get('linked_concessions_json'), [])
+
+    # Unit-level restrictions (SOP COM01). Stored as {dim: [codes], min/max_duration_months: int}.
+    # Only the known dim keys are persisted — unknown keys from client are dropped.
+    raw_restr = _parse_json_field(form.get('restrictions_json'), {})
+    cleaned_restr: dict = {}
+    if isinstance(raw_restr, dict):
+        for field in _DIM_FIELDS:
+            vals = raw_restr.get(field)
+            if isinstance(vals, list):
+                cleaned_restr[field] = [str(v).strip() for v in vals if str(v).strip()]
+
+    def _parse_month_int(s):
+        s = (s or '').strip()
+        if not s:
+            return None
+        try:
+            v = int(s)
+            return v if v >= 0 else None
+        except ValueError:
+            return None
+
+    min_dur = _parse_month_int(form.get('min_duration_months'))
+    max_dur = _parse_month_int(form.get('max_duration_months'))
+    # Swap if user inverted them; keep None when blank.
+    if min_dur is not None and max_dur is not None and min_dur > max_dur:
+        min_dur, max_dur = max_dur, min_dur
+    if min_dur is not None:
+        cleaned_restr['min_duration_months'] = min_dur
+    if max_dur is not None:
+        cleaned_restr['max_duration_months'] = max_dur
+
+    plan.restrictions = cleaned_restr
 
     # Status
     plan.is_active = form.get('is_active') == 'on'
@@ -282,13 +303,31 @@ def _build_plan_from_form(form, plan=None, config_options=None):
 
 def _edit_tpl_kwargs():
     """Build common template kwargs for create/edit pages."""
+    from web.models.discount_plan import DiscountPlan
+
     sites_by_country, all_site_codes = _get_sites_by_country()
+    # Existing group names for the <datalist> autocomplete on the edit form.
+    existing_groups: list[str] = []
+    try:
+        session = get_session()
+        try:
+            rows = (session.query(DiscountPlan.group_name)
+                    .filter(DiscountPlan.group_name.isnot(None))
+                    .filter(DiscountPlan.group_name != '')
+                    .distinct()
+                    .order_by(DiscountPlan.group_name)
+                    .all())
+            existing_groups = [r[0] for r in rows if r[0]]
+        finally:
+            session.close()
+    except Exception as e:
+        current_app.logger.warning(f"Could not load existing groups: {e}")
     return dict(
         sites_by_country=sites_by_country, site_codes=all_site_codes,
         plan_types=PLAN_TYPES, discount_types=DISCOUNT_TYPES,
         eligibility_options=ELIGIBILITY_OPTIONS,
-        sitelink_discount_names=_get_sitelink_discount_names(),
         config_options=_get_config_options(),
+        existing_groups=existing_groups,
     )
 
 
@@ -299,8 +338,9 @@ def _edit_tpl_kwargs():
 @discount_plans_bp.route('/')
 @login_required
 def list_plans():
-    """List all discount plans."""
+    """List all discount plans with per-plan candidate counts + setup audit."""
     from web.models.discount_plan import DiscountPlan
+    from sqlalchemy import text as sqltext
 
     sites_by_country, all_site_codes = _get_sites_by_country()
     db_session = get_session()
@@ -308,12 +348,75 @@ def list_plans():
         plans = (db_session.query(DiscountPlan)
                  .order_by(asc(DiscountPlan.sort_order), asc(DiscountPlan.plan_name))
                  .all())
+
+        # Candidate counts per plan id — how many units each plan reaches
+        # after all restriction + exclusion filtering by the pipeline.
+        cand_counts: dict = {}
+        try:
+            rows = db_session.execute(sqltext("""
+                SELECT plan_id, COUNT(*) AS n
+                FROM mw_unit_discount_candidates
+                GROUP BY plan_id
+            """)).fetchall()
+            cand_counts = {r[0]: r[1] for r in rows}
+        except Exception as e:
+            current_app.logger.warning(f"candidate count query failed: {e}")
+
+        # Per-plan audit — flag missing setup.
+        audits = {p.id: _audit_plan(p) for p in plans}
+
         return render_template('admin/discount_plans/list.html',
                                plans=plans,
                                sites_by_country=sites_by_country,
-                               site_codes=all_site_codes)
+                               site_codes=all_site_codes,
+                               cand_counts=cand_counts,
+                               audits=audits)
     finally:
         db_session.close()
+
+
+def _audit_plan(plan) -> dict:
+    """Return a simple health report for a plan.
+
+    status: "ok" | "warn" | "error"
+    issues: list of short strings explaining what's missing or inconsistent
+    """
+    issues: list[str] = []
+    # Sites
+    applicable = plan.applicable_sites or {}
+    has_sites = any(bool(v) for v in applicable.values()) if isinstance(applicable, dict) else False
+    if not has_sites:
+        issues.append('no applicable sites')
+    # Linked concessions
+    linked = plan.linked_concessions or []
+    if not isinstance(linked, list) or not linked:
+        issues.append('no linked SiteLink concessions')
+    # Discount numeric
+    if plan.discount_numeric is None:
+        issues.append('no discount_numeric')
+    # Discount type
+    if not plan.discount_type:
+        issues.append('no discount_type')
+    # Period dates
+    if not plan.promo_period_start and not plan.promo_period_end:
+        issues.append('no promo period')
+    # Duration
+    restr = plan.restrictions or {}
+    if isinstance(restr, dict):
+        mn = restr.get('min_duration_months')
+        mx = restr.get('max_duration_months')
+        if mn is None and mx is None:
+            issues.append('no min/max duration')
+        elif mn is not None and mx is not None and mn > mx:
+            issues.append('min > max duration')
+
+    if not issues:
+        status = 'ok'
+    elif any(k in ' '.join(issues) for k in ('no linked', 'min > max')):
+        status = 'error'
+    else:
+        status = 'warn'
+    return {'status': status, 'issues': issues}
 
 
 # =============================================================================
@@ -360,7 +463,7 @@ def create_plan():
             db_session.close()
 
     return render_template('admin/discount_plans/edit.html',
-                           plan=None, form_data={}, **tpl_kwargs)
+                           plan=None, form_data=request.form, **tpl_kwargs)
 
 
 # =============================================================================
@@ -407,7 +510,7 @@ def edit_plan(plan_id):
             return redirect(url_for('discount_plans.list_plans'))
 
         return render_template('admin/discount_plans/edit.html',
-                               plan=plan, form_data={}, **tpl_kwargs)
+                               plan=plan, form_data=request.form, **tpl_kwargs)
     except Exception as e:
         db_session.rollback()
         current_app.logger.error(f"Error editing discount plan: {e}")
@@ -420,6 +523,489 @@ def edit_plan(plan_id):
 # =============================================================================
 # Delete
 # =============================================================================
+
+# =============================================================================
+# AI-assisted extraction from pasted promo brief
+# =============================================================================
+
+_COUNTRY_NAME_MAP = {
+    'SG': 'Singapore',
+    'MY': 'Malaysia',
+    'KR': 'South Korea',
+    'HK': 'Hong Kong',
+    'JP': 'Japan',
+    'TW': 'Taiwan',
+    'TH': 'Thailand',
+}
+
+
+def _site_codes_for_country(country_iso: str) -> list[str]:
+    """Map a 2-letter country code to SiteCodes via SiteInfo."""
+    from common.models import SiteInfo
+    session = _get_pbi_session()
+    try:
+        name = _COUNTRY_NAME_MAP.get(country_iso)
+        if not name:
+            return []
+        rows = (session.query(SiteInfo.SiteCode)
+                .filter(SiteInfo.Country == name)
+                .filter(SiteInfo.SiteCode.isnot(None))
+                .all())
+        return [r[0] for r in rows if r[0]]
+    finally:
+        session.close()
+
+
+def _resolve_sitelink_name_to_concessions(plan_name: str, site_codes: list[str]) -> list[dict]:
+    """Find active ccws_discount rows matching `plan_name` within `site_codes`.
+
+    Returns JSONB-ready link entries: {site_id, concession_id, site_code, plan_name}.
+    Exact match first; falls back to case-insensitive substring if no exact hit.
+    """
+    from sqlalchemy import text as sqltext
+    from datetime import datetime
+    if not plan_name or not site_codes:
+        return []
+
+    session = get_session()
+    try:
+        now = datetime.utcnow()
+        params = {
+            'codes': site_codes,
+            'now': now,
+            'name_exact': plan_name,
+            'name_like': f'%{plan_name}%',
+        }
+        rows = session.execute(sqltext("""
+            WITH site_ids AS (
+                SELECT "SiteID", "SiteCode"
+                FROM mw_siteinfo
+                WHERE "SiteCode" = ANY(:codes)
+            ),
+            matches AS (
+                SELECT d."SiteID", d."ConcessionID", d."sPlanName",
+                       CASE WHEN d."sPlanName" = :name_exact THEN 1 ELSE 2 END AS priority
+                FROM ccws_discount d
+                WHERE d."SiteID" IN (SELECT "SiteID" FROM site_ids)
+                  AND d."dDeleted" IS NULL
+                  AND d."dDisabled" IS NULL
+                  AND d."dArchived" IS NULL
+                  AND (d."bNeverExpires" = TRUE
+                       OR d."dPlanEnd" IS NULL
+                       OR d."dPlanEnd" >= :now)
+                  AND (d."sPlanName" = :name_exact
+                       OR d."sPlanName" ILIKE :name_like)
+            ),
+            ranked AS (
+                SELECT m.*, s."SiteCode",
+                       MIN(priority) OVER (PARTITION BY m."SiteID") AS best
+                FROM matches m
+                JOIN site_ids s ON s."SiteID" = m."SiteID"
+            )
+            SELECT "SiteID", "ConcessionID", "sPlanName", "SiteCode"
+            FROM ranked
+            WHERE priority = best
+            ORDER BY "SiteCode", "ConcessionID"
+        """), params).mappings().all()
+
+        return [
+            {
+                'site_id': r['SiteID'],
+                'concession_id': r['ConcessionID'],
+                'site_code': r['SiteCode'] or '',
+                'plan_name': r['sPlanName'] or '',
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        current_app.logger.warning(
+            f"_resolve_sitelink_name_to_concessions failed for {plan_name!r}: {e}"
+        )
+        return []
+    finally:
+        session.close()
+
+
+# =============================================================================
+# Restrictions helpers — multi-select + live vacant-unit count
+# =============================================================================
+
+_DIM_FIELDS = ('size_category', 'size_range', 'unit_type',
+               'climate_type', 'unit_shape', 'pillar')
+_DIM_TABLE = {
+    'size_category': ('mw_dim_size_category', 'code', 'description', 'sort_order'),
+    'size_range':    ('mw_dim_size_range',    'range_code', 'description', 'sort_order'),
+    'unit_type':     ('mw_dim_unit_type',     'code', 'description', 'sort_order'),
+    'climate_type':  ('mw_dim_climate_type',  'code', 'description', 'sort_order'),
+    'unit_shape':    ('mw_dim_unit_shape',    'code', 'description', 'sort_order'),
+    'pillar':        ('mw_dim_pillar',        'code', 'description', 'sort_order'),
+}
+
+
+@discount_plans_bp.route('/api/dim-options')
+@login_required
+def api_dim_options():
+    """Return the canonical option lists for every SOP COM01 dim.
+
+    Shape: {"size_category": [{code, description}, ...], ...}
+    """
+    from sqlalchemy import text as sqltext
+    session = get_session()
+    try:
+        out: dict = {}
+        for field, (table, code_col, desc_col, sort_col) in _DIM_TABLE.items():
+            rows = session.execute(sqltext(
+                f'SELECT "{code_col}" AS code, "{desc_col}" AS description '
+                f'FROM {table} ORDER BY "{sort_col}"'
+            )).mappings().all()
+            out[field] = [{'code': r['code'], 'description': r['description']} for r in rows]
+        return jsonify(out)
+    finally:
+        session.close()
+
+
+@discount_plans_bp.route('/api/unit-count', methods=['POST'])
+@login_required
+@rate_limit_api(max_requests=60, window_seconds=60)
+def api_unit_count():
+    """Count vacant units matching the given site + restriction combo.
+
+    Body JSON: {"site_codes": [...], "restrictions": {dim: [codes]}}.
+    Returns: {"count": N, "by_site": {"L001": n, ...}, "parse_fail": N}.
+
+    Reads `ccws_available_units` (vacant units only — rented units aren't
+    impacted by plan-level restrictions) and applies the sTypeName parser
+    per row. Restrictions with empty/missing value lists are ignored.
+    """
+    from sqlalchemy import text as sqltext
+    from common.stype_name_parser import parse_stype_name
+
+    body = request.get_json(silent=True) or {}
+    site_codes = body.get('site_codes') or []
+    restrictions = body.get('restrictions') or {}
+    if not isinstance(site_codes, list) or not site_codes:
+        return jsonify({'count': 0, 'by_site': {}, 'parse_fail': 0, 'note': 'no sites'})
+
+    # Only keep known dim keys + string lists.
+    clean: dict = {}
+    for field in _DIM_FIELDS:
+        vals = restrictions.get(field)
+        if isinstance(vals, list):
+            s = [str(v).strip() for v in vals if str(v).strip()]
+            if s:
+                clean[field] = set(s)
+
+    session = get_session()
+    try:
+        rows = session.execute(sqltext("""
+            SELECT u."sLocationCode" AS site_code, u."sTypeName" AS stype_name
+            FROM ccws_available_units u
+            WHERE u."sLocationCode" = ANY(:codes)
+        """), {'codes': site_codes}).mappings().all()
+
+        by_site: dict = {code: 0 for code in site_codes}
+        parse_fail = 0
+        total = 0
+        for r in rows:
+            parts = parse_stype_name(r['stype_name'])
+            if not parts.parse_ok:
+                parse_fail += 1
+            # Apply each active restriction. A row passes only if its parsed
+            # value is IN the selected set for every restricted dim.
+            passes = True
+            for field, allowed in clean.items():
+                val = getattr(parts, field, None)
+                if val is None or val not in allowed:
+                    passes = False
+                    break
+            if passes:
+                total += 1
+                by_site[r['site_code']] = by_site.get(r['site_code'], 0) + 1
+
+        return jsonify({
+            'count': total,
+            'by_site': by_site,
+            'parse_fail': parse_fail,
+            'sites_queried': len(site_codes),
+        })
+    finally:
+        session.close()
+
+
+@discount_plans_bp.route('/ai-extract', methods=['GET', 'POST'])
+@login_required
+@_require_config_permission
+def ai_extract():
+    """Paste promo document → LLM returns N candidate plans."""
+    if request.method == 'GET':
+        return render_template('admin/discount_plans/ai_extract.html')
+
+    pasted = (request.form.get('pasted_text') or '').strip()
+    if not pasted:
+        flash('Paste the promo brief text before extracting.', 'error')
+        return render_template('admin/discount_plans/ai_extract.html')
+
+    from web.utils.promo_extractor import extract_plans
+    try:
+        candidates = extract_plans(pasted)
+    except Exception as e:
+        current_app.logger.error(f"AI extract failed: {e}")
+        flash('AI extraction failed. See server logs.', 'error')
+        return render_template('admin/discount_plans/ai_extract.html',
+                               pasted_text=pasted)
+
+    if not candidates:
+        flash('The LLM returned zero plans. Check the paste and try again.', 'error')
+        return render_template('admin/discount_plans/ai_extract.html',
+                               pasted_text=pasted)
+
+    # Enrich each candidate with a preview of the resolved fields.
+    for c in candidates:
+        site_codes = (
+            _site_codes_for_country(c.get('country') or '') if c.get('country') else []
+        )
+        c['_applicable_site_codes'] = site_codes
+        c['_matched_concessions'] = (
+            _resolve_sitelink_name_to_concessions(c.get('sitelink_plan_name') or '', site_codes)
+            if c.get('sitelink_plan_name') and site_codes else []
+        )
+
+    return render_template('admin/discount_plans/ai_picker.html',
+                           candidates=candidates, pasted_text=pasted)
+
+
+def _build_draft_plan_from_ai_candidate(db_session, data: dict):
+    """Build + persist one inactive DiscountPlan from an AI candidate dict.
+
+    Handles unique-name collision, country → applicable_sites, and
+    sitelink_plan_name → linked_concessions resolution. Returns the saved
+    plan on success, or raises on failure (caller manages the transaction).
+    """
+    from web.models.discount_plan import DiscountPlan
+
+    base_name = (data.get('plan_name') or 'AI Draft').strip() or 'AI Draft'
+    candidate_name = base_name
+    suffix = 2
+    while db_session.query(DiscountPlan).filter_by(plan_name=candidate_name).first():
+        candidate_name = f"{base_name} ({suffix})"
+        suffix += 1
+        if suffix > 50:
+            raise RuntimeError(f"could not find a unique name for '{base_name}'")
+
+    plan = DiscountPlan(
+        plan_name=candidate_name,
+        plan_type=data.get('plan_type') or 'Tactical',
+        group_name=(data.get('group_name') or '').strip() or None,
+        objective=data.get('objective') or None,
+        storage_type=data.get('storage_type') or None,
+        promo_period_start=_parse_date_field(data.get('promo_period_start')),
+        promo_period_end=_parse_date_field(data.get('promo_period_end')),
+        booking_period_start=_parse_date_field(data.get('booking_period_start')),
+        booking_period_end=_parse_date_field(data.get('booking_period_end')),
+        discount_type=data.get('discount_type') or None,
+        discount_numeric=data.get('discount_numeric'),
+        discount_segmentation=_derive_discount_segmentation(
+            data.get('discount_type'), data.get('discount_numeric'),
+        ),
+        payment_terms=data.get('payment_terms') or None,
+        deposit=data.get('deposit') or None,
+        lock_in_period=data.get('lock_in_period') or None,
+        distribution_channel=data.get('distribution_channel') or None,
+        switch_to_us=data.get('switch_to_us') or 'Not Eligible',
+        referral_program=data.get('referral_program') or 'Not Eligible',
+        terms_conditions=data.get('terms_conditions') or None,
+        tc_labels=data.get('tc_labels') or None,
+        rate_rules=data.get('rate_rules') or None,
+        rate_rules_sites=data.get('rate_rules_sites') or None,
+        notes=data.get('notes') or None,
+        is_active=False,
+        created_by=current_user.username,
+        updated_by=current_user.username,
+    )
+
+    country = (data.get('country') or '').strip().upper()
+    applicable: dict = {}
+    site_codes_for_plan: list[str] = []
+    if country:
+        site_codes_for_plan = _site_codes_for_country(country)
+        for code in site_codes_for_plan:
+            applicable[code] = True
+    plan.applicable_sites = applicable
+
+    sitelink_name = (data.get('sitelink_plan_name') or '').strip()
+    if sitelink_name and site_codes_for_plan:
+        plan.linked_concessions = _resolve_sitelink_name_to_concessions(
+            sitelink_name, site_codes_for_plan,
+        )
+    else:
+        plan.linked_concessions = []
+
+    db_session.add(plan)
+    return plan
+
+
+@discount_plans_bp.route('/ai-create', methods=['POST'])
+@login_required
+@_require_config_permission
+def ai_create():
+    """Create an inactive draft plan from a single AI candidate and open it."""
+    raw_payload = request.form.get('payload', '').strip()
+    if not raw_payload:
+        flash('Missing candidate payload.', 'error')
+        return redirect(url_for('discount_plans.ai_extract'))
+
+    try:
+        data = json.loads(raw_payload)
+    except (json.JSONDecodeError, TypeError):
+        flash('Invalid candidate payload.', 'error')
+        return redirect(url_for('discount_plans.ai_extract'))
+
+    db_session = get_session()
+    try:
+        plan = _build_draft_plan_from_ai_candidate(db_session, data)
+        db_session.commit()
+        audit_log(
+            AuditEvent.CONFIG_UPDATED,
+            f"AI-drafted discount plan '{plan.plan_name}' (id={plan.id})",
+        )
+        flash(f'Draft "{plan.plan_name}" created. Review and save to activate.', 'success')
+        return redirect(url_for('discount_plans.edit_plan', plan_id=plan.id))
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"Error creating AI draft plan: {e}")
+        flash('Could not create draft. Check server logs.', 'error')
+        return redirect(url_for('discount_plans.ai_extract'))
+    finally:
+        db_session.close()
+
+
+@discount_plans_bp.route('/ai-create-all', methods=['POST'])
+@login_required
+@_require_config_permission
+def ai_create_all():
+    """Bulk-create inactive draft plans for every AI candidate.
+
+    Body form field `payloads` holds a JSON array of candidate dicts. Each
+    successful creation lands in the list page with a summary flash; failed
+    rows are logged but don't block the batch.
+    """
+    raw_payloads = request.form.get('payloads', '').strip()
+    if not raw_payloads:
+        flash('Missing candidate payloads.', 'error')
+        return redirect(url_for('discount_plans.ai_extract'))
+
+    try:
+        candidates = json.loads(raw_payloads)
+    except (json.JSONDecodeError, TypeError):
+        flash('Invalid candidate payloads.', 'error')
+        return redirect(url_for('discount_plans.ai_extract'))
+
+    if not isinstance(candidates, list) or not candidates:
+        flash('No candidates to create.', 'error')
+        return redirect(url_for('discount_plans.ai_extract'))
+
+    created: list[str] = []
+    failed: list[str] = []
+    db_session = get_session()
+    try:
+        for i, data in enumerate(candidates, start=1):
+            if not isinstance(data, dict):
+                failed.append(f'#{i} (not a dict)')
+                continue
+            try:
+                plan = _build_draft_plan_from_ai_candidate(db_session, data)
+                db_session.flush()  # get id + surface UNIQUE conflicts inline
+                created.append(plan.plan_name)
+            except Exception as e:
+                db_session.rollback()
+                current_app.logger.error(
+                    f"ai_create_all: candidate #{i} failed: {e}"
+                )
+                failed.append(f'#{i} {(data.get("plan_name") or "unnamed")}: {e}')
+        if created:
+            db_session.commit()
+            audit_log(
+                AuditEvent.CONFIG_UPDATED,
+                f"AI-drafted {len(created)} discount plans: {', '.join(created[:10])}"
+                + (f" …(+{len(created) - 10})" if len(created) > 10 else '')
+            )
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"ai_create_all transaction failed: {e}")
+        flash('Batch-create transaction failed. Check server logs.', 'error')
+        return redirect(url_for('discount_plans.ai_extract'))
+    finally:
+        db_session.close()
+
+    if created and not failed:
+        flash(f'Created {len(created)} draft(s): {", ".join(created)}. All inactive — review and activate.', 'success')
+    elif created and failed:
+        flash(f'Created {len(created)} draft(s); {len(failed)} failed. See server logs for details.', 'info')
+    else:
+        flash(f'No drafts created — {len(failed)} failed.', 'error')
+    return redirect(url_for('discount_plans.list_plans'))
+
+
+@discount_plans_bp.route('/<int:plan_id>/duplicate', methods=['POST'])
+@login_required
+@_require_config_permission
+def duplicate_plan(plan_id):
+    """Duplicate an existing plan as an inactive draft and open it for editing.
+
+    Copies every column except id/created/updated bookkeeping. Name becomes
+    "Copy of <original>" (with a numeric suffix if that's already taken).
+    """
+    from web.models.discount_plan import DiscountPlan
+    from sqlalchemy import inspect as sa_inspect
+
+    db_session = get_session()
+    try:
+        orig = db_session.query(DiscountPlan).get(plan_id)
+        if not orig:
+            flash('Discount plan not found.', 'error')
+            return redirect(url_for('discount_plans.list_plans'))
+
+        # Build a fresh name that doesn't collide with the unique index.
+        base_name = f"Copy of {orig.plan_name}"
+        candidate = base_name
+        suffix = 2
+        while db_session.query(DiscountPlan).filter_by(plan_name=candidate).first():
+            candidate = f"{base_name} ({suffix})"
+            suffix += 1
+            if suffix > 50:
+                flash('Could not find a free name for the copy.', 'error')
+                return redirect(url_for('discount_plans.list_plans'))
+
+        # Shallow-copy all mapped columns except the primary key and audit fields.
+        skip = {'id', 'created_at', 'updated_at', 'created_by', 'updated_by', 'plan_name'}
+        data = {}
+        for col in sa_inspect(DiscountPlan).c.keys():
+            if col in skip:
+                continue
+            data[col] = getattr(orig, col)
+
+        copy = DiscountPlan(plan_name=candidate, **data)
+        copy.is_active = False  # drafts default inactive
+        copy.created_by = current_user.username
+        copy.updated_by = current_user.username
+
+        db_session.add(copy)
+        db_session.commit()
+
+        audit_log(
+            AuditEvent.CONFIG_UPDATED,
+            f"Duplicated discount plan '{orig.plan_name}' (id={plan_id}) → '{candidate}' (id={copy.id})",
+        )
+        flash(f'Plan duplicated as "{candidate}" (inactive). Review and save to activate.', 'success')
+        return redirect(url_for('discount_plans.edit_plan', plan_id=copy.id))
+    except Exception as e:
+        db_session.rollback()
+        current_app.logger.error(f"Error duplicating discount plan: {e}")
+        flash('Could not duplicate plan. Check server logs.', 'error')
+        return redirect(url_for('discount_plans.list_plans'))
+    finally:
+        db_session.close()
+
 
 @discount_plans_bp.route('/<int:plan_id>/delete', methods=['POST'])
 @login_required
@@ -581,62 +1167,82 @@ def api_get(plan_id):
 def api_search_concessions():
     """
     Search ccws_discount entries by plan name.
-    Query params: q (search text), site_id (optional filter).
+    Query params: q (search text), site_id (optional), site_code (optional).
+    Reads middleware — PBI's weekly ccws_discount sync was decommissioned.
     """
     q = request.args.get('q', '').strip()
     site_id = request.args.get('site_id', '').strip()
+    site_code = request.args.get('site_code', '').strip()
+    site_codes_raw = request.args.get('site_codes', '').strip()
+    site_codes = [c.strip() for c in site_codes_raw.split(',') if c.strip()] if site_codes_raw else []
 
-    if len(q) < 2 and not site_id:
+    if len(q) < 2 and not site_id and not site_code and not site_codes:
         return jsonify([])
 
+    from sqlalchemy import text as sqltext
+    from datetime import datetime
     try:
-        from common.models import CcwsDiscount, Site
-        pbi_session = _get_pbi_session()
+        session = get_session()
         try:
-            query = pbi_session.query(
-                CcwsDiscount.ConcessionID, CcwsDiscount.SiteID,
-                CcwsDiscount.sPlanName, CcwsDiscount.sDefPlanName,
-                CcwsDiscount.dcPCDiscount, CcwsDiscount.dPlanStrt, CcwsDiscount.dPlanEnd,
-            )
+            clauses = [
+                '"dDeleted" IS NULL',
+                '"dDisabled" IS NULL',
+                '"dArchived" IS NULL',
+                '("bNeverExpires" = TRUE OR "dPlanEnd" IS NULL OR "dPlanEnd" >= :now)',
+            ]
+            params = {'now': datetime.utcnow()}
+
             if q:
-                query = query.filter(CcwsDiscount.sPlanName.ilike(f'%{q}%'))
+                clauses.append('"sPlanName" ILIKE :q')
+                params['q'] = f'%{q}%'
             if site_id:
                 if not site_id.isdigit():
                     return jsonify({'error': 'Invalid site_id'}), 400
-                query = query.filter(CcwsDiscount.SiteID == int(site_id))
-            from sqlalchemy import or_
-            from datetime import datetime
-            now = datetime.utcnow()
-            query = (query
-                .filter(CcwsDiscount.dDeleted.is_(None))
-                .filter(CcwsDiscount.dDisabled.is_(None))
-                .filter(CcwsDiscount.dArchived.is_(None))
-                .filter(or_(
-                    CcwsDiscount.dPlanEnd.is_(None),
-                    CcwsDiscount.bNeverExpires.is_(True),
-                    CcwsDiscount.dPlanEnd >= now,
-                )))
-            results = query.order_by(CcwsDiscount.SiteID, CcwsDiscount.sPlanName).limit(50).all()
+                clauses.append('"SiteID" = :sid')
+                params['sid'] = int(site_id)
+            if site_code:
+                clauses.append('"SiteID" IN (SELECT "SiteID" FROM mw_siteinfo WHERE "SiteCode" = :scode)')
+                params['scode'] = site_code
+            if site_codes:
+                clauses.append('"SiteID" IN (SELECT "SiteID" FROM mw_siteinfo WHERE "SiteCode" = ANY(:scodes))')
+                params['scodes'] = site_codes
 
-            # Get site names
-            site_ids = list({r.SiteID for r in results})
-            site_map = {}
+            sql = sqltext(f"""
+                SELECT "ConcessionID", "SiteID", "sPlanName", "sDefPlanName",
+                       "dcPCDiscount", "dPlanStrt", "dPlanEnd"
+                FROM ccws_discount
+                WHERE {' AND '.join(clauses)}
+                ORDER BY "SiteID", "sPlanName"
+                LIMIT 50
+            """)
+            rows = session.execute(sql, params).mappings().all()
+
+            site_ids = sorted({r['SiteID'] for r in rows})
+            site_map: dict = {}
             if site_ids:
-                sites = pbi_session.query(Site.SiteID, Site.sSiteName, Site.sLocationCode).filter(Site.SiteID.in_(site_ids)).all()
-                site_map = {s.SiteID: {'name': s.sSiteName, 'code': s.sLocationCode} for s in sites}
+                info_rows = session.execute(sqltext("""
+                    SELECT "SiteID", "SiteCode", "Name"
+                    FROM mw_siteinfo
+                    WHERE "SiteID" = ANY(:sids)
+                """), {'sids': site_ids}).mappings().all()
+                for s in info_rows:
+                    site_map[s['SiteID']] = {
+                        'name': s.get('Name') or f"Site {s['SiteID']}",
+                        'code': s.get('SiteCode') or '',
+                    }
 
             return jsonify([{
-                'concession_id': r.ConcessionID,
-                'site_id': r.SiteID,
-                'site_name': site_map.get(r.SiteID, {}).get('name', f'Site {r.SiteID}'),
-                'site_code': site_map.get(r.SiteID, {}).get('code', ''),
-                'plan_name': r.sPlanName or r.sDefPlanName or '-',
-                'discount_pct': float(r.dcPCDiscount) if r.dcPCDiscount else None,
-                'start': r.dPlanStrt.strftime('%Y-%m-%d') if r.dPlanStrt else None,
-                'end': r.dPlanEnd.strftime('%Y-%m-%d') if r.dPlanEnd else None,
-            } for r in results])
+                'concession_id': r['ConcessionID'],
+                'site_id': r['SiteID'],
+                'site_name': site_map.get(r['SiteID'], {}).get('name', f"Site {r['SiteID']}"),
+                'site_code': site_map.get(r['SiteID'], {}).get('code', ''),
+                'plan_name': r['sPlanName'] or r['sDefPlanName'] or '-',
+                'discount_pct': float(r['dcPCDiscount']) if r['dcPCDiscount'] is not None else None,
+                'start': r['dPlanStrt'].strftime('%Y-%m-%d') if r['dPlanStrt'] else None,
+                'end': r['dPlanEnd'].strftime('%Y-%m-%d') if r['dPlanEnd'] else None,
+            } for r in rows])
         finally:
-            pbi_session.close()
+            session.close()
     except Exception as e:
         current_app.logger.error(f"Concession search error: {e}")
         return jsonify({'error': 'Concession search failed'}), 500
@@ -708,6 +1314,95 @@ def api_concessions_by_plan_name():
             pbi_session.close()
     except Exception as e:
         current_app.logger.error(f"Concessions by plan name error: {e}")
+        return jsonify({'error': 'Failed to fetch concessions'}), 500
+
+
+@discount_plans_bp.route('/api/concessions/by-ids')
+@login_required
+@rate_limit_api(max_requests=30, window_seconds=60)
+def api_concessions_by_ids():
+    """Hydrate linked_concessions entries with site_code + sPlanName.
+
+    Query param `items` is a comma-separated list of "site_id:concession_id"
+    pairs (e.g. `100:900,101:500`). Reads middleware `ccws_discount` +
+    `mw_siteinfo`. Used by the edit page to render existing links with
+    readable labels even when the stored JSONB predates the upgraded
+    picker format.
+    """
+    items_raw = request.args.get('items', '').strip()
+    if not items_raw:
+        return jsonify([])
+
+    pairs: list[tuple[int, int]] = []
+    for token in items_raw.split(','):
+        token = token.strip()
+        if not token or ':' not in token:
+            continue
+        sid_s, cid_s = token.split(':', 1)
+        if not sid_s.isdigit() or not cid_s.isdigit():
+            continue
+        pairs.append((int(sid_s), int(cid_s)))
+
+    if not pairs:
+        return jsonify([])
+
+    if len(pairs) > 500:
+        return jsonify({'error': 'Too many items (max 500)'}), 400
+
+    try:
+        from sqlalchemy import text
+        session = get_session()
+        try:
+            site_ids = list({sid for sid, _ in pairs})
+            conc_ids = list({cid for _, cid in pairs})
+            rows = session.execute(text("""
+                SELECT "SiteID", "ConcessionID", "sPlanName", "sDefPlanName",
+                       "dcPCDiscount", "dPlanStrt", "dPlanEnd"
+                FROM ccws_discount
+                WHERE "SiteID" = ANY(:sids)
+                  AND "ConcessionID" = ANY(:cids)
+            """), {'sids': site_ids, 'cids': conc_ids}).mappings().all()
+
+            # site_code lookup via mw_siteinfo
+            sites = session.execute(text("""
+                SELECT "SiteID", "SiteCode"
+                FROM mw_siteinfo
+                WHERE "SiteID" = ANY(:sids)
+            """), {'sids': site_ids}).mappings().all()
+            site_code_map = {s['SiteID']: s['SiteCode'] for s in sites}
+
+            by_key = {(r['SiteID'], r['ConcessionID']): r for r in rows}
+
+            out = []
+            for sid, cid in pairs:
+                r = by_key.get((sid, cid))
+                if r is None:
+                    # Concession not found — still return the pair so the UI
+                    # shows a placeholder rather than dropping the selection.
+                    out.append({
+                        'site_id': sid,
+                        'concession_id': cid,
+                        'site_code': site_code_map.get(sid, ''),
+                        'plan_name': '(concession not found)',
+                        'discount_pct': None,
+                        'start': None,
+                        'end': None,
+                    })
+                    continue
+                out.append({
+                    'site_id': sid,
+                    'concession_id': cid,
+                    'site_code': site_code_map.get(sid, ''),
+                    'plan_name': r['sPlanName'] or r['sDefPlanName'] or '-',
+                    'discount_pct': float(r['dcPCDiscount']) if r['dcPCDiscount'] else None,
+                    'start': r['dPlanStrt'].strftime('%Y-%m-%d') if r['dPlanStrt'] else None,
+                    'end': r['dPlanEnd'].strftime('%Y-%m-%d') if r['dPlanEnd'] else None,
+                })
+            return jsonify(out)
+        finally:
+            session.close()
+    except Exception as e:
+        current_app.logger.error(f"Concessions by-ids error: {e}")
         return jsonify({'error': 'Failed to fetch concessions'}), 500
 
 

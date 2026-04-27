@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}AI Extract — Pick Plans{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Extracted Candidate Plans</h1>
+    <div>
+        <a href="{{ url_for('discount_plans.ai_extract') }}" class="btn btn-secondary">Edit Paste</a>
+        <a href="{{ url_for('discount_plans.list_plans') }}" class="btn btn-secondary">Back to List</a>
+    </div>
+</div>
+
+<p style="color: #555; max-width: 780px;">
+    The model found <strong>{{ candidates | length }}</strong> candidate plan(s). Create them all at once, or create them individually — single-create opens the edit view, bulk-create returns to the list.
+</p>
+
+{% if candidates %}
+<form method="POST" action="{{ url_for('discount_plans.ai_create_all') }}" style="margin-bottom: 1rem;"
+      onsubmit="return confirm('Create {{ candidates | length }} draft plan(s)? They will be inactive until you review and save each.');">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+    <input type="hidden" name="payloads" value='{{ candidates | tojson | e }}'>
+    <button type="submit" class="btn" style="font-weight: 600;">Create All {{ candidates | length }} Draft(s)</button>
+    <span style="margin-left: 0.5rem; color: #6b7280; font-size: 0.8rem;">All marked inactive — review each on the list page.</span>
+</form>
+{% endif %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div style="margin-bottom: 1rem;">
+        {% for category, message in messages %}
+        <div style="padding: 0.6rem 0.9rem; border-radius: 6px; margin-bottom: 0.4rem; font-size: 0.9rem;
+            {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;
+            {% elif category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;
+            {% else %}background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe;{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+{% endwith %}
+
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1rem;">
+    {% for c in candidates %}
+    <div class="card" style="padding: 1rem;">
+        <div style="font-size: 0.75rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em;">
+            {{ c.country or '—' }} · {{ c.storage_type or '—' }}
+        </div>
+        <h3 style="margin: 0.2rem 0 0.2rem 0; font-size: 1rem; color: var(--esa-navy);">{{ c.plan_name or '(unnamed)' }}</h3>
+        {% if c.group_name %}<div style="font-size: 0.72rem; color: #4338ca; margin-bottom: 0.35rem;">Group: <strong>{{ c.group_name }}</strong></div>{% endif %}
+        <div style="font-size: 0.82rem; line-height: 1.5; color: #374151;">
+            <div><strong>Type:</strong> {{ c.plan_type or '-' }}</div>
+            {% if c.discount_type or c.discount_numeric %}
+            <div><strong>Discount:</strong>
+                {% if c.discount_type == 'percentage' %}{{ c.discount_numeric or '?' }}%
+                {% elif c.discount_numeric %}{{ c.discount_numeric }} ({{ c.discount_type or '-' }})
+                {% else %}{{ c.discount_type }}
+                {% endif %}
+            </div>
+            {% endif %}
+            <div><strong>Promo:</strong> {{ c.promo_period_start or '?' }} → {{ c.promo_period_end or '?' }}</div>
+            {% if c.booking_period_start or c.booking_period_end %}
+            <div><strong>Lease start:</strong> {{ c.booking_period_start or '?' }} → {{ c.booking_period_end or '?' }}</div>
+            {% endif %}
+            <div><strong>Payment:</strong> {{ c.payment_terms or '-' }} · <strong>Deposit:</strong> {{ c.deposit or '-' }}</div>
+            <div><strong>Lock-in:</strong> {{ c.lock_in_period or '-' }}</div>
+            {% if c._applicable_site_codes %}
+            <div><strong>Applicable sites:</strong>
+                <span style="color: #6b7280;">{{ c._applicable_site_codes | length }} site(s) ({{ (c._applicable_site_codes | join(', '))[:80] }}{% if (c._applicable_site_codes | join(', ')) | length > 80 %}…{% endif %})</span>
+            </div>
+            {% elif c.country %}
+            <div><strong>Applicable sites:</strong> <span style="color: #dc2626;">no sites matched for {{ c.country }}</span></div>
+            {% endif %}
+            {% if c.sitelink_plan_name %}
+            <div><strong>Sitelink plan:</strong> <code>{{ c.sitelink_plan_name }}</code>
+                {% if c._matched_concessions %}
+                    <span style="color: #059669;">→ {{ c._matched_concessions | length }} concession match(es)</span>
+                {% else %}
+                    <span style="color: #d97706;">→ 0 matches in applicable sites (link manually after save)</span>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% if c.rate_rules %}
+            <div><strong>Rate rules:</strong> <span style="color: #6b7280;">{{ c.rate_rules[:80] }}{% if c.rate_rules | length > 80 %}…{% endif %}</span></div>
+            {% endif %}
+            {% if c.terms_conditions %}
+            <div style="margin-top: 0.4rem;"><strong>T&amp;Cs ({{ c.terms_conditions | length }}):</strong>
+                <ul style="margin: 0.2rem 0 0 1rem; padding: 0; font-size: 0.78rem; color: #4b5563;">
+                    {% for t in c.terms_conditions[:3] %}<li>{{ t[:90] }}{% if t | length > 90 %}…{% endif %}</li>{% endfor %}
+                    {% if c.terms_conditions | length > 3 %}<li style="font-style: italic;">+{{ c.terms_conditions | length - 3 }} more</li>{% endif %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+
+        <form method="POST" action="{{ url_for('discount_plans.ai_create') }}" style="margin-top: 0.75rem;">
+            {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+            <input type="hidden" name="payload" value='{{ c | tojson | e }}'>
+            <button type="submit" class="btn btn-sm">Create Draft</button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Unit Type Availability - Candidate Filtering{% endblock %}
+
+{% block content %}
+<div style="font-size: 0.8rem; color: #6b7280; margin-bottom: 0.25rem;">
+    <a href="{{ url_for('recommendation_engine.index') }}" style="color: #6b7280;">Recommendation Engine</a>
+    &rsaquo; Candidate Filtering &rsaquo; <strong>Unit Type Availability</strong>
+</div>
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1 style="margin: 0;">Unit Type Availability</h1>
+    <a href="{{ url_for('recommendation_engine.index') }}" class="btn btn-secondary">Back</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div style="margin-bottom: 1rem;">
+        {% for category, message in messages %}
+        <div style="padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 0.5rem;
+            {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;
+            {% elif category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;
+            {% else %}background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe;{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+{% endwith %}
+
+<p style="color: #555; max-width: 780px;">
+    Tick a unit type to <strong>exclude</strong> it from the recommendation
+    engine's candidate pool. Excluded types still exist in SiteLink &mdash; they
+    just never appear as recommendations. The exclusion is applied on the next
+    <code>mw_unit_discount_candidates</code> pipeline run.
+</p>
+
+<div style="font-size: 0.9rem; color: #555; margin-bottom: 0.75rem;">
+    <strong>{{ excluded_count }}</strong> of <strong>{{ total_types }}</strong> unit types excluded.
+</div>
+
+<form method="POST" action="{{ url_for('recommendation_engine.unit_availability_save') }}">
+    {% if csrf_token %}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% endif %}
+
+    {% for group, items in grouped.items() %}
+    <div class="card" style="margin-bottom: 1rem; padding: 1rem;">
+        <h3 style="margin-top: 0; color: var(--esa-navy); font-size: 1rem;">{{ group }}</h3>
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+            <thead>
+                <tr style="background: var(--esa-gray); text-align: left;">
+                    <th style="padding: 0.4rem 0.6rem; width: 70px;">Exclude</th>
+                    <th style="padding: 0.4rem 0.6rem; width: 90px;">Code</th>
+                    <th style="padding: 0.4rem 0.6rem;">Description</th>
+                    <th style="padding: 0.4rem 0.6rem;">Reason (optional)</th>
+                    <th style="padding: 0.4rem 0.6rem; width: 180px;">Last update</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in items %}
+                <tr style="border-bottom: 1px solid var(--esa-gray);">
+                    <td style="padding: 0.4rem 0.6rem;">
+                        <input type="checkbox" name="excluded_unit_type" value="{{ t.code }}"
+                               id="chk_{{ t.code }}" {% if t.excluded %}checked{% endif %}>
+                    </td>
+                    <td style="padding: 0.4rem 0.6rem;"><code>{{ t.code }}</code></td>
+                    <td style="padding: 0.4rem 0.6rem;">
+                        <label for="chk_{{ t.code }}" style="cursor: pointer;">{{ t.description }}</label>
+                    </td>
+                    <td style="padding: 0.4rem 0.6rem;">
+                        <input type="text" name="reason_{{ t.code }}" value="{{ t.reason }}"
+                               placeholder="Why excluded?"
+                               style="width: 100%; padding: 0.3rem 0.5rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.85rem;">
+                    </td>
+                    <td style="padding: 0.4rem 0.6rem; font-size: 0.8rem; color: #666;">
+                        {% if t.updated_at %}
+                            {{ t.updated_at.strftime('%Y-%m-%d %H:%M') }}
+                            {% if t.updated_by %}<br>by {{ t.updated_by }}{% endif %}
+                        {% else %}
+                            &mdash;
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+
+    <div style="display: flex; gap: 0.75rem; align-items: center;">
+        {% if current_user.can_manage_configs() %}
+        <button type="submit" class="btn">Save Exclusions</button>
+        {% else %}
+        <div style="color: #888; font-size: 0.85rem;">Read-only &mdash; config management permission required to edit.</div>
+        {% endif %}
+        <a href="{{ url_for('recommendation_engine.index') }}" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}

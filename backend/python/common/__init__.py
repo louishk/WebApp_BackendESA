@@ -59,8 +59,11 @@ from .models import (
     GadsCampaignDaily, GadsCampaignConversions, GadsAdGroupDaily, GadsKeywordDaily,
 )
 from .models import IglooProperty, IglooDevice  # Igloo smart lock models
+from .models import ZoomContactSync, ZoomCallLog, ZoomSyncState, CallScoringConfig  # Zoom Phone sync models
 from .models import Tenant, Ledger, Charge, CcwsDiscount  # CallCenterWs models
 from .models import CcwsTenant, CcwsLedger, CcwsCharge  # CallCenterWs API-only models
+from .models import UnitDiscountCandidate  # Per-unit discount candidates (phase 1)
+from .models import RecommenderExcludedUnitType  # Recommender unit-type exclusions
 # Management Summary models
 from .models import (
     MSDeposits, MSReceipts, MSConcessions, MSDiscounts, MSLiabilities,
@@ -98,6 +101,9 @@ from .soap_reports import SOAPReportClient, ReportConfig, REPORT_REGISTRY
 
 # SugarCRM client
 from .sugarcrm_client import SugarCRMClient
+
+# Zoom Phone client
+from .zoom_client import ZoomClient, ZoomAPIError
 
 # Pipeline DB helper
 from .pipeline_db import PipelineDB
@@ -160,6 +166,9 @@ __all__ = [
     'CcwsTenant',
     'CcwsLedger',
     'CcwsCharge',
+    # Discount module phase 1
+    'UnitDiscountCandidate',
+    'RecommenderExcludedUnitType',
     # Management Summary models
     'MSDeposits',
     'MSReceipts',
@@ -189,6 +198,11 @@ __all__ = [
     # Igloo smart lock models
     'IglooProperty',
     'IglooDevice',
+    # Zoom Phone sync models
+    'ZoomContactSync',
+    'ZoomCallLog',
+    'ZoomSyncState',
+    'CallScoringConfig',
 
     # Operations
     'BaseRepository',
@@ -218,6 +232,10 @@ __all__ = [
 
     # SugarCRM Client
     'SugarCRMClient',
+
+    # Zoom Phone Client
+    'ZoomClient',
+    'ZoomAPIError',
 
     # Pipeline DB helper
     'PipelineDB',

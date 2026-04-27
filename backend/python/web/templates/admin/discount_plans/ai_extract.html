@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}AI Extract — Discount Plans{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>AI Extract — Promo Brief</h1>
+    <a href="{{ url_for('discount_plans.list_plans') }}" class="btn btn-secondary">Back</a>
+</div>
+
+<p style="color: #555; max-width: 780px;">
+    Paste the promo brief (copy-paste straight from Excel — tab separators are fine). The model reads the matrix, returns one draft per column, and you pick which ones to create.
+</p>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div style="margin-bottom: 1rem;">
+        {% for category, message in messages %}
+        <div style="padding: 0.6rem 0.9rem; border-radius: 6px; margin-bottom: 0.4rem; font-size: 0.9rem;
+            {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;
+            {% elif category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;
+            {% else %}background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe;{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+{% endwith %}
+
+<style>
+@keyframes esa-progress-slide {
+    0%   { left: -30%; right: 100%; }
+    60%  { left: 100%; right: -30%; }
+    100% { left: 100%; right: -30%; }
+}
+#ai-progress-overlay {
+    position: fixed; inset: 0; background: rgba(17, 24, 39, 0.55);
+    display: none; align-items: center; justify-content: center; z-index: 9999;
+    backdrop-filter: blur(2px);
+}
+#ai-progress-overlay.show { display: flex; }
+#ai-progress-overlay .panel {
+    background: #fff; border-radius: 8px; padding: 1.25rem 1.5rem;
+    width: 420px; max-width: calc(100vw - 2rem);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+}
+#ai-progress-overlay .bar-track {
+    position: relative; height: 8px; background: #e5e7eb; border-radius: 4px;
+    overflow: hidden; margin: 0.8rem 0 0.5rem 0;
+}
+#ai-progress-overlay .bar-fill {
+    position: absolute; top: 0; height: 100%;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6);
+    border-radius: 4px;
+    animation: esa-progress-slide 1.6s ease-in-out infinite;
+}
+#ai-progress-overlay .status {
+    font-size: 0.85rem; color: #4b5563; display: flex;
+    justify-content: space-between; align-items: baseline;
+}
+</style>
+
+<div id="ai-progress-overlay" role="status" aria-live="polite">
+    <div class="panel">
+        <div style="font-weight: 700; color: var(--esa-navy); font-size: 1rem;">Extracting plans…</div>
+        <div style="font-size: 0.82rem; color: #6b7280; margin-top: 0.2rem;">
+            Sending the brief to the Foundry model and parsing candidates. This usually takes 5–20 seconds.
+        </div>
+        <div class="bar-track"><div class="bar-fill"></div></div>
+        <div class="status">
+            <span id="ai-progress-stage">Contacting the model…</span>
+            <span id="ai-progress-elapsed" style="font-variant-numeric: tabular-nums;">0s</span>
+        </div>
+    </div>
+</div>
+
+<form method="POST" action="{{ url_for('discount_plans.ai_extract') }}" id="ai-extract-form">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+    <div class="card" style="padding: 1rem;">
+        <label for="pasted_text" style="display: block; font-weight: 600; margin-bottom: 0.4rem;">Paste promo brief</label>
+        <textarea id="pasted_text" name="pasted_text" rows="14" placeholder="Paste straight from Excel — tabs preserved..."
+                  style="width: 100%; padding: 0.5rem; font-family: ui-monospace, 'Menlo', monospace; font-size: 0.78rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px;">{{ pasted_text or '' }}</textarea>
+        <div style="display: flex; gap: 0.6rem; margin-top: 0.75rem; align-items: center;">
+            <button type="submit" id="ai-extract-submit" class="btn">Extract Plans</button>
+            <span id="paste-stats" style="font-size: 0.8rem; color: #6b7280;">Paste to preview.</span>
+        </div>
+    </div>
+
+    <div class="card" style="padding: 0.75rem; margin-top: 0.75rem; overflow-x: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+            <strong style="font-size: 0.85rem;">Preview (first 50 rows)</strong>
+            <span style="font-size: 0.75rem; color: #6b7280;">This is what the model sees — verify the grid landed correctly.</span>
+        </div>
+        <div id="paste-preview" style="font-size: 0.78rem;">
+            <div style="color: #9ca3af; padding: 0.5rem;">Nothing pasted yet.</div>
+        </div>
+    </div>
+</form>
+
+<script>
+(function() {
+    var area = document.getElementById('pasted_text');
+    var host = document.getElementById('paste-preview');
+    var stats = document.getElementById('paste-stats');
+
+    function render() {
+        var txt = area.value || '';
+        if (!txt.trim()) {
+            host.innerHTML = '<div style="color:#9ca3af;padding:0.5rem;">Nothing pasted yet.</div>';
+            stats.textContent = 'Paste to preview.';
+            return;
+        }
+        var rows = txt.split(/\r?\n/).slice(0, 50);
+        var cols = Math.max.apply(null, rows.map(function(r) { return r.split('\t').length; }));
+        stats.textContent = rows.length + ' row(s), ' + cols + ' column(s) (first 50 rows shown).';
+
+        var table = document.createElement('table');
+        table.style.cssText = 'width: 100%; border-collapse: collapse; font-family: ui-monospace, Menlo, monospace; font-size: 0.72rem;';
+        rows.forEach(function(line, i) {
+            var tr = document.createElement('tr');
+            if (i < 3) tr.style.background = '#f3f4f6';
+            var cells = line.split('\t');
+            for (var c = 0; c < cols; c++) {
+                var td = document.createElement('td');
+                td.style.cssText = 'border: 1px solid #e5e7eb; padding: 0.15rem 0.35rem; vertical-align: top; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+                td.title = cells[c] || '';
+                td.textContent = cells[c] || '';
+                tr.appendChild(td);
+            }
+            table.appendChild(tr);
+        });
+        host.innerHTML = '';
+        host.appendChild(table);
+    }
+
+    area.addEventListener('input', render);
+    render();
+})();
+
+// ---------------------------------------------------------------------------
+// Progress overlay while the LLM works.
+// ---------------------------------------------------------------------------
+(function() {
+    var form = document.getElementById('ai-extract-form');
+    var overlay = document.getElementById('ai-progress-overlay');
+    var elapsedEl = document.getElementById('ai-progress-elapsed');
+    var stageEl = document.getElementById('ai-progress-stage');
+    var submitBtn = document.getElementById('ai-extract-submit');
+    if (!form || !overlay) return;
+
+    form.addEventListener('submit', function(e) {
+        var text = (document.getElementById('pasted_text').value || '').trim();
+        if (!text) return; // let the server flash the normal error
+        overlay.classList.add('show');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Extracting…';
+
+        var start = Date.now();
+        var stages = [
+            [0,    'Contacting the model…'],
+            [3000, 'Parsing the matrix…'],
+            [8000, 'Identifying columns…'],
+            [15000,'Model is thinking — long docs take longer…'],
+            [30000,'Still extracting — hang on…'],
+        ];
+        setInterval(function() {
+            var ms = Date.now() - start;
+            elapsedEl.textContent = (ms / 1000).toFixed(1) + 's';
+            for (var i = stages.length - 1; i >= 0; i--) {
+                if (ms >= stages[i][0]) {
+                    stageEl.textContent = stages[i][1];
+                    break;
+                }
+            }
+        }, 100);
+    });
+
+    // If the user navigates back via bfcache (Safari/Firefox), hide the overlay.
+    window.addEventListener('pageshow', function(e) {
+        if (e.persisted) {
+            overlay.classList.remove('show');
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Extract Plans';
+        }
+    });
+})();
+</script>
+{% endblock %}

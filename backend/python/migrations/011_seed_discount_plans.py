@@ -51,7 +51,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Standard Rate",
-        "sitelink_discount_name": "Best Rate",
         "notes": None,
         "objective": "Standard Rate - Best Rate in a non-promotional condition.",
         "period_range": "Permanent",
@@ -73,7 +72,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Prepaid - 6M",
-        "sitelink_discount_name": "6M Prepaid",
         "notes": "To stop and switch to Free Months offer",
         "objective": "Offer a discount to Prepaid customers.",
         "period_range": "Permanent",
@@ -95,7 +93,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Prepaid - 12M",
-        "sitelink_discount_name": "12M Prepaid",
         "notes": "To stop and switch to Free Months offer",
         "objective": "Offer a discount to Prepaid customers.",
         "period_range": "Permanent",
@@ -117,7 +114,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Permanent Offer 6M",
-        "sitelink_discount_name": None,
         "notes": "Replace 6M Prepaid",
         "objective": "Permanent Offer 6M",
         "period_range": "Permanent",
@@ -139,7 +135,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Permanent Offer 12M",
-        "sitelink_discount_name": None,
         "notes": "Replace 12M Prepaid",
         "objective": "Permanent Offer 12M",
         "period_range": "Permanent",
@@ -161,7 +156,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Referral - Referee",
-        "sitelink_discount_name": "Customer Referee",
         "notes": None,
         "objective": "Offer an Incentive to customer referring us.",
         "period_range": "Permanent",
@@ -183,7 +177,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Referral - Referer",
-        "sitelink_discount_name": "$300 Refer a Friend",
         "notes": None,
         "objective": "Offer an Incentive to customer referring us.",
         "period_range": "Permanent",
@@ -205,7 +198,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Friends and Family",
-        "sitelink_discount_name": "Staff Referral",
         "notes": None,
         "objective": "Offer an Incentive to customer being referred by a Redbox Staff.",
         "period_range": "Permanent",
@@ -227,7 +219,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Friends and Family - New",
-        "sitelink_discount_name": "Staff Referral",
         "notes": "Replace Staff Referral",
         "objective": "Offer an Incentive to customer being referred by a Redbox Staff.",
         "period_range": "Permanent",
@@ -249,7 +240,6 @@ SEED_PLANS = [
     {
         "plan_type": "Evergreen",
         "plan_name": "Staff Rate",
-        "sitelink_discount_name": "RBS Staff Discount",
         "notes": None,
         "objective": "Staff Benefits exclusive to Redbox Staff.",
         "period_range": "Permanent",
@@ -272,7 +262,6 @@ SEED_PLANS = [
     {
         "plan_type": "Tactical",
         "plan_name": "Direct Mailing Offer - TKO Residents",
-        "sitelink_discount_name": None,
         "notes": None,
         "objective": "Tactical offer to attract new customers from TKO area",
         "period_range": "From 11 August till 30 September 2025",
