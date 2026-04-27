@@ -139,9 +139,12 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                        is_active
                 FROM mw_discount_plans
                 WHERE is_active = TRUE
-                  AND (period_end          IS NULL OR period_end          >= CURRENT_DATE)
-                  AND (promo_period_end    IS NULL OR promo_period_end    >= CURRENT_DATE)
-                  AND (booking_period_end  IS NULL OR booking_period_end  >= CURRENT_DATE)
+                  AND (period_end           IS NULL OR period_end           >= CURRENT_DATE)
+                  AND (promo_period_end     IS NULL OR promo_period_end     >= CURRENT_DATE)
+                  AND (booking_period_end   IS NULL OR booking_period_end   >= CURRENT_DATE)
+                  AND (period_start          IS NULL OR period_start          <= CURRENT_DATE)
+                  AND (promo_period_start    IS NULL OR promo_period_start    <= CURRENT_DATE)
+                  AND (booking_period_start  IS NULL OR booking_period_start  <= CURRENT_DATE)
             """)).mappings().all()
             _mark('load_plans', t)
 
