@@ -26,6 +26,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+from dataclasses import replace as dc_replace
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -89,6 +90,12 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
             )).fetchall()
             excluded_unit_types = {r[0] for r in excluded_rows if r[0]}
             _mark('load_exclusions', t)
+
+            # 0b. Legacy sTypeName fallback map (for sites that haven't migrated
+            # to SOP COM01 yet). Lives in esa_backend, not middleware.
+            t = time.perf_counter()
+            legacy_map = _load_legacy_type_map()
+            _mark('load_legacy_map', t)
 
             # 1. Site code → site_id map. Sourced from ccws_units (full
             # inventory) so the resolver stays stable even if a site has
@@ -192,7 +199,7 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
 
             # 6. Compose.
             t = time.perf_counter()
-            candidates, parse_fail_count, excluded_count, restriction_drop_count = _compose_candidates(
+            candidates, parse_fail_count, excluded_count, restriction_drop_count, legacy_mapped_count = _compose_candidates(
                 plan_rows=plan_rows,
                 conc_rows=conc_rows,
                 unit_rows=unit_rows,
@@ -200,6 +207,7 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                 computed_at=now,
                 excluded_unit_types=excluded_unit_types,
                 smart_lock_map=smart_lock_map,
+                legacy_type_map=legacy_map,
             )
             _mark('compose', t)
 
@@ -252,6 +260,7 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                 'available_units_loaded': len(unit_rows),
                 'smart_lock_assignments_loaded': len(smart_lock_map),
                 'parse_fail_count': parse_fail_count,
+                'legacy_mapped_count': legacy_mapped_count,
                 'excluded_unit_types': sorted(excluded_unit_types),
                 'excluded_count': excluded_count,
                 'restriction_drop_count': restriction_drop_count,
@@ -276,6 +285,49 @@ def _site_applies(applicable_sites: Any, site_code: Optional[str]) -> bool:
     if not site_code:
         return False
     return bool(applicable_sites.get(site_code))
+
+
+def _load_legacy_type_map() -> Dict[str, Tuple[str, Optional[str]]]:
+    """Load `inventory_type_mappings` from esa_backend as a quick lookup.
+
+    Maps a legacy `sTypeName` (e.g. "AC Walk-In", "BizPlus", "Locker") to
+    a (unit_type_code, climate_code) tuple aligned with SOP dim values.
+    Used as a fallback when the COM01 parser cannot decode a value because
+    its site hasn't migrated to the new naming convention yet.
+
+    Returns an empty dict on any error — legacy fallback is best-effort.
+    """
+    try:
+        backend_engine = get_engine('backend')
+        with backend_engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT source_type_name, mapped_type_code, mapped_climate_code "
+                "FROM inventory_type_mappings"
+            )).fetchall()
+        return {
+            (r[0] or '').strip(): (r[1], r[2])
+            for r in rows if r[0] and r[1]
+        }
+    except Exception as exc:
+        logger.warning("legacy type-map unavailable: %s", exc)
+        return {}
+
+
+def _enrich_with_legacy(parts, raw_stype: Optional[str],
+                        legacy_map: Dict[str, Tuple[str, Optional[str]]]):
+    """If the SOP parse failed, fill unit_type/climate_type from the legacy map.
+
+    Returns a (parts, used_legacy: bool) tuple. parse_ok stays False so
+    downstream knows it's a legacy mapping rather than a true SOP decode.
+    """
+    if parts.parse_ok or parts.unit_type:
+        return parts, False
+    if not legacy_map or not raw_stype:
+        return parts, False
+    hit = legacy_map.get(raw_stype.strip())
+    if not hit:
+        return parts, False
+    return dc_replace(parts, unit_type=hit[0], climate_type=hit[1]), True
 
 
 def _jsonb_or_none(value: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -322,18 +374,24 @@ def _compose_candidates(
     computed_at: datetime,
     excluded_unit_types: Optional[set] = None,
     smart_lock_map: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None,
-) -> Tuple[List[Dict[str, Any]], int, int, int]:
+    legacy_type_map: Optional[Dict[str, Tuple[str, Optional[str]]]] = None,
+) -> Tuple[List[Dict[str, Any]], int, int, int, int]:
     """Build the bulk-insert rowset.
 
-    Returns (rows, parse_fail_count, excluded_count, restriction_drop_count).
-    A unit whose parsed unit_type is in `excluded_unit_types` is dropped
-    silently (counted). A unit that fails any per-plan `restrictions` dim
-    check is dropped into restriction_drop_count. Units with parse_ok=False
-    are still emitted — excluding them would hide legacy inventory that
-    has not yet migrated to the SOP naming.
+    Returns (rows, parse_fail_count, excluded_count, restriction_drop_count,
+    legacy_mapped_count). A unit whose parsed unit_type is in
+    `excluded_unit_types` is dropped silently (counted). A unit that fails
+    any per-plan `restrictions` dim check is dropped into
+    restriction_drop_count. Units with parse_ok=False are still emitted —
+    excluding them would hide legacy inventory that has not yet migrated to
+    the SOP naming. When legacy_type_map is provided, parse-failed units
+    have their unit_type + climate_type filled from `inventory_type_mappings`
+    so plan restrictions can still target them.
     """
     excluded_unit_types = excluded_unit_types or set()
     smart_lock_map = smart_lock_map or {}
+    legacy_type_map = legacy_type_map or {}
+    legacy_mapped_count = 0
 
     # Index concessions by (SiteID, ConcessionID) for O(1) lookup.
     conc_by_key: Dict[Tuple[int, int], Dict[str, Any]] = {
@@ -384,6 +442,22 @@ def _compose_candidates(
                             plan_max_duration = n
                     except (TypeError, ValueError):
                         pass
+            # Wine case-count window is a filter — units with no case_count
+            # (= non-wine) are dropped if either bound is set.
+            plan_min_cases: Optional[int] = None
+            plan_max_cases: Optional[int] = None
+            if isinstance(raw_restr, dict):
+                for key, target in (('min_case_count', 'min'), ('max_case_count', 'max')):
+                    v = raw_restr.get(key)
+                    if v is not None:
+                        try:
+                            n = int(v)
+                            if target == 'min':
+                                plan_min_cases = n
+                            else:
+                                plan_max_cases = n
+                        except (TypeError, ValueError):
+                            pass
 
         for link in linked:
             if not isinstance(link, dict):
@@ -418,9 +492,13 @@ def _compose_candidates(
                     # Concession explicitly not-for-corp, unit is corp — skip.
                     continue
 
-                parts = parse_stype_name(u.get('sTypeName'))
+                raw_stype = u.get('sTypeName')
+                parts = parse_stype_name(raw_stype)
                 if not parts.parse_ok:
                     parse_fail_count += 1
+                    parts, _used_legacy = _enrich_with_legacy(parts, raw_stype, legacy_type_map)
+                    if _used_legacy:
+                        legacy_mapped_count += 1
                 # Drop units whose parsed unit_type is globally excluded.
                 if parts.unit_type and parts.unit_type in excluded_unit_types:
                     excluded_count += 1
@@ -434,6 +512,19 @@ def _compose_candidates(
                             passes = False
                             break
                     if not passes:
+                        restriction_drop_count += 1
+                        continue
+                # Wine case-count gate — when either bound is set, the unit
+                # must (a) have a case_count and (b) fall within the range.
+                if plan_min_cases is not None or plan_max_cases is not None:
+                    cc = parts.case_count
+                    if cc is None:
+                        restriction_drop_count += 1
+                        continue
+                    if plan_min_cases is not None and cc < plan_min_cases:
+                        restriction_drop_count += 1
+                        continue
+                    if plan_max_cases is not None and cc > plan_max_cases:
                         restriction_drop_count += 1
                         continue
 
@@ -505,4 +596,4 @@ def _compose_candidates(
     dedup: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {}
     for row in out:
         dedup[(row['site_id'], row['unit_id'], row['plan_id'], row['concession_id'])] = row
-    return list(dedup.values()), parse_fail_count, excluded_count, restriction_drop_count
+    return list(dedup.values()), parse_fail_count, excluded_count, restriction_drop_count, legacy_mapped_count

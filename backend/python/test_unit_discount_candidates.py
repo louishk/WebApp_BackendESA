@@ -78,7 +78,7 @@ UNIT_C_CORP = dict(UNIT_A, UnitID=3, bCorporate=True)
 
 class ComposeTests(unittest.TestCase):
     def test_happy_path(self):
-        rows, parse_fail, _excluded, _restr = _compose_candidates(
+        rows, parse_fail, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -98,7 +98,7 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(parse_fail, 0)
 
     def test_legacy_stype_flags_parse_fail_but_still_emits(self):
-        rows, parse_fail, _excluded, _restr = _compose_candidates(
+        rows, parse_fail, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_B_LEGACY],
@@ -110,8 +110,26 @@ class ComposeTests(unittest.TestCase):
         self.assertIsNone(rows[0]['climate_type'])
         self.assertEqual(parse_fail, 1)
 
+    def test_legacy_type_map_fills_unit_and_climate_type(self):
+        # parse_ok stays False but unit_type/climate_type get populated from
+        # the legacy lookup so per-plan dim restrictions can still match.
+        rows, parse_fail, _excluded, _restr, legacy = _compose_candidates(
+            plan_rows=[PLAN],
+            conc_rows=[CONC_ACTIVE],
+            unit_rows=[UNIT_B_LEGACY],
+            code_to_site_id={'L017': 100},
+            computed_at=datetime(2026, 4, 22),
+            legacy_type_map={'AC Walk-In': ('W', 'A')},
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]['parse_ok'])
+        self.assertEqual(rows[0]['unit_type'], 'W')
+        self.assertEqual(rows[0]['climate_type'], 'A')
+        self.assertEqual(parse_fail, 1)
+        self.assertEqual(legacy, 1)
+
     def test_site_not_in_applicable_sites_skipped(self):
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -122,7 +140,7 @@ class ComposeTests(unittest.TestCase):
 
     def test_applicable_site_false_skipped(self):
         plan = dict(PLAN, applicable_sites={'L017': False})
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[plan],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -132,7 +150,7 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(rows, [])
 
     def test_concession_missing_skipped(self):
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[],
             unit_rows=[UNIT_A],
@@ -142,7 +160,7 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(rows, [])
 
     def test_smart_lock_attached_when_assignment_present(self):
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -156,7 +174,7 @@ class ComposeTests(unittest.TestCase):
         self.assertIn('"padlock_id"', rows[0]['smart_lock'])
 
     def test_smart_lock_null_when_no_assignment(self):
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -168,7 +186,7 @@ class ComposeTests(unittest.TestCase):
 
     def test_corporate_only_concession_skips_noncorp_unit(self):
         conc = dict(CONC_ACTIVE, bForCorp=True)
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[conc],
             unit_rows=[UNIT_A],
@@ -179,7 +197,7 @@ class ComposeTests(unittest.TestCase):
 
     def test_non_corp_concession_emits_for_corp_unit_when_flag_null(self):
         # bForCorp=None → no explicit mismatch, emit.
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_C_CORP],
@@ -193,7 +211,7 @@ class ComposeTests(unittest.TestCase):
             {'site_id': 100, 'concession_id': 900},
             {'site_id': 100, 'concession_id': 900},  # duplicate
         ])
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[plan],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -204,7 +222,7 @@ class ComposeTests(unittest.TestCase):
 
     def test_excluded_unit_type_dropped(self):
         # Unit type 'W' is in the parsed output; exclude it globally.
-        rows, _, excluded, _restr = _compose_candidates(
+        rows, _, excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -217,7 +235,7 @@ class ComposeTests(unittest.TestCase):
 
     def test_exclusion_does_not_affect_other_types(self):
         unit_u = dict(UNIT_A, UnitID=99, sTypeName='S/10-12/U/NC/SS/NP')
-        rows, _, excluded, _restr = _compose_candidates(
+        rows, _, excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A, unit_u],
@@ -232,7 +250,7 @@ class ComposeTests(unittest.TestCase):
     def test_plan_restriction_drops_unit_when_dim_mismatch(self):
         # Unit A parses as climate_type='A'; restrict to climate 'RF' only.
         plan = dict(PLAN, restrictions={'climate_type': ['RF']})
-        rows, _pf, _exc, restr = _compose_candidates(
+        rows, _pf, _exc, restr, _legacy = _compose_candidates(
             plan_rows=[plan],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -245,7 +263,7 @@ class ComposeTests(unittest.TestCase):
     def test_plan_restriction_allows_unit_when_dim_matches(self):
         # climate_type=A → restrict to ['A', 'AD'] → unit passes.
         plan = dict(PLAN, restrictions={'climate_type': ['A', 'AD']})
-        rows, _pf, _exc, restr = _compose_candidates(
+        rows, _pf, _exc, restr, _legacy = _compose_candidates(
             plan_rows=[plan],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -261,7 +279,7 @@ class ComposeTests(unittest.TestCase):
             'size_category': ['L', 'XL'],
             'climate_type': ['A'],
         })
-        rows, _pf, _exc, restr = _compose_candidates(
+        rows, _pf, _exc, restr, _legacy = _compose_candidates(
             plan_rows=[plan],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -274,7 +292,7 @@ class ComposeTests(unittest.TestCase):
     def test_plan_restriction_empty_dim_is_ignored(self):
         # Empty dim list = no restriction on that dim; climate is untouched.
         plan = dict(PLAN, restrictions={'size_category': ['M'], 'climate_type': []})
-        rows, _pf, _exc, restr = _compose_candidates(
+        rows, _pf, _exc, restr, _legacy = _compose_candidates(
             plan_rows=[plan],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_A],
@@ -287,7 +305,7 @@ class ComposeTests(unittest.TestCase):
     def test_plan_restriction_blocks_legacy_unparsed_unit(self):
         # parse_ok=False → every parsed field is None → any restriction excludes it.
         plan = dict(PLAN, restrictions={'climate_type': ['A']})
-        rows, pf, _exc, restr = _compose_candidates(
+        rows, pf, _exc, restr, _legacy = _compose_candidates(
             plan_rows=[plan],
             conc_rows=[CONC_ACTIVE],
             unit_rows=[UNIT_B_LEGACY],
@@ -300,7 +318,7 @@ class ComposeTests(unittest.TestCase):
 
     def test_effective_rate_fixed_discount(self):
         conc = dict(CONC_ACTIVE, dcPCDiscount=None, dcFixedDiscount=Decimal('20'))
-        rows, _, _excluded, _restr = _compose_candidates(
+        rows, _, _excluded, _restr, _legacy = _compose_candidates(
             plan_rows=[PLAN],
             conc_rows=[conc],
             unit_rows=[UNIT_A],

@@ -18,6 +18,90 @@ def get_session():
     return current_app.get_middleware_session()
 
 
+# =============================================================================
+# Legacy sTypeName fallback — cached process-wide
+# =============================================================================
+_LEGACY_TYPE_MAP_CACHE: dict | None = None
+
+
+def _load_legacy_type_map_cached() -> dict:
+    """Load `inventory_type_mappings` once per process.
+
+    Returns {source_type_name -> (mapped_type_code, mapped_climate_code)}.
+    Used by the live unit-count endpoint to mirror the candidates pipeline's
+    legacy fallback logic.
+    """
+    global _LEGACY_TYPE_MAP_CACHE
+    if _LEGACY_TYPE_MAP_CACHE is not None:
+        return _LEGACY_TYPE_MAP_CACHE
+    try:
+        from sqlalchemy import text as sqltext
+        s = current_app.get_db_session()
+        try:
+            rows = s.execute(sqltext(
+                "SELECT source_type_name, mapped_type_code, mapped_climate_code "
+                "FROM inventory_type_mappings"
+            )).fetchall()
+            _LEGACY_TYPE_MAP_CACHE = {
+                (r[0] or '').strip(): (r[1], r[2])
+                for r in rows if r[0] and r[1]
+            }
+        finally:
+            s.close()
+    except Exception as exc:
+        current_app.logger.warning(f"legacy type-map unavailable: {exc}")
+        _LEGACY_TYPE_MAP_CACHE = {}
+    return _LEGACY_TYPE_MAP_CACHE
+
+
+def _trigger_candidates_refresh(site_codes: list) -> None:
+    """Fire-and-forget refresh of mw_unit_discount_candidates for given sites.
+
+    Spawns a daemon thread that runs the pipeline scoped to the affected
+    site_codes. Returns immediately so the web request stays snappy.
+    Failures are logged but never bubble up — the 4h scheduled run will
+    eventually catch up.
+    """
+    if not site_codes:
+        return
+    codes = sorted({str(c).strip() for c in site_codes if c and str(c).strip()})
+    if not codes:
+        return
+
+    import threading
+    # Capture the real app object — `current_app` is request-scoped and not
+    # safe to dereference inside the worker thread.
+    app = current_app._get_current_object()
+
+    def _run():
+        try:
+            with app.app_context():
+                from sync_service.executor import get_executor
+                result = get_executor().run(
+                    pipeline_name='mw_unit_discount_candidates',
+                    scope={'site_codes': codes},
+                    triggered_by='discount_plan_save',
+                )
+                app.logger.info(
+                    f"candidates refresh after plan save: status={result.status} "
+                    f"records={result.records} sites={codes}"
+                )
+        except Exception as exc:
+            app.logger.warning(
+                f"candidates refresh failed for {codes}: {exc}"
+            )
+
+    threading.Thread(target=_run, daemon=True, name='candidates-refresh').start()
+
+
+def _site_codes_from_plan(plan) -> list:
+    """Extract applicable_sites codes (where flag is True) from a plan."""
+    sites = (plan.applicable_sites or {}) if plan else {}
+    if not isinstance(sites, dict):
+        return []
+    return [code for code, flag in sites.items() if flag]
+
+
 _pbi_engine = None
 
 
@@ -291,6 +375,18 @@ def _build_plan_from_form(form, plan=None, config_options=None):
     if max_dur is not None:
         cleaned_restr['max_duration_months'] = max_dur
 
+    # Wine case-count restriction (only meaningful for wine sTypeName).
+    # When set, candidates whose unit has no case_count (= non-wine) are
+    # dropped, naturally narrowing the plan to wine inventory.
+    min_cases = _parse_month_int(form.get('min_case_count'))
+    max_cases = _parse_month_int(form.get('max_case_count'))
+    if min_cases is not None and max_cases is not None and min_cases > max_cases:
+        min_cases, max_cases = max_cases, min_cases
+    if min_cases is not None:
+        cleaned_restr['min_case_count'] = min_cases
+    if max_cases is not None:
+        cleaned_restr['max_case_count'] = max_cases
+
     plan.restrictions = cleaned_restr
 
     # Status
@@ -453,6 +549,7 @@ def create_plan():
             db_session.commit()
 
             audit_log(AuditEvent.CONFIG_UPDATED, f"Created discount plan '{plan.plan_name}'")
+            _trigger_candidates_refresh(_site_codes_from_plan(plan))
             flash(f'Discount plan "{plan.plan_name}" created.', 'success')
             return redirect(url_for('discount_plans.list_plans'))
         except Exception as e:
@@ -488,6 +585,7 @@ def edit_plan(plan_id):
 
         if request.method == 'POST':
             old_name = plan.plan_name
+            old_sites = _site_codes_from_plan(plan)
             _build_plan_from_form(request.form, plan, config_options=tpl_kwargs.get('config_options'))
             plan.updated_by = current_user.username
 
@@ -506,6 +604,10 @@ def edit_plan(plan_id):
 
             db_session.commit()
             audit_log(AuditEvent.CONFIG_UPDATED, f"Updated discount plan '{plan.plan_name}' (id={plan_id})")
+            # Refresh candidates for the union of old + new sites so removed
+            # sites get their stale rows wiped on the next per-site DELETE+INSERT.
+            new_sites = _site_codes_from_plan(plan)
+            _trigger_candidates_refresh(sorted(set(old_sites) | set(new_sites)))
             flash('Discount plan updated.', 'success')
             return redirect(url_for('discount_plans.list_plans'))
 
@@ -695,6 +797,15 @@ def api_unit_count():
             if s:
                 clean[field] = set(s)
 
+    # Optional wine case-count window. Either bound may be unset.
+    def _to_int(x):
+        try:
+            return int(x) if x is not None and str(x).strip() != '' else None
+        except (TypeError, ValueError):
+            return None
+    min_cases = _to_int(restrictions.get('min_case_count'))
+    max_cases = _to_int(restrictions.get('max_case_count'))
+
     session = get_session()
     try:
         rows = session.execute(sqltext("""
@@ -703,13 +814,24 @@ def api_unit_count():
             WHERE u."sLocationCode" = ANY(:codes)
         """), {'codes': site_codes}).mappings().all()
 
+        # Legacy fallback map — only loaded when needed.
+        legacy_map = _load_legacy_type_map_cached() if clean else {}
+
         by_site: dict = {code: 0 for code in site_codes}
         parse_fail = 0
+        legacy_mapped = 0
         total = 0
         for r in rows:
             parts = parse_stype_name(r['stype_name'])
             if not parts.parse_ok:
                 parse_fail += 1
+                # Legacy fallback: map unit_type + climate_type when SOP failed.
+                if legacy_map:
+                    hit = legacy_map.get((r['stype_name'] or '').strip())
+                    if hit:
+                        from dataclasses import replace as _dc_replace
+                        parts = _dc_replace(parts, unit_type=hit[0], climate_type=hit[1])
+                        legacy_mapped += 1
             # Apply each active restriction. A row passes only if its parsed
             # value is IN the selected set for every restricted dim.
             passes = True
@@ -718,6 +840,16 @@ def api_unit_count():
                 if val is None or val not in allowed:
                     passes = False
                     break
+            # Apply case-count range when set. Units with no case_count
+            # (= non-wine) are dropped if either bound is set.
+            if passes and (min_cases is not None or max_cases is not None):
+                cc = parts.case_count
+                if cc is None:
+                    passes = False
+                elif min_cases is not None and cc < min_cases:
+                    passes = False
+                elif max_cases is not None and cc > max_cases:
+                    passes = False
             if passes:
                 total += 1
                 by_site[r['site_code']] = by_site.get(r['site_code'], 0) + 1
@@ -726,6 +858,7 @@ def api_unit_count():
             'count': total,
             'by_site': by_site,
             'parse_fail': parse_fail,
+            'legacy_mapped': legacy_mapped,
             'sites_queried': len(site_codes),
         })
     finally:
@@ -868,6 +1001,7 @@ def ai_create():
             AuditEvent.CONFIG_UPDATED,
             f"AI-drafted discount plan '{plan.plan_name}' (id={plan.id})",
         )
+        _trigger_candidates_refresh(_site_codes_from_plan(plan))
         flash(f'Draft "{plan.plan_name}" created. Review and save to activate.', 'success')
         return redirect(url_for('discount_plans.edit_plan', plan_id=plan.id))
     except Exception as e:
@@ -906,6 +1040,7 @@ def ai_create_all():
 
     created: list[str] = []
     failed: list[str] = []
+    affected_sites: set = set()
     db_session = get_session()
     try:
         for i, data in enumerate(candidates, start=1):
@@ -916,6 +1051,7 @@ def ai_create_all():
                 plan = _build_draft_plan_from_ai_candidate(db_session, data)
                 db_session.flush()  # get id + surface UNIQUE conflicts inline
                 created.append(plan.plan_name)
+                affected_sites.update(_site_codes_from_plan(plan))
             except Exception as e:
                 db_session.rollback()
                 current_app.logger.error(
@@ -924,6 +1060,7 @@ def ai_create_all():
                 failed.append(f'#{i} {(data.get("plan_name") or "unnamed")}: {e}')
         if created:
             db_session.commit()
+            _trigger_candidates_refresh(sorted(affected_sites))
             audit_log(
                 AuditEvent.CONFIG_UPDATED,
                 f"AI-drafted {len(created)} discount plans: {', '.join(created[:10])}"
@@ -996,6 +1133,8 @@ def duplicate_plan(plan_id):
             AuditEvent.CONFIG_UPDATED,
             f"Duplicated discount plan '{orig.plan_name}' (id={plan_id}) → '{candidate}' (id={copy.id})",
         )
+        # Duplicate is inactive by default → no candidates produced until
+        # user activates and saves. Skip the refresh here.
         flash(f'Plan duplicated as "{candidate}" (inactive). Review and save to activate.', 'success')
         return redirect(url_for('discount_plans.edit_plan', plan_id=copy.id))
     except Exception as e:
@@ -1019,9 +1158,11 @@ def delete_plan(plan_id):
         plan = db_session.query(DiscountPlan).get(plan_id)
         if plan:
             name = plan.plan_name
+            sites_to_refresh = _site_codes_from_plan(plan)
             db_session.delete(plan)
             db_session.commit()
             audit_log(AuditEvent.CONFIG_UPDATED, f"Deleted discount plan '{name}' (id={plan_id})")
+            _trigger_candidates_refresh(sites_to_refresh)
             flash(f'Discount plan "{name}" deleted.', 'success')
         else:
             flash('Discount plan not found.', 'error')

@@ -297,6 +297,24 @@
             </div>
         </div>
 
+        <div class="form-grid-4" style="margin-top: 0.4rem;">
+            <div class="form-group">
+                <label>Min Cases <span style="font-weight: 400; color: #888; font-size: 0.72rem;">(wine only)</span></label>
+                <input type="number" id="min_case_count" name="min_case_count" min="0" step="1"
+                       value="{{ _restr.get('min_case_count', '') if _restr else '' }}"
+                       placeholder="e.g. 100">
+            </div>
+            <div class="form-group">
+                <label>Max Cases <span style="font-weight: 400; color: #888; font-size: 0.72rem;">(wine only)</span></label>
+                <input type="number" id="max_case_count" name="max_case_count" min="0" step="1"
+                       value="{{ _restr.get('max_case_count', '') if _restr else '' }}"
+                       placeholder="e.g. 240 — blank = no cap">
+            </div>
+            <div class="form-group" style="grid-column: span 2; align-self: end;">
+                <div class="hint">Filters wine units by their case capacity (the 7th token of <code>sTypeName</code>). When set, non-wine units are excluded from candidates. Empty = no filter.</div>
+            </div>
+        </div>
+
         <details class="sub-section" open>
             <summary>Unit Feature Restrictions (SOP COM01)
                 <span id="restriction-summary-chip" style="margin-left: 0.4rem; font-size: 0.72rem; color: #6b7280;"></span>
@@ -1238,7 +1256,24 @@ renderLinked();
         if (!Array.isArray(state[f])) state[f] = [];
     });
 
+    // Bridge wine case-count inputs into the restrictions state so they get
+    // persisted to restrictions_json on save and fed into the live count.
+    var minCases = document.getElementById('min_case_count');
+    var maxCases = document.getElementById('max_case_count');
+    function syncCaseCount() {
+        var mn = (minCases && minCases.value || '').trim();
+        var mx = (maxCases && maxCases.value || '').trim();
+        if (mn === '') delete state.min_case_count; else state.min_case_count = parseInt(mn, 10);
+        if (mx === '') delete state.max_case_count; else state.max_case_count = parseInt(mx, 10);
+        persist();
+    }
+    if (minCases) minCases.addEventListener('input', syncCaseCount);
+    if (maxCases) maxCases.addEventListener('input', syncCaseCount);
+
     function persist() {
+        // Re-read case-count fields each time so a manual edit doesn't get lost.
+        if (minCases && (minCases.value || '').trim() !== '') state.min_case_count = parseInt(minCases.value, 10);
+        if (maxCases && (maxCases.value || '').trim() !== '') state.max_case_count = parseInt(maxCases.value, 10);
         hidden.value = JSON.stringify(state);
         updateSummaryChip();
         queueCount();
