@@ -121,6 +121,11 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                 )
 
             # 2. Active plans with their JSONB fields.
+            # Drop plans that are already past their promo or booking window —
+            # the recommender shouldn't see candidates for a campaign that's
+            # already ended. Keep upcoming plans (start_date in the future)
+            # so admins can preview them; the recommender's query-time check
+            # will gate them from being offered until they're live.
             t = time.perf_counter()
             plan_rows = conn.execute(text("""
                 SELECT id, plan_name, plan_type,
@@ -134,7 +139,9 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                        is_active
                 FROM mw_discount_plans
                 WHERE is_active = TRUE
-                  AND (period_end IS NULL OR period_end >= CURRENT_DATE)
+                  AND (period_end          IS NULL OR period_end          >= CURRENT_DATE)
+                  AND (promo_period_end    IS NULL OR promo_period_end    >= CURRENT_DATE)
+                  AND (booking_period_end  IS NULL OR booking_period_end  >= CURRENT_DATE)
             """)).mappings().all()
             _mark('load_plans', t)
 
