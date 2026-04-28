@@ -52,14 +52,19 @@ _require_date = require_date
 def _link_recommendation(
     *,
     unit_id: int,
-    plan_id,
     concession_id,
-    customer_id,
-    session_id,
+    customer_id=None,
+    session_id=None,
 ):
     """
     Best-effort: stamp the matching mw_recommendations_served row with booking
     outcome. Opens its own middleware session; never raises; never blocks caller.
+
+    Reconciliation is fully derived from middleware-side data — the bot does
+    not need to echo plan_id back. The matching engine pairs the booking's
+    (unit_id, concession_id) against slot1/2/3 of recent recommendations and
+    pulls the slot's plan_id automatically. session_id and customer_id are
+    optional bonuses that tighten the match window when provided.
     """
     from datetime import timezone as _tz
     from web.services.booking_outcomes import link_booking_to_recommendation
@@ -72,26 +77,15 @@ def _link_recommendation(
         return
 
     try:
-        rec_id = link_booking_to_recommendation(
+        link_booking_to_recommendation(
             unit_id=unit_id,
-            plan_id=plan_id,
             concession_id=concession_id,
             customer_id=customer_id,
             session_id=session_id,
             booked_at=booked_at,
             db_session=mw_session,
         )
-        if rec_id is not None:
-            logger.info(
-                "linked booking unit=%s to recommendation row id=%s",
-                unit_id, rec_id,
-            )
-        else:
-            logger.info(
-                "booking unit=%s not linked to any recommendation "
-                "(session_id=%s customer_id=%s)",
-                unit_id, session_id, customer_id,
-            )
+        # Result is logged inside the helper — no extra log needed here.
     finally:
         try:
             mw_session.close()
@@ -461,10 +455,10 @@ def reservation_reserve():
             status='created',
         )
 
-        # Link to recommendation (best-effort — never blocks the booking response)
+        # Link to recommendation (best-effort — never blocks the booking response).
+        # plan_id is derived inside the helper from whichever slot the unit was in.
         _link_recommendation(
             unit_id=unit_id,
-            plan_id=None,
             concession_id=concession_id or None,
             customer_id=_clamp(data.get('customer_id', ''), 120) or None,
             session_id=_clamp(data.get('session_id', ''), 64) or None,
@@ -637,10 +631,10 @@ def reservation_create():
             status='created',
         )
 
-        # Link to recommendation (best-effort — never blocks the booking response)
+        # Link to recommendation (best-effort — never blocks the booking response).
+        # plan_id is derived inside the helper from whichever slot the unit was in.
         _link_recommendation(
             unit_id=unit_id,
-            plan_id=None,
             concession_id=concession_id or None,
             customer_id=_clamp(data.get('customer_id', ''), 120) or None,
             session_id=_clamp(data.get('session_id', ''), 64) or None,

@@ -52,10 +52,11 @@ CREATE TABLE IF NOT EXISTS mw_recommendations_served (
     slot3_first_month   REAL,
     slot3_total_contract REAL,
 
-    booked_unit_id  INTEGER,
-    booked_plan_id  INTEGER,
-    booked_at       TIMESTAMP,
-    booked_slot     INTEGER
+    booked_unit_id       INTEGER,
+    booked_plan_id       INTEGER,
+    booked_concession_id INTEGER,
+    booked_at            TIMESTAMP,
+    booked_slot          INTEGER
 )
 """
 
@@ -156,7 +157,7 @@ class TestSessionMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=7,
+            plan_id_override=7,
             concession_id=3,
             customer_id=None,
             session_id="abc",
@@ -180,8 +181,7 @@ class TestSessionMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id=None,
             session_id="s2",
             booked_at=_now(),
@@ -202,8 +202,7 @@ class TestSessionMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id=None,
             session_id="s3",
             booked_at=_now(),
@@ -219,8 +218,7 @@ class TestSessionMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id=None,
             session_id="abc",
             booked_at=_now(),
@@ -251,8 +249,7 @@ class TestSessionMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id=None,
             session_id="abc",
             booked_at=_now(),
@@ -279,8 +276,7 @@ class TestCustomerIdMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id="cust-42",
             session_id=None,           # no session_id → falls to priority 2
             booked_at=_now(),
@@ -301,8 +297,7 @@ class TestCustomerIdMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id="cust-42",
             session_id=None,
             booked_at=_now(),
@@ -327,8 +322,7 @@ class TestUnitOnlyMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id=None,          # no customer
             session_id=None,           # no session → priority 3
             booked_at=_now(),
@@ -348,8 +342,7 @@ class TestUnitOnlyMatch:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id=None,
             session_id=None,
             booked_at=_now(),
@@ -368,7 +361,7 @@ class TestIdempotencyAndEdgeCases:
         # First booking stamps the row
         r1 = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=1,
+            plan_id_override=1,
             concession_id=None,
             customer_id=None,
             session_id="abc",
@@ -380,7 +373,7 @@ class TestIdempotencyAndEdgeCases:
         # Second call with same session — row is already booked, nothing to update
         r2 = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=99,
+            plan_id_override=99,
             concession_id=None,
             customer_id=None,
             session_id="abc",
@@ -400,8 +393,7 @@ class TestIdempotencyAndEdgeCases:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id=None,
             session_id="abc",
             booked_at=_now(),
@@ -419,8 +411,6 @@ class TestIdempotencyAndEdgeCases:
         with caplog.at_level(logging.WARNING, logger="web.services.booking_outcomes"):
             link_booking_to_recommendation(
                 unit_id=99,
-                plan_id=None,
-                concession_id=None,
                 customer_id=None,
                 session_id=None,
                 booked_at=_now(),
@@ -432,8 +422,7 @@ class TestIdempotencyAndEdgeCases:
     def test_no_rows_at_all_returns_none(self, db_session):
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id=None,
             session_id="no-such-session",
             booked_at=_now(),
@@ -464,8 +453,7 @@ class TestIdempotencyAndEdgeCases:
 
         result = link_booking_to_recommendation(
             unit_id=12345,
-            plan_id=None,
-            concession_id=None,
+            concession_id=900,
             customer_id="cust-X",
             session_id="my-session",
             booked_at=_now(),
