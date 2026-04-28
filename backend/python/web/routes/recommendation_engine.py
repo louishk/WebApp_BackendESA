@@ -57,6 +57,8 @@ def _require_config_permission(f):
 @login_required
 def index():
     """Landing page — lists the configuration tools in this module."""
+    from web.services import recommender_settings
+
     session = _get_session()
     try:
         excluded_count = session.execute(text(
@@ -68,6 +70,9 @@ def index():
         candidate_count = session.execute(text(
             "SELECT COUNT(*) FROM mw_unit_discount_candidates"
         )).scalar() or 0
+        # Live tunables for the form
+        settings_specs = recommender_settings.list_specs()
+        settings_values = recommender_settings.get_all_settings(session)
     finally:
         session.close()
     return render_template(
@@ -75,7 +80,51 @@ def index():
         excluded_count=excluded_count,
         unit_type_count=unit_type_count,
         candidate_count=candidate_count,
+        settings_specs=settings_specs,
+        settings_values=settings_values,
     )
+
+
+# ---------------------------------------------------------------------------
+# Settings save
+# ---------------------------------------------------------------------------
+
+@recommendation_engine_bp.route('/settings/save', methods=['POST'])
+@login_required
+@_require_config_permission
+def save_settings():
+    """Persist edits from the settings form on the landing page."""
+    from web.services import recommender_settings
+
+    # Build update dict from form fields. Each setting has a known key.
+    updates = {}
+    for spec in recommender_settings.list_specs():
+        if spec.type_ == 'bool':
+            # Checkboxes only post when checked → infer FALSE from absence.
+            updates[spec.key] = '1' if request.form.get(spec.key) else '0'
+        else:
+            raw = request.form.get(spec.key)
+            if raw is not None:
+                updates[spec.key] = raw
+
+    session = _get_session()
+    try:
+        changed = recommender_settings.update_settings(
+            updates, updated_by=getattr(current_user, 'username', 'admin'),
+            db_session=session,
+        )
+    finally:
+        session.close()
+
+    if changed:
+        audit_log(
+            AuditEvent.CONFIG_UPDATED,
+            f"Updated {changed} recommender setting(s)",
+        )
+        flash(f'Saved {changed} setting change(s).', 'success')
+    else:
+        flash('No changes to save.', 'info')
+    return redirect(url_for('recommendation_engine.index'))
 
 
 # ---------------------------------------------------------------------------

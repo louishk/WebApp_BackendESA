@@ -56,13 +56,87 @@
 </div>
 
 <!-- ===================================================================== -->
-<!-- Ranking signals (future) -->
+<!-- Engine Settings — admin-tunable global behaviour -->
 <!-- ===================================================================== -->
-<div class="card" style="margin-top: 1rem; padding: 1rem; opacity: 0.8;">
-    <h3 style="margin-top: 0; color: #6b7280;">Ranking Signals <span style="font-size: 0.75rem; font-weight: 400;">(coming soon)</span></h3>
-    <p style="font-size: 0.85rem; color: #666; margin: 0;">
-        Weights and priorities the engine uses to pick the best plan per unit
-        (discount %, lock-in length, hidden-rate, segmentation, &hellip;). Configured here once the engine is live.
+<div class="card" style="margin-top: 1rem; padding: 1rem;">
+    <h3 style="margin-top: 0;">Engine Settings</h3>
+    <p style="font-size: 0.85rem; color: #666; margin-top: 0;">
+        Global tunables for the recommendation engine. Saves take effect within ~60 seconds (no service restart needed). Caller can still override per-request via <code>constraints.*</code> on the API call.
     </p>
+
+    {% if current_user.can_manage_configs() %}
+    <form method="POST" action="{{ url_for('recommendation_engine.save_settings') }}" style="margin-top: 0.75rem;">
+        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
+        {% set group_titles = {'slot': 'Slot Tuning', 'pricing': 'Pricing', 'pool': 'Pool Composition', 'ops': 'Operational'} %}
+        {% for group_key, group_title in group_titles.items() %}
+            {% set group_specs = settings_specs | selectattr('group', 'equalto', group_key) | list %}
+            {% if group_specs %}
+            <details class="sub-section" open style="margin-top: 0.6rem;">
+                <summary style="font-weight: 600; color: var(--esa-navy);">{{ group_title }}</summary>
+                <div style="margin-top: 0.5rem;">
+                    {% for spec in group_specs %}
+                    <div class="form-group" style="margin-bottom: 0.85rem; padding: 0.5rem 0; border-bottom: 1px dashed #e5e7eb;">
+                        <label for="set_{{ spec.key }}" style="display: block; font-weight: 600; font-size: 0.85rem; color: #1f2937;">
+                            {{ spec.label }}
+                            {% if spec.min_value is not none and spec.max_value is not none %}
+                                <span style="font-weight: 400; color: #6b7280; font-size: 0.7rem;">range {{ spec.min_value | int }}–{{ spec.max_value | int }}</span>
+                            {% endif %}
+                        </label>
+                        {% if spec.type_ == 'bool' %}
+                            <label class="toggle-row" style="margin-top: 0.25rem;">
+                                <input type="checkbox" name="{{ spec.key }}" id="set_{{ spec.key }}"
+                                       {{ 'checked' if settings_values.get(spec.key) else '' }}>
+                                <span style="font-size: 0.85rem; color: #4b5563;">Enabled</span>
+                            </label>
+                        {% else %}
+                            <input type="number" name="{{ spec.key }}" id="set_{{ spec.key }}"
+                                   value="{{ settings_values.get(spec.key) }}"
+                                   {% if spec.min_value is not none %}min="{{ spec.min_value }}"{% endif %}
+                                   {% if spec.max_value is not none %}max="{{ spec.max_value }}"{% endif %}
+                                   step="1" style="max-width: 140px;">
+                        {% endif %}
+                        <div class="hint" style="margin-top: 0.2rem; font-size: 0.75rem; color: #6b7280;">{{ spec.description }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endif %}
+        {% endfor %}
+
+        <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.6rem;">
+            <button type="submit" class="btn">Save Settings</button>
+            <span style="font-size: 0.78rem; color: #6b7280;">Changes propagate to recommender within ~60s.</span>
+        </div>
+    </form>
+    {% else %}
+    <p style="margin-top: 0.5rem; color: #b45309; font-size: 0.85rem;">⚠ Read-only — config-management permission required to edit.</p>
+    <ul style="line-height: 1.8;">
+        {% for spec in settings_specs %}
+        <li><strong>{{ spec.label }}</strong>: <code>{{ settings_values.get(spec.key) }}</code></li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+
+<!-- ===================================================================== -->
+<!-- Related controls -->
+<!-- ===================================================================== -->
+<div class="card" style="margin-top: 1rem; padding: 1rem;">
+    <h3 style="margin-top: 0;">Related controls</h3>
+    <ul style="line-height: 1.9;">
+        <li>
+            <a href="{{ url_for('admin.site_billing_config_list') }}"><strong>Site Billing Config</strong></a>
+            &mdash; per-site proration rules (anniversary vs 1st-of-month, late-move-in threshold). Drives how the calculator builds the month-by-month breakdown.
+        </li>
+        <li>
+            <a href="{{ url_for('admin.site_distance') }}"><strong>Site Distances</strong></a>
+            &mdash; nearest-site picker for Slot 2 (Nearest Available). Real km values from GPS; admin can override per-pair.
+        </li>
+        <li>
+            <a href="{{ url_for('discount_plans.list_plans') }}"><strong>Discount Plans</strong></a>
+            &mdash; manage the plans themselves (restrictions, hidden_rate / coupon, distribution channels, periods).
+        </li>
+    </ul>
 </div>
 {% endblock %}

@@ -613,7 +613,14 @@ def build_slot2(
     if not locations:
         return None
 
-    max_dist = req.constraints.get('max_distance_km', 50)
+    # max_distance_km can be overridden per-request (constraint); otherwise
+    # falls back to the global admin setting, otherwise 50 km.
+    try:
+        from web.services import recommender_settings
+        global_default = recommender_settings.get_setting('slot2_max_distance_km', db_session)
+    except Exception:
+        global_default = 50
+    max_dist = req.constraints.get('max_distance_km') or global_default
 
     # Pool sites already excludes the requested locations
     pool_by_site: Dict[str, List[CandidateRow]] = {}
@@ -671,13 +678,20 @@ def build_slot3(
     locations = set(req.filters.get('location', []))
     requested_sizes = req.filters.get('size_range', [])
 
-    # Determine the ±20% neighbours for all requested sizes.
+    # Size band % is admin-tunable on the recommendation engine settings page.
+    try:
+        from web.services import recommender_settings
+        size_band_pct = int(recommender_settings.get_setting('slot3_size_band_pct', db_session))
+    except Exception:
+        size_band_pct = 20
+
+    # Determine the ±N% neighbours for all requested sizes.
     neighbour_sizes: set[str] = set()
     if requested_sizes:
         try:
             from common.size_range_window import size_range_neighbours
             for s in requested_sizes:
-                for nb in size_range_neighbours(s, radius_pct=20):
+                for nb in size_range_neighbours(s, radius_pct=size_band_pct):
                     neighbour_sizes.add(nb)
         except Exception as exc:
             logger.warning("build_slot3: size_range_neighbours failed: %s", exc)
@@ -703,11 +717,21 @@ def build_slot3(
         key=lambda r: (r.effective_rate is None, r.effective_rate or Decimal('0'))
     )
 
-    # Must be strictly cheaper than slot1.
+    # Must beat slot1's price by at least min_savings_pct (admin-tunable).
+    # Default 0 = strictly cheaper. Setting e.g. 10 means slot 3 only shows
+    # when there's a meaningful saving, not a $1 difference.
+    try:
+        from web.services import recommender_settings
+        min_savings_pct = int(recommender_settings.get_setting('slot3_min_savings_pct', db_session))
+    except Exception:
+        min_savings_pct = 0
+
     slot1_rate = slot1.effective_rate if slot1.effective_rate is not None else slot1.std_rate
     best_rate = best.effective_rate if best.effective_rate is not None else best.std_rate
 
-    if best_rate >= slot1_rate:
+    threshold = slot1_rate * (Decimal('1') - Decimal(min_savings_pct) / Decimal('100'))
+    # Strictly cheaper, plus the minimum savings margin
+    if best_rate >= threshold:
         return None
 
     return best

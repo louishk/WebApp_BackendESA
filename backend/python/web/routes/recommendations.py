@@ -258,11 +258,28 @@ def recommend():
                 slot3_row = None
 
         # 10. Quote each non-None slot
+        # When the admin setting `drop_low_confidence_quotes` is on, we
+        # discard the slot when the calculator flags the quote as low-
+        # confidence (free-month / multi-month-prepay edge cases the
+        # calculator doesn't model exactly).
+        try:
+            from web.services import recommender_settings
+            drop_low_conf = bool(recommender_settings.get_setting('drop_low_confidence_quotes', db))
+        except Exception:
+            drop_low_conf = False
+
         def _quote(row: Optional[CandidateRow]):
             if row is None:
                 return None
             try:
-                return recommender.quote_slot(row, req, db, move_in_date=move_in_date)
+                q = recommender.quote_slot(row, req, db, move_in_date=move_in_date)
+                if drop_low_conf and q is not None and getattr(q, 'confidence', 'high') != 'high':
+                    logger.info(
+                        "dropping slot — low-confidence quote unit_id=%s reason=%s",
+                        row.unit_id, getattr(q, 'confidence_reason', None),
+                    )
+                    return None
+                return q
             except Exception as exc:
                 logger.error(
                     "quote_slot failed unit_id=%s plan_id=%s request_id=%s: %s",
@@ -272,7 +289,7 @@ def recommend():
 
         slot1_quote = _quote(slot1_row)
         if slot1_row is not None and slot1_quote is None:
-            slot1_row = None  # quote failed; treat as empty
+            slot1_row = None  # quote failed or dropped; treat as empty
 
         slot2_quote = _quote(slot2_row)
         if slot2_row is not None and slot2_quote is None:
