@@ -709,13 +709,28 @@ def build_slot3(
     # If no size filter was requested, consider all sizes at the site.
     use_size_filter = bool(requested_sizes)
 
+    # Slot 3's spec is "any unit_type" — but the base pool was filtered by
+    # the user's unit_type list. Re-fetch with unit_type cleared so we
+    # genuinely consider every type at the same site. (Same pattern as slot 2's
+    # neighbouring-site re-fetch.) Other dim filters stay intact.
+    from copy import copy
+    relaxed_req = copy(req)
+    relaxed_filters = dict(req.filters)
+    relaxed_filters.pop('unit_type', None)
+    if use_size_filter:
+        relaxed_filters['size_range'] = sorted(neighbour_sizes)
+    relaxed_req.filters = relaxed_filters
+    try:
+        relaxed_pool = fetch_candidate_pool(relaxed_req, db_session)
+    except Exception as exc:
+        logger.warning("build_slot3: relaxed pool fetch failed: %s", exc)
+        relaxed_pool = pool  # fall back to the original pool
+
     candidates: List[CandidateRow] = []
-    for r in pool:
+    for r in relaxed_pool:
         if r.unit_id == slot1.unit_id:
             continue
         if r.site_code not in locations:
-            continue
-        if use_size_filter and (r.size_range is None or r.size_range not in neighbour_sizes):
             continue
         candidates.append(r)
 

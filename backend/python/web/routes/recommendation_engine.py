@@ -180,6 +180,12 @@ def simulator_run():
             return None
         dc_raw = (row.distribution_channel or '').strip()
         dc_list = [c.strip() for c in dc_raw.split(',') if c.strip()] if dc_raw else None
+        # Discount window comes straight from SiteLink's iInMonth.
+        # iInMonth=1 → first-month-only; iInMonth=N → first N months;
+        # iInMonth large → effectively whole tenure. Surface so admin sees
+        # whether the breakdown's "discount only month 1" matches the
+        # campaign's marketing intent or reveals a SiteLink config gap.
+        in_month = getattr(row, 'in_month', None)
         return {
             'slot': slot_num,
             'label': label,
@@ -196,6 +202,7 @@ def simulator_run():
             'is_hidden_rate': bool(row.hidden_rate),
             'authorised_channels': dc_list,
             'smart_lock': row.smart_lock,
+            'discount_window_months': in_month,
             'pricing': _quote_to_json(quote),
         }
 

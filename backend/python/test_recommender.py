@@ -393,12 +393,14 @@ class TestBuildSlot3(unittest.TestCase):
     def test_returns_cheapest_neighbour_cheaper_than_slot1(self):
         req = _make_req(filters={'location': ['L017'], 'size_range': ['30-35']})
         slot1 = _make_row(unit_id=1, effective_rate='180.00')
-        pool = [
+        relaxed_pool = [
             _make_row(unit_id=2, effective_rate='160.00', size_range='25-30'),
             _make_row(unit_id=3, effective_rate='150.00', size_range='35-40'),
             _make_row(unit_id=4, effective_rate='170.00', size_range='25-30'),
         ]
-        result = build_slot3(pool, req, slot1=slot1, db_session=self._mock_db())
+        with patch('web.services.recommender.fetch_candidate_pool',
+                   return_value=relaxed_pool):
+            result = build_slot3([], req, slot1=slot1, db_session=self._mock_db())
         self.assertIsNotNone(result)
         self.assertEqual(result.unit_id, 3)  # cheapest
 
@@ -416,10 +418,12 @@ class TestBuildSlot3(unittest.TestCase):
         """slot1 with None effective_rate falls back to std_rate for comparison."""
         req = _make_req(filters={'location': ['L017'], 'size_range': ['30-35']})
         slot1 = _make_row(unit_id=1, effective_rate=None, std_rate='200.00')
-        pool = [
+        relaxed_pool = [
             _make_row(unit_id=2, effective_rate='150.00', size_range='25-30'),
         ]
-        result = build_slot3(pool, req, slot1=slot1, db_session=self._mock_db())
+        with patch('web.services.recommender.fetch_candidate_pool',
+                   return_value=relaxed_pool):
+            result = build_slot3([], req, slot1=slot1, db_session=self._mock_db())
         self.assertIsNotNone(result)
         self.assertEqual(result.unit_id, 2)
 
@@ -427,10 +431,12 @@ class TestBuildSlot3(unittest.TestCase):
         """When no size_range in filters, slot3 considers all sizes at the site."""
         req = _make_req(filters={'location': ['L017']})
         slot1 = _make_row(unit_id=1, effective_rate='200.00', size_range='30-35')
-        pool = [
+        relaxed_pool = [
             _make_row(unit_id=2, effective_rate='150.00', size_range='50-60'),
         ]
-        result = build_slot3(pool, req, slot1=slot1, db_session=self._mock_db())
+        with patch('web.services.recommender.fetch_candidate_pool',
+                   return_value=relaxed_pool):
+            result = build_slot3([], req, slot1=slot1, db_session=self._mock_db())
         self.assertIsNotNone(result)
         self.assertEqual(result.unit_id, 2)
 

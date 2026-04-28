@@ -200,6 +200,16 @@
         const lockBadge = s.smart_lock
             ? `<span style="color:#6366f1;">🔑 ${(s.smart_lock.keypad_ids || []).join(',')}${s.smart_lock.padlock_id ? ' / 🔒'+s.smart_lock.padlock_id : ''}</span>`
             : '';
+        // Discount window note — explains "why is the discount only on month 1?"
+        let discountNote = '';
+        if (s.discount_window_months !== null && s.discount_window_months !== undefined) {
+            const w = s.discount_window_months;
+            if (w === 1) {
+                discountNote = `<span style="color:#b45309; font-size: 0.72rem;">📌 SiteLink concession iInMonth=1 → discount applies first month only. Edit in SiteLink to extend.</span><br>`;
+            } else if (w > 1 && w < 999) {
+                discountNote = `<span style="color:#059669; font-size: 0.72rem;">📌 Discount window: first ${w} month${w === 1 ? '' : 's'} (SiteLink iInMonth=${w}).</span><br>`;
+            }
+        }
         return `
         <div class="slot-card">
             <h4>${hidden}Slot ${s.slot} · ${s.label}
@@ -219,6 +229,7 @@
                 Std rate: $${fmt(s.std_rate)} · Effective: $${fmt(s.effective_rate)}
                 · Confidence: <code>${p.confidence || '—'}</code>${p.confidence_reason ? ' ('+p.confidence_reason+')' : ''}
                 <br>
+                ${discountNote}
                 Total contract (${p.duration_months}mo): <strong>$${fmt(p.total_contract)}</strong>
                 · Avg/month: $${fmt(p.monthly_average)}
             </div>
