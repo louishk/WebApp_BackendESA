@@ -538,6 +538,11 @@ def _audit_plan(plan) -> dict:
     if getattr(plan, 'hidden_rate', False) and not (plan.coupon_code or '').strip():
         issues.append('hidden_rate set but no coupon_code')
 
+    # Distribution channels should be explicit — empty falls back to "all
+    # channels" but ambiguous between "draft state" and "fully public".
+    if not (plan.distribution_channel or '').strip():
+        issues.append('no distribution channels selected (plan defaults to all — list explicitly)')
+
     # Duration
     restr = plan.restrictions or {}
     if isinstance(restr, dict):

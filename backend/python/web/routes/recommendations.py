@@ -104,6 +104,11 @@ def _serialise_slot(
     quote,
     match_flags: Optional[Dict] = None,
 ) -> Dict[str, Any]:
+    # Parse distribution_channel CSV → list (empty/null → null = "all channels")
+    dc_raw = (row.distribution_channel or '').strip()
+    dc_list: Optional[List[str]] = None
+    if dc_raw:
+        dc_list = [c.strip() for c in dc_raw.split(',') if c.strip()]
     return {
         'slot': slot_num,
         'label': _SLOT_LABELS.get(slot_num, f'Slot {slot_num}'),
@@ -118,6 +123,11 @@ def _serialise_slot(
         'plan_id': row.plan_id,
         'concession_id': row.concession_id,
         'smart_lock': row.smart_lock,
+        # Authorised channels for this plan. null = open to all (the
+        # recommender only emits plans the caller is authorised for, but
+        # we expose the full list so 3rd parties can confirm scope).
+        'authorised_channels': dc_list,
+        'is_hidden_rate': bool(row.hidden_rate),
         'pricing': _serialise_quote(quote),
     }
 

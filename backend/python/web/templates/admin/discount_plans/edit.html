@@ -344,20 +344,55 @@
         </details>
 
         <details class="sub-section" open>
-            <summary>Distribution Channel</summary>
+            <summary>Distribution Channel
+                <span id="dist-channel-summary" style="margin-left: 0.4rem; font-size: 0.72rem; color: #6b7280;"></span>
+            </summary>
             <div class="hint" style="margin-top: 0.3rem;">
-                Channels this plan is eligible for. Empty = all channels. Passed through to every candidate row so the recommender can filter by the originating channel of a booking.
+                Tick every channel authorised to distribute this plan. 3rd-party API callers (chatbot, web, etc.) declare their channel in the booking request and the recommender drops plans they aren't authorised for. <strong>Tick all if the plan is fully public</strong> — explicit listing is clearer than relying on the empty-state default.
             </div>
-            <div class="site-checkboxes" style="margin-top: 0.35rem;">
+            <div style="margin-top: 0.4rem;">
+                <a href="#" onclick="event.preventDefault(); toggleAllChannels(true);"
+                   style="font-size: 0.78rem; color: #6366f1; margin-right: 0.7rem; text-decoration: none;">✓ Select all</a>
+                <a href="#" onclick="event.preventDefault(); toggleAllChannels(false);"
+                   style="font-size: 0.78rem; color: #6b7280; text-decoration: none;">✗ Clear</a>
+            </div>
+            <div id="dist-channel-list" class="site-checkboxes" style="margin-top: 0.35rem;">
                 {% set channel_list = (plan.distribution_channel or '').split(', ') if plan else form_data.getlist('distribution_channel') %}
                 {% for opt in config_options.get('distribution_channel', []) %}
                 <label>
                     <input type="checkbox" name="distribution_channel" value="{{ opt }}"
-                           {{ 'checked' if opt in channel_list }}>
+                           {{ 'checked' if opt in channel_list }}
+                           onchange="updateDistChannelSummary()">
                     {{ opt }}
                 </label>
                 {% endfor %}
             </div>
+            <script>
+            (function() {
+                const total = {{ (config_options.get('distribution_channel', []) | length) }};
+                window.toggleAllChannels = function(on) {
+                    document.querySelectorAll('#dist-channel-list input[type="checkbox"]').forEach(cb => cb.checked = on);
+                    updateDistChannelSummary();
+                };
+                window.updateDistChannelSummary = function() {
+                    const checked = document.querySelectorAll('#dist-channel-list input:checked').length;
+                    const span = document.getElementById('dist-channel-summary');
+                    if (!span) return;
+                    if (checked === 0) {
+                        span.textContent = '⚠ none selected — falls back to all channels, but please list explicitly';
+                        span.style.color = '#d97706';
+                    } else if (checked === total) {
+                        span.textContent = 'all ' + total + ' channels — fully public';
+                        span.style.color = '#059669';
+                    } else {
+                        span.textContent = checked + ' / ' + total + ' selected';
+                        span.style.color = '#6b7280';
+                    }
+                };
+                document.addEventListener('DOMContentLoaded', updateDistChannelSummary);
+                if (document.readyState !== 'loading') updateDistChannelSummary();
+            })();
+            </script>
         </details>
     </details>
 
