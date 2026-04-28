@@ -476,11 +476,13 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
         " OR (UPPER(coupon_code) = :coupon AND :coupon IS NOT NULL))",
         # Distribution channel gate: when the plan limits its distribution,
         # the calling channel must be in that list. Empty/null = open to all.
+        # Comparison is case-insensitive — plans store 'Chatbot' (TitleCase) but
+        # callers may pass 'chatbot' (lowercase). LOWER() on both sides normalises.
         # REPLACE strips spaces so 'Direct Mailing, Online' splits cleanly.
         "(distribution_channel IS NULL "
         " OR distribution_channel = '' "
         " OR :channel = '' "
-        " OR :channel = ANY(string_to_array(REPLACE(distribution_channel, ' ', ''), ',')))",
+        " OR LOWER(:channel) = ANY(string_to_array(LOWER(REPLACE(distribution_channel, ' ', '')), ',')))",
     ]
     params: Dict[str, Any] = {
         'locations': locations,
