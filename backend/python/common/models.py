@@ -4248,6 +4248,10 @@ class UnitDiscountCandidate(Base, BaseModel):
     # Hidden-rate flag from plan — when true, the plan shouldn't be exposed to
     # public-facing channels.
     hidden_rate = Column(Boolean)
+    # Coupon code that unlocks the plan when hidden_rate=True. NULL on
+    # public plans. The recommender requires the booking input to provide
+    # a matching coupon_code before emitting hidden candidates.
+    coupon_code = Column(String(100))
     discount_type = Column(String(40))
     discount_numeric = Column(Numeric(14, 4))
     discount_segmentation = Column(String(80))

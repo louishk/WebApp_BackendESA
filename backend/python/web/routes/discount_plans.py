@@ -243,6 +243,33 @@ def _derive_discount_segmentation(discount_type, discount_numeric):
     return '>= 40%'
 
 
+def _stdrate_links_for_sites(site_codes: list) -> list[dict]:
+    """Synthesize linked_concessions entries for a Standard Rate plan.
+
+    Resolves each SiteCode to its SiteID via mw_siteinfo and returns
+    `[{site_id, concession_id: 0, site_code}, ...]`. Codes that don't
+    resolve are dropped silently.
+    """
+    codes = [c for c in (site_codes or []) if c]
+    if not codes:
+        return []
+    from sqlalchemy import text as sqltext
+    session = get_session()
+    try:
+        rows = session.execute(sqltext(
+            'SELECT "SiteID", "SiteCode" FROM mw_siteinfo WHERE "SiteCode" = ANY(:codes)'
+        ), {'codes': codes}).mappings().all()
+        return [
+            {'site_id': r['SiteID'], 'concession_id': 0, 'site_code': r['SiteCode']}
+            for r in rows
+        ]
+    except Exception as exc:
+        current_app.logger.warning(f"_stdrate_links_for_sites failed: {exc}")
+        return []
+    finally:
+        session.close()
+
+
 def _build_plan_from_form(form, plan=None, config_options=None):
     """Extract discount plan fields from the submitted form."""
     from web.models.discount_plan import DiscountPlan
@@ -334,6 +361,7 @@ def _build_plan_from_form(form, plan=None, config_options=None):
 
     # Promotion brief fields
     plan.hidden_rate = form.get('hidden_rate') == 'on'
+    plan.coupon_code = (form.get('coupon_code') or '').strip().upper() or None
     plan.switch_to_us = _validate_config_value(form.get('switch_to_us', '').strip(), 'switch_to_us') or 'Not Eligible'
     plan.referral_program = _validate_config_value(form.get('referral_program', '').strip(), 'referral_program') or 'Not Eligible'
     # Distribution channel (multi-choice checkboxes, stored comma-separated, validated against config)
@@ -342,8 +370,16 @@ def _build_plan_from_form(form, plan=None, config_options=None):
     valid_channels = [c.strip() for c in dist_channels if c.strip() and (not allowed_channels or c.strip() in allowed_channels)]
     plan.distribution_channel = ', '.join(valid_channels) or None
 
+    # Standard Rate override — when ticked, the plan represents stdrate
+    # (ConcessionID=0). linked_concessions is auto-synthesized from
+    # applicable_sites below, regardless of what the picker submitted.
+    plan.is_stdrate_override = form.get('is_stdrate_override') == 'on'
+
     # Linked Sitelink concessions
-    plan.linked_concessions = _parse_json_field(form.get('linked_concessions_json'), [])
+    if plan.is_stdrate_override:
+        plan.linked_concessions = _stdrate_links_for_sites(list(sites.keys()))
+    else:
+        plan.linked_concessions = _parse_json_field(form.get('linked_concessions_json'), [])
 
     # Unit-level restrictions (SOP COM01). Stored as {dim: [codes], min/max_duration_months: int}.
     # Only the known dim keys are persisted — unknown keys from client are dropped.
@@ -483,10 +519,11 @@ def _audit_plan(plan) -> dict:
     has_sites = any(bool(v) for v in applicable.values()) if isinstance(applicable, dict) else False
     if not has_sites:
         issues.append('no applicable sites')
-    # Linked concessions
-    linked = plan.linked_concessions or []
-    if not isinstance(linked, list) or not linked:
-        issues.append('no linked SiteLink concessions')
+    # Linked concessions — skipped for stdrate-override plans (no real concession by design).
+    if not getattr(plan, 'is_stdrate_override', False):
+        linked = plan.linked_concessions or []
+        if not isinstance(linked, list) or not linked:
+            issues.append('no linked SiteLink concessions')
     # Discount numeric
     if plan.discount_numeric is None:
         issues.append('no discount_numeric')
@@ -496,6 +533,11 @@ def _audit_plan(plan) -> dict:
     # Period dates
     if not plan.promo_period_start and not plan.promo_period_end:
         issues.append('no promo period')
+    # Hidden rate must have a coupon — otherwise the recommender silently
+    # excludes it from every channel and the plan is effectively dead.
+    if getattr(plan, 'hidden_rate', False) and not (plan.coupon_code or '').strip():
+        issues.append('hidden_rate set but no coupon_code')
+
     # Duration
     restr = plan.restrictions or {}
     if isinstance(restr, dict):
@@ -944,6 +986,8 @@ def _build_draft_plan_from_ai_candidate(db_session, data: dict):
         deposit=data.get('deposit') or None,
         lock_in_period=data.get('lock_in_period') or None,
         distribution_channel=data.get('distribution_channel') or None,
+        hidden_rate=bool(data.get('hidden_rate')),
+        coupon_code=((data.get('coupon_code') or '').strip().upper() or None),
         switch_to_us=data.get('switch_to_us') or 'Not Eligible',
         referral_program=data.get('referral_program') or 'Not Eligible',
         terms_conditions=data.get('terms_conditions') or None,
@@ -1202,7 +1246,23 @@ def view_brief(plan_id):
 
         # Resolve linked concession details from PBI DB
         linked_details = []
-        if plan.linked_concessions:
+        if plan.is_stdrate_override:
+            # Standard Rate: synthesize one row per applicable site, no ccws lookup.
+            applicable_codes_iter = sorted(
+                (c for c, v in (plan.applicable_sites or {}).items() if v)
+            )
+            for code in applicable_codes_iter:
+                linked_details.append({
+                    'site_id': None,
+                    'site_code': code,
+                    'site_name': site_name_map.get(code, code),
+                    'concession_id': 0,
+                    'plan_name': 'Standard Rate (no concession)',
+                    'discount_pct': None,
+                    'start': None,
+                    'end': None,
+                })
+        elif plan.linked_concessions:
             try:
                 from common.models import CcwsDiscount, Site, SiteInfo
                 pbi_session = _get_pbi_session()

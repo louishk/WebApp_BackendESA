@@ -84,6 +84,7 @@ class DiscountPlan(Base):
     # Promotion Brief: Eligibility & Channel
     # =========================================================================
     hidden_rate = Column(Boolean, default=False, comment="Whether rate is hidden from public")
+    coupon_code = Column(String(100), comment="Unlock code for hidden_rate plans; ignored when hidden_rate is False")
     available_for_chatbot = Column(Boolean, default=False, comment="Available for chatbot promotion")
     chatbot_notes = Column(String(255), comment="ChatBot availability notes")
     switch_to_us = Column(String(50), default='Not Eligible', comment="Switch-To-Us eligibility")

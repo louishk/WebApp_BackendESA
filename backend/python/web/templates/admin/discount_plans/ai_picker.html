@@ -48,6 +48,7 @@
         </div>
         <h3 style="margin: 0.2rem 0 0.2rem 0; font-size: 1rem; color: var(--esa-navy);">{{ c.plan_name or '(unnamed)' }}</h3>
         {% if c.group_name %}<div style="font-size: 0.72rem; color: #4338ca; margin-bottom: 0.35rem;">Group: <strong>{{ c.group_name }}</strong></div>{% endif %}
+        {% if c.hidden_rate %}<div style="font-size: 0.72rem; color: #b45309; margin-bottom: 0.25rem;">🔒 Hidden Rate{% if c.coupon_code %} · code <code>{{ c.coupon_code }}</code>{% else %} · <span style="color: #dc2626;">no coupon — admin must fill</span>{% endif %}</div>{% endif %}
         <div style="font-size: 0.82rem; line-height: 1.5; color: #374151;">
             <div><strong>Type:</strong> {{ c.plan_type or '-' }}</div>
             {% if c.discount_type or c.discount_numeric %}

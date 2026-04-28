@@ -171,6 +171,19 @@
                 <span id="linked-count-badge" style="display: none; background: #6366f1; color: #fff; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 10px; margin-left: 0.3rem;">0</span>
             </summary>
             <div style="margin-top: 0.5rem;">
+                <div class="form-group" id="stdrate-override-group" style="background: #fff7ed; border: 1px solid #fdba74; padding: 0.5rem 0.75rem; border-radius: 4px; margin-bottom: 0.5rem;">
+                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.85rem;">
+                        <input type="checkbox" name="is_stdrate_override" id="is_stdrate_override"
+                               {{ 'checked' if plan and plan.is_stdrate_override }}>
+                        <strong>Standard Rate (force ConcessionID = 0)</strong>
+                    </label>
+                    <div class="hint" style="margin-top: 0.25rem;">
+                        Tick to make this plan represent the unit's standard rate (no discount).
+                        Booking flow sends <code>ConcessionID=0</code> to SOAP. Linked Concessions
+                        below are auto-synthesized from Applicable Sites — the picker is hidden.
+                    </div>
+                </div>
+                <div class="form-group" id="concession-picker-group">
                 <div class="form-group">
                     <label>Search concessions to link</label>
                     <div style="display: flex; gap: 0.4rem; align-items: center;">
@@ -195,6 +208,7 @@
                         <span style="color: #888;">Link concessions above to see coverage.</span>
                     </div>
                 </div>
+                </div><!-- /concession-picker-group -->
                 <input type="hidden" name="linked_concessions_json" id="linked-concessions-json"
                        value='{{ (plan.linked_concessions | tojson) if plan and plan.linked_concessions else "[]" }}'>
             </div>
@@ -532,6 +546,12 @@
                                    {{ 'checked' if plan and plan.hidden_rate }}>
                             <label for="hidden_rate">Hidden Rate</label>
                         </div>
+                        <input type="text" name="coupon_code" id="coupon_code"
+                               value="{{ plan.coupon_code or '' if plan else '' }}"
+                               placeholder="Coupon code (only for Hidden Rate)"
+                               style="margin-top: 0.3rem; font-family: monospace; text-transform: uppercase;"
+                               maxlength="100">
+                        <div class="hint">Hidden plans only surface to bot/web channels when the booking provides this exact code.</div>
                     </div>
                     <div class="form-group">
                         <label>Switch To Us</label>
@@ -1142,6 +1162,21 @@ searchInput.addEventListener('keydown', function(e) {
 })();
 
 renderLinked();
+
+// =========================================================================
+// Standard Rate override — hide the concession picker when ticked. Backend
+// auto-synthesizes linked_concessions from applicable_sites on save.
+// =========================================================================
+(function() {
+    var override = document.getElementById('is_stdrate_override');
+    var picker = document.getElementById('concession-picker-group');
+    if (!override || !picker) return;
+    function sync() {
+        picker.style.display = override.checked ? 'none' : '';
+    }
+    override.addEventListener('change', sync);
+    sync();
+})();
 
 // Site-comparison is re-rendered via the 'applicable-sites-changed' event
 // dispatched by the SiteFilter wiring above.

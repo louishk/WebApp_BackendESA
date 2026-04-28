@@ -58,7 +58,7 @@ _INSERT_COLS: Tuple[str, ...] = (
     'booking_period_start', 'booking_period_end',
     'move_in_range', 'lock_in_period', 'payment_terms',
     'min_duration_months', 'max_duration_months',
-    'distribution_channel', 'hidden_rate',
+    'distribution_channel', 'hidden_rate', 'coupon_code',
     'discount_type', 'discount_numeric', 'discount_segmentation',
     'is_active', 'smart_lock', 'effective_rate', 'computed_at',
 )
@@ -134,7 +134,7 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                        booking_period_start, booking_period_end,
                        period_start, period_end,
                        move_in_range, lock_in_period, payment_terms,
-                       distribution_channel, hidden_rate,
+                       distribution_channel, hidden_rate, coupon_code,
                        discount_type, discount_numeric, discount_segmentation,
                        is_active, is_stdrate_override
                 FROM mw_discount_plans
@@ -577,6 +577,7 @@ def _compose_candidates(
                         'max_duration_months': plan_max_duration,
                         'distribution_channel': plan.get('distribution_channel'),
                         'hidden_rate': plan.get('hidden_rate'),
+                        'coupon_code': plan.get('coupon_code'),
                         'discount_type': plan.get('discount_type'),
                         'discount_numeric': plan.get('discount_numeric'),
                         'discount_segmentation': plan.get('discount_segmentation'),
@@ -709,6 +710,7 @@ def _compose_candidates(
                         'max_duration_months': plan_max_duration,
                         'distribution_channel': plan.get('distribution_channel'),
                         'hidden_rate': plan.get('hidden_rate'),
+                        'coupon_code': plan.get('coupon_code'),
                         'discount_type': plan.get('discount_type'),
                         'discount_numeric': plan.get('discount_numeric'),
                         'discount_segmentation': plan.get('discount_segmentation'),

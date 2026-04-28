@@ -40,6 +40,8 @@ Return a JSON object with exactly one key "plans" whose value is an array. Each 
 - deposit: short string like "No Deposit" or "1 Month"
 - lock_in_period: short string like "Min 6M up to 12M" or "None"
 - distribution_channel: comma-separated string of channels (e.g. "All Channels" or "Direct Mail, Chatbot")
+- hidden_rate: boolean — TRUE when the brief says the rate is hidden / private / unlocked-by-code / for partners only / non-public. Else FALSE.
+- coupon_code: string — extract any explicit promo code mentioned (e.g. "Use code MOVING2026", "Code: SAVE50"). Null if no code is mentioned. Required when hidden_rate=TRUE; if you mark hidden_rate but find no code, leave coupon_code null and the admin will fill it in.
 - switch_to_us: one of ["Eligible","Not Eligible","Eligible with Conditions"]
 - referral_program: one of ["Eligible","Not Eligible","Eligible with Conditions"]
 - terms_conditions: array of strings — one numbered T&C clause per element (strip leading numbers)

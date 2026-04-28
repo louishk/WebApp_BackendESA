@@ -72,6 +72,7 @@ class CandidateRow:
     in_month: Optional[int]
     prepay: Optional[bool]
     prepaid_months: Optional[int]
+    coupon_code: Optional[str] = None
 
 
 class ValidationError(ValueError):
@@ -145,6 +146,13 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
             coerced = _coerce_list(val)
             if coerced:
                 filters[dim] = coerced
+
+    # Coupon code — single string, normalised to upper-case for case-
+    # insensitive match. Stored on filters so fetch_candidate_pool can
+    # parameterise it. None when not provided.
+    coupon = raw_filters.get('coupon_code')
+    if coupon is not None and str(coupon).strip():
+        filters['coupon_code'] = str(coupon).strip().upper()
 
     # case_count range: pass through as-is if numeric
     if 'case_count_min' in raw_filters:
@@ -424,6 +432,7 @@ def _build_candidate_row(r: Any) -> CandidateRow:
         max_duration_months=int(r['max_duration_months']) if r['max_duration_months'] is not None else None,
         distribution_channel=r['distribution_channel'] or None,
         hidden_rate=bool(r['hidden_rate']) if r.get('hidden_rate') is not None else None,
+        coupon_code=r.get('coupon_code') or None,
         amt_type=int(r['amt_type']) if r.get('amt_type') is not None else None,
         pct_discount=_dec(r.get('pct_discount')),
         fixed_discount=_dec(r.get('fixed_discount')),
@@ -451,16 +460,33 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
     exclude_ids: List[int] = req.constraints.get('exclude_unit_ids') or []
     include_legacy: bool = req.constraints.get('include_legacy', True)
     duration = req.duration_months
+    channel = (req.context.get('channel') or '').strip()
+    coupon = (req.filters.get('coupon_code') or '').strip().upper() or None
 
     # Build parameterised WHERE clauses for optional dim filters.
     where_parts = [
         "site_code = ANY(:locations)",
         "((min_duration_months IS NULL OR min_duration_months <= :dur) "
         " AND (max_duration_months IS NULL OR max_duration_months >= :dur))",
+        # Hidden-rate gate: hidden plans require a matching coupon. Public
+        # plans (hidden_rate IS NULL or FALSE) ignore the coupon entirely.
+        # The recommender pulls hidden plans into the pool only when the
+        # bot/web caller explicitly provides the unlock code.
+        "(hidden_rate IS NOT TRUE "
+        " OR (UPPER(coupon_code) = :coupon AND :coupon IS NOT NULL))",
+        # Distribution channel gate: when the plan limits its distribution,
+        # the calling channel must be in that list. Empty/null = open to all.
+        # REPLACE strips spaces so 'Direct Mailing, Online' splits cleanly.
+        "(distribution_channel IS NULL "
+        " OR distribution_channel = '' "
+        " OR :channel = '' "
+        " OR :channel = ANY(string_to_array(REPLACE(distribution_channel, ' ', ''), ',')))",
     ]
     params: Dict[str, Any] = {
         'locations': locations,
         'dur': duration,
+        'channel': channel,
+        'coupon': coupon,
     }
 
     # Each optional dim filter
@@ -515,7 +541,7 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
             parse_ok,
             FALSE AS legacy_mapped,
             plan_name, min_duration_months, max_duration_months,
-            distribution_channel, hidden_rate,
+            distribution_channel, hidden_rate, coupon_code,
             amt_type, pct_discount, fixed_discount, max_amount_off,
             in_month, prepay, prepaid_months
         FROM mw_unit_discount_candidates
