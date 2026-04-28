@@ -796,6 +796,12 @@ def quote_slot(
     charge_info = _load_charge_descriptions(row.site_id, db_session)
     admin_fee: Decimal = charge_info.get('admin_fee', Decimal('0'))
     security_deposit: Decimal = charge_info.get('security_deposit', Decimal('0'))
+    # SiteLink convention: when SecDep.dcPrice is 0, the deposit is the
+    # unit's std_rate (1 month's rent). Only when an explicit fixed amount
+    # is configured does dcPrice carry it. Falling back to std_rate matches
+    # what SOAP MoveInCostRetrieve would charge.
+    if security_deposit <= 0 and row.std_rate is not None:
+        security_deposit = Decimal(str(row.std_rate))
     rent_tax = charge_info.get('rent_tax', ChargeTypeTax('Rent'))
     admin_tax = charge_info.get('admin_tax', rent_tax)
     deposit_tax = charge_info.get('deposit_tax', ChargeTypeTax('SecDep'))
