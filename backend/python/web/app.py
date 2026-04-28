@@ -85,6 +85,26 @@ def create_app(config=None, db_url=None):
 
     app.get_db_session = get_db_session
 
+    # Middleware database session factory (esa_middleware — discount plans,
+    # reservation fees, and other middleware-tier tables)
+    _mw_engine = None
+    _mw_session_factory = None
+
+    def get_middleware_session():
+        nonlocal _mw_engine, _mw_session_factory
+        if _mw_engine is None:
+            _mw_engine = create_engine(
+                get_database_url('middleware'),
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True,
+                pool_recycle=300,
+            )
+            _mw_session_factory = sessionmaker(bind=_mw_engine)
+        return _mw_session_factory()
+
+    app.get_middleware_session = get_middleware_session
+
     # Initialize CORS with restricted origins
     cors_origins = app.config.get('CORS_ORIGINS', [
         'https://esa-backend.extraspaceasia.com',
@@ -240,15 +260,16 @@ def create_app(config=None, db_url=None):
     from web.routes.admin_siteinfo import admin_siteinfo_bp
     from web.routes.reservations import reservations_bp
     from web.routes.crm import crm_bp
+    from web.routes.stripe_payments import stripe_bp
     from web.routes.visits import visits_bp
     from web.routes.revenue import revenue_bp
     from web.routes.tenants import tenants_bp
     from web.routes.billing import billing_bp
     from web.routes.units import units_bp
     from web.routes.reservation_fees import reservation_fees_bp, reservation_fees_api_bp
-    from web.routes.sync_api import sync_api_bp
-    from web.routes.sync_ui import sync_ui_bp
     from web.routes.orchestrator_ui import orchestrator_ui_bp
+    from web.routes.recommendation_engine import recommendation_engine_bp
+    from web.routes.recommendations import recommendations_bp
     from sync_service.api import sync_service_bp
 
     app.register_blueprint(main_bp)
@@ -264,6 +285,7 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(admin_siteinfo_bp)
     app.register_blueprint(reservations_bp)
     app.register_blueprint(crm_bp)
+    app.register_blueprint(stripe_bp)
     app.register_blueprint(visits_bp)
     app.register_blueprint(revenue_bp)
     app.register_blueprint(tenants_bp)
@@ -271,9 +293,9 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(units_bp)
     app.register_blueprint(reservation_fees_bp)
     app.register_blueprint(reservation_fees_api_bp)
-    app.register_blueprint(sync_api_bp)
-    app.register_blueprint(sync_ui_bp)
     app.register_blueprint(orchestrator_ui_bp)
+    app.register_blueprint(recommendation_engine_bp)
+    app.register_blueprint(recommendations_bp)
     app.register_blueprint(sync_service_bp)
 
     # Exempt API routes from CSRF (they use JWT authentication, not session cookies)
@@ -282,8 +304,10 @@ def create_app(config=None, db_url=None):
     csrf.exempt(tenants_bp)
     csrf.exempt(reservation_fees_api_bp)
     csrf.exempt(billing_bp)
-    csrf.exempt(sync_api_bp)
     csrf.exempt(sync_service_bp)
+    csrf.exempt(recommendations_bp)
+    # stripe_bp uses Stripe signature verification on webhook; other routes use JWT
+    csrf.exempt(stripe_bp)
     # crm_bp and visits_bp use session auth — CSRF protection stays enabled
     # (the frontend sends X-CSRFToken header via apiHeaders())
 

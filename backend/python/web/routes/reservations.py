@@ -16,13 +16,13 @@ value or use the _default_date() / _PLACEHOLDER_DOB helpers.
 import logging
 from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from web.auth.jwt_auth import require_auth, require_api_scope
 from web.utils.rate_limit import rate_limit_api
-from web.utils.audit import audit_log
+from web.utils.audit import audit_log, AuditEvent
 from web.utils.soap_helpers import (
     get_pbi_session, CC_NS, cc_soap_action, get_cc_soap_client,
     validate_site_code, safe_int, safe_rate, sanitize_log, clamp,
@@ -47,6 +47,56 @@ _clamp = clamp
 _default_date = default_date
 _parse_date = parse_date
 _require_date = require_date
+
+
+def _link_recommendation(
+    *,
+    unit_id: int,
+    plan_id,
+    concession_id,
+    customer_id,
+    session_id,
+):
+    """
+    Best-effort: stamp the matching mw_recommendations_served row with booking
+    outcome. Opens its own middleware session; never raises; never blocks caller.
+    """
+    from datetime import timezone as _tz
+    from web.services.booking_outcomes import link_booking_to_recommendation
+
+    booked_at = datetime.now(_tz.utc)
+    try:
+        mw_session = current_app.get_middleware_session()
+    except Exception as exc:
+        logger.warning("Could not open middleware session for outcome write-back: %s", exc)
+        return
+
+    try:
+        rec_id = link_booking_to_recommendation(
+            unit_id=unit_id,
+            plan_id=plan_id,
+            concession_id=concession_id,
+            customer_id=customer_id,
+            session_id=session_id,
+            booked_at=booked_at,
+            db_session=mw_session,
+        )
+        if rec_id is not None:
+            logger.info(
+                "linked booking unit=%s to recommendation row id=%s",
+                unit_id, rec_id,
+            )
+        else:
+            logger.info(
+                "booking unit=%s not linked to any recommendation "
+                "(session_id=%s customer_id=%s)",
+                unit_id, session_id, customer_id,
+            )
+    finally:
+        try:
+            mw_session.close()
+        except Exception:
+            pass
 
 
 def _record_reservation(**kwargs):
@@ -126,6 +176,69 @@ def _get_caller_info():
     """Extract API caller identity from Flask g."""
     user = getattr(g, 'current_user', None) or {}
     return user.get('key_id'), user.get('sub')
+
+
+def _reservation_soap_call(site_code, operation, params, result_tag="RT",
+                           audit_event=None, audit_detail="",
+                           success_check=None):
+    """
+    Call a reservation SOAP write operation with standard error handling.
+
+    Returns (results, None) on success, (None, error_response) on failure.
+    Fires audit_log ONLY on success.
+
+    For ReservationNewWithSource_v6, Ret_Code is the WaitingID (positive int =
+    success, 0 or negative = failure). Pass success_check=<callable> to override
+    the default Ret_Code > 0 check — it receives the first result dict and
+    must return True for success.
+    """
+    from common.soap_client import SOAPFaultError
+
+    soap_client = None
+    try:
+        soap_client = _get_cc_soap_client()
+        results = soap_client.call(
+            operation=operation,
+            parameters={"sLocationCode": site_code, **params},
+            soap_action=_cc_soap_action(operation),
+            namespace=CC_NS,
+            result_tag=result_tag,
+        )
+
+        if result_tag == "Table":
+            return results or [], None
+
+        first = results[0] if results else {}
+        ret_code = first.get('Ret_Code')
+
+        if success_check is not None:
+            ok = success_check(first)
+        else:
+            ok = ret_code is not None and int(ret_code) > 0
+
+        if not ok:
+            ret_msg = first.get('Ret_Msg', '')
+            logger.error(f"{operation} failed: ret_code={ret_code} msg={ret_msg}")
+            return None, (jsonify({'success': False, 'error': f'{operation} rejected by SMD',
+                                   'detail': ret_msg}), 502)
+
+        if audit_event:
+            audit_log(audit_event, audit_detail)
+
+        return results, None
+
+    except SOAPFaultError as e:
+        logger.error(f"SOAP fault {operation}: {e}")
+        return None, (jsonify({'success': False, 'error': 'SOAP API error'}), 502)
+    except RuntimeError as e:
+        logger.error(f"Config error {operation}: {e}")
+        return None, (jsonify({'error': 'SOAP configuration not available'}), 500)
+    except Exception as e:
+        logger.error(f"Unexpected error {operation}: {e}")
+        return None, (jsonify({'success': False, 'error': 'An internal error occurred'}), 500)
+    finally:
+        if soap_client:
+            soap_client.close()
 
 
 # =============================================================================
@@ -308,6 +421,21 @@ def reservation_reserve():
             waiting_id = res_results[0].get('Ret_Code')
             global_waiting_num = res_results[0].get('Ret_Msg')
 
+        # Success only if we got a positive WaitingID back
+        try:
+            res_ok = waiting_id is not None and int(waiting_id) > 0
+        except (TypeError, ValueError):
+            res_ok = False
+
+        if not res_ok:
+            ret_msg = res_results[0].get('Ret_Msg', '') if res_results else ''
+            logger.error(
+                f"ReservationNewWithSource_v6 failed: waiting_id={waiting_id} msg={ret_msg}"
+            )
+            return jsonify({'success': False,
+                            'error': 'Failed to create reservation',
+                            'detail': ret_msg}), 502
+
         logger.info(
             f"ReservationNewWithSource_v6 unit={unit_id} site={site_code}: "
             f"tenant_id={tenant_id}, waiting_id={waiting_id}"
@@ -331,6 +459,15 @@ def reservation_reserve():
             source=source, gclid=gclid, gid=gid, botid=botid,
             api_key_id=api_key_id, api_user=api_user,
             status='created',
+        )
+
+        # Link to recommendation (best-effort — never blocks the booking response)
+        _link_recommendation(
+            unit_id=unit_id,
+            plan_id=None,
+            concession_id=concession_id or None,
+            customer_id=_clamp(data.get('customer_id', ''), 120) or None,
+            session_id=_clamp(data.get('session_id', ''), 64) or None,
         )
 
         return jsonify({
@@ -462,6 +599,20 @@ def reservation_create():
             waiting_id = results[0].get('Ret_Code')
             global_waiting_num = results[0].get('Ret_Msg')
 
+        try:
+            res_ok = waiting_id is not None and int(waiting_id) > 0
+        except (TypeError, ValueError):
+            res_ok = False
+
+        if not res_ok:
+            ret_msg = results[0].get('Ret_Msg', '') if results else ''
+            logger.error(
+                f"ReservationNewWithSource_v6 failed: waiting_id={waiting_id} msg={ret_msg}"
+            )
+            return jsonify({'success': False,
+                            'error': 'Failed to create reservation',
+                            'detail': ret_msg}), 502
+
         logger.info(
             f"ReservationNewWithSource_v6 unit={unit_id} site={site_code}: "
             f"tenant_id={tenant_id}, waiting_id={waiting_id}"
@@ -484,6 +635,15 @@ def reservation_create():
             source=source, gclid=gclid, gid=gid, botid=botid,
             api_key_id=api_key_id, api_user=api_user,
             status='created',
+        )
+
+        # Link to recommendation (best-effort — never blocks the booking response)
+        _link_recommendation(
+            unit_id=unit_id,
+            plan_id=None,
+            concession_id=concession_id or None,
+            customer_id=_clamp(data.get('customer_id', ''), 120) or None,
+            session_id=_clamp(data.get('session_id', ''), 64) or None,
         )
 
         return jsonify({
@@ -764,6 +924,20 @@ def reservation_update(waiting_id):
             ret_code = results[0].get('Ret_Code')
             ret_msg = results[0].get('Ret_Msg')
 
+        try:
+            update_ok = ret_code is not None and int(ret_code) > 0
+        except (TypeError, ValueError):
+            update_ok = False
+
+        if not update_ok:
+            logger.error(
+                f"ReservationUpdate_v4 failed: waiting_id={waiting_id} "
+                f"ret_code={ret_code} msg={ret_msg}"
+            )
+            return jsonify({'success': False,
+                            'error': 'Reservation update rejected by SMD',
+                            'detail': ret_msg}), 502
+
         logger.info(
             f"ReservationUpdate_v4 waiting_id={waiting_id} site={site_code}: "
             f"code={ret_code}, msg={ret_msg}"
@@ -888,6 +1062,20 @@ def reservation_cancel(waiting_id):
             ret_code = results[0].get('Ret_Code')
             ret_msg = results[0].get('Ret_Msg')
 
+        try:
+            cancel_ok = ret_code is not None and int(ret_code) > 0
+        except (TypeError, ValueError):
+            cancel_ok = False
+
+        if not cancel_ok:
+            logger.error(
+                f"ReservationUpdate_v4 cancel failed: waiting_id={waiting_id} "
+                f"ret_code={ret_code} msg={ret_msg}"
+            )
+            return jsonify({'success': False,
+                            'error': 'Cancellation rejected by SMD',
+                            'detail': ret_msg}), 502
+
         logger.info(f"Reservation cancelled: waiting_id={waiting_id} site={site_code}")
         audit_log(
             'RESERVATION_CANCELLED',
@@ -895,7 +1083,7 @@ def reservation_cancel(waiting_id):
             f"reason={_sanitize_log(data.get('cancellation_reason', ''))}"
         )
 
-        # Sync tracking table
+        # Sync tracking table only after confirmed cancellation
         _update_reservation_status(site_code, waiting_id, 'cancelled', 'cancelled_at')
 
         return jsonify({

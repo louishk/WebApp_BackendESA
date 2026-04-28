@@ -112,6 +112,11 @@ class DiscountPlan(Base):
     # Sitelink Concession Linking
     # =========================================================================
     linked_concessions = Column(JSONB, default=list, comment="Array of {site_id, concession_id} pairs linking to ccws_discount")
+    # When TRUE, the plan is a "Standard Rate" pseudo-plan — booking flow
+    # sends ConcessionID=0 to SOAP (no discount). Candidates pipeline emits
+    # rows with concession-derived fields nulled and effective_rate=std_rate.
+    is_stdrate_override = Column(Boolean, nullable=False, default=False,
+                                 comment="Force ConcessionID=0; bypass ccws_discount lookup")
 
     # =========================================================================
     # Unit-level Restrictions (SOP COM01 dims)
@@ -194,6 +199,7 @@ class DiscountPlan(Base):
             'department_notes': self.department_notes or {},
             # Sitelink linking
             'linked_concessions': self.linked_concessions or [],
+            'is_stdrate_override': bool(self.is_stdrate_override),
             'restrictions': self.restrictions or {},
             # Status
             'is_active': self.is_active,

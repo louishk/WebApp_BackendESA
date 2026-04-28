@@ -327,6 +327,64 @@ class ComposeTests(unittest.TestCase):
         )
         self.assertEqual(rows[0]['effective_rate'], Decimal('80'))
 
+    def test_stdrate_override_emits_one_row_per_unit_with_concession_id_zero(self):
+        # Plan with is_stdrate_override=True and empty linked_concessions.
+        # Should emit one row per applicable site x unit; concession_id must be
+        # 0 and effective_rate must equal std_rate (no discount math).
+        plan = dict(
+            PLAN,
+            is_stdrate_override=True,
+            linked_concessions=[],       # empty — the stdrate path ignores this
+        )
+        rows, parse_fail, _excluded, _restr, _legacy = _compose_candidates(
+            plan_rows=[plan],
+            conc_rows=[CONC_ACTIVE],     # present but irrelevant for stdrate path
+            unit_rows=[UNIT_A],
+            code_to_site_id={'L017': 100},
+            computed_at=datetime(2026, 4, 22),
+        )
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r['concession_id'], 0)
+        self.assertEqual(r['effective_rate'], Decimal('100'))   # std_rate, no discount
+        self.assertEqual(r['plan_id'], 42)
+        self.assertEqual(r['site_id'], 100)
+        self.assertEqual(r['unit_id'], 1)
+        # All concession-derived fields must be NULL.
+        for field in ('amt_type', 'fixed_discount', 'pct_discount', 'max_amount_off',
+                      'plan_start', 'plan_end', 'never_expires', 'in_month',
+                      'prepay', 'prepaid_months', 'b_for_all_units', 'b_for_corp',
+                      'restriction_flags', 'exclude_if_less_than',
+                      'exclude_if_more_than', 'max_occ_pct'):
+            self.assertIsNone(r[field], msg=f'{field} should be None for stdrate row')
+        self.assertEqual(parse_fail, 0)
+
+    def test_stdrate_override_ignores_linked_concessions(self):
+        # Even when linked_concessions contains a valid entry, the stdrate path
+        # must NOT iterate it. Two units at the applicable site → two rows with
+        # concession_id=0; no rows with concession_id=900.
+        unit_b = dict(UNIT_A, UnitID=2, sTypeName='M/30-35/W/A/SS/NP')
+        plan = dict(
+            PLAN,
+            is_stdrate_override=True,
+            linked_concessions=[{'site_id': 100, 'concession_id': 900}],  # must be ignored
+        )
+        rows, _pf, _excluded, _restr, _legacy = _compose_candidates(
+            plan_rows=[plan],
+            conc_rows=[CONC_ACTIVE],
+            unit_rows=[UNIT_A, unit_b],
+            code_to_site_id={'L017': 100},
+            computed_at=datetime(2026, 4, 22),
+        )
+        # Two units at L017 → two rows.
+        self.assertEqual(len(rows), 2)
+        # All rows must use concession_id=0, never 900.
+        concession_ids = {r['concession_id'] for r in rows}
+        self.assertEqual(concession_ids, {0})
+        # effective_rate = std_rate for every row.
+        for r in rows:
+            self.assertEqual(r['effective_rate'], Decimal('100'))
+
 
 class SiteAppliesTests(unittest.TestCase):
     def test_true_value(self):

@@ -22,6 +22,7 @@ ChargeDescriptionsRetrieve data.
 
 from calendar import monthrange
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from typing import List, Optional, Tuple
 
@@ -305,6 +306,284 @@ def calculate_movein_cost(
 def estimate_total(charges: List[CostLine]) -> Decimal:
     """Sum all charge line totals."""
     return sum((c.total for c in charges), Decimal("0"))
+
+
+@dataclass
+class MonthlyBreakdown:
+    """Cost breakdown for a single month in a duration quote."""
+    month_index: int               # 1..N
+    billing_date: date             # 1st of the billing month (or move-in date for month 1)
+    rent: Decimal
+    rent_proration_factor: Decimal  # 1.0 = full month, <1.0 = prorated
+    discount: Decimal               # negative or zero (stored as positive, subtracted from rent)
+    insurance: Decimal
+    deposit: Decimal                # 0 except month 1
+    admin_fee: Decimal              # 0 except month 1
+    rent_tax: Decimal
+    insurance_tax: Decimal
+    total: Decimal                  # net charge for the month
+
+
+@dataclass
+class DurationQuote:
+    """Month-by-month cost quote for a given tenure."""
+    unit_id: int
+    plan_id: int
+    concession_id: int
+    move_in_date: date
+    duration_months: int
+    breakdown: List[MonthlyBreakdown]
+    first_month_total: Decimal      # = breakdown[0].total
+    monthly_average: Decimal        # = total_contract / duration_months
+    total_contract: Decimal         # sum of breakdown[*].total
+    confidence: str                 # 'high' | 'low_unsupported_concession'
+    confidence_reason: Optional[str]
+
+
+def _next_month_date(d: date) -> date:
+    """Return the 1st of the month following d."""
+    if d.month == 12:
+        return date(d.year + 1, 1, 1)
+    return date(d.year, d.month + 1, 1)
+
+
+def _add_months(d: date, n: int) -> date:
+    """Add n months to date d (day-1 result — always returns 1st of target month)."""
+    month = d.month - 1 + n
+    year = d.year + month // 12
+    month = month % 12 + 1
+    return date(year, month, 1)
+
+
+def calculate_duration_breakdown(
+    std_rate,
+    security_deposit,
+    admin_fee,
+    move_in_date,
+    rent_tax: ChargeTypeTax,
+    admin_tax: Optional[ChargeTypeTax] = None,
+    deposit_tax: Optional[ChargeTypeTax] = None,
+    insurance_tax: Optional[ChargeTypeTax] = None,
+    pc_discount=0,
+    fixed_discount=0,
+    insurance_premium=0,
+    anniversary_billing: bool = False,
+    day_start_prorate_plus_next: int = 17,
+    *,
+    duration_months: int,
+    concession_in_month: int = 1,
+    concession_prepay_months: int = 0,
+    max_amount_off: Optional[Decimal] = None,
+    unit_id: int = 0,
+    plan_id: int = 0,
+    concession_id: int = 0,
+) -> DurationQuote:
+    """
+    Compute a month-by-month cost breakdown for the requested tenure.
+
+    Month 1 delegates entirely to calculate_movein_cost() — all proration,
+    deposit, admin fee, discount, and tax logic is identical and SOAP-validated.
+
+    Months 2..N use simpler full-month math:
+    - Full rent + insurance + tax each month.
+    - Discount applied when month_index <= concession_in_month (iInMonth window).
+    - No deposit or admin fee on recurring months.
+
+    LSETUP late-day case (1st-of-month billing, day > threshold):
+    When calculate_movein_cost triggers a "Second Monthly Rent Fee", that second
+    month is bundled into the move-in payment. The breakdown reflects this by
+    making month 2 a full-month entry with rent_proration_factor=1.0 but
+    billing_date = 1st of month 2. Months 3..N are the recurring schedule.
+    The `total` on month 2 is the real cost — it was charged at move-in, not
+    as a separate future billing. Callers can detect the bundled case by
+    checking DurationQuote.breakdown[0].rent_proration_factor < 1.0 on a
+    non-anniversary plan when duration_months > 1.
+
+    Anniversary billing: month 1 = full rent on move-in date; month 2 = full
+    rent on the monthly anniversary; etc. No late-day bundling.
+
+    Discount math (months 2..N):
+    - pc_discount: applied as percentage of full rent, subject to max_amount_off.
+    - fixed_discount: applied as flat amount, capped at full rent.
+    - Mirrors month 1's logic but without proration.
+
+    Confidence: 'high' when no low-confidence reason; 'low_unsupported_concession'
+    when calculate_movein_cost returns a reason code (free-month, prepay, etc.).
+    """
+    if admin_tax is None:
+        admin_tax = rent_tax
+    if deposit_tax is None:
+        deposit_tax = ChargeTypeTax("SecDep")
+    if insurance_tax is None:
+        insurance_tax = rent_tax
+
+    _rate = Decimal(str(std_rate))
+    _ins = Decimal(str(insurance_premium)) if insurance_premium else Decimal("0")
+    _pc = Decimal(str(pc_discount)) if pc_discount else Decimal("0")
+    _fixed = Decimal(str(fixed_discount)) if fixed_discount else Decimal("0")
+    _max_off = Decimal(str(max_amount_off)) if max_amount_off is not None else None
+
+    # --- Month 1: delegate to existing validated calculator ---
+    m1_charges, low_reason = calculate_movein_cost(
+        std_rate=std_rate,
+        security_deposit=security_deposit,
+        admin_fee=admin_fee,
+        move_in_date=move_in_date,
+        rent_tax=rent_tax,
+        admin_tax=admin_tax,
+        deposit_tax=deposit_tax,
+        insurance_tax=insurance_tax,
+        pc_discount=pc_discount,
+        fixed_discount=fixed_discount,
+        insurance_premium=insurance_premium,
+        anniversary_billing=anniversary_billing,
+        day_start_prorate_plus_next=day_start_prorate_plus_next,
+    )
+
+    # Determine whether a second month was bundled into the move-in charge.
+    day = move_in_date.day
+    late_movein = not anniversary_billing and day > day_start_prorate_plus_next
+
+    # Parse month 1 lines from the CostLine list.
+    # Lines are: First Monthly Rent Fee, Administrative Fee, Security Deposit,
+    # [Second Monthly Rent Fee], [First Month Insurance], [Second Month Insurance]
+    m1_rent_line = next(c for c in m1_charges if "First Monthly Rent" in c.description)
+    m1_admin_line = next(c for c in m1_charges if "Administrative" in c.description)
+    m1_dep_line = next(c for c in m1_charges if "Security Deposit" in c.description)
+    m1_ins_line = next(
+        (c for c in m1_charges if c.description == "First Month Insurance"), None
+    )
+
+    # Proration factor for month 1 (1.0 for anniversary billing or move-in on day 1)
+    if anniversary_billing:
+        m1_factor = Decimal("1")
+    else:
+        _, days_in_month = monthrange(move_in_date.year, move_in_date.month)
+        remaining = days_in_month - day + 1
+        m1_factor = _round2(Decimal(remaining) / Decimal(days_in_month))
+
+    m1_rent_tax = m1_rent_line.tax1 + m1_rent_line.tax2
+    m1_ins_tax = m1_ins_line.tax1 if m1_ins_line else Decimal("0")
+    m1_ins_amt = m1_ins_line.charge_amount if m1_ins_line else Decimal("0")
+
+    m1_total = sum(c.total for c in m1_charges)
+
+    # For month 1, the "rent" field holds the gross prorated rent (before discount).
+    # The discount is what calculate_movein_cost computed.
+    m1_breakdown = MonthlyBreakdown(
+        month_index=1,
+        billing_date=move_in_date if isinstance(move_in_date, date) else move_in_date.date(),
+        rent=m1_rent_line.charge_amount,
+        rent_proration_factor=m1_factor,
+        discount=m1_rent_line.discount,
+        insurance=m1_ins_amt,
+        deposit=m1_dep_line.charge_amount,
+        admin_fee=m1_admin_line.charge_amount,
+        rent_tax=m1_rent_tax,
+        insurance_tax=m1_ins_tax,
+        total=m1_total,
+    )
+
+    breakdown: List[MonthlyBreakdown] = [m1_breakdown]
+
+    # --- Months 2..N ---
+    # When late_movein: month 2 is already bundled into the move-in payment.
+    # We still emit a MonthlyBreakdown for it so the caller has the complete
+    # picture, but its total was charged at move-in.
+    # The recurring schedule (future billing dates) starts at month 3 for
+    # late-movein cases, or month 2 otherwise.
+
+    # Billing date anchor: 1st of the calendar month following move_in_date.
+    # For anniversary billing the anchor is the monthly anniversary of move_in_date.
+    if anniversary_billing:
+        # Month 2 billing date = move_in_date + 1 month (same day, or last day of month)
+        def _anniv_date(n: int) -> date:
+            """Return the billing date for month n (1-indexed). Month 1 = move_in_date."""
+            target_month = move_in_date.month - 1 + n
+            target_year = move_in_date.year + (target_month - 1) // 12
+            target_month = (target_month - 1) % 12 + 1
+            _, days_in_target = monthrange(target_year, target_month)
+            target_day = min(move_in_date.day, days_in_target)
+            return date(target_year, target_month, target_day)
+    else:
+        def _anniv_date(n: int) -> date:
+            """Return the 1st of the nth billing month (n >= 2 means +n-1 calendar months)."""
+            # Month 1 = move_in_date month; month 2 = next calendar month 1st; etc.
+            return _add_months(date(move_in_date.year, move_in_date.month, 1), n - 1)
+
+    for month_idx in range(2, duration_months + 1):
+        billing_dt = _anniv_date(month_idx)
+
+        # Full rent (no proration on months 2+)
+        full_rent = _round2(_rate)
+
+        # Discount: apply only within concession_in_month window
+        if month_idx <= concession_in_month:
+            if _pc > Decimal("0"):
+                disc = _round2(full_rent * _pc / Decimal("100"))
+                if _max_off is not None:
+                    disc = min(disc, _max_off)
+            elif _fixed > Decimal("0"):
+                disc = min(_round2(_fixed), full_rent)
+            else:
+                disc = Decimal("0")
+        else:
+            disc = Decimal("0")
+
+        # Tax on rent (gross - discount tax method, mirrors month 1)
+        r_full_t1 = _tax(full_rent, rent_tax.tax1_rate)
+        r_full_t2 = _tax(full_rent, rent_tax.tax2_rate)
+        if disc > Decimal("0"):
+            r_disc_t1 = _tax(disc, rent_tax.tax1_rate)
+            r_disc_t2 = _tax(disc, rent_tax.tax2_rate)
+        else:
+            r_disc_t1 = r_disc_t2 = Decimal("0")
+        r_tax = (r_full_t1 - r_disc_t1) + (r_full_t2 - r_disc_t2)
+
+        # Insurance (full premium, no proration on months 2+)
+        if _ins > Decimal("0"):
+            ins_amt = _round2(_ins)
+            ins_tax_amt = _tax(ins_amt, insurance_tax.tax1_rate)
+        else:
+            ins_amt = Decimal("0")
+            ins_tax_amt = Decimal("0")
+
+        rent_after_disc = full_rent - disc
+        month_total = rent_after_disc + r_tax + ins_amt + ins_tax_amt
+
+        breakdown.append(MonthlyBreakdown(
+            month_index=month_idx,
+            billing_date=billing_dt,
+            rent=full_rent,
+            rent_proration_factor=Decimal("1"),
+            discount=disc,
+            insurance=ins_amt,
+            deposit=Decimal("0"),
+            admin_fee=Decimal("0"),
+            rent_tax=r_tax,
+            insurance_tax=ins_tax_amt,
+            total=month_total,
+        ))
+
+    total_contract = sum(m.total for m in breakdown)
+    first_month_total = breakdown[0].total
+    monthly_average = _round2(total_contract / Decimal(str(duration_months)))
+
+    confidence = "high" if low_reason is None else "low_unsupported_concession"
+
+    return DurationQuote(
+        unit_id=unit_id,
+        plan_id=plan_id,
+        concession_id=concession_id,
+        move_in_date=move_in_date if isinstance(move_in_date, date) else move_in_date.date(),
+        duration_months=duration_months,
+        breakdown=breakdown,
+        first_month_total=first_month_total,
+        monthly_average=monthly_average,
+        total_contract=total_contract,
+        confidence=confidence,
+        confidence_reason=low_reason,
+    )
 
 
 def load_site_billing_config(site_code: str):

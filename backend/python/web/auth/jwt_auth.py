@@ -55,6 +55,18 @@ def _ensure_jwt_config():
 # Allowed roles for API access (scheduler and tools)
 API_ACCESS_ROLES = ['admin', 'scheduler_admin']
 
+# Known API key scopes — grant via /admin/api-keys.
+# Scope enforcement is string-based in require_api_scope(); this list is the
+# single source of truth for documentation and admin UI population.
+KNOWN_API_SCOPES = [
+    'discount_plans:read',
+    'discount_plans:write',
+    'inventory:read',
+    'reservations:read',
+    'reservations:write',
+    'recommender',          # POST /api/recommendations — chatbot key gets this
+]
+
 
 class AuthError(Exception):
     """Authentication error with status code."""

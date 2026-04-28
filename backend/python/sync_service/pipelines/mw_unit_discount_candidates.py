@@ -136,7 +136,7 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                        move_in_range, lock_in_period, payment_terms,
                        distribution_channel, hidden_rate,
                        discount_type, discount_numeric, discount_segmentation,
-                       is_active
+                       is_active, is_stdrate_override
                 FROM mw_discount_plans
                 WHERE is_active = TRUE
                   AND (period_end           IS NULL OR period_end           >= CURRENT_DATE)
@@ -425,8 +425,11 @@ def _compose_candidates(
                    'climate_type', 'unit_shape', 'pillar')
 
     for plan in plan_rows:
+        is_stdrate = bool(plan.get('is_stdrate_override'))
         linked = plan.get('linked_concessions') or []
-        if not isinstance(linked, list):
+        # Guard is only needed for the concession path; stdrate plans don't use
+        # linked_concessions at all, so a malformed value there is harmless.
+        if not is_stdrate and not isinstance(linked, list):
             continue
 
         # Per-plan restriction allow-sets. Empty dim = no restriction; a dim
@@ -469,137 +472,251 @@ def _compose_candidates(
                         except (TypeError, ValueError):
                             pass
 
-        for link in linked:
-            if not isinstance(link, dict):
-                continue
-            try:
-                site_id = int(link.get('site_id'))
-                concession_id = int(link.get('concession_id'))
-            except (TypeError, ValueError):
-                continue
+        if is_stdrate:
+            # Standard Rate plan — iterate applicable_sites directly instead of
+            # linked_concessions. One row per applicable site × available unit,
+            # concession_id=0, all concession-derived fields NULL, and
+            # effective_rate = std_rate (no discount applied). ConcessionID=0
+            # is the booking-flow sentinel for "no concession" sent to SOAP.
+            applicable_sites = plan.get('applicable_sites') or {}
+            if not isinstance(applicable_sites, dict):
+                applicable_sites = {}
+            site_iter = [
+                (code, code_to_site_id[code])
+                for code, flag in applicable_sites.items()
+                if flag and code in code_to_site_id
+            ]
+            for site_code, site_id in site_iter:
+                units = units_by_site.get(site_id) or []
+                for u in units:
+                    # No concession → no corp gate; all units pass.
+                    raw_stype = u.get('sTypeName')
+                    parts = parse_stype_name(raw_stype)
+                    if not parts.parse_ok:
+                        parse_fail_count += 1
+                        parts, _used_legacy = _enrich_with_legacy(parts, raw_stype, legacy_type_map)
+                        if _used_legacy:
+                            legacy_mapped_count += 1
+                    # Drop units whose parsed unit_type is globally excluded.
+                    if parts.unit_type and parts.unit_type in excluded_unit_types:
+                        excluded_count += 1
+                        continue
+                    # Drop units that fail any of the plan's per-dim restrictions.
+                    if restrict_sets:
+                        passes = True
+                        for field, allowed in restrict_sets.items():
+                            val = getattr(parts, field, None)
+                            if val is None or val not in allowed:
+                                passes = False
+                                break
+                        if not passes:
+                            restriction_drop_count += 1
+                            continue
+                    # Wine case-count gate.
+                    if plan_min_cases is not None or plan_max_cases is not None:
+                        cc = parts.case_count
+                        if cc is None:
+                            restriction_drop_count += 1
+                            continue
+                        if plan_min_cases is not None and cc < plan_min_cases:
+                            restriction_drop_count += 1
+                            continue
+                        if plan_max_cases is not None and cc > plan_max_cases:
+                            restriction_drop_count += 1
+                            continue
 
-            site_code = site_id_to_code.get(site_id)
-            # Only emit if plan's applicable_sites allows this site.
-            if not _site_applies(plan.get('applicable_sites'), site_code):
-                continue
-
-            conc = conc_by_key.get((site_id, concession_id))
-            if conc is None:
-                # Concession inactive or not synced yet — skip.
-                continue
-
-            units = units_by_site.get(site_id) or []
-            for u in units:
-                # Corporate sanity: if the concession is corporate-only and the
-                # unit is non-corporate (or vice versa), skip. Conservative —
-                # only skip on explicit mismatch; surface the flags as columns
-                # so recommender can override later.
-                conc_for_corp = conc.get('bForCorp')
-                unit_corp = u.get('bCorporate')
-                if conc_for_corp is True and unit_corp is False:
+                    std_rate = u.get('dcStdRate')
+                    out.append({
+                        'site_id': site_id,
+                        'unit_id': u['UnitID'],
+                        'plan_id': plan['id'],
+                        'concession_id': 0,
+                        'site_code': u.get('sLocationCode') or site_code,
+                        'unit_type_id': u.get('UnitTypeID'),
+                        'stype_name': u.get('sTypeName'),
+                        'size_category': parts.size_category,
+                        'size_range': parts.size_range,
+                        'unit_type': parts.unit_type,
+                        'climate_type': parts.climate_type,
+                        'unit_shape': parts.unit_shape,
+                        'pillar': parts.pillar,
+                        'case_count': parts.case_count,
+                        'parse_ok': parts.parse_ok,
+                        'std_rate': std_rate,
+                        'web_rate': u.get('dcWebRate'),
+                        'push_rate': u.get('dcPushRate'),
+                        'board_rate': u.get('dcBoardRate'),
+                        'preferred_rate': u.get('dcPreferredRate'),
+                        # Concession-derived fields: all NULL for stdrate rows.
+                        'amt_type': None,
+                        'fixed_discount': None,
+                        'pct_discount': None,
+                        'max_amount_off': None,
+                        'plan_start': None,
+                        'plan_end': None,
+                        'never_expires': None,
+                        'in_month': None,
+                        'prepay': None,
+                        'prepaid_months': None,
+                        'b_for_all_units': None,
+                        'b_for_corp': None,
+                        'restriction_flags': None,
+                        'exclude_if_less_than': None,
+                        'exclude_if_more_than': None,
+                        'max_occ_pct': None,
+                        'plan_type': plan.get('plan_type'),
+                        'plan_name': plan.get('plan_name'),
+                        'promo_period_start': plan.get('promo_period_start'),
+                        'promo_period_end': plan.get('promo_period_end'),
+                        'booking_period_start': plan.get('booking_period_start'),
+                        'booking_period_end': plan.get('booking_period_end'),
+                        'move_in_range': plan.get('move_in_range'),
+                        'lock_in_period': plan.get('lock_in_period'),
+                        'payment_terms': plan.get('payment_terms'),
+                        'min_duration_months': plan_min_duration,
+                        'max_duration_months': plan_max_duration,
+                        'distribution_channel': plan.get('distribution_channel'),
+                        'hidden_rate': plan.get('hidden_rate'),
+                        'discount_type': plan.get('discount_type'),
+                        'discount_numeric': plan.get('discount_numeric'),
+                        'discount_segmentation': plan.get('discount_segmentation'),
+                        'is_active': plan.get('is_active'),
+                        'smart_lock': _jsonb_or_none(smart_lock_map.get((site_id, u['UnitID']))),
+                        'effective_rate': std_rate,
+                        'computed_at': computed_at,
+                    })
+        else:
+            for link in linked:
+                if not isinstance(link, dict):
                     continue
-                if conc_for_corp is False and unit_corp is True:
-                    # Concession explicitly not-for-corp, unit is corp — skip.
+                try:
+                    site_id = int(link.get('site_id'))
+                    concession_id = int(link.get('concession_id'))
+                except (TypeError, ValueError):
                     continue
 
-                raw_stype = u.get('sTypeName')
-                parts = parse_stype_name(raw_stype)
-                if not parts.parse_ok:
-                    parse_fail_count += 1
-                    parts, _used_legacy = _enrich_with_legacy(parts, raw_stype, legacy_type_map)
-                    if _used_legacy:
-                        legacy_mapped_count += 1
-                # Drop units whose parsed unit_type is globally excluded.
-                if parts.unit_type and parts.unit_type in excluded_unit_types:
-                    excluded_count += 1
+                site_code = site_id_to_code.get(site_id)
+                # Only emit if plan's applicable_sites allows this site.
+                if not _site_applies(plan.get('applicable_sites'), site_code):
                     continue
-                # Drop units that fail any of the plan's per-dim restrictions.
-                if restrict_sets:
-                    passes = True
-                    for field, allowed in restrict_sets.items():
-                        val = getattr(parts, field, None)
-                        if val is None or val not in allowed:
-                            passes = False
-                            break
-                    if not passes:
-                        restriction_drop_count += 1
+
+                conc = conc_by_key.get((site_id, concession_id))
+                if conc is None:
+                    # Concession inactive or not synced yet — skip.
+                    continue
+
+                units = units_by_site.get(site_id) or []
+                for u in units:
+                    # Corporate sanity: if the concession is corporate-only and the
+                    # unit is non-corporate (or vice versa), skip. Conservative —
+                    # only skip on explicit mismatch; surface the flags as columns
+                    # so recommender can override later.
+                    conc_for_corp = conc.get('bForCorp')
+                    unit_corp = u.get('bCorporate')
+                    if conc_for_corp is True and unit_corp is False:
                         continue
-                # Wine case-count gate — when either bound is set, the unit
-                # must (a) have a case_count and (b) fall within the range.
-                if plan_min_cases is not None or plan_max_cases is not None:
-                    cc = parts.case_count
-                    if cc is None:
-                        restriction_drop_count += 1
-                        continue
-                    if plan_min_cases is not None and cc < plan_min_cases:
-                        restriction_drop_count += 1
-                        continue
-                    if plan_max_cases is not None and cc > plan_max_cases:
-                        restriction_drop_count += 1
+                    if conc_for_corp is False and unit_corp is True:
+                        # Concession explicitly not-for-corp, unit is corp — skip.
                         continue
 
-                std_rate = u.get('dcStdRate')
-                pct_discount = conc.get('dcPCDiscount')
-                fixed_discount = conc.get('dcFixedDiscount')
+                    raw_stype = u.get('sTypeName')
+                    parts = parse_stype_name(raw_stype)
+                    if not parts.parse_ok:
+                        parse_fail_count += 1
+                        parts, _used_legacy = _enrich_with_legacy(parts, raw_stype, legacy_type_map)
+                        if _used_legacy:
+                            legacy_mapped_count += 1
+                    # Drop units whose parsed unit_type is globally excluded.
+                    if parts.unit_type and parts.unit_type in excluded_unit_types:
+                        excluded_count += 1
+                        continue
+                    # Drop units that fail any of the plan's per-dim restrictions.
+                    if restrict_sets:
+                        passes = True
+                        for field, allowed in restrict_sets.items():
+                            val = getattr(parts, field, None)
+                            if val is None or val not in allowed:
+                                passes = False
+                                break
+                        if not passes:
+                            restriction_drop_count += 1
+                            continue
+                    # Wine case-count gate — when either bound is set, the unit
+                    # must (a) have a case_count and (b) fall within the range.
+                    if plan_min_cases is not None or plan_max_cases is not None:
+                        cc = parts.case_count
+                        if cc is None:
+                            restriction_drop_count += 1
+                            continue
+                        if plan_min_cases is not None and cc < plan_min_cases:
+                            restriction_drop_count += 1
+                            continue
+                        if plan_max_cases is not None and cc > plan_max_cases:
+                            restriction_drop_count += 1
+                            continue
 
-                out.append({
-                    'site_id': site_id,
-                    'unit_id': u['UnitID'],
-                    'plan_id': plan['id'],
-                    'concession_id': concession_id,
-                    'site_code': u.get('sLocationCode') or site_code,
-                    'unit_type_id': u.get('UnitTypeID'),
-                    'stype_name': u.get('sTypeName'),
-                    'size_category': parts.size_category,
-                    'size_range': parts.size_range,
-                    'unit_type': parts.unit_type,
-                    'climate_type': parts.climate_type,
-                    'unit_shape': parts.unit_shape,
-                    'pillar': parts.pillar,
-                    'case_count': parts.case_count,
-                    'parse_ok': parts.parse_ok,
-                    'std_rate': std_rate,
-                    'web_rate': u.get('dcWebRate'),
-                    'push_rate': u.get('dcPushRate'),
-                    'board_rate': u.get('dcBoardRate'),
-                    'preferred_rate': u.get('dcPreferredRate'),
-                    'amt_type': conc.get('iAmtType'),
-                    'fixed_discount': fixed_discount,
-                    'pct_discount': pct_discount,
-                    'max_amount_off': conc.get('dcMaxAmountOff'),
-                    'plan_start': conc.get('dPlanStrt'),
-                    'plan_end': conc.get('dPlanEnd'),
-                    'never_expires': conc.get('bNeverExpires'),
-                    'in_month': conc.get('iInMonth'),
-                    'prepay': conc.get('bPrepay'),
-                    'prepaid_months': conc.get('iPrePaidMonths'),
-                    'b_for_all_units': conc.get('bForAllUnits'),
-                    'b_for_corp': conc.get('bForCorp'),
-                    'restriction_flags': conc.get('iRestrictionFlags'),
-                    'exclude_if_less_than': conc.get('iExcludeIfLessThanUnitsTotal'),
-                    'exclude_if_more_than': conc.get('iExcludeIfMoreThanUnitsTotal'),
-                    'max_occ_pct': conc.get('dcMaxOccPct'),
-                    'plan_type': plan.get('plan_type'),
-                    'plan_name': plan.get('plan_name'),
-                    'promo_period_start': plan.get('promo_period_start'),
-                    'promo_period_end': plan.get('promo_period_end'),
-                    'booking_period_start': plan.get('booking_period_start'),
-                    'booking_period_end': plan.get('booking_period_end'),
-                    'move_in_range': plan.get('move_in_range'),
-                    'lock_in_period': plan.get('lock_in_period'),
-                    'payment_terms': plan.get('payment_terms'),
-                    'min_duration_months': plan_min_duration,
-                    'max_duration_months': plan_max_duration,
-                    'distribution_channel': plan.get('distribution_channel'),
-                    'hidden_rate': plan.get('hidden_rate'),
-                    'discount_type': plan.get('discount_type'),
-                    'discount_numeric': plan.get('discount_numeric'),
-                    'discount_segmentation': plan.get('discount_segmentation'),
-                    'is_active': plan.get('is_active'),
-                    'smart_lock': _jsonb_or_none(smart_lock_map.get((site_id, u['UnitID']))),
-                    'effective_rate': _effective_rate(std_rate, pct_discount, fixed_discount),
-                    'computed_at': computed_at,
-                })
+                    std_rate = u.get('dcStdRate')
+                    pct_discount = conc.get('dcPCDiscount')
+                    fixed_discount = conc.get('dcFixedDiscount')
+
+                    out.append({
+                        'site_id': site_id,
+                        'unit_id': u['UnitID'],
+                        'plan_id': plan['id'],
+                        'concession_id': concession_id,
+                        'site_code': u.get('sLocationCode') or site_code,
+                        'unit_type_id': u.get('UnitTypeID'),
+                        'stype_name': u.get('sTypeName'),
+                        'size_category': parts.size_category,
+                        'size_range': parts.size_range,
+                        'unit_type': parts.unit_type,
+                        'climate_type': parts.climate_type,
+                        'unit_shape': parts.unit_shape,
+                        'pillar': parts.pillar,
+                        'case_count': parts.case_count,
+                        'parse_ok': parts.parse_ok,
+                        'std_rate': std_rate,
+                        'web_rate': u.get('dcWebRate'),
+                        'push_rate': u.get('dcPushRate'),
+                        'board_rate': u.get('dcBoardRate'),
+                        'preferred_rate': u.get('dcPreferredRate'),
+                        'amt_type': conc.get('iAmtType'),
+                        'fixed_discount': fixed_discount,
+                        'pct_discount': pct_discount,
+                        'max_amount_off': conc.get('dcMaxAmountOff'),
+                        'plan_start': conc.get('dPlanStrt'),
+                        'plan_end': conc.get('dPlanEnd'),
+                        'never_expires': conc.get('bNeverExpires'),
+                        'in_month': conc.get('iInMonth'),
+                        'prepay': conc.get('bPrepay'),
+                        'prepaid_months': conc.get('iPrePaidMonths'),
+                        'b_for_all_units': conc.get('bForAllUnits'),
+                        'b_for_corp': conc.get('bForCorp'),
+                        'restriction_flags': conc.get('iRestrictionFlags'),
+                        'exclude_if_less_than': conc.get('iExcludeIfLessThanUnitsTotal'),
+                        'exclude_if_more_than': conc.get('iExcludeIfMoreThanUnitsTotal'),
+                        'max_occ_pct': conc.get('dcMaxOccPct'),
+                        'plan_type': plan.get('plan_type'),
+                        'plan_name': plan.get('plan_name'),
+                        'promo_period_start': plan.get('promo_period_start'),
+                        'promo_period_end': plan.get('promo_period_end'),
+                        'booking_period_start': plan.get('booking_period_start'),
+                        'booking_period_end': plan.get('booking_period_end'),
+                        'move_in_range': plan.get('move_in_range'),
+                        'lock_in_period': plan.get('lock_in_period'),
+                        'payment_terms': plan.get('payment_terms'),
+                        'min_duration_months': plan_min_duration,
+                        'max_duration_months': plan_max_duration,
+                        'distribution_channel': plan.get('distribution_channel'),
+                        'hidden_rate': plan.get('hidden_rate'),
+                        'discount_type': plan.get('discount_type'),
+                        'discount_numeric': plan.get('discount_numeric'),
+                        'discount_segmentation': plan.get('discount_segmentation'),
+                        'is_active': plan.get('is_active'),
+                        'smart_lock': _jsonb_or_none(smart_lock_map.get((site_id, u['UnitID']))),
+                        'effective_rate': _effective_rate(std_rate, pct_discount, fixed_discount),
+                        'computed_at': computed_at,
+                    })
 
     # Dedup on PK — last writer wins — protects against duplicated linked_concession
     # entries within a single plan row.

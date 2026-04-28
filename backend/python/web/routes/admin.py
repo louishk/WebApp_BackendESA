@@ -112,6 +112,12 @@ def create_role():
                 can_manage_configs=request.form.get('can_manage_configs') == 'on',
                 can_access_ecri=request.form.get('can_access_ecri') == 'on',
                 can_manage_ecri=request.form.get('can_manage_ecri') == 'on',
+                can_request_ecri_exclusion=request.form.get('can_request_ecri_exclusion') == 'on',
+                can_create_ecri_objection=request.form.get('can_create_ecri_objection') == 'on',
+                can_approve_ecri_objection=request.form.get('can_approve_ecri_objection') == 'on',
+                can_finalize_ecri_batch=request.form.get('can_finalize_ecri_batch') == 'on',
+                can_execute_ecri_batch=request.form.get('can_execute_ecri_batch') == 'on',
+                can_manage_ecri_reasons=request.form.get('can_manage_ecri_reasons') == 'on',
                 can_access_statistics=request.form.get('can_access_statistics') == 'on',
                 can_access_smart_lock=request.form.get('can_access_smart_lock') == 'on',
                 can_access_revenue_tools=request.form.get('can_access_revenue_tools') == 'on',
@@ -223,6 +229,14 @@ def delete_role(role_id):
 # User Management (Admin only)
 # =============================================================================
 
+@admin_bp.route('/users/ecri-limits')
+@login_required
+@admin_required
+def ecri_user_limits():
+    """Per-user ECRI approval limits + site restrictions (lives under User Management)."""
+    return render_template('admin/ecri_user_limits.html')
+
+
 @admin_bp.route('/api/users')
 @login_required
 @admin_required
@@ -240,7 +254,6 @@ def api_list_users():
                     'email': u.email,
                     'department': getattr(u, 'department', None),
                     'roles': [{'id': r.id, 'name': r.name} for r in u.roles],
-                    'ecri_entitled': bool(getattr(u, 'ecri_entitled', False)),
                     'ecri_max_pct_reduction': float(u.ecri_max_pct_reduction) if getattr(u, 'ecri_max_pct_reduction', None) is not None else 0,
                     'ecri_max_abs_reduction': float(u.ecri_max_abs_reduction) if getattr(u, 'ecri_max_abs_reduction', None) is not None else 0,
                     'allowed_site_ids': list(getattr(u, 'allowed_site_ids', None) or []),
@@ -1558,3 +1571,186 @@ def admin_delete_api_key(user_id):
         db.close()
 
     return redirect(url_for('admin.list_api_keys'))
+
+
+# =============================================================================
+# Site Distance Editor (Config permission required)
+# =============================================================================
+
+def _get_middleware_session():
+    """Get middleware DB session (mw_site_distance lives in esa_middleware)."""
+    return current_app.get_middleware_session()
+
+
+@admin_bp.route('/site-distance')
+@login_required
+@config_required
+def site_distance():
+    """Render the mw_site_distance grid editor, grouped by country."""
+    from sqlalchemy import text
+
+    db = _get_middleware_session()
+    try:
+        # Pull all site-distance rows + country name via mw_siteinfo join.
+        rows = db.execute(text("""
+            SELECT
+                d.from_site_code,
+                d.to_site_code,
+                d.distance_km,
+                d.same_country,
+                d.notes,
+                d.updated_at,
+                d.updated_by,
+                si_from."Country" AS country
+            FROM mw_site_distance d
+            JOIN mw_siteinfo si_from ON si_from."SiteCode" = d.from_site_code
+            WHERE d.same_country = true
+            ORDER BY si_from."Country", d.from_site_code, d.to_site_code
+        """)).fetchall()
+
+        # Collect per-country site code lists (ordered) and build a nested dict.
+        # Structure: { country: { from_code: { to_code: row_dict } } }
+        countries = {}  # ordered by first appearance
+        for row in rows:
+            country = row.country
+            if country not in countries:
+                countries[country] = {}
+            if row.from_site_code not in countries[country]:
+                countries[country][row.from_site_code] = {}
+            countries[country][row.from_site_code][row.to_site_code] = {
+                'distance_km': str(row.distance_km),
+                'notes': row.notes or '',
+                'updated_at': row.updated_at.strftime('%Y-%m-%d %H:%M') if row.updated_at else '',
+                'updated_by': row.updated_by or '',
+            }
+
+        # For each country, build an ordered list of site codes (union of from + to).
+        country_site_codes = {}
+        for country, from_map in countries.items():
+            codes = set()
+            for from_code, to_map in from_map.items():
+                codes.add(from_code)
+                codes.update(to_map.keys())
+            country_site_codes[country] = sorted(codes)
+
+    finally:
+        db.close()
+
+    return render_template(
+        'admin/site_distance.html',
+        countries=countries,
+        country_site_codes=country_site_codes,
+    )
+
+
+@admin_bp.route('/site-distance/save', methods=['POST'])
+@login_required
+@config_required
+def site_distance_save():
+    """Bulk update mw_site_distance rows submitted from the editor grid."""
+    from sqlalchemy import text
+    from decimal import Decimal, InvalidOperation
+
+    db = _get_middleware_session()
+    try:
+        # Parse all distance_km_<from>_<to> fields from the form.
+        updates = []
+        errors = []
+        for key, val in request.form.items():
+            if not key.startswith('distance_km_'):
+                continue
+            # key format: distance_km_<from_site_code>_<to_site_code>
+            # Site codes like L017, MY001 contain no underscore; safe to split on first two underscores.
+            suffix = key[len('distance_km_'):]
+            # suffix is "<from>_<to>" — site codes may contain digits/letters only, no underscores
+            parts = suffix.split('_', 1)
+            if len(parts) != 2:
+                continue
+            from_code, to_code = parts[0], parts[1]
+            notes_key = f'notes_{from_code}_{to_code}'
+            notes_val = request.form.get(notes_key, '').strip()[:500]
+
+            val = val.strip()
+            if not val:
+                continue
+            try:
+                km = Decimal(val)
+            except InvalidOperation:
+                errors.append(f"Invalid distance value for {from_code} to {to_code}: '{val}'")
+                continue
+            if km < 0 or km > 9999.99:
+                errors.append(f"Distance for {from_code} to {to_code} must be between 0 and 9999.99.")
+                continue
+            updates.append({
+                'from_code': from_code,
+                'to_code': to_code,
+                'km': float(km),
+                'notes': notes_val or None,
+            })
+
+        if errors:
+            for err in errors:
+                flash(err, 'error')
+            return redirect(url_for('admin.site_distance'))
+
+        if not updates:
+            flash('No distances submitted.', 'error')
+            return redirect(url_for('admin.site_distance'))
+
+        # Fetch current DB values in one query for change-detection.
+        from_codes = list({u['from_code'] for u in updates})
+        current_rows = db.execute(text("""
+            SELECT from_site_code, to_site_code, distance_km, notes
+            FROM mw_site_distance
+            WHERE from_site_code = ANY(:froms)
+        """), {'froms': from_codes}).fetchall()
+
+        current_map = {
+            (r.from_site_code, r.to_site_code): {'km': float(r.distance_km), 'notes': r.notes}
+            for r in current_rows
+        }
+
+        changed = []
+        for u in updates:
+            cur = current_map.get((u['from_code'], u['to_code']))
+            if cur is None:
+                continue  # row not found — skip silently (no orphan inserts)
+            km_changed = round(cur['km'], 2) != round(u['km'], 2)
+            notes_changed = (cur['notes'] or '') != (u['notes'] or '')
+            if km_changed or notes_changed:
+                changed.append(u)
+
+        if not changed:
+            flash('No changes detected — nothing saved.', 'info')
+            return redirect(url_for('admin.site_distance'))
+
+        username = current_user.username
+        for u in changed:
+            db.execute(text("""
+                UPDATE mw_site_distance
+                SET distance_km = :km,
+                    notes       = :notes,
+                    updated_at  = now(),
+                    updated_by  = :user
+                WHERE from_site_code = :from_code
+                  AND to_site_code   = :to_code
+            """), {
+                'km': u['km'],
+                'notes': u['notes'],
+                'user': username,
+                'from_code': u['from_code'],
+                'to_code': u['to_code'],
+            })
+
+        db.commit()
+        n = len(changed)
+        audit_log(AuditEvent.CONFIG_UPDATED, f"Updated site distances: {n} pair(s)")
+        flash(f'{n} distance pair(s) saved successfully.', 'success')
+    except Exception as e:
+        db.rollback()
+        current_app.logger.error(f"Error saving site distances: {e}")
+        flash('An error occurred while saving. Please try again.', 'error')
+    finally:
+        db.close()
+
+    return redirect(url_for('admin.site_distance'))

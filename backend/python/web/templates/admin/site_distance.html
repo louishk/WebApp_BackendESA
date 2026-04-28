@@ -1,0 +1,436 @@
+{% extends "base.html" %}
+{% block title %}Site Distances — ESA Backend{% endblock %}
+
+{% block content %}
+<style>
+/* ---- Page chrome ---- */
+.sd-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 1.25rem;
+}
+.sd-page-header h1 {
+    font-size: 1.3rem;
+    color: var(--esa-navy);
+    margin: 0;
+}
+.sd-page-header p {
+    margin: 0.2rem 0 0;
+    font-size: 0.82rem;
+    color: #6b7280;
+}
+
+/* ---- Country card ---- */
+.sd-country-card {
+    background: #fff;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    margin-bottom: 2rem;
+    overflow: hidden;
+}
+.sd-country-header {
+    background: var(--esa-navy);
+    color: #fff;
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.sd-country-header h2 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
+    color: #fff;
+    border: none;
+    padding: 0;
+    display: inline;
+}
+.sd-legend {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.73rem;
+    color: rgba(255,255,255,0.75);
+}
+.sd-legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 3px;
+    vertical-align: middle;
+}
+
+/* ---- Scroll wrapper ---- */
+.sd-scroll {
+    overflow-x: auto;
+    padding: 0.75rem 1rem 0;
+}
+
+/* ---- Distance grid table ---- */
+.sd-table {
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    width: auto;
+    min-width: 100%;
+}
+.sd-table th, .sd-table td {
+    border: 1px solid #e5e7eb;
+    padding: 0;
+    text-align: center;
+    vertical-align: top;
+    background: #fff;
+}
+.sd-table thead th {
+    background: #f3f4f6;
+    color: #374151;
+    font-size: 0.71rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 0.3rem 0.5rem;
+    white-space: nowrap;
+    text-transform: uppercase;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+/* Row-header column */
+.sd-table td.sd-row-label {
+    background: #f3f4f6;
+    font-weight: 600;
+    font-size: 0.71rem;
+    color: #374151;
+    padding: 0.3rem 0.5rem;
+    white-space: nowrap;
+    text-align: left;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    border-right: 2px solid #d1d5db;
+}
+
+/* site-code badge pill */
+.sd-code {
+    display: inline-block;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.7rem;
+    background: var(--esa-navy);
+    color: #fff;
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
+}
+
+/* diagonal / same-site cell */
+.sd-cell-diag {
+    background: #f3f4f6;
+    color: #9ca3af;
+    font-size: 1rem;
+    padding: 0.35rem 0.5rem;
+    user-select: none;
+}
+
+/* editable cell wrapper */
+.sd-cell-edit {
+    padding: 0.25rem 0.3rem;
+    min-width: 110px;
+}
+.sd-cell-edit.is-placeholder {
+    background: #fffbeb;
+}
+.sd-cell-edit.is-changed {
+    background: #ecfdf5;
+}
+
+.sd-input-km {
+    width: 72px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    padding: 0.2rem 0.3rem;
+    font-size: 0.78rem;
+    text-align: right;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    color: #111;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.sd-input-km:focus {
+    outline: none;
+    border-color: var(--esa-navy);
+    box-shadow: 0 0 0 2px rgba(26,46,90,0.12);
+}
+.sd-input-km.is-placeholder {
+    color: #d97706;
+    border-color: #fcd34d;
+}
+.sd-input-km.is-changed {
+    color: #059669;
+    border-color: #6ee7b7;
+}
+
+.sd-meta {
+    font-size: 0.63rem;
+    color: #9ca3af;
+    margin-top: 0.15rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 106px;
+}
+
+/* notes sub-table below the km grid */
+.sd-notes-section {
+    padding: 0.75rem 1rem 1rem;
+    border-top: 1px solid #f3f4f6;
+}
+.sd-notes-section h3 {
+    font-size: 0.75rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0 0 0.5rem;
+    font-weight: 600;
+}
+.sd-notes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.5rem;
+}
+.sd-notes-item label {
+    font-size: 0.71rem;
+    color: #374151;
+    font-weight: 500;
+    display: block;
+    margin-bottom: 0.15rem;
+}
+.sd-notes-item textarea {
+    width: 100%;
+    border: 1px solid #e5e7eb;
+    border-radius: 3px;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.75rem;
+    resize: vertical;
+    font-family: inherit;
+    color: #374151;
+    min-height: 44px;
+}
+.sd-notes-item textarea:focus {
+    outline: none;
+    border-color: var(--esa-navy);
+    box-shadow: 0 0 0 2px rgba(26,46,90,0.1);
+}
+
+/* save bar */
+.sd-save-bar {
+    padding: 0.75rem 1rem;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: #fafafa;
+}
+.sd-change-count {
+    font-size: 0.78rem;
+    color: #6b7280;
+}
+.sd-change-count strong {
+    color: #059669;
+}
+</style>
+
+<div class="sd-page-header">
+    <div>
+        <h1>Site-to-Site Distances</h1>
+        <p>Curate km distances for same-country pairs. Cells in yellow (999.99) are placeholders — fill with real values for the Slot 2 "Nearest Available" recommender.</p>
+    </div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 1rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.7rem 1rem; border-radius: 6px; margin-bottom: 0.4rem;
+                    {% if category == 'error' %}background:#fee2e2;color:#dc2626;border:1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background:#d1fae5;color:#059669;border:1px solid #a7f3d0;{% endif %}
+                    {% if category == 'info' %}background:#dbeafe;color:#2563eb;border:1px solid #bfdbfe;{% endif %}
+                    ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+{% if not countries %}
+<div class="card">
+    <p style="color:#6b7280; font-size:0.9rem;">No site-distance data found. Run the seed migration to populate <code>mw_site_distance</code> with same-country pairs.</p>
+</div>
+{% endif %}
+
+{% for country, from_map in countries.items() %}
+{% set site_codes = country_site_codes[country] %}
+<form method="POST" action="{{ url_for('admin.site_distance_save') }}" class="sd-country-form" data-country="{{ country }}">
+<div class="sd-country-card">
+
+    <div class="sd-country-header">
+        <h2>{{ country }}</h2>
+        <span style="font-size:0.78rem; color:rgba(255,255,255,0.6);">{{ site_codes|length }} sites &middot; {{ (site_codes|length * (site_codes|length - 1)) }} directed pairs</span>
+        <div class="sd-legend">
+            <span><span class="sd-legend-dot" style="background:#fffbeb; border:1px solid #fcd34d;"></span>Placeholder (999.99)</span>
+            <span><span class="sd-legend-dot" style="background:#ecfdf5; border:1px solid #6ee7b7;"></span>Edited (unsaved)</span>
+        </div>
+    </div>
+
+    <div class="sd-scroll">
+        <table class="sd-table">
+            <thead>
+                <tr>
+                    <th style="text-align:left; min-width:80px;">From \ To</th>
+                    {% for to_code in site_codes %}
+                    <th><span class="sd-code">{{ to_code }}</span></th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+            {% for from_code in site_codes %}
+                <tr>
+                    <td class="sd-row-label"><span class="sd-code">{{ from_code }}</span></td>
+                    {% for to_code in site_codes %}
+                        {% if from_code == to_code %}
+                        <td class="sd-cell-diag"><span>—</span></td>
+                        {% else %}
+                            {% set cell = from_map.get(from_code, {}).get(to_code, None) %}
+                            {% if cell %}
+                                {% set is_placeholder = (cell.distance_km == '999.99') %}
+                                <td class="sd-cell-edit{% if is_placeholder %} is-placeholder{% endif %}" data-from="{{ from_code }}" data-to="{{ to_code }}">
+                                    <input
+                                        type="number"
+                                        class="sd-input-km{% if is_placeholder %} is-placeholder{% endif %}"
+                                        name="distance_km_{{ from_code }}_{{ to_code }}"
+                                        value="{{ cell.distance_km }}"
+                                        step="0.1"
+                                        min="0"
+                                        max="9999.99"
+                                        data-original="{{ cell.distance_km }}"
+                                    >
+                                    {% if cell.updated_by %}
+                                    <div class="sd-meta" title="{{ cell.updated_by }} at {{ cell.updated_at }}">{{ cell.updated_by }} &middot; {{ cell.updated_at }}</div>
+                                    {% else %}
+                                    <div class="sd-meta" style="color:#d1d5db;">Not yet set</div>
+                                    {% endif %}
+                                </td>
+                            {% else %}
+                                {# pair not seeded — cross-country or missing #}
+                                <td class="sd-cell-diag"><span style="font-size:0.7rem;">n/a</span></td>
+                            {% endif %}
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {# Notes textareas for each from-row that has data #}
+    {% set ns = namespace(has_notes=false) %}
+    {% for from_code in site_codes %}
+        {% if from_map.get(from_code) %}
+            {% set ns.has_notes = true %}
+        {% endif %}
+    {% endfor %}
+    {% if ns.has_notes %}
+    <div class="sd-notes-section">
+        <h3>Row Notes (optional)</h3>
+        <div class="sd-notes-grid">
+        {% for from_code in site_codes %}
+            {% set row_data = from_map.get(from_code, {}) %}
+            {% if row_data %}
+                {% for to_code, cell in row_data.items() %}
+                <div class="sd-notes-item">
+                    <label><span class="sd-code">{{ from_code }}</span> &rarr; <span class="sd-code">{{ to_code }}</span></label>
+                    <textarea name="notes_{{ from_code }}_{{ to_code }}" placeholder="e.g. via highway, approx 12km">{{ cell.notes }}</textarea>
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="sd-save-bar">
+        <button type="submit" class="btn">Save {{ country }} Changes</button>
+        <span class="sd-change-count" id="change-count-{{ loop.index }}">No unsaved changes.</span>
+    </div>
+
+</div>
+</form>
+{% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    'use strict';
+
+    // Track changes per country form and update the counter badge.
+    document.querySelectorAll('.sd-country-form').forEach(function (form) {
+        var countEl = form.querySelector('.sd-change-count');
+
+        function refreshCount() {
+            var changed = 0;
+            form.querySelectorAll('.sd-input-km').forEach(function (inp) {
+                var orig = parseFloat(inp.dataset.original);
+                var cur  = parseFloat(inp.value);
+                if (!isNaN(cur) && Math.abs(cur - orig) > 0.001) changed++;
+            });
+            if (changed === 0) {
+                countEl.innerHTML = 'No unsaved changes.';
+            } else {
+                countEl.innerHTML = '<strong>' + changed + ' change' + (changed === 1 ? '' : 's') + '</strong> pending — click Save to persist.';
+            }
+        }
+
+        form.querySelectorAll('.sd-input-km').forEach(function (inp) {
+            inp.addEventListener('input', function () {
+                var orig = parseFloat(inp.dataset.original);
+                var cur  = parseFloat(inp.value);
+                var cell = inp.closest('.sd-cell-edit');
+                if (!isNaN(cur) && Math.abs(cur - orig) > 0.001) {
+                    inp.classList.remove('is-placeholder');
+                    inp.classList.add('is-changed');
+                    if (cell) { cell.classList.remove('is-placeholder'); cell.classList.add('is-changed'); }
+                } else {
+                    // Restore placeholder styling if the value matches the original.
+                    var wasPlaceholder = Math.abs(orig - 999.99) < 0.001;
+                    inp.classList.remove('is-changed');
+                    if (cell) cell.classList.remove('is-changed');
+                    if (wasPlaceholder) {
+                        inp.classList.add('is-placeholder');
+                        if (cell) cell.classList.add('is-placeholder');
+                    }
+                }
+                refreshCount();
+            });
+        });
+
+        // Warn before leaving with unsaved changes.
+        form.addEventListener('submit', function () {
+            window._sdSubmitting = true;
+        });
+    });
+
+    window.addEventListener('beforeunload', function (e) {
+        if (window._sdSubmitting) return;
+        var hasChanges = false;
+        document.querySelectorAll('.sd-input-km').forEach(function (inp) {
+            var orig = parseFloat(inp.dataset.original);
+            var cur  = parseFloat(inp.value);
+            if (!isNaN(cur) && Math.abs(cur - orig) > 0.001) hasChanges = true;
+        });
+        if (hasChanges) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+}());
+</script>
+{% endblock %}
