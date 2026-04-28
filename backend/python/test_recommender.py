@@ -737,34 +737,38 @@ class TestBuildSlot2(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_returns_closest_site_with_candidates(self):
+        # build_slot2 now re-runs fetch_candidate_pool per neighbour.
+        # Patch it to simulate L018 + L019 inventories.
         req = _make_req(filters={'location': ['L017']})
-        pool = [
-            _make_row(site_code='L017', unit_id=1, effective_rate='200.00'),
-            _make_row(site_code='L018', unit_id=2, effective_rate='190.00'),
-            _make_row(site_code='L019', unit_id=3, effective_rate='180.00'),
-        ]
+        pool = [_make_row(site_code='L017', unit_id=1, effective_rate='200.00')]
         db = MagicMock()
-        # Distance table returns L018 first (closer), then L019
         db.execute.return_value.fetchall.return_value = [
             ('L018', 5.0),
             ('L019', 10.0),
         ]
-        result = build_slot2(pool, req, db)
+        l018_row = _make_row(site_code='L018', unit_id=2, effective_rate='190.00')
+        l019_row = _make_row(site_code='L019', unit_id=3, effective_rate='180.00')
+        with patch('web.services.recommender.fetch_candidate_pool',
+                   side_effect=lambda r, _db: {'L018': [l018_row], 'L019': [l019_row]}.get(
+                       r.filters['location'][0], [])):
+            result = build_slot2(pool, req, db)
         self.assertIsNotNone(result)
         self.assertEqual(result.site_code, 'L018')
 
     def test_skips_site_with_no_candidates_in_pool(self):
         req = _make_req(filters={'location': ['L017']})
-        pool = [
-            _make_row(site_code='L019', unit_id=3, effective_rate='180.00'),
-        ]
+        pool = [_make_row(site_code='L017', unit_id=1)]
         db = MagicMock()
-        # L018 is closer but not in pool; L019 is farther but has candidates
+        # L018 is closer but no inventory; L019 farther, has inventory
         db.execute.return_value.fetchall.return_value = [
             ('L018', 5.0),
             ('L019', 10.0),
         ]
-        result = build_slot2(pool, req, db)
+        l019_row = _make_row(site_code='L019', unit_id=3, effective_rate='180.00')
+        with patch('web.services.recommender.fetch_candidate_pool',
+                   side_effect=lambda r, _db: {'L019': [l019_row]}.get(
+                       r.filters['location'][0], [])):
+            result = build_slot2(pool, req, db)
         self.assertIsNotNone(result)
         self.assertEqual(result.site_code, 'L019')
 

@@ -605,9 +605,10 @@ def build_slot2(
     Slot 2 — same dim filters as slot 1 but at a DIFFERENT site, picked by
     proximity from mw_site_distance.
 
-    For each requested location, we query mw_site_distance ordered by
-    distance_km ASC where distance_km <= constraints.max_distance_km. The
-    first site from that ranking that has any candidate in the pool is chosen.
+    The base `pool` is restricted to req.filters.location, so we run a
+    second pool fetch with location swapped to the nearest site(s) within
+    max_distance_km. First neighbouring site that produces any candidate
+    matching the rest of the filters wins.
 
     Returns None when nothing qualifies within the radius.
     """
@@ -624,32 +625,39 @@ def build_slot2(
         global_default = 50
     max_dist = req.constraints.get('max_distance_km') or global_default
 
-    # Pool sites already excludes the requested locations
-    pool_by_site: Dict[str, List[CandidateRow]] = {}
-    for r in pool:
-        if r.site_code not in locations:
-            pool_by_site.setdefault(r.site_code, []).append(r)
-
-    if not pool_by_site:
-        return None
-
+    # Step 1: order neighbouring sites by distance.
     try:
         dist_rows = db_session.execute(text("""
-            SELECT to_site_code, distance_km
+            SELECT DISTINCT to_site_code, MIN(distance_km) AS d
             FROM mw_site_distance
             WHERE from_site_code = ANY(:locs)
               AND distance_km <= :max_km
-            ORDER BY distance_km ASC
+              AND to_site_code <> ALL(:locs)
+            GROUP BY to_site_code
+            ORDER BY d ASC
         """), {'locs': locations, 'max_km': max_dist}).fetchall()
     except Exception as exc:
         logger.warning("build_slot2: mw_site_distance query failed: %s", exc)
         return None
 
-    for to_site, _dist in dist_rows:
-        if to_site in pool_by_site:
-            candidates = pool_by_site[to_site]
+    if not dist_rows:
+        return None
+
+    # Step 2: re-run the pool query but at each neighbour in turn, taking
+    # the first one that has matching inventory. Same filter set as the
+    # original request — just swap the location.
+    from copy import copy
+    for neighbour, _dist in dist_rows:
+        neighbour_req = copy(req)
+        neighbour_req.filters = dict(req.filters, location=[neighbour])
+        try:
+            neighbour_pool = fetch_candidate_pool(neighbour_req, db_session)
+        except Exception as exc:
+            logger.warning("build_slot2: neighbour %s pool failed: %s", neighbour, exc)
+            continue
+        if neighbour_pool:
             best = min(
-                candidates,
+                neighbour_pool,
                 key=lambda r: (r.effective_rate is None, r.effective_rate or Decimal('0'))
             )
             return best
