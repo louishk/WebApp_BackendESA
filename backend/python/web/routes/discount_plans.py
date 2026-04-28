@@ -530,8 +530,14 @@ def _audit_plan(plan) -> dict:
     # Discount type
     if not plan.discount_type:
         issues.append('no discount_type')
-    # Period dates
-    if not plan.promo_period_start and not plan.promo_period_end:
+    # Period dates — skipped for Evergreen / stdrate-override plans, which
+    # are permanent offers by design (e.g. Standard Rate). For Tactical /
+    # Seasonal plans, the absence of any promo dates is a real warning.
+    is_permanent = (
+        getattr(plan, 'plan_type', '') == 'Evergreen'
+        or getattr(plan, 'is_stdrate_override', False)
+    )
+    if not is_permanent and not plan.promo_period_start and not plan.promo_period_end:
         issues.append('no promo period')
     # Hidden rate must have a coupon — otherwise the recommender silently
     # excludes it from every channel and the plan is effectively dead.
