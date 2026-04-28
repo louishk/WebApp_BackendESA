@@ -235,6 +235,46 @@
         </div>`;
     }
 
+    function renderDiagnostic(d) {
+        if (!d) return '';
+        const dropRows = (d.try_dropping || [])
+            .map(t => `<li>Remove <code>${t.remove}</code> → <strong>${t.matches}</strong> match${t.matches === 1 ? '' : 'es'}</li>`)
+            .join('');
+        const availRows = (d.available_at_location || [])
+            .map(a => `<tr>
+                <td><code>${a.site}</code></td>
+                <td><code>${a.unit_type || '—'}</code></td>
+                <td><code>${a.climate_type || '—'}</code></td>
+                <td><code>${a.size_range || '—'}</code></td>
+                <td style="text-align:right;">${a.count}</td>
+            </tr>`).join('');
+        return `
+        <div style="background:#fef3c7; border:1px solid #fcd34d; padding:0.7rem 0.9rem; border-radius:6px; margin-bottom:0.7rem;">
+            <strong>⚠ ${d.message}</strong>
+            ${dropRows ? `
+                <div style="margin-top:0.5rem; font-size: 0.8rem; color:#78350f;">
+                    Filter relaxation diagnostic:
+                    <ul style="margin:0.2rem 0 0 1rem; line-height:1.6;">${dropRows}</ul>
+                </div>` : ''}
+            ${availRows ? `
+                <details style="margin-top:0.5rem;">
+                    <summary style="cursor:pointer; color:#78350f; font-size:0.8rem;">
+                        📊 What's actually available at this location (top 12 by inventory)
+                    </summary>
+                    <table style="width:100%; margin-top:0.4rem; font-size:0.78rem; border-collapse:collapse;">
+                        <thead><tr style="background:#fde68a;">
+                            <th style="padding:0.25rem; text-align:left;">Site</th>
+                            <th style="padding:0.25rem; text-align:left;">Unit type</th>
+                            <th style="padding:0.25rem; text-align:left;">Climate</th>
+                            <th style="padding:0.25rem; text-align:left;">Size</th>
+                            <th style="padding:0.25rem; text-align:right;">Units</th>
+                        </tr></thead>
+                        <tbody>${availRows}</tbody>
+                    </table>
+                </details>` : ''}
+        </div>`;
+    }
+
     function render(data) {
         const root = $('sim-result');
         if (data.error) {
@@ -257,6 +297,7 @@
             <div style="font-size: 0.75rem; color: #6b7280; margin-bottom: 0.6rem;">
                 Filters: ${filterChips || '<em>none</em>'}
             </div>
+            ${renderDiagnostic(data.diagnostic)}
             ${data.slots.map(renderSlot).join('')}
         `;
     }

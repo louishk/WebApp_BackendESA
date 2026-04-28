@@ -219,6 +219,13 @@ def simulator_run():
             current_app.logger.error("simulator pool fetch failed: %s", exc, exc_info=True)
             return jsonify({'error': 'pool fetch failed', 'detail': str(exc)}), 500
 
+        # When the pool is empty, run a diagnostic — drop each filter one at
+        # a time and report how many rows we'd get. Tells admin which filter
+        # is the bottleneck instead of staring at three empty slot cards.
+        diagnostic = None
+        if not pool:
+            diagnostic = _filter_drop_diagnostic(req, db, recommender)
+
         slot1 = recommender.build_slot1(pool, req)
         slot2 = recommender.build_slot2(pool, req, db)
         slot3 = recommender.build_slot3(pool, req, slot1, db)
@@ -258,6 +265,7 @@ def simulator_run():
                 'distinct_plans_in_pool': len({r.plan_id for r in pool}),
                 'filters_applied': {k: v for k, v in req.filters.items() if v},
             },
+            'diagnostic': diagnostic,
             'slots': [
                 _row_to_json(slot1, 1, 'Best Match', q1),
                 _row_to_json(slot2, 2, 'Nearest Available', q2),
@@ -267,6 +275,60 @@ def simulator_run():
     finally:
         try: db.close()
         except Exception: pass
+
+
+def _filter_drop_diagnostic(req, db, recommender_module) -> dict:
+    """When the simulator pool is empty, try dropping each filter one at a time
+    and report the resulting pool size. The smallest filter that 'unlocks'
+    matches is the bottleneck.
+
+    Also returns a flat sample of what's actually available at the requested
+    location(s) so admin can see the closest size buckets.
+    """
+    out: dict = {
+        'message': 'Pool is empty with current filters.',
+        'try_dropping': [],
+        'available_at_location': [],
+    }
+    # Snapshot the filter-relaxed permutations
+    base_filters = dict(req.filters)
+    drop_keys = [k for k in ('unit_type', 'climate_type', 'size_range', 'coupon_code') if base_filters.get(k)]
+    for key in drop_keys:
+        relaxed = dict(base_filters)
+        relaxed.pop(key, None)
+        # Make a shallow-copy of req with relaxed filters
+        try:
+            req.filters = relaxed
+            relaxed_pool = recommender_module.fetch_candidate_pool(req, db)
+            out['try_dropping'].append({
+                'remove': key,
+                'matches': len(relaxed_pool),
+            })
+        finally:
+            req.filters = base_filters
+
+    # Show what's actually at the requested location (top 12 by combination)
+    locations = base_filters.get('location') or []
+    if locations:
+        try:
+            rows = db.execute(text("""
+                SELECT site_code, unit_type, climate_type, size_range, COUNT(*) AS n
+                FROM mw_unit_discount_candidates
+                WHERE site_code = ANY(:locs)
+                GROUP BY site_code, unit_type, climate_type, size_range
+                ORDER BY n DESC
+                LIMIT 12
+            """), {'locs': locations}).fetchall()
+            out['available_at_location'] = [
+                {
+                    'site': r[0], 'unit_type': r[1], 'climate_type': r[2],
+                    'size_range': r[3], 'count': r[4],
+                } for r in rows
+            ]
+        except Exception:
+            pass
+
+    return out
 
 
 # ---------------------------------------------------------------------------
