@@ -86,6 +86,190 @@ def index():
 
 
 # ---------------------------------------------------------------------------
+# Simulator — admin-side recommender tester (no JWT / curl needed)
+# ---------------------------------------------------------------------------
+
+@recommendation_engine_bp.route('/simulator', methods=['GET'])
+@login_required
+@_require_config_permission
+def simulator():
+    """Fill a form, see the same envelope the chatbot would receive."""
+    session = _get_session()
+    try:
+        site_rows = session.execute(text("""
+            SELECT "SiteCode", "Country", "Name"
+            FROM mw_siteinfo
+            WHERE "SiteCode" IS NOT NULL
+            ORDER BY "Country", "SiteCode"
+        """)).fetchall()
+        sites = [{'code': r[0], 'country': r[1] or '', 'name': r[2] or ''} for r in site_rows]
+
+        ut_rows = session.execute(text(
+            "SELECT code, description FROM mw_dim_unit_type ORDER BY sort_order"
+        )).fetchall()
+        unit_types = [{'code': r[0], 'description': r[1] or ''} for r in ut_rows]
+
+        ct_rows = session.execute(text(
+            "SELECT code, description FROM mw_dim_climate_type ORDER BY sort_order"
+        )).fetchall()
+        climate_types = [{'code': r[0], 'description': r[1] or ''} for r in ct_rows]
+
+        sr_rows = session.execute(text(
+            "SELECT range_code, description FROM mw_dim_size_range ORDER BY sort_order"
+        )).fetchall()
+        size_ranges = [{'code': r[0], 'description': r[1] or ''} for r in sr_rows]
+    finally:
+        session.close()
+    return render_template(
+        'admin/recommendation_engine/simulator.html',
+        sites=sites, unit_types=unit_types,
+        climate_types=climate_types, size_ranges=size_ranges,
+        channels=['chatbot', 'web', 'api', 'admin'],
+    )
+
+
+@recommendation_engine_bp.route('/simulator/run', methods=['POST'])
+@login_required
+@_require_config_permission
+def simulator_run():
+    """Run the recommender pipeline and return the envelope.
+
+    No JWT, no rate limit, no log_served — purely an admin debugging tool.
+    Same code path as /api/recommendations but writes nothing to
+    mw_recommendations_served (would pollute conversion analytics).
+    """
+    from decimal import Decimal
+    import uuid as _uuid
+    from datetime import date, datetime, timezone
+    from web.services import recommender
+
+    def _dec(v):
+        if v is None:
+            return None
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
+
+    def _quote_to_json(q):
+        if q is None:
+            return None
+        return {
+            'first_month_total': _dec(q.first_month_total),
+            'monthly_average': _dec(q.monthly_average),
+            'total_contract': _dec(q.total_contract),
+            'duration_months': q.duration_months,
+            'confidence': q.confidence,
+            'confidence_reason': q.confidence_reason,
+            'breakdown': [{
+                'month_index': b.month_index,
+                'billing_date': b.billing_date.isoformat() if b.billing_date else None,
+                'rent': _dec(b.rent),
+                'rent_proration_factor': _dec(b.rent_proration_factor),
+                'discount': _dec(b.discount),
+                'insurance': _dec(b.insurance),
+                'deposit': _dec(b.deposit),
+                'admin_fee': _dec(b.admin_fee),
+                'rent_tax': _dec(b.rent_tax),
+                'insurance_tax': _dec(b.insurance_tax),
+                'total': _dec(b.total),
+            } for b in q.breakdown],
+        }
+
+    def _row_to_json(row, slot_num, label, quote):
+        if row is None:
+            return None
+        dc_raw = (row.distribution_channel or '').strip()
+        dc_list = [c.strip() for c in dc_raw.split(',') if c.strip()] if dc_raw else None
+        return {
+            'slot': slot_num,
+            'label': label,
+            'unit_id': row.unit_id,
+            'facility': row.site_code,
+            'unit_type': row.unit_type,
+            'climate_type': row.climate_type,
+            'size_range': row.size_range,
+            'plan_id': row.plan_id,
+            'plan_name': row.plan_name,
+            'concession_id': row.concession_id,
+            'std_rate': _dec(row.std_rate),
+            'effective_rate': _dec(row.effective_rate),
+            'is_hidden_rate': bool(row.hidden_rate),
+            'authorised_channels': dc_list,
+            'smart_lock': row.smart_lock,
+            'pricing': _quote_to_json(quote),
+        }
+
+    raw = request.get_json(silent=True) or {}
+    # Auto-fill required identifiers
+    ctx = raw.setdefault('context', {})
+    ctx.setdefault('request_id', f'sim-{_uuid.uuid4()}')
+    ctx.setdefault('session_id', f'sim-{_uuid.uuid4()}')
+    ctx.setdefault('customer_id', 'simulator')
+
+    try:
+        req = recommender.normalise_request(raw)
+    except recommender.ValidationError as exc:
+        return jsonify({'error': str(exc), 'where': 'normalise'}), 400
+
+    db = _get_session()
+    try:
+        try:
+            pool = recommender.fetch_candidate_pool(req, db)
+        except Exception as exc:
+            current_app.logger.error("simulator pool fetch failed: %s", exc, exc_info=True)
+            return jsonify({'error': 'pool fetch failed', 'detail': str(exc)}), 500
+
+        slot1 = recommender.build_slot1(pool, req)
+        slot2 = recommender.build_slot2(pool, req, db)
+        slot3 = recommender.build_slot3(pool, req, slot1, db)
+
+        # Distinct unit_ids
+        seen = set()
+        for row in (slot1, slot2, slot3):
+            if row and row.unit_id in seen:
+                # nullify duplicates
+                if row is slot2: slot2 = None
+                elif row is slot3: slot3 = None
+            elif row:
+                seen.add(row.unit_id)
+
+        def _quote(row):
+            if row is None:
+                return None
+            try:
+                return recommender.quote_slot(row, req, db)
+            except Exception as exc:
+                current_app.logger.warning("simulator quote failed unit=%s: %s",
+                                            row.unit_id, exc)
+                return None
+
+        q1 = _quote(slot1)
+        q2 = _quote(slot2)
+        q3 = _quote(slot3)
+
+        return jsonify({
+            'mode': req.mode,
+            'level': req.level,
+            'request_id': req.context['request_id'],
+            'served_at': datetime.now(timezone.utc).isoformat(),
+            'stats': {
+                'candidates_pool_size': len(pool),
+                'distinct_sites_in_pool': len({r.site_code for r in pool}),
+                'distinct_plans_in_pool': len({r.plan_id for r in pool}),
+                'filters_applied': {k: v for k, v in req.filters.items() if v},
+            },
+            'slots': [
+                _row_to_json(slot1, 1, 'Best Match', q1),
+                _row_to_json(slot2, 2, 'Nearest Available', q2),
+                _row_to_json(slot3, 3, 'Best Price', q3),
+            ],
+        })
+    finally:
+        try: db.close()
+        except Exception: pass
+
+
+# ---------------------------------------------------------------------------
 # Settings save
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+
+{% block title %}Recommender Simulator - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Recommender Simulator</h1>
+    <a href="{{ url_for('recommendation_engine.index') }}" class="btn btn-secondary">← Engine Settings</a>
+</div>
+
+<p style="color: #555; max-width: 760px;">
+    Test the recommendation engine without curl or JWT. Fill the form, hit
+    <strong>Run</strong> — you'll see the same 3-slot envelope a chatbot would receive.
+    Simulator runs do <em>not</em> write to <code>mw_recommendations_served</code> — analytics stay clean.
+</p>
+
+<style>
+.sim-grid { display: grid; grid-template-columns: 380px 1fr; gap: 1rem; margin-top: 1rem; }
+@media (max-width: 1024px) { .sim-grid { grid-template-columns: 1fr; } }
+.sim-form .row { margin-bottom: 0.6rem; }
+.sim-form label { display: block; font-size: 0.78rem; font-weight: 600; color: #1f2937; margin-bottom: 0.2rem; }
+.sim-form select, .sim-form input[type="number"], .sim-form input[type="text"], .sim-form input[type="date"] {
+    width: 100%; padding: 0.35rem 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.85rem;
+}
+.sim-form select[multiple] { min-height: 80px; }
+.sim-form .hint { font-size: 0.68rem; color: #6b7280; margin-top: 0.15rem; }
+.sim-result { background: #fff; min-height: 400px; }
+.sim-empty { color: #9ca3af; padding: 2rem; text-align: center; font-size: 0.9rem; }
+.slot-card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.7rem; }
+.slot-card.empty { background: #f9fafb; color: #9ca3af; font-style: italic; }
+.slot-card h4 { margin: 0 0 0.4rem 0; font-size: 0.95rem; color: var(--esa-navy); display: flex; justify-content: space-between; align-items: baseline; }
+.slot-card .price { color: #059669; font-weight: 700; }
+.slot-card .meta { font-size: 0.78rem; color: #4b5563; line-height: 1.6; }
+.slot-card code { background: #f3f4f6; padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.75rem; }
+.slot-card .breakdown { margin-top: 0.5rem; font-size: 0.72rem; }
+.slot-card .breakdown table { width: 100%; border-collapse: collapse; }
+.slot-card .breakdown th, .slot-card .breakdown td { padding: 0.2rem 0.4rem; text-align: right; border-bottom: 1px solid #f3f4f6; }
+.slot-card .breakdown th { background: #f9fafb; font-size: 0.68rem; color: #6b7280; }
+.slot-card .breakdown td:first-child, .slot-card .breakdown th:first-child { text-align: center; }
+.stats-bar { display: flex; gap: 0.8rem; margin-bottom: 0.7rem; padding: 0.5rem 0.7rem; background: #eff6ff; border-radius: 4px; font-size: 0.78rem; color: #1e40af; }
+.error-banner { background: #fee2e2; border: 1px solid #fecaca; color: #991b1b; padding: 0.6rem 0.8rem; border-radius: 4px; margin-bottom: 0.7rem; font-size: 0.85rem; }
+</style>
+
+<div class="sim-grid">
+    <!-- LEFT: form -->
+    <div class="card sim-form" style="padding: 0.9rem;">
+        <h3 style="margin-top: 0;">Request</h3>
+
+        <div class="row">
+            <label>Location <span style="color:#dc2626;">*</span></label>
+            <select id="sim-location" multiple size="6">
+                {% for s in sites %}
+                <option value="{{ s.code }}">{{ s.code }} · {{ s.name }}{% if s.country %} ({{ s.country }}){% endif %}</option>
+                {% endfor %}
+            </select>
+            <div class="hint">Required. Hold Ctrl/Cmd for multi-select.</div>
+        </div>
+
+        <div class="row">
+            <label>Unit Type</label>
+            <select id="sim-unit-type" multiple size="4">
+                {% for t in unit_types %}
+                <option value="{{ t.code }}">{{ t.code }}{% if t.description %} — {{ t.description }}{% endif %}</option>
+                {% endfor %}
+            </select>
+            <div class="hint">Optional. Empty = no filter.</div>
+        </div>
+
+        <div class="row">
+            <label>Climate Type</label>
+            <select id="sim-climate" multiple size="4">
+                {% for c in climate_types %}
+                <option value="{{ c.code }}">{{ c.code }}{% if c.description %} — {{ c.description }}{% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="row">
+            <label>Size Range</label>
+            <select id="sim-size-range" multiple size="5">
+                {% for s in size_ranges %}
+                <option value="{{ s.code }}">{{ s.code }}{% if s.description %} — {{ s.description }}{% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+            <div>
+                <label>Duration (months) <span style="color:#dc2626;">*</span></label>
+                <input type="number" id="sim-duration" value="6" min="1" max="60">
+            </div>
+            <div>
+                <label>Move-in date</label>
+                <input type="date" id="sim-movein">
+            </div>
+        </div>
+
+        <div class="row">
+            <label>Channel <span style="color:#dc2626;">*</span></label>
+            <select id="sim-channel">
+                {% for ch in channels %}
+                <option value="{{ ch }}" {{ 'selected' if ch == 'chatbot' }}>{{ ch }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="row">
+            <label>Coupon Code</label>
+            <input type="text" id="sim-coupon" placeholder="Optional — unlocks hidden_rate plans">
+        </div>
+
+        <div class="row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+            <div>
+                <label>Customer ID</label>
+                <input type="text" id="sim-customer" placeholder="Optional">
+            </div>
+            <div>
+                <label>Max distance (km)</label>
+                <input type="number" id="sim-maxdist" placeholder="default 50">
+            </div>
+        </div>
+
+        <div style="margin-top: 0.8rem; display: flex; gap: 0.5rem;">
+            <button type="button" id="sim-run" class="btn">Run Simulation</button>
+            <button type="button" id="sim-clear" class="btn btn-secondary">Clear</button>
+        </div>
+    </div>
+
+    <!-- RIGHT: results -->
+    <div class="card sim-result" id="sim-result" style="padding: 0.9rem;">
+        <div class="sim-empty">Run a simulation to see results here.</div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const $ = (id) => document.getElementById(id);
+    const getSel = (id) => Array.from($(id).selectedOptions).map(o => o.value);
+
+    function buildPayload() {
+        const location = getSel('sim-location');
+        if (!location.length) {
+            alert('Pick at least one location.');
+            return null;
+        }
+        const filters = { location };
+        const ut = getSel('sim-unit-type');     if (ut.length) filters.unit_type = ut;
+        const ct = getSel('sim-climate');       if (ct.length) filters.climate_type = ct;
+        const sr = getSel('sim-size-range');    if (sr.length) filters.size_range = sr;
+        const coupon = $('sim-coupon').value.trim();
+        if (coupon) filters.coupon_code = coupon;
+
+        const constraints = {};
+        const md = $('sim-maxdist').value.trim();
+        if (md) constraints.max_distance_km = parseInt(md, 10);
+
+        const ctx = { channel: $('sim-channel').value };
+        const cust = $('sim-customer').value.trim();
+        if (cust) ctx.customer_id = cust;
+        const movein = $('sim-movein').value;
+        if (movein) ctx.move_in_date = movein;
+
+        return {
+            mode: 'recommendation',
+            level: 'standard',
+            duration_months: parseInt($('sim-duration').value, 10) || 6,
+            filters: filters,
+            constraints: constraints,
+            context: ctx,
+        };
+    }
+
+    function fmt(n) {
+        if (n === null || n === undefined) return '—';
+        return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function renderSlot(s) {
+        if (!s) {
+            return `<div class="slot-card empty">Slot empty (no qualifying inventory)</div>`;
+        }
+        const p = s.pricing || {};
+        const breakdownRows = (p.breakdown || []).map(b => `
+            <tr>
+                <td>${b.month_index}</td>
+                <td>${(b.billing_date || '').substring(0,10)}</td>
+                <td>${fmt(b.rent)}</td>
+                <td>${b.discount ? fmt(b.discount) : '—'}</td>
+                <td>${b.insurance ? fmt(b.insurance) : '—'}</td>
+                <td>${b.admin_fee ? fmt(b.admin_fee) : '—'}</td>
+                <td>${b.deposit ? fmt(b.deposit) : '—'}</td>
+                <td>${fmt(parseFloat(b.rent_tax || 0) + parseFloat(b.insurance_tax || 0))}</td>
+                <td><strong>${fmt(b.total)}</strong></td>
+            </tr>
+        `).join('');
+        const hidden = s.is_hidden_rate ? '🔒 ' : '';
+        const channelsLabel = s.authorised_channels
+            ? s.authorised_channels.join(', ')
+            : '<em>all channels</em>';
+        const lockBadge = s.smart_lock
+            ? `<span style="color:#6366f1;">🔑 ${(s.smart_lock.keypad_ids || []).join(',')}${s.smart_lock.padlock_id ? ' / 🔒'+s.smart_lock.padlock_id : ''}</span>`
+            : '';
+        return `
+        <div class="slot-card">
+            <h4>${hidden}Slot ${s.slot} · ${s.label}
+                <span class="price">$${fmt(p.first_month_total)}</span>
+            </h4>
+            <div class="meta">
+                <strong>${s.facility}</strong> · unit <code>${s.unit_id}</code>
+                · type <code>${s.unit_type || '—'}</code>
+                · climate <code>${s.climate_type || '—'}</code>
+                · size <code>${s.size_range || '—'}</code>
+                ${lockBadge}
+                <br>
+                Plan <strong>${s.plan_name || s.plan_id}</strong> (id ${s.plan_id})
+                · concession ${s.concession_id === 0 ? '<em>standard rate</em>' : s.concession_id}
+                · channels: ${channelsLabel}
+                <br>
+                Std rate: $${fmt(s.std_rate)} · Effective: $${fmt(s.effective_rate)}
+                · Confidence: <code>${p.confidence || '—'}</code>${p.confidence_reason ? ' ('+p.confidence_reason+')' : ''}
+                <br>
+                Total contract (${p.duration_months}mo): <strong>$${fmt(p.total_contract)}</strong>
+                · Avg/month: $${fmt(p.monthly_average)}
+            </div>
+            <details class="breakdown" style="margin-top: 0.45rem;">
+                <summary style="cursor: pointer; color: #4b5563; font-size: 0.78rem;">📋 Month-by-month breakdown</summary>
+                <table style="margin-top: 0.3rem;">
+                    <thead><tr>
+                        <th>#</th><th>Date</th><th>Rent</th><th>Disc</th><th>Ins</th>
+                        <th>Admin</th><th>Dep</th><th>Tax</th><th>Total</th>
+                    </tr></thead>
+                    <tbody>${breakdownRows}</tbody>
+                </table>
+            </details>
+        </div>`;
+    }
+
+    function render(data) {
+        const root = $('sim-result');
+        if (data.error) {
+            root.innerHTML = `<div class="error-banner">⚠ ${data.error}${data.where ? ' (at '+data.where+')' : ''}${data.detail ? ': '+data.detail : ''}</div>`;
+            return;
+        }
+        const stats = data.stats || {};
+        const filters = stats.filters_applied || {};
+        const filterChips = Object.entries(filters)
+            .map(([k, v]) => `<span style="background:#dbeafe; padding:0.05rem 0.35rem; border-radius:3px; margin-right:0.25rem;">${k}=${Array.isArray(v) ? v.join(',') : v}</span>`)
+            .join('');
+        root.innerHTML = `
+            <div class="stats-bar">
+                Pool: <strong>${stats.candidates_pool_size}</strong> rows
+                · ${stats.distinct_sites_in_pool} sites
+                · ${stats.distinct_plans_in_pool} plans
+                | served at ${data.served_at.substring(11,19)} UTC
+                · req <code>${data.request_id.substring(0, 12)}…</code>
+            </div>
+            <div style="font-size: 0.75rem; color: #6b7280; margin-bottom: 0.6rem;">
+                Filters: ${filterChips || '<em>none</em>'}
+            </div>
+            ${data.slots.map(renderSlot).join('')}
+        `;
+    }
+
+    $('sim-run').addEventListener('click', async () => {
+        const payload = buildPayload();
+        if (!payload) return;
+        const root = $('sim-result');
+        root.innerHTML = `<div class="sim-empty">⏳ Running…</div>`;
+        try {
+            const r = await fetch('{{ url_for("recommendation_engine.simulator_run") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(payload),
+            });
+            const data = await r.json().catch(() => ({error: 'response not JSON', detail: 'status '+r.status}));
+            render(data);
+        } catch (e) {
+            root.innerHTML = `<div class="error-banner">⚠ Network error: ${e.message}</div>`;
+        }
+    });
+
+    $('sim-clear').addEventListener('click', () => {
+        ['sim-location','sim-unit-type','sim-climate','sim-size-range'].forEach(id => {
+            Array.from($(id).options).forEach(o => o.selected = false);
+        });
+        $('sim-coupon').value = '';
+        $('sim-customer').value = '';
+        $('sim-maxdist').value = '';
+        $('sim-movein').value = '';
+        $('sim-duration').value = '6';
+        $('sim-result').innerHTML = `<div class="sim-empty">Cleared. Run a new simulation.</div>`;
+    });
+})();
+</script>
+{% endblock %}
