@@ -73,6 +73,7 @@ class CandidateRow:
     prepay: Optional[bool]
     prepaid_months: Optional[int]
     coupon_code: Optional[str] = None
+    std_sec_dep: Optional[Decimal] = None
 
 
 class ValidationError(ValueError):
@@ -423,6 +424,7 @@ def _build_candidate_row(r: Any) -> CandidateRow:
         climate_type=r['climate_type'] or None,
         size_range=r['size_range'] or None,
         std_rate=Decimal(str(r['std_rate'])) if r['std_rate'] is not None else Decimal('0'),
+        std_sec_dep=_dec(r.get('std_sec_dep')),
         effective_rate=_dec(r['effective_rate']),
         smart_lock=smart_lock,
         parse_ok=bool(r['parse_ok']),
@@ -539,7 +541,7 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
         SELECT DISTINCT ON (unit_id)
             site_id, site_code, unit_id, plan_id, concession_id,
             unit_type, climate_type, size_range,
-            std_rate, effective_rate, smart_lock,
+            std_rate, std_sec_dep, effective_rate, smart_lock,
             parse_ok,
             FALSE AS legacy_mapped,
             plan_name, min_duration_months, max_duration_months,
@@ -797,11 +799,14 @@ def quote_slot(
     admin_fee: Decimal = charge_info.get('admin_fee', Decimal('0'))
     security_deposit: Decimal = charge_info.get('security_deposit', Decimal('0'))
     # SiteLink convention: when SecDep.dcPrice is 0, the deposit is the
-    # unit's std_rate (1 month's rent). Only when an explicit fixed amount
-    # is configured does dcPrice carry it. Falling back to std_rate matches
-    # what SOAP MoveInCostRetrieve would charge.
-    if security_deposit <= 0 and row.std_rate is not None:
-        security_deposit = Decimal(str(row.std_rate))
+    # unit's per-row dcStdSecDep (or its dcStdRate if dcStdSecDep is also 0).
+    # Some sites have units with deposit != std_rate (premium 2x, no-deposit 0).
+    # Falling back this way matches what SOAP MoveInCostRetrieve would charge.
+    if security_deposit <= 0:
+        if row.std_sec_dep and row.std_sec_dep > 0:
+            security_deposit = Decimal(str(row.std_sec_dep))
+        elif row.std_rate is not None:
+            security_deposit = Decimal(str(row.std_rate))
     rent_tax = charge_info.get('rent_tax', ChargeTypeTax('Rent'))
     admin_tax = charge_info.get('admin_tax', rent_tax)
     deposit_tax = charge_info.get('deposit_tax', ChargeTypeTax('SecDep'))

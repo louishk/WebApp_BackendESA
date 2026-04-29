@@ -47,7 +47,7 @@ _INSERT_COLS: Tuple[str, ...] = (
     'size_category', 'size_range', 'unit_type',
     'climate_type', 'unit_shape', 'pillar',
     'case_count', 'parse_ok',
-    'std_rate', 'web_rate', 'push_rate', 'board_rate', 'preferred_rate',
+    'std_rate', 'std_sec_dep', 'web_rate', 'push_rate', 'board_rate', 'preferred_rate',
     'amt_type', 'fixed_discount', 'pct_discount', 'max_amount_off',
     'plan_start', 'plan_end', 'never_expires',
     'in_month', 'prepay', 'prepaid_months',
@@ -176,7 +176,7 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
             unit_rows = conn.execute(text("""
                 SELECT "SiteID", "UnitID", "UnitTypeID", "sLocationCode",
                        "sTypeName", "bCorporate",
-                       "dcStdRate", "dcWebRate", "dcPushRate",
+                       "dcStdRate", "dcStdSecDep", "dcWebRate", "dcPushRate",
                        "dcBoardRate", "dcPreferredRate"
                 FROM ccws_available_units
                 WHERE "SiteID" = ANY(:sids)
@@ -543,6 +543,7 @@ def _compose_candidates(
                         'case_count': parts.case_count,
                         'parse_ok': parts.parse_ok,
                         'std_rate': std_rate,
+                        'std_sec_dep': u.get('dcStdSecDep'),
                         'web_rate': u.get('dcWebRate'),
                         'push_rate': u.get('dcPushRate'),
                         'board_rate': u.get('dcBoardRate'),
@@ -677,6 +678,7 @@ def _compose_candidates(
                         'case_count': parts.case_count,
                         'parse_ok': parts.parse_ok,
                         'std_rate': std_rate,
+                        'std_sec_dep': u.get('dcStdSecDep'),
                         'web_rate': u.get('dcWebRate'),
                         'push_rate': u.get('dcPushRate'),
                         'board_rate': u.get('dcBoardRate'),
