@@ -15,6 +15,11 @@
 #       The token's API key must hold the `recommender` scope (granted on
 #       /admin/api-keys → tick the "POST /api/recommendations" checkbox).
 #
+#       NOTE: `recommender` alone is NOT sufficient for a full chatbot.
+#       The bot also needs `reservations:read` + `reservations:write` to
+#       complete the booking lifecycle. See docs/api/chatbot_integration.md
+#       for the full scope checklist + endpoint × scope matrix.
+#
 # Outcome reconciliation is automatic: when a reservation reaches
 # /api/reservations/move-in via the same chatbot key, the middleware looks
 # up the most-recent recommendation served for the (session_id | customer_id |
