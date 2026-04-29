@@ -18,6 +18,8 @@ API_SCOPES = {
     'discount_plans:write': 'Create / update discount plans',
     'scheduler:read': 'Read scheduler jobs and history',
     'scheduler:write': 'Trigger and manage scheduler jobs',
+    'sync:read': 'Read sync orchestrator pipelines and state',
+    'sync:write': 'Manage sync orchestrator pipelines, trigger runs, reset state',
     'ecri:read': 'Read ECRI batches and eligibility',
     'statistics:read': 'Read API usage statistics',
     'inventory:read': 'Read unit inventory data',
@@ -27,6 +29,11 @@ API_SCOPES = {
     'reservations:track': 'Push external reservation tracking records and lifecycle events',
     'smart_lock:read': 'Read smart lock assignments, keypads, and padlocks',
     'smart_lock:write': 'Create/update smart lock assignments and devices',
+    'reservation_fees:read': 'Read per-site reservation fees',
+    'reservation_fees:write': 'Create/update/delete per-site reservation fees',
+    'billing:read': 'Read billing data (tax rates, charges, ledgers, payments)',
+    'billing:write': 'Write billing operations (add charges, apply payments, refunds)',
+    'recommender': 'POST /api/recommendations — chatbot/booking quote engine',
 }
 
 # Defaults

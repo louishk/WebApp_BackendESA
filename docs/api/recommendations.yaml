@@ -1,0 +1,604 @@
+# =============================================================================
+# Recommendation Engine API — chatbot integration
+# =============================================================================
+#
+# Single endpoint serves the 3-slot recommender. Stateful: bot can chain
+# turns through session_id + previous_request_id + picked_slot to refine.
+#
+# Pricing in the response is calculated to match SOAP MoveInCostRetrieve to
+# the cent (validated 2026-04-29 on LSETUP). The bot can show these as
+# customer-facing quotes confidently. At actual booking time, the booking
+# flow re-fetches GET /api/reservations/move-in/cost (SOAP) before charging
+# — this is the safe pattern even when our calc agrees.
+#
+# Auth: JWT bearer token in `Authorization: Bearer <token>` header.
+#       The token's API key must hold the `recommender` scope (granted on
+#       /admin/api-keys → tick the "POST /api/recommendations" checkbox).
+#
+# Outcome reconciliation is automatic: when a reservation reaches
+# /api/reservations/move-in via the same chatbot key, the middleware looks
+# up the most-recent recommendation served for the (session_id | customer_id |
+# unit_id) and stamps the booked_unit_id / booked_plan_id / booked_concession_id
+# columns. No bot-side bookkeeping needed.
+# =============================================================================
+
+openapi: 3.0.3
+info:
+  title: ESA Recommendation Engine
+  version: 1.0.0
+  description: |
+    3-slot recommendation engine for unit-level pricing quotes. Designed for
+    PandaAI chatbot integration but usable by any client with the `recommender`
+    scope.
+
+    **Booking flow integration**
+    1. `POST /api/recommendations` → 3 slots with prices
+    2. Customer picks → `POST /api/reservations/reserve` (no payment, just hold)
+    3. *(later, at move-in)* `GET /api/reservations/move-in/cost` → real SOAP total
+    4. `POST /api/reservations/move-in` with `payment_amount = step 3's total`
+
+    The recommender is decoupled from payment authority by design — its
+    quotes inform the customer, but `dcPaymentAmount` always comes from
+    SOAP at move-in time.
+
+servers:
+  - url: https://backend.extraspace.com.sg
+    description: Production
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # -------------------------------------------------------------------------
+    # Request
+    # -------------------------------------------------------------------------
+    RecommendationRequest:
+      type: object
+      required: [duration_months, filters, context]
+      properties:
+        mode:
+          type: string
+          enum: [recommendation, availability, quote, compare]
+          default: recommendation
+          description: Only `recommendation` is implemented in v1; others return 501.
+        level:
+          type: string
+          enum: [standard, top_n, single_best, comprehensive]
+          default: standard
+          description: Only `standard` (3-slot) is implemented in v1.
+        duration_months:
+          type: integer
+          minimum: 1
+          maximum: 60
+          example: 6
+        filters:
+          $ref: '#/components/schemas/Filters'
+        constraints:
+          $ref: '#/components/schemas/Constraints'
+        context:
+          $ref: '#/components/schemas/Context'
+
+    Filters:
+      type: object
+      required: [location]
+      properties:
+        location:
+          oneOf:
+            - type: string
+            - type: array
+              items: { type: string }
+          example: ["L003"]
+          description: |
+            Site code(s) to search. Required. Single string or array; server
+            normalises to list. Bot must translate "Yishun" / customer NL
+            into a site code before calling.
+        unit_type:
+          oneOf: [{ type: string }, { type: array, items: { type: string } }]
+          example: ["W"]
+          description: |
+            Optional. SOP COM01 unit-type code(s). Empty = no filter. Common
+            codes: `W` (Walk-in), `U` (Upper Locker), `M` (Medium), `L`
+            (Large), `WN` (Wine), `WNU` (Wine Upper), `MB` (Mailbox), `BZ`
+            (BizPlus), `PR` (Parking), `DV` (Drive-up), `SC` (Showcase).
+            Full list at GET /discount-plans/api/dim-options.
+        climate_type:
+          oneOf: [{ type: string }, { type: array, items: { type: string } }]
+          example: ["A"]
+          description: |
+            Optional. SOP climate code(s). `NC` (None), `A` (Air-con),
+            `D` (Dehumidified), `AD` (Air-con + Dehu), `RF` (Refrigerated /
+            wine).
+        size_range:
+          oneOf: [{ type: string }, { type: array, items: { type: string } }]
+          example: ["30-35"]
+          description: |
+            Optional. SOP size bucket(s) like "0-6", "6-8", "30-35", "100-130".
+            Full list at GET /discount-plans/api/dim-options.
+        unit_shape:
+          oneOf: [{ type: string }, { type: array, items: { type: string } }]
+          description: Optional. SOP shape codes (`SS`, `WR`, `NR`, ...).
+        pillar:
+          oneOf: [{ type: string }, { type: array, items: { type: string } }]
+          description: Optional. SOP pillar codes (`P` / `NP`).
+        case_count_min:
+          type: integer
+          description: Optional. Wine units only — minimum case capacity.
+        case_count_max:
+          type: integer
+          description: Optional. Wine units only — maximum case capacity.
+        coupon_code:
+          type: string
+          example: "MOVING2026"
+          description: |
+            Optional. Required ONLY when the customer presents a hidden-rate
+            promo code. Without a matching code, hidden_rate plans are
+            silently dropped from the pool. Server upper-cases for matching.
+
+    Constraints:
+      type: object
+      properties:
+        max_distance_km:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: |
+            Slot 2 (Nearest Available) won't reach beyond this radius.
+            Override per-request; otherwise uses the global setting on
+            /recommendation-engine.
+        include_legacy:
+          type: boolean
+          default: true
+          description: |
+            Include units whose sTypeName failed SOP parsing but were
+            rescued via inventory_type_mappings. Set `false` to be strict.
+        exclude_unit_ids:
+          type: array
+          items: { type: integer }
+          description: |
+            Server fills this automatically from prior turns in the same
+            session. Bot rarely needs to set it directly.
+
+    Context:
+      type: object
+      required: [request_id]
+      properties:
+        request_id:
+          type: string
+          example: "uuid-v4"
+          description: |
+            Bot's correlation id for THIS turn. Must be unique per call.
+            Server logs it; bot can later reference via `previous_request_id`.
+        session_id:
+          type: string
+          description: |
+            Conversation anchor. Same value across multiple turns of one
+            convo. Server auto-generates if missing on the first turn.
+        customer_id:
+          type: string
+          example: "pandai_xyz_123"
+          description: |
+            PandaAI's stable customer identifier. Captured for future
+            personalization (per-customer ranking based on past picks /
+            bookings). v1 just logs; no behaviour change yet.
+        channel:
+          type: string
+          enum: [chatbot, web, api, admin]
+          default: chatbot
+          description: |
+            Calling channel. Plans whose `distribution_channel` doesn't
+            include this value are dropped. Empty plan distribution_channel
+            = open to all channels.
+        previous_request_id:
+          type: string
+          description: |
+            For multi-turn flows: the request_id of the prior turn. When set,
+            server fetches that turn's filters as the BASE (current filters
+            override per-key) and excludes already-served unit_ids.
+        picked_slot:
+          type: integer
+          enum: [1, 2, 3]
+          description: |
+            Which slot the customer accepted on the prior turn. Drives the
+            relax strategy:
+              1 → "more best-matches" (size_plus_one, then expand_unit_type)
+              2 → "more nearby"       (next_nearest_site)
+              3 → "more cheap options"(wider_size_band)
+        action:
+          type: string
+          enum: [more_like_this, different_options]
+          description: |
+            Pairs with picked_slot. `more_like_this` keeps the same slot's
+            relax strategy. `different_options` just dedups already-served
+            unit_ids without expanding filters.
+        move_in_date:
+          type: string
+          format: date
+          description: |
+            ISO date for the lease start. Defaults to today. Drives
+            proration math in the pricing breakdown.
+
+    # -------------------------------------------------------------------------
+    # Response
+    # -------------------------------------------------------------------------
+    RecommendationResponse:
+      type: object
+      properties:
+        mode: { type: string, example: recommendation }
+        level: { type: string, example: standard }
+        request_id: { type: string }
+        served_at: { type: string, format: date-time }
+        ttl_seconds:
+          type: integer
+          example: 60
+          description: |
+            Bot can cache and re-show this response for up to N seconds
+            without re-calling. After TTL the prices may have shifted
+            (e.g. a unit was rented).
+        stats:
+          type: object
+          properties:
+            candidates_pool_size: { type: integer }
+            distinct_sites_in_pool: { type: integer }
+            distinct_plans_in_pool: { type: integer }
+            filter_applied: { type: object }
+        slots:
+          type: array
+          minItems: 3
+          maxItems: 3
+          description: |
+            Always exactly 3 entries. Each is a Slot object or `null` when
+            no qualifying inventory was found for that role.
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/Slot'
+              - type: 'null'
+        tracking_id:
+          type: integer
+          description: |
+            mw_recommendations_served row id. Bot may pass this to support
+            tools later for debugging, but it's not required for outcome
+            reconciliation (the booking flow handles that automatically).
+
+    Slot:
+      type: object
+      properties:
+        slot:
+          type: integer
+          enum: [1, 2, 3]
+        label:
+          type: string
+          enum: ["Best Match", "Nearest Available", "Best Price"]
+        unit_id:
+          type: integer
+          description: SiteLink UnitID. Use this in /api/reservations/reserve.
+        facility:
+          type: string
+          example: "L003"
+        unit_type: { type: string, nullable: true, example: "W" }
+        climate_type: { type: string, nullable: true, example: "A" }
+        size_range: { type: string, nullable: true, example: "30-35" }
+        size_sqft_actual:
+          type: number
+          nullable: true
+          description: Actual sqft from dcWidth × dcLength when available.
+        plan_id:
+          type: integer
+          description: |
+            mw_discount_plans.id. Pass to /api/reservations/move-in as
+            optional `plan_id` so booked_plan_id is populated cleanly.
+        plan_name: { type: string }
+        concession_id:
+          type: integer
+          description: |
+            ccws_discount.ConcessionID. **Required** in
+            /api/reservations/reserve and /move-in. Use 0 when slot is
+            standard rate (concession_id=0 in the response).
+        std_rate:
+          type: number
+          description: Pre-discount monthly rent.
+        effective_rate:
+          type: number
+          description: |
+            Internal sort metric (std_rate − naive concession). Don't show
+            to customers; use `pricing.first_month_total` instead.
+        price:
+          type: number
+          description: |
+            Customer-facing first-month total ( = pricing.first_month_total).
+            What the bot should advertise.
+        is_hidden_rate:
+          type: boolean
+          description: |
+            true = plan was unlocked via the matching coupon_code. Bot can
+            show 🔒 indicator if relevant.
+        authorised_channels:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: |
+            Channels the plan is authorised for, e.g. ["Chatbot", "Web"].
+            null = open to all channels.
+        smart_lock:
+          type: object
+          nullable: true
+          properties:
+            keypad_ids:
+              type: array
+              items: { type: string }
+            padlock_id: { type: string }
+          description: |
+            Smart-lock device assignments for this unit. Useful for
+            instant-access bookings. null when no device assigned.
+        discount_window_months:
+          type: integer
+          nullable: true
+          description: |
+            From SiteLink concession iInMonth. 1 = first-month-only
+            discount (most common). N = first N months. Helps bot explain
+            "you save X this month, then full rate from month 2".
+        pricing:
+          $ref: '#/components/schemas/Pricing'
+
+    Pricing:
+      type: object
+      properties:
+        first_month_total: { type: number, example: 285.00 }
+        monthly_average: { type: number }
+        total_contract: { type: number }
+        duration_months: { type: integer }
+        confidence:
+          type: string
+          enum: [high, low_unsupported_concession]
+          description: |
+            `high` = calculator matches SOAP exactly. `low_*` = calculator's
+            best-effort guess for an edge case (free-month or multi-month-
+            prepay concession). Bot should warn / suppress these unless
+            admin enables drop_low_confidence_quotes globally.
+        confidence_reason:
+          type: string
+          nullable: true
+          enum:
+            - free_month_plan
+            - late_move_in_with_discount
+            - prepaid_multi_month
+            - unknown_discount_structure
+        breakdown:
+          type: array
+          description: One MonthlyBreakdown per month of the lease.
+          items:
+            type: object
+            properties:
+              month_index: { type: integer }
+              billing_date: { type: string, format: date }
+              rent: { type: number }
+              rent_proration_factor:
+                type: number
+                description: 1.0 = full month; <1 = LSETUP-style partial.
+              discount: { type: number }
+              insurance: { type: number }
+              deposit: { type: number, description: 0 except possibly month 1 }
+              admin_fee: { type: number, description: 0 except month 1 }
+              rent_tax: { type: number }
+              insurance_tax: { type: number }
+              total: { type: number, description: Net charge for the month }
+
+paths:
+  /api/recommendations:
+    post:
+      summary: Get a 3-slot recommendation
+      description: |
+        Returns Best Match (slot 1), Nearest Available (slot 2), Best Price
+        (slot 3) for the requested unit shape. Each slot is fully quoted
+        with month-by-month breakdown matching SOAP MoveInCostRetrieve to
+        the cent.
+
+        **Hidden-rate plans** require a matching `filters.coupon_code` in
+        the request — otherwise dropped silently.
+
+        **Channel gating**: each plan's `distribution_channel` (CSV in
+        admin) must include `context.channel` for the plan to be eligible.
+      tags: [Recommendations]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationRequest'
+            examples:
+              fresh_chatbot_call:
+                summary: First turn — bot translates customer NL into SOP filters
+                value:
+                  mode: recommendation
+                  level: standard
+                  duration_months: 6
+                  filters:
+                    location: ["L003"]
+                    unit_type: ["W"]
+                    climate_type: ["A"]
+                    size_range: ["30-35"]
+                  constraints:
+                    max_distance_km: 30
+                  context:
+                    channel: chatbot
+                    request_id: "550e8400-e29b-41d4-a716-446655440000"
+                    customer_id: "pandai_xyz_123"
+              follow_up_more_like_slot1:
+                summary: Customer wants more options like slot 1
+                value:
+                  mode: recommendation
+                  level: standard
+                  duration_months: 6
+                  filters:
+                    location: ["L003"]
+                  context:
+                    channel: chatbot
+                    request_id: "660e8400-e29b-41d4-a716-446655440001"
+                    session_id: "session-abc"
+                    previous_request_id: "550e8400-e29b-41d4-a716-446655440000"
+                    picked_slot: 1
+                    action: more_like_this
+              hidden_rate_with_coupon:
+                summary: Customer presents a promo code
+                value:
+                  mode: recommendation
+                  level: standard
+                  duration_months: 12
+                  filters:
+                    location: ["L017"]
+                    coupon_code: "MOVING2026"
+                  context:
+                    channel: chatbot
+                    request_id: "770e8400-e29b-41d4-a716-446655440002"
+      responses:
+        '200':
+          description: 3-slot envelope (slots may be null individually)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecommendationResponse'
+              example:
+                mode: recommendation
+                level: standard
+                request_id: "550e8400-e29b-41d4-a716-446655440000"
+                served_at: "2026-04-29T08:30:00.000Z"
+                ttl_seconds: 60
+                stats:
+                  candidates_pool_size: 47
+                  distinct_sites_in_pool: 1
+                  distinct_plans_in_pool: 2
+                  filter_applied:
+                    location: ["L003"]
+                    unit_type: ["W"]
+                slots:
+                  - slot: 1
+                    label: Best Match
+                    unit_id: 79215
+                    facility: L003
+                    unit_type: W
+                    climate_type: A
+                    size_range: 30-35
+                    plan_id: 10
+                    plan_name: "Moving Season"
+                    concession_id: 11878
+                    std_rate: 149.0
+                    effective_rate: 104.30
+                    price: 298.66
+                    is_hidden_rate: false
+                    authorised_channels: [Offline, Web, "Mobile App", Chatbot, Walk-In]
+                    smart_lock: null
+                    discount_window_months: 1
+                    pricing:
+                      first_month_total: 298.66
+                      monthly_average: 187.84
+                      total_contract: 1127.06
+                      duration_months: 6
+                      confidence: high
+                      confidence_reason: null
+                      breakdown:
+                        - month_index: 1
+                          billing_date: "2026-04-29"
+                          rent: 149.0
+                          rent_proration_factor: 1.0
+                          discount: -44.70
+                          insurance: 3.0
+                          deposit: 149.0
+                          admin_fee: 30.0
+                          rent_tax: 9.39
+                          insurance_tax: 0.27
+                          total: 298.66
+                        - month_index: 2
+                          billing_date: "2026-05-29"
+                          rent: 149.0
+                          rent_proration_factor: 1.0
+                          discount: 0
+                          insurance: 3.0
+                          deposit: 0
+                          admin_fee: 0
+                          rent_tax: 13.41
+                          insurance_tax: 0.24
+                          total: 165.65
+                  - null
+                  - null
+                tracking_id: 8472
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+              examples:
+                missing_location:
+                  value: { error: "filters.location is required" }
+                bad_channel:
+                  value: { error: "context.channel must be one of [chatbot, web, api, admin]" }
+        '401':
+          description: Auth missing or invalid JWT
+        '403':
+          description: |
+            JWT valid but lacks `recommender` scope. Admin: tick the box on
+            /admin/api-keys for the chatbot's key.
+        '409':
+          description: Duplicate request_id
+        '429':
+          description: Rate-limited (120 req/min per key)
+        '501':
+          description: |
+            mode/level not implemented. v1 ships only `mode=recommendation,
+            level=standard`. Body includes `supported` list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  mode: { type: string }
+                  level: { type: string }
+                  supported: { type: array, items: { type: string } }
+        '500':
+          description: Internal error — request_id is echoed back so support can find logs
+
+# =============================================================================
+# Conversational flow examples (for bot integrators)
+# =============================================================================
+#
+# Turn 1 — fresh request:
+#   bot generates request_id, optionally session_id (else server fills)
+#   POST { filters, context: { request_id, session_id?, customer_id? }}
+#   ← { slots: [s1, s2, s3], session_id, tracking_id }
+#   bot stores session_id locally
+#
+# Turn 2 — customer wants more like slot 1:
+#   POST { filters, context: {
+#       request_id: <new uuid>,
+#       session_id: <same as turn 1>,
+#       previous_request_id: <turn 1's request_id>,
+#       picked_slot: 1,
+#       action: more_like_this } }
+#   ← { slots: [next 3 not-yet-shown], excludes prior unit_ids automatically }
+#
+# Turn 3 — customer accepts a slot, books:
+#   POST /api/reservations/reserve with the slot's
+#       { unit_id, concession_id, customer_data }
+#       (optionally include session_id, customer_id, plan_id for tighter
+#        outcome attribution — but the system reconciles even without)
+#   ← reservation created, no payment, no concession applied yet
+#
+# Turn 4 — at actual move-in:
+#   GET /api/reservations/move-in/cost?... → SOAP-derived total
+#   POST /api/reservations/move-in { waiting_id, payment_amount = SOAP total }
+#   ← lease created, payment captured
+#
+# Outcome auto-reconciles: middleware finds the most recent
+# mw_recommendations_served row for this session/customer/unit, updates
+# booked_unit_id / booked_plan_id / booked_concession_id / booked_slot.
+# Bot doesn't have to call any "mark booked" endpoint.
+# =============================================================================
