@@ -57,15 +57,24 @@ def _round2(value: Decimal) -> Decimal:
 
 
 def _round2_tax(value: Decimal) -> Decimal:
-    """Tax-specific 2dp rounding. SiteLink truncates (ROUND_DOWN) tax.
+    """Tax-specific 2dp rounding. SiteLink rounds tax HALF_UP.
 
-    Empirically determined on LSETUP 2026-04-17:
-    - 35.50 * 0.09 = 3.195 → SOAP returns 3.19 (truncation, not HALF_UP)
-    - 17.75 * 0.09 = 1.5975 → SOAP returns 1.59 (truncation, not HALF_DOWN)
-    Combined with the discount tax method (full_tax - disc_tax), this
-    matches SOAP exactly across all tested scenarios.
+    Empirically validated on LSETUP 2026-04-29 across 10 move-in days
+    (probe_soap_tax_rounding.py vs MoveInCostRetrieveWithDiscount_Reservation_v4):
+      day  rent_chg  rent_tax_soap  HALF_UP  | ins_chg  ins_tax_soap  HALF_UP
+        5     65.32          5.88     5.88   |    2.61          0.21     0.21
+       14     43.55          3.92     3.92   |    1.74          0.14     0.14
+       17     36.29          3.27     3.27   |    1.45          0.12     0.12
+       23     21.77          1.96     1.96   |    0.87          0.07     0.07
+       30      4.84          0.44     0.44   |    0.19          0.02     0.02
+    All 5 boundary cases (per line) match HALF_UP. None match ROUND_DOWN.
+    Same rule for rent (9%) and insurance (8%).
+
+    The earlier "truncation" docstring (2026-04-17 sample) was wrong — the
+    cases observed didn't actually cross a rounding boundary, or were of
+    discount-tax-derivation lines, not direct rate × charge.
     """
-    return value.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+    return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _prorate(monthly_amount, move_in_day: int, days_in_month: int) -> Decimal:
