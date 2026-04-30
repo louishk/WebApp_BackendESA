@@ -115,12 +115,26 @@
             <tr{% if _g_key %} class="group-row" data-parent-group="{{ _g_key }}"{% endif %}>
                 <td style="color:#6b7280;">{{ plan.sort_order }}</td>
                 <td>
-                    <div style="display:flex;flex-direction:column;gap:0.1rem;">
+                    <div style="display:flex;flex-direction:column;gap:0.15rem;">
                         <strong>{{ plan.plan_name }}</strong>
                         <div style="font-size:0.68rem;color:#6b7280;">
                             <span class="pill" style="background:var(--esa-navy);color:#fff;">{{ plan.plan_type }}</span>
                             {% if plan.storage_type %}<span class="pill" style="background:#f3f4f6;color:#374151;">{{ plan.storage_type }}</span>{% endif %}
+                            {% if plan.discount_perpetual %}<span class="pill" style="background:#ede9fe;color:#6d28d9;" title="Discount applied for the entire lease (discount_perpetual=true)">📌 Perpetual</span>{% endif %}
+                            {% if plan.hidden_rate %}<span class="pill" style="background:#fef3c7;color:#92400e;" title="Hidden rate — only revealed when caller passes coupon_code{% if plan.coupon_code %}: {{ plan.coupon_code }}{% endif %}">🔒 Hidden{% if plan.coupon_code %} · <code style="background:transparent;font-size:0.66rem;">{{ plan.coupon_code }}</code>{% endif %}</span>{% endif %}
                         </div>
+                        {% set _channels = (plan.distribution_channel or '').strip() %}
+                        {% if _channels %}
+                        <div style="font-size:0.66rem;color:#6b7280;display:flex;flex-wrap:wrap;gap:1px;align-items:center;">
+                            <span style="color:#9ca3af;text-transform:uppercase;letter-spacing:0.04em;font-size:0.6rem;margin-right:0.2rem;">Channels</span>
+                            {% for ch in _channels.split(',') %}
+                                {% set _c = ch.strip() %}
+                                {% if _c %}<span class="pill" style="background:#dbeafe;color:#1e40af;">{{ _c }}</span>{% endif %}
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div style="font-size:0.66rem;color:#9ca3af;font-style:italic;">all channels</div>
+                        {% endif %}
                     </div>
                 </td>
                 <td>
