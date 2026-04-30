@@ -459,7 +459,7 @@ def reservation_reserve():
         # plan_id is derived inside the helper from whichever slot the unit was in.
         _link_recommendation(
             unit_id=unit_id,
-            concession_id=concession_id or None,
+            concession_id=concession_id,  # 0 = Standard Rate sentinel; do NOT collapse to None
             customer_id=_clamp(data.get('customer_id', ''), 120) or None,
             session_id=_clamp(data.get('session_id', ''), 64) or None,
         )
@@ -635,7 +635,7 @@ def reservation_create():
         # plan_id is derived inside the helper from whichever slot the unit was in.
         _link_recommendation(
             unit_id=unit_id,
-            concession_id=concession_id or None,
+            concession_id=concession_id,  # 0 = Standard Rate sentinel; do NOT collapse to None
             customer_id=_clamp(data.get('customer_id', ''), 120) or None,
             session_id=_clamp(data.get('session_id', ''), 64) or None,
         )

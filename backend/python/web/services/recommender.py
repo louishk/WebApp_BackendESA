@@ -669,14 +669,23 @@ def build_slot2(
     max_dist = req.constraints.get('max_distance_km') or global_default
 
     # Step 1: order neighbouring sites by distance.
+    # Distance is symmetric, so we union (from→to) and (to→from) — many
+    # admin tables only seed one direction. Preserve the smaller distance
+    # when both directions exist.
     try:
         dist_rows = db_session.execute(text("""
-            SELECT DISTINCT to_site_code, MIN(distance_km) AS d
-            FROM mw_site_distance
-            WHERE from_site_code = ANY(:locs)
+            SELECT neighbour, MIN(distance_km) AS d FROM (
+                SELECT to_site_code   AS neighbour, distance_km
+                FROM mw_site_distance
+                WHERE from_site_code = ANY(:locs)
+                UNION ALL
+                SELECT from_site_code AS neighbour, distance_km
+                FROM mw_site_distance
+                WHERE to_site_code   = ANY(:locs)
+            ) bidir
+            WHERE neighbour <> ALL(:locs)
               AND distance_km <= :max_km
-              AND to_site_code <> ALL(:locs)
-            GROUP BY to_site_code
+            GROUP BY neighbour
             ORDER BY d ASC
         """), {'locs': locations, 'max_km': max_dist}).fetchall()
     except Exception as exc:

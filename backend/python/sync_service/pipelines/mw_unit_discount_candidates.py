@@ -390,7 +390,11 @@ def _earliest_date(*candidates):
 
 
 def _size_sqft(width: Any, length: Any) -> Optional[Decimal]:
-    """Width × length, rounded to 2dp. None if either side is missing/zero."""
+    """Width × length, rounded to 2dp. None if either side is missing/zero
+    or the result is implausible. SiteLink stores placeholder dimensions
+    (e.g. 100 × 100 = 10 000 sqft) on non-standard unit types like setup
+    Lockers, so cap the surfaced value at 2000 sqft — anything larger is
+    almost certainly bogus and would mislead the bot."""
     if width is None or length is None:
         return None
     try:
@@ -400,7 +404,10 @@ def _size_sqft(width: Any, length: Any) -> Optional[Decimal]:
         return None
     if w <= 0 or l <= 0:
         return None
-    return (w * l).quantize(Decimal('0.01'))
+    sqft = (w * l).quantize(Decimal('0.01'))
+    if sqft > Decimal('2000'):
+        return None
+    return sqft
 
 
 def _effective_rate(
