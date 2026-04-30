@@ -410,7 +410,11 @@ def recommend():
         def _build_slot_obj(num: int, row, quote) -> Optional[Dict]:
             if row is None or quote is None:
                 return None
-            return _serialise_slot(num, row, quote, db_session=db)
+            mf: Dict[str, Any] = {}
+            relaxed = getattr(row, '_slot3_relaxed_dims', None)
+            if relaxed:
+                mf['relaxed_dims'] = list(relaxed)
+            return _serialise_slot(num, row, quote, db_session=db, match_flags=mf)
 
         slots_payload = [
             _build_slot_obj(1, slot1_row, slot1_quote),

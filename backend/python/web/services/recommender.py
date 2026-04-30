@@ -715,94 +715,118 @@ def build_slot3(
     db_session,
 ) -> Optional[CandidateRow]:
     """
-    Slot 3 — cheapest unit at the SAME site as the primary location with
-    size_range within ±20% buckets of the requested size, any unit_type.
+    Slot 3 — "Best Price" at the SAME site as the primary location.
 
-    Guards:
-      - Must be cheaper than slot1.effective_rate (strictly)
-      - Must have a different unit_id from slot1
-      - Must be at the requested site(s)
+    Hunts progressively wider until it finds a unit strictly cheaper than
+    slot 1 (by `slot3_min_savings_pct`). Each step relaxes one more
+    dimension so the bot can surface "if you're flexible on X you save Y":
 
-    Returns None when guards fail or no match.
+        Step 1: drop unit_type (size_range still ±N% buckets, climate kept)
+        Step 2: drop climate_type as well
+        Step 3: drop size_range as well — any unit at the site
+
+    The first step that yields a strictly-cheaper candidate wins. This
+    keeps the suggestion as "close" to the user's intent as possible — we
+    don't widen further than we need to.
+
+    Returns None when slot1 is null, when no qualifying cheaper unit
+    exists at the site, or when the cheapest is the slot1 unit itself.
     """
     if slot1 is None:
         return None
 
     locations = set(req.filters.get('location', []))
+    if not locations:
+        return None
     requested_sizes = req.filters.get('size_range', [])
 
-    # Size band % is admin-tunable on the recommendation engine settings page.
+    # Admin-tunable settings.
     try:
         from web.services import recommender_settings
         size_band_pct = int(recommender_settings.get_setting('slot3_size_band_pct', db_session))
+        min_savings_pct = int(recommender_settings.get_setting('slot3_min_savings_pct', db_session))
     except Exception:
         size_band_pct = 20
+        min_savings_pct = 0
 
-    # Determine the ±N% neighbours for all requested sizes.
-    neighbour_sizes: set[str] = set()
+    # ±N% size neighbour buckets (only used in steps 1 + 2).
+    neighbour_sizes: List[str] = []
     if requested_sizes:
         try:
             from common.size_range_window import size_range_neighbours
+            seen: set[str] = set()
             for s in requested_sizes:
                 for nb in size_range_neighbours(s, radius_pct=size_band_pct):
-                    neighbour_sizes.add(nb)
+                    if nb not in seen:
+                        neighbour_sizes.append(nb)
+                        seen.add(nb)
         except Exception as exc:
             logger.warning("build_slot3: size_range_neighbours failed: %s", exc)
-            neighbour_sizes = set(requested_sizes)
-    # If no size filter was requested, consider all sizes at the site.
-    use_size_filter = bool(requested_sizes)
-
-    # Slot 3's spec is "any unit_type" — but the base pool was filtered by
-    # the user's unit_type list. Re-fetch with unit_type cleared so we
-    # genuinely consider every type at the same site. (Same pattern as slot 2's
-    # neighbouring-site re-fetch.) Other dim filters stay intact.
-    from copy import copy
-    relaxed_req = copy(req)
-    relaxed_filters = dict(req.filters)
-    relaxed_filters.pop('unit_type', None)
-    if use_size_filter:
-        relaxed_filters['size_range'] = sorted(neighbour_sizes)
-    relaxed_req.filters = relaxed_filters
-    try:
-        relaxed_pool = fetch_candidate_pool(relaxed_req, db_session)
-    except Exception as exc:
-        logger.warning("build_slot3: relaxed pool fetch failed: %s", exc)
-        relaxed_pool = pool  # fall back to the original pool
-
-    candidates: List[CandidateRow] = []
-    for r in relaxed_pool:
-        if r.unit_id == slot1.unit_id:
-            continue
-        if r.site_code not in locations:
-            continue
-        candidates.append(r)
-
-    if not candidates:
-        return None
-
-    best = min(
-        candidates,
-        key=lambda r: (r.effective_rate is None, r.effective_rate or Decimal('0'))
-    )
-
-    # Must beat slot1's price by at least min_savings_pct (admin-tunable).
-    # Default 0 = strictly cheaper. Setting e.g. 10 means slot 3 only shows
-    # when there's a meaningful saving, not a $1 difference.
-    try:
-        from web.services import recommender_settings
-        min_savings_pct = int(recommender_settings.get_setting('slot3_min_savings_pct', db_session))
-    except Exception:
-        min_savings_pct = 0
+            neighbour_sizes = list(requested_sizes)
 
     slot1_rate = slot1.effective_rate if slot1.effective_rate is not None else slot1.std_rate
-    best_rate = best.effective_rate if best.effective_rate is not None else best.std_rate
-
-    threshold = slot1_rate * (Decimal('1') - Decimal(min_savings_pct) / Decimal('100'))
-    # Strictly cheaper, plus the minimum savings margin
-    if best_rate >= threshold:
+    if slot1_rate is None:
         return None
+    threshold = Decimal(slot1_rate) * (Decimal('1') - Decimal(min_savings_pct) / Decimal('100'))
 
-    return best
+    # Build the progressively-relaxed filter sets.
+    base_filters = dict(req.filters)
+    base_filters.pop('unit_type', None)  # always drop unit_type for slot 3
+
+    # (filters, relaxed_dims_label) tuples. relaxed_dims is recorded on the
+    # returned row so the route can put it in match_flags for the bot.
+    relax_steps: List[Tuple[Dict[str, Any], List[str]]] = []
+
+    step1 = dict(base_filters)
+    if neighbour_sizes:
+        step1['size_range'] = neighbour_sizes
+    relax_steps.append((step1, ['unit_type']))
+
+    step2 = dict(step1)
+    step2.pop('climate_type', None)
+    if step2 != step1:
+        relax_steps.append((step2, ['unit_type', 'climate_type']))
+
+    step3 = dict(step2)
+    step3.pop('size_range', None)
+    if step3 != step2:
+        relax_steps.append((step3, ['unit_type', 'climate_type', 'size_range']))
+
+    from copy import copy
+    for filters, relaxed_dims in relax_steps:
+        relaxed_req = copy(req)
+        relaxed_req.filters = filters
+        try:
+            relaxed_pool = fetch_candidate_pool(relaxed_req, db_session)
+        except Exception as exc:
+            logger.warning("build_slot3: relaxed pool fetch failed: %s", exc)
+            continue
+
+        candidates = [
+            r for r in relaxed_pool
+            if r.unit_id != slot1.unit_id and r.site_code in locations
+        ]
+        if not candidates:
+            continue
+
+        best = min(
+            candidates,
+            key=lambda r: (r.effective_rate is None, r.effective_rate or Decimal('0'))
+        )
+        best_rate = best.effective_rate if best.effective_rate is not None else best.std_rate
+        if best_rate is None:
+            continue
+        if Decimal(best_rate) < threshold:
+            # Stash the relax label on the row so the route can render it.
+            # CandidateRow is a frozen-ish dataclass; we tag via a dict-like
+            # attribute the route knows to look for.
+            try:
+                best._slot3_relaxed_dims = relaxed_dims  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            return best
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1014,7 +1038,14 @@ def render_discount_summary(
     """
     has_pct = pct_discount is not None and Decimal(pct_discount) > 0
     has_fixed = fixed_discount is not None and Decimal(fixed_discount) > 0
-    is_prepay = bool(prepay) or amt_type == 3 or (prepaid_months and prepaid_months > 0)
+    # Prepay-style is only the dominant rendering when there is NO pct/fixed
+    # discount to describe. SiteLink's bPrepay flag is set on many regular
+    # percentage promos (it just means "the discount is consumed in month 1
+    # whether you prepay or not"), so it cannot stand alone as the trigger.
+    pure_prepay = (
+        not has_pct and not has_fixed
+        and (amt_type == 3 or (prepaid_months and prepaid_months > 0))
+    )
 
     months = int(in_month) if in_month and in_month > 0 else 1
     if months == 1:
@@ -1022,7 +1053,7 @@ def render_discount_summary(
     else:
         scope = f'first {months} months'
 
-    if is_prepay and prepaid_months and prepaid_months > 0:
+    if pure_prepay and prepaid_months and prepaid_months > 0:
         # "Pay 11, get 12" — total months = prepaid_months + freebie inferred from in_month
         free = max(int(in_month or 1), 1)
         paid = int(prepaid_months)
@@ -1052,18 +1083,18 @@ def _load_insurance_options(site_id: int, db_session) -> List[Dict[str, Any]]:
     """
     try:
         rows = db_session.execute(text("""
-            SELECT "InsurCoverageID", "dcCoverageAmount", "dcPremium"
+            SELECT "InsurCoverageID", "dcCoverage", "dcPremium", "sCoverageDesc"
             FROM ccws_insurance_coverage
             WHERE "SiteID" = :sid
-              AND ("dDeleted" IS NULL)
             ORDER BY "dcPremium" ASC NULLS LAST
         """), {'sid': site_id}).fetchall()
         out = []
-        for cov_id, cov_amt, prem in rows:
+        for cov_id, cov_amt, prem, desc in rows:
             out.append({
                 'id': int(cov_id) if cov_id is not None else None,
                 'coverage_amount': float(cov_amt) if cov_amt is not None else None,
                 'premium': float(prem) if prem is not None else None,
+                'description': desc or None,
             })
         return out
     except Exception as exc:
