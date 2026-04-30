@@ -342,19 +342,25 @@
             <span style="font-size: 0.8rem; font-weight: normal; color: #888; margin-left: 0.5rem;">— showing endpoints for your assigned scopes</span>
         </h3>
 
-        <div style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 0.83rem; color: #1e40af;">
-            <strong>Booking flow guide for chatbots</strong>
-            <ol style="margin: 0.4rem 0 0 1.25rem; padding: 0; line-height: 1.5;">
-                <li><code>POST /api/recommendations</code> — quote engine. Read <code>pricing.total_due_at_movein</code> + <code>customer_disclosure.fine_print</code>.</li>
-                <li><code>POST /api/reservations/reserve</code> — pass <code>session_id</code> + <code>customer_id</code> for outcome reconciliation.</li>
-                <li><code>GET /api/reservations/move-in/cost</code> — SOAP-truth confirmation right before charging.</li>
-                <li><code>POST /api/reservations/move-in</code> — pass the <code>total</code> as <code>payment_amount</code>. Include header <code>Idempotency-Key: &lt;UUID&gt;</code> to make retries safe (24h cache, replays return <code>idempotent_replay: true</code>).</li>
-            </ol>
-            <div style="margin-top: 0.4rem;">
-                For perpetual+prepay plans the middleware orchestrates SOAP follow-ups internally
-                (PaymentSimpleCash for the prepay surplus, ScheduleTenantRateChange for the future ECRI).
-                Bot's contract stays single-amount — just pass <code>total_due_at_movein</code> as <code>payment_amount</code>.
-                See <a href="https://github.com/louishk/WebApp_BackendESA/blob/master/docs/api/chatbot_integration.md" target="_blank">chatbot_integration.md</a> for the full lifecycle.
+        <div style="margin-bottom: 1rem; padding: 0.85rem 1rem; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; font-size: 0.83rem; color: #1e40af;">
+            <strong>How to choose the right endpoint group</strong>
+            <ul style="margin: 0.4rem 0 0 1.25rem; padding: 0; line-height: 1.55;">
+                <li><strong>🤖 Chatbot Booking Flow</strong> — purpose-built for the chatbot &amp; recommendation engine. Pricing is computed by the engine, idempotent move-ins, automatic SOAP orchestration for perpetual+prepay plans, and session/customer reconciliation back to the recommendation that produced the booking.</li>
+                <li><strong>📦 SiteLink Reservations (Direct)</strong> — thin passthrough to SiteLink for CRUD on existing reservations (list, update, cancel, notes, fee config, etc.) Use when you're not going through the recommender — e.g. ops tooling, back-office integrations, manual reservations.</li>
+                <li><strong>Inventory / Discount Plans / Smart Lock / Statistics / Reservation Fees</strong> — supporting data sources. Read-mostly references that any caller can use.</li>
+            </ul>
+            <div style="margin-top: 0.55rem; padding-top: 0.45rem; border-top: 1px solid #bfdbfe;">
+                <strong>Chatbot booking — 4 calls in order:</strong>
+                <ol style="margin: 0.25rem 0 0 1.25rem; padding: 0; line-height: 1.5;">
+                    <li><code>POST /api/recommendations</code> — quote engine; read <code>pricing.total_due_at_movein</code> + <code>customer_disclosure.fine_print</code>.</li>
+                    <li><code>POST /api/reservations/reserve</code> — hold the unit; pass <code>session_id</code> + <code>customer_id</code> for outcome reconciliation.</li>
+                    <li><code>GET /api/reservations/move-in/cost</code> — SOAP-truth confirmation right before charging.</li>
+                    <li><code>POST /api/reservations/move-in</code> — pass the <code>total</code> as <code>payment_amount</code>. Send <code>Idempotency-Key: &lt;UUID&gt;</code> to make retries safe (24h cache; replays return <code>idempotent_replay: true</code>).</li>
+                </ol>
+                <div style="margin-top: 0.4rem; font-size: 0.78rem; color: #1e3a8a;">
+                    Perpetual+prepay plans: the middleware fans out the follow-up SOAP calls internally (PaymentSimpleCash for the prepay surplus, ScheduleTenantRateChange for the future ECRI). Bot's contract stays single-amount.
+                    See <a href="https://github.com/louishk/WebApp_BackendESA/blob/master/docs/api/chatbot_integration.md" target="_blank">chatbot_integration.md</a> for the full lifecycle.
+                </div>
             </div>
         </div>
 
@@ -382,13 +388,14 @@ function copyField(elementId) {
 // ── API Reference ──────────────────────────────────────────────────────────
 
 const API_ENDPOINTS = {
-    "Recommendations": {
+    "🤖 Chatbot Booking Flow (Recommendation Engine)": {
+        "description": "Purpose-built end-to-end booking pipeline for the chatbot. Quote → reserve → confirm price → move-in. Pricing is computed by the recommender, perpetual+prepay orchestration is automatic, and session_id/customer_id flow through every call so outcomes link back to the recommendation that produced them.",
         "read_scope": "recommender",
-        "write_scope": null,
+        "write_scope": "reservations:write",
         "endpoints": [
             {
                 "method": "POST", "path": "/api/recommendations", "scope": "recommender",
-                "description": "Get a 3-slot recommendation (Best Match / Best Alternative / Best Price). Stateful: chain turns via context.previous_request_id + picked_slot.",
+                "description": "Step 1 · Quote. Returns a 3-slot envelope (Best Match / Best Alternative / Best Price). Stateful: chain turns via context.previous_request_id + picked_slot.",
                 "body": {
                     "mode":            {"type": "string",  "required": false, "description": "'recommendation' (default, 3-slot envelope) or 'quote' (single unit; requires filters.unit_id)"},
                     "level":           {"type": "string",  "required": false, "description": "'standard' (default; only level supported in v1)"},
@@ -433,16 +440,10 @@ const API_ENDPOINTS = {
                     ],
                     "next_turn": {"previous_request_id": "req-1234", "session_id": "sess-abc", "supported_actions": ["more_like_this", "different_options", "different_size", "different_site"]}
                 }
-            }
-        ]
-    },
-    "Reservations": {
-        "read_scope": "reservations:read",
-        "write_scope": "reservations:write",
-        "endpoints": [
+            },
             {
                 "method": "POST", "path": "/api/reservations/reserve", "scope": "reservations:write",
-                "description": "Reserve a unit (creates tenant + reservation). Pass session_id + customer_id for outcome reconciliation against the recommendation.",
+                "description": "Step 2 · Hold the unit (creates tenant + reservation in SiteLink). Pass session_id + customer_id from /recommendations so the move-in outcome can link back to the slot the customer picked.",
                 "body": {
                     "site_code":    {"type": "string",  "required": true,  "description": "Location code (e.g. LSETUP)"},
                     "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID to reserve"},
@@ -464,92 +465,8 @@ const API_ENDPOINTS = {
                 "example_response": {"success": true, "site_code": "LSETUP", "unit_id": 106155, "tenant_id": "1109544", "waiting_id": "848757", "global_waiting_num": "809363726", "message": "Reservation created"}
             },
             {
-                "method": "POST", "path": "/api/reservations/create", "scope": "reservations:write",
-                "description": "Create reservation for existing tenant",
-                "body": {
-                    "site_code":    {"type": "string",  "required": true,  "description": "Location code"},
-                    "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID"},
-                    "tenant_id":    {"type": "integer", "required": true,  "description": "Existing tenant ID"},
-                    "needed_date":  {"type": "string",  "required": false, "description": "Move-in date YYYY-MM-DD"},
-                    "expires_date": {"type": "string",  "required": false, "description": "Expiry date YYYY-MM-DD"},
-                    "comment":      {"type": "string",  "required": false, "description": "Comment"},
-                    "quoted_rate":  {"type": "number",  "required": false, "description": "Quoted rate"},
-                    "source_name":  {"type": "string",  "required": false, "description": "Source name"},
-                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID"}
-                },
-                "example_response": {"success": true, "site_code": "LSETUP", "unit_id": 106155, "tenant_id": 1109544, "waiting_id": "848758", "global_waiting_num": "700485212", "message": "Reservation created"}
-            },
-            {
-                "method": "GET", "path": "/api/reservations/list", "scope": "reservations:read",
-                "description": "List reservations for a site",
-                "params": {
-                    "site_code":           {"type": "string",  "required": true,  "description": "Location code"},
-                    "waiting_id":          {"type": "integer", "required": false, "description": "Filter by WaitingID (default: 0 = all)"},
-                    "global_waiting_num":  {"type": "integer", "required": false, "description": "Filter by global waiting number"}
-                },
-                "example_response": {"site_code": "LSETUP", "count": 178, "reservations": ["..."]}
-            },
-            {
-                "method": "GET", "path": "/api/reservations/<id>", "scope": "reservations:read",
-                "description": "Get single reservation by WaitingID",
-                "params": {
-                    "site_code": {"type": "string", "required": true, "description": "Location code (query param)"}
-                },
-                "example_response": {"site_code": "LSETUP", "reservation": {"WaitingID": "848757", "TenantID": "1109544", "sUnitName": "4120", "iWaitingStatus": "0"}}
-            },
-            {
-                "method": "PUT", "path": "/api/reservations/<id>", "scope": "reservations:write",
-                "description": "Update a reservation",
-                "body": {
-                    "site_code":    {"type": "string",  "required": true,  "description": "Location code"},
-                    "tenant_id":    {"type": "integer", "required": true,  "description": "Tenant ID"},
-                    "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID"},
-                    "needed_date":  {"type": "string",  "required": true,  "description": "Needed date YYYY-MM-DD"},
-                    "comment":      {"type": "string",  "required": false, "description": "Comment"},
-                    "status":       {"type": "integer", "required": false, "description": "Status code (0=active, 2=cancelled)"},
-                    "quoted_rate":  {"type": "number",  "required": false, "description": "Quoted rate"},
-                    "expires_date": {"type": "string",  "required": false, "description": "Expiry date YYYY-MM-DD"},
-                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID"}
-                },
-                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "848757", "message": "Reservation updated"}
-            },
-            {
-                "method": "PUT", "path": "/api/reservations/<id>/cancel", "scope": "reservations:write",
-                "description": "Cancel a reservation",
-                "body": {
-                    "site_code":            {"type": "string", "required": true,  "description": "Location code"},
-                    "cancellation_reason":  {"type": "string", "required": false, "description": "Reason for cancellation"}
-                },
-                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "848757", "message": "Reservation cancelled"}
-            },
-            {
-                "method": "GET", "path": "/api/reservations/<id>/notes", "scope": "reservations:read",
-                "description": "Get notes for a reservation",
-                "params": {
-                    "site_code": {"type": "string", "required": true, "description": "Location code (query param)"}
-                },
-                "example_response": {"waiting_id": 848757, "notes": [], "count": 0}
-            },
-            {
-                "method": "POST", "path": "/api/reservations/<id>/notes", "scope": "reservations:write",
-                "description": "Add a note to a reservation",
-                "body": {
-                    "site_code": {"type": "string", "required": true, "description": "Location code"},
-                    "note":      {"type": "string", "required": true, "description": "Note text"}
-                },
-                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "3207283", "message": "Note added"}
-            },
-            {
-                "method": "GET", "path": "/api/reservations/fees", "scope": "reservations:read",
-                "description": "Get reservation fee config for a site",
-                "params": {
-                    "site_code": {"type": "string", "required": true, "description": "Location code"}
-                },
-                "example_response": {"site_code": "LSETUP", "fees": [{"dcPrice": "0.0000", "bReqReservationFee": "true", "iDaysReservationExpAfterDateNeed": "7"}]}
-            },
-            {
                 "method": "GET", "path": "/api/reservations/move-in/cost", "scope": "reservations:read",
-                "description": "SOAP-truth move-in cost. Bot calls this right before charging the customer. Authoritative number = `total`.",
+                "description": "Step 3 · Confirm price (SOAP-truth). Bot calls this right before charging the customer. Authoritative number = `total`.",
                 "params": {
                     "site_code":     {"type": "string",  "required": true,  "description": "Location code"},
                     "unit_id":       {"type": "integer", "required": true,  "description": "Unit ID"},
@@ -572,7 +489,7 @@ const API_ENDPOINTS = {
             },
             {
                 "method": "POST", "path": "/api/reservations/move-in", "scope": "reservations:write",
-                "description": "Convert reservation → move-in. Pass `Idempotency-Key` header (UUID per booking attempt) to safely retry. For perpetual+prepay plans the middleware orchestrates SOAP follow-ups (PaymentSimpleCash + ScheduleTenantRateChange) — bot just passes the single payment_amount from /move-in/cost.",
+                "description": "Step 4 · Convert reservation → move-in. Pass `Idempotency-Key` header (UUID per booking attempt) to safely retry. For perpetual+prepay plans the middleware orchestrates SOAP follow-ups (PaymentSimpleCash + ScheduleTenantRateChange) — bot just passes the single payment_amount from /move-in/cost.",
                 "body": {
                     "site_code":      {"type": "string",  "required": true,  "description": "Location code"},
                     "waiting_id":     {"type": "integer", "required": true,  "description": "WaitingID from /reserve"},
@@ -595,55 +512,8 @@ const API_ENDPOINTS = {
                 }
             },
             {
-                "method": "POST", "path": "/api/reservations/move-in/direct", "scope": "reservations:write",
-                "description": "Direct move-in (no reservation, MoveInWithDiscount_v7). Includes billing_frequency + ChannelType + iSource. LSETUP requires billing_frequency=3.",
-                "body": {
-                    "site_code":         {"type": "string",  "required": true,  "description": "Location code"},
-                    "tenant_id":         {"type": "integer", "required": true,  "description": "Tenant ID"},
-                    "unit_id":           {"type": "integer", "required": true,  "description": "Unit ID"},
-                    "payment_amount":    {"type": "number",  "required": true,  "description": "Move-in total"},
-                    "pay_method":        {"type": "integer", "required": false, "description": "1=CC, 2=cash (default)"},
-                    "concession_id":     {"type": "integer", "required": false, "description": "Discount plan concession ID"},
-                    "insurance_id":      {"type": "integer", "required": false, "description": "Insurance coverage ID"},
-                    "billing_frequency": {"type": "integer", "required": false, "description": "Site-specific. LSETUP=3."},
-                    "channel_type":      {"type": "integer", "required": false, "description": "0=walkin (default), 1=phone, 2=web"},
-                    "use_push_rate":     {"type": "boolean", "required": false, "description": "Use unit's dcPushRate instead of dcStdRate"}
-                },
-                "example_response": {"success": true, "ledger_id": 593700, "lease_num": 1652, "message": "Move-in completed"}
-            },
-            {
-                "method": "GET", "path": "/api/reservations/insurance-coverage", "scope": "reservations:read",
-                "description": "Available insurance coverage tiers at a site.",
-                "params": {
-                    "site_code": {"type": "string", "required": true, "description": "Location code"}
-                },
-                "example_response": {"site_code": "L017", "count": 11, "data": [{"InsurCoverageID": 9727, "dcCoverage": 1000, "dcPremium": 3.00}]}
-            },
-            {
-                "method": "GET", "path": "/api/reservations/insurance-minimums", "scope": "reservations:read",
-                "description": "Required minimum insurance coverage per unit type at a site.",
-                "params": {
-                    "site_code": {"type": "string", "required": true, "description": "Location code"}
-                },
-                "example_response": {"site_code": "L017", "count": 4, "data": [{"sUnitType": "W", "dcMinimumInsurance": 1000}]}
-            },
-            {
-                "method": "GET", "path": "/api/reservations/discount-plans", "scope": "reservations:read",
-                "description": "Active discount plans/concessions applicable at a site (SOAP-fresh).",
-                "params": {
-                    "site_code": {"type": "string", "required": true, "description": "Location code"}
-                },
-                "example_response": {"site_code": "L017", "count": 3, "data": [{"ConcessionID": 11872, "sPlanName": "SS-TAC-Move-R-30%", "iAmtType": 1, "dcPCDiscount": 30}]}
-            }
-        ]
-    },
-    "Reservation Tracking": {
-        "read_scope": "reservations:track",
-        "write_scope": "reservations:track",
-        "endpoints": [
-            {
                 "method": "POST", "path": "/api/reservations/track", "scope": "reservations:track",
-                "description": "Track an external reservation (upsert by site_code + waiting_id)",
+                "description": "Outcome tracking · Upsert an external reservation record (by site_code + waiting_id). Use to capture chatbot-originated reservations for analytics + outcome reconciliation.",
                 "body": {
                     "site_code":         {"type": "string",  "required": true,  "description": "Location code"},
                     "unit_id":           {"type": "integer", "required": true,  "description": "Unit ID"},
@@ -669,7 +539,7 @@ const API_ENDPOINTS = {
             },
             {
                 "method": "PUT", "path": "/api/reservations/track/event", "scope": "reservations:track",
-                "description": "Push a lifecycle event against a tracked reservation",
+                "description": "Outcome tracking · Push a lifecycle event (move_in / cancellation / expiry) against a tracked reservation.",
                 "body": {
                     "site_code":   {"type": "string", "required": true,  "description": "Location code"},
                     "waiting_id":  {"type": "integer","required": true,  "description": "The reservation to update"},
@@ -680,11 +550,143 @@ const API_ENDPOINTS = {
             },
             {
                 "method": "POST", "path": "/api/reservations/track/batch", "scope": "reservations:track",
-                "description": "Batch import reservation records (max 100 per call, 5 req/min)",
+                "description": "Outcome tracking · Batch import reservation records (max 100 per call, 5 req/min).",
                 "body": {
                     "records": {"type": "array", "required": true, "description": "Array of reservation objects (same schema as /track)"}
                 },
                 "example_response": {"success": true, "processed": 100, "inserted": 85, "updated": 15, "errors": []}
+            }
+        ]
+    },
+    "📦 SiteLink Reservations (Direct CRUD)": {
+        "description": "Generic passthrough to SiteLink for reservations that did NOT come through the recommendation engine — admin tooling, manual back-office bookings, or upstream integrations that mirror SiteLink. No idempotency, no perpetual+prepay orchestration, no session/customer reconciliation. Same `reservations:read` / `reservations:write` scopes as the chatbot flow.",
+        "read_scope": "reservations:read",
+        "write_scope": "reservations:write",
+        "endpoints": [
+            {
+                "method": "POST", "path": "/api/reservations/create", "scope": "reservations:write",
+                "description": "Create a reservation for an existing tenant (no tenant creation; use /reserve for that).",
+                "body": {
+                    "site_code":    {"type": "string",  "required": true,  "description": "Location code"},
+                    "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID"},
+                    "tenant_id":    {"type": "integer", "required": true,  "description": "Existing tenant ID"},
+                    "needed_date":  {"type": "string",  "required": false, "description": "Move-in date YYYY-MM-DD"},
+                    "expires_date": {"type": "string",  "required": false, "description": "Expiry date YYYY-MM-DD"},
+                    "comment":      {"type": "string",  "required": false, "description": "Comment"},
+                    "quoted_rate":  {"type": "number",  "required": false, "description": "Quoted rate"},
+                    "source_name":  {"type": "string",  "required": false, "description": "Source name"},
+                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID"}
+                },
+                "example_response": {"success": true, "site_code": "LSETUP", "unit_id": 106155, "tenant_id": 1109544, "waiting_id": "848758", "global_waiting_num": "700485212", "message": "Reservation created"}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/list", "scope": "reservations:read",
+                "description": "List reservations for a site.",
+                "params": {
+                    "site_code":           {"type": "string",  "required": true,  "description": "Location code"},
+                    "waiting_id":          {"type": "integer", "required": false, "description": "Filter by WaitingID (default: 0 = all)"},
+                    "global_waiting_num":  {"type": "integer", "required": false, "description": "Filter by global waiting number"}
+                },
+                "example_response": {"site_code": "LSETUP", "count": 178, "reservations": ["..."]}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/<id>", "scope": "reservations:read",
+                "description": "Get a single reservation by WaitingID.",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code (query param)"}
+                },
+                "example_response": {"site_code": "LSETUP", "reservation": {"WaitingID": "848757", "TenantID": "1109544", "sUnitName": "4120", "iWaitingStatus": "0"}}
+            },
+            {
+                "method": "PUT", "path": "/api/reservations/<id>", "scope": "reservations:write",
+                "description": "Update a reservation (dates, comment, quoted rate, status, concession).",
+                "body": {
+                    "site_code":    {"type": "string",  "required": true,  "description": "Location code"},
+                    "tenant_id":    {"type": "integer", "required": true,  "description": "Tenant ID"},
+                    "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID"},
+                    "needed_date":  {"type": "string",  "required": true,  "description": "Needed date YYYY-MM-DD"},
+                    "comment":      {"type": "string",  "required": false, "description": "Comment"},
+                    "status":       {"type": "integer", "required": false, "description": "Status code (0=active, 2=cancelled)"},
+                    "quoted_rate":  {"type": "number",  "required": false, "description": "Quoted rate"},
+                    "expires_date": {"type": "string",  "required": false, "description": "Expiry date YYYY-MM-DD"},
+                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID"}
+                },
+                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "848757", "message": "Reservation updated"}
+            },
+            {
+                "method": "PUT", "path": "/api/reservations/<id>/cancel", "scope": "reservations:write",
+                "description": "Cancel a reservation.",
+                "body": {
+                    "site_code":            {"type": "string", "required": true,  "description": "Location code"},
+                    "cancellation_reason":  {"type": "string", "required": false, "description": "Reason for cancellation"}
+                },
+                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "848757", "message": "Reservation cancelled"}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/<id>/notes", "scope": "reservations:read",
+                "description": "Get notes for a reservation.",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code (query param)"}
+                },
+                "example_response": {"waiting_id": 848757, "notes": [], "count": 0}
+            },
+            {
+                "method": "POST", "path": "/api/reservations/<id>/notes", "scope": "reservations:write",
+                "description": "Add a note to a reservation.",
+                "body": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code"},
+                    "note":      {"type": "string", "required": true, "description": "Note text"}
+                },
+                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "3207283", "message": "Note added"}
+            },
+            {
+                "method": "POST", "path": "/api/reservations/move-in/direct", "scope": "reservations:write",
+                "description": "Direct move-in — no reservation step, no idempotency, no orchestration. Use when you've bypassed the recommender (e.g. walk-in customer at the counter). LSETUP requires billing_frequency=3.",
+                "body": {
+                    "site_code":         {"type": "string",  "required": true,  "description": "Location code"},
+                    "tenant_id":         {"type": "integer", "required": true,  "description": "Tenant ID"},
+                    "unit_id":           {"type": "integer", "required": true,  "description": "Unit ID"},
+                    "payment_amount":    {"type": "number",  "required": true,  "description": "Move-in total"},
+                    "pay_method":        {"type": "integer", "required": false, "description": "1=CC, 2=cash (default)"},
+                    "concession_id":     {"type": "integer", "required": false, "description": "Discount plan concession ID"},
+                    "insurance_id":      {"type": "integer", "required": false, "description": "Insurance coverage ID"},
+                    "billing_frequency": {"type": "integer", "required": false, "description": "Site-specific. LSETUP=3."},
+                    "channel_type":      {"type": "integer", "required": false, "description": "0=walkin (default), 1=phone, 2=web"},
+                    "use_push_rate":     {"type": "boolean", "required": false, "description": "Use unit's dcPushRate instead of dcStdRate"}
+                },
+                "example_response": {"success": true, "ledger_id": 593700, "lease_num": 1652, "message": "Move-in completed"}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/fees", "scope": "reservations:read",
+                "description": "Reservation fee config for a site (SiteLink-side).",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code"}
+                },
+                "example_response": {"site_code": "LSETUP", "fees": [{"dcPrice": "0.0000", "bReqReservationFee": "true", "iDaysReservationExpAfterDateNeed": "7"}]}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/insurance-coverage", "scope": "reservations:read",
+                "description": "Available insurance coverage tiers at a site.",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code"}
+                },
+                "example_response": {"site_code": "L017", "count": 11, "data": [{"InsurCoverageID": 9727, "dcCoverage": 1000, "dcPremium": 3.00}]}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/insurance-minimums", "scope": "reservations:read",
+                "description": "Required minimum insurance coverage per unit type at a site.",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code"}
+                },
+                "example_response": {"site_code": "L017", "count": 4, "data": [{"sUnitType": "W", "dcMinimumInsurance": 1000}]}
+            },
+            {
+                "method": "GET", "path": "/api/reservations/discount-plans", "scope": "reservations:read",
+                "description": "Active discount plans/concessions applicable at a site (SOAP-fresh).",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code"}
+                },
+                "example_response": {"site_code": "L017", "count": 3, "data": [{"ConcessionID": 11872, "sPlanName": "SS-TAC-Move-R-30%", "iAmtType": 1, "dcPCDiscount": 30}]}
             }
         ]
     },
@@ -1119,6 +1121,9 @@ function buildApiReference() {
         const endpointCountLabel = `<span style="font-size:0.75rem; color:#888; font-weight:400;">${visibleEndpoints.length} endpoint${visibleEndpoints.length !== 1 ? "s" : ""}</span>`;
 
         let rowsHtml = "";
+        if (groupDef.description) {
+            rowsHtml += `<div style="padding: 0.65rem 0.95rem; border-top: 1px solid var(--esa-gray-dark); background: #f7f8fa; font-size: 0.8rem; color: #4b5563; line-height: 1.5;">${esc(groupDef.description)}</div>`;
+        }
         visibleEndpoints.forEach((ep, epIdx) => {
             const rowId = `${groupId}-ep-${epIdx}`;
             const detailId = `${groupId}-detail-${epIdx}`;
