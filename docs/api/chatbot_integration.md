@@ -218,6 +218,107 @@ Slot definitions with multi-value input:
 - **Slot 3 Best Price** — progressively relaxes dimensions to find a
   strictly cheaper unit. `match_flags.relaxed_dims` lists what was dropped.
 
+### "Perpetual + prepayment plans" — single-amount contract for the bot
+
+Some plans are configured for **perpetual discount** with an optional
+**N-month prepayment**. The bot integration surface stays **identical** to
+the standard flow — the middleware orchestrates the multi-call SOAP
+chain internally.
+
+**Bot's only obligation**: charge the customer `pricing.total_due_at_movein`
+and pass that same number as `payment_amount` on `/move-in`. Read
+`customer_disclosure.fine_print` verbatim to the customer so they
+understand what they're committing to.
+
+```jsonc
+// /api/recommendations response (slot 1 of a perpetual + 6-mo prepay plan)
+{
+  "slot": 1, "label": "Best Match",
+  "unit_id": 106096, "facility": "LSETUP",
+  "plan_name": "Moving Season SG",
+  "concession_name": "30% Recurring Discount",
+  "discount_summary": "30% off every month",
+
+  "terms": {
+    "discount_perpetual":     true,
+    "prepayment_months":      6,
+    "post_prepay_uplift_pct": 5.0
+  },
+
+  "pricing": {
+    "first_month_total":   140.18,    // legacy field — SOAP-truth move-in cost
+    "total_contract":      574.03,
+    "total_due_at_movein": 574.03,    // ← bot charges this
+    "rate_during_prepay":  49.70,     // monthly rent during 6-mo prepay window
+    "rate_after_prepay":   52.18,     // = 49.70 × 1.05 (auto-scheduled at end of window)
+    "rate_change_date":    "2026-11-15",
+    "monthly_average":     95.67,
+    "breakdown": [...]
+  },
+
+  "customer_disclosure": {
+    "fine_print": [
+      "Pay $574.03 today to lock $49.70/month for 6 months.",
+      "After 2026-11-15, your rate adjusts to $52.18/month (5.0% increase).",
+      "You can move out at any time after move-in."
+    ],
+    "fine_print_template": {
+      "amount":      574.03,  "lock_rate":   49.70,
+      "lock_months": 6,       "new_rate":    52.18,
+      "from_date":   "2026-11-15", "uplift_pct": 5.0
+    }
+  }
+}
+```
+
+**Plan-shape behaviour** — the same response shape covers all 4 plan
+combinations; `terms.discount_perpetual` + `terms.prepayment_months`
+tell the bot which one it's quoting:
+
+| Plan shape | `total_due_at_movein` | Customer commits to |
+|---|---|---|
+| Regular, no prepay | 1 month + admin + dep + ins | First month at discounted rate; standard renewal at +12 mo |
+| Regular + SiteLink-native prepay (`bPrepay=true`) | N months bundled by SOAP | Locked discount for N mo; standard renewal at +N+1 mo |
+| Perpetual, no prepay | 1 month + admin + dep + ins | Discount applies forever; rate adjusts at +12 mo |
+| **Perpetual + custom prepay** | 1 month move-in + (N−1) × discounted recurring | Discount + prepay locked for N mo; rate adjusts at +N |
+
+Behind the scenes, after the bot's `/move-in` call succeeds, the middleware
+fires up to two follow-up SOAP calls (PaymentSimpleCash for the prepay
+surplus, ScheduleTenantRateChange_v2 for the future ECRI). These run
+inline on the happy path; failures land in a DLQ that ops drains via
+`/admin/recommendation-engine/lease-followups`. The bot's response will
+include `followups: { enqueued, inline_ok, pending_retry, ... }` so the
+caller can see the orchestration outcome, but **the lease is fully
+created either way** — bot can confirm the booking with the customer
+the moment it sees `success: true`.
+
+### Idempotency on `/move-in`
+
+The bot **should** pass `Idempotency-Key: <opaque-string>` on every
+`POST /api/reservations/move-in`. Within 24 hours, replays of the same
+key return the cached response with `idempotent_replay: true` instead
+of firing SOAP again. This protects against retry-on-network-blip
+double-MoveIn, which would otherwise create two leases.
+
+```http
+POST /api/reservations/move-in
+Idempotency-Key: bot-booking-abc123-2026-04-30
+X-API-Key: ...
+
+{ "site_code": "L017", "waiting_id": 852447, ... }
+```
+
+Bot can pick any opaque string as long as it's stable across retries
+of the **same logical booking**. UUID v4 per booking attempt is fine.
+
+### Sanity guard on `payment_amount`
+
+The handler computes the SOAP-truth move-in cost (calculator, validated
+exact match) and rejects with **400** if the bot sent a `payment_amount`
+that's more than 50¢ short. Hint pointing back to `/move-in/cost`
+included in the response. Prevents half-funded leases from network
+glitches mid-call.
+
 ### "I want a unit at L017 but L017 is fully booked"
 
 When the strict filter yields zero candidates at the requested location(s),

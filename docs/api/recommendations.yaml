@@ -497,6 +497,57 @@ components:
               description: |
                 Earliest of plan period_end / promo_period_end /
                 booking_period_end. null = no expiry on file.
+            # ── Phase 4 Part 2 — perpetual + prepay flags ────────────
+            discount_perpetual:
+              type: boolean
+              description: |
+                When TRUE the discount applies to every month of the
+                lease (not just SiteLink iInMonth). The recommender's
+                breakdown reflects this in `pricing.breakdown[].discount`
+                across all rows.
+            prepayment_months:
+              type: integer
+              nullable: true
+              description: |
+                Months of rent the customer prepays at move-in for
+                perpetual plans. Null = no prepay required. When set,
+                `pricing.total_due_at_movein` = move-in cost + (N-1) ×
+                discounted recurring total.
+            post_prepay_uplift_pct:
+              type: number
+              nullable: true
+              description: |
+                ECRI uplift percentage applied at the end of the prepay
+                window (or +12 mo for perpetual plans without a prepay
+                window). Plan-level override of the global
+                `ecri_default_pct` (default 5.0). Null = use the global.
+        customer_disclosure:
+          type: object
+          nullable: true
+          description: |
+            Customer-facing prose for plans with non-trivial financial
+            terms (perpetual + prepay especially). Bot reads `fine_print`
+            verbatim to the customer to disclose what they are committing
+            to. `fine_print_template` provides the raw fields for bots
+            that want to localize / restyle the wording.
+          properties:
+            fine_print:
+              type: array
+              items: { type: string }
+              description: |
+                English sentences ready to read to the customer. Order
+                is meaningful — first line is the headline ("Pay $X
+                today to lock $Y for N months"), follow-ups disclose
+                the post-prepay rate and the no-penalty exit.
+            fine_print_template:
+              type: object
+              properties:
+                amount:      { type: number }
+                lock_rate:   { type: number }
+                lock_months: { type: integer }
+                from_date:   { type: string, format: date }
+                new_rate:    { type: number }
+                uplift_pct:  { type: number }
         insurance:
           type: object
           nullable: true
@@ -577,6 +628,45 @@ components:
         monthly_average: { type: number }
         total_contract: { type: number }
         duration_months: { type: integer }
+        # ── Phase 4 Part 2 — perpetual + prepay quote fields ─────────
+        # Always present in the response. For non-perpetual plans they
+        # equal first_month_total / null / null. For perpetual + prepay
+        # they describe the prepayment, the locked rate during the
+        # window, and the auto-scheduled rate change at the end.
+        total_due_at_movein:
+          type: number
+          description: |
+            What the bot must charge the customer + pass as `payment_amount`
+            on `/api/reservations/move-in`. For non-perpetual plans this
+            equals `first_month_total`. For perpetual + prepay plans this
+            equals first-month cost + (prepayment_months − 1) × discounted
+            recurring total — i.e. the customer prepays the full window
+            up front. The middleware splits this into SOAP MoveIn portion
+            + PaymentSimpleCash surplus internally.
+        rate_during_prepay:
+          type: number
+          nullable: true
+          description: |
+            Locked monthly rent during the prepayment window. Only
+            populated for perpetual + prepay plans.
+        rate_after_prepay:
+          type: number
+          nullable: true
+          description: |
+            Monthly rent after the prepay window ends. Computed as
+            `rate_during_prepay × (1 + post_prepay_uplift_pct/100)` where
+            the uplift pct is the plan-level override or the global
+            `ecri_default_pct` setting (5% by default). The middleware
+            schedules this rate change via SOAP at move-in time so the
+            customer's billing transitions automatically.
+        rate_change_date:
+          type: string
+          format: date
+          nullable: true
+          description: |
+            Date when `rate_after_prepay` takes effect = move-in date
+            + `terms.prepayment_months`. Null on plans without a prepay
+            window.
         confidence:
           type: string
           enum: [high, low_unsupported_concession]

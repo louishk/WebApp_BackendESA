@@ -10,11 +10,15 @@ info:
 
     **Rate limiting** is applied per API key per sliding window; limits vary by endpoint.
 
-    **SOAP backend**: All mutation and read operations proxy to the SMD CallCenterWs SOAP
+    **SOAP backend**: Mutation and read operations proxy to the SMD CallCenterWs SOAP
     service (`CallCenterWs.asmx`). The `site_code` parameter is validated against the
     `site_info` table in the `esa_pbi` database before every SOAP call.
 
-  version: "1.0.0"
+    **Tracking endpoints** (`/track`, `/track/event`, `/track/batch`) do NOT call SOAP —
+    they write directly to the `api_reservations` table in `esa_pbi` for distribution
+    analytics and lifecycle tracking.
+
+  version: "2.0.0"
   contact:
     name: ESA Backend
 
@@ -82,13 +86,13 @@ components:
     # Request bodies
     # -------------------------------------------------------------------------
 
-    QuickReservationRequest:
+    ReserveUnitRequest:
       type: object
       required:
         - site_code
         - unit_id
-        - tenant_name
-        - tenant_last
+        - first_name
+        - last_name
         - phone
       properties:
         site_code:
@@ -97,33 +101,107 @@ components:
           type: integer
           description: StorageMaker unit ID to reserve.
           example: 10042
-        tenant_name:
+        first_name:
           type: string
           description: Tenant first name.
+          maxLength: 100
           example: "John"
-        tenant_last:
+        last_name:
           type: string
           description: Tenant last name.
+          maxLength: 100
           example: "Smith"
         phone:
           type: string
           description: Contact phone number.
+          maxLength: 20
           example: "+6591234567"
         email:
           type: string
           format: email
           description: Contact email address (optional).
+          maxLength: 100
           example: "john.smith@example.com"
-        notes:
+        mobile:
           type: string
-          description: Free-text reservation notes (optional).
+          description: Mobile phone (defaults to phone if omitted).
+          maxLength: 20
+          example: "+6591234567"
+        address:
+          type: string
+          description: Street address.
+          maxLength: 200
+          example: "123 Orchard Road"
+        city:
+          type: string
+          description: City.
+          maxLength: 100
+          example: "Singapore"
+        postal_code:
+          type: string
+          description: Postal code.
+          maxLength: 20
+          example: "238858"
+        country:
+          type: string
+          description: Country code (e.g. "SG").
+          maxLength: 10
+          example: "SG"
+        comment:
+          type: string
+          description: Reservation comment (optional).
+          maxLength: 500
           example: "Needs ground-floor access"
+        quoted_rate:
+          type: number
+          format: float
+          description: Monthly rate quoted to the prospective tenant.
+          default: 0
+          example: 280.00
+        needed_date:
+          type: string
+          format: date
+          description: Desired move-in date (YYYY-MM-DD). Defaults to tomorrow (UTC).
+          example: "2026-03-17"
+        source_name:
+          type: string
+          description: Human-readable source label passed to SOAP.
+          maxLength: 64
+          default: "ESA Backend"
+          example: "Website"
+        concession_id:
+          type: integer
+          description: Discount/concession plan ID to apply.
+          default: 0
+          example: 0
+        source:
+          type: string
+          description: Distribution source tag for analytics tracking.
+          maxLength: 50
+          default: "api"
+          example: "google_ads"
+        gclid:
+          type: string
+          description: Google Click ID for marketing attribution.
+          maxLength: 255
+          example: "CjwKCAjw..."
+        gid:
+          type: string
+          description: Google Analytics ID for tracking.
+          maxLength: 255
+          example: "GA1.2.123456789.1234567890"
+        botid:
+          type: string
+          description: Bot/chat identifier for tracking.
+          maxLength: 255
+          example: "chatbot-v2"
 
     CreateReservationRequest:
       type: object
       required:
         - site_code
         - unit_id
+        - tenant_id
       properties:
         site_code:
           $ref: "#/components/schemas/SiteCode"
@@ -132,10 +210,9 @@ components:
           description: StorageMaker unit ID to reserve.
           example: 10042
         tenant_id:
-          type: string
-          description: Existing tenant ID; use "0" for a walk-in / new enquiry.
-          default: "0"
-          example: "0"
+          type: integer
+          description: Existing tenant ID (required).
+          example: 12345
         needed_date:
           type: string
           format: date
@@ -164,48 +241,38 @@ components:
         comment:
           type: string
           description: Free-text comment for the reservation.
+          maxLength: 500
           default: ""
           example: "Walk-in from website enquiry"
-        source_id:
-          type: integer
-          description: Numeric source ID (maps to SMD source table).
-          default: 0
-          example: 3
         source_name:
           type: string
           description: Human-readable source label passed to SOAP.
+          maxLength: 64
           default: "ESA Backend"
           example: "Website"
-        rental_type_id:
-          type: integer
-          description: SOAP `QTRentalTypeID` — rental type identifier.
-          default: 0
-          example: 0
-        inquiry_type:
-          type: integer
-          description: Inquiry channel type code.
-          default: 0
-          example: 1
-        tracking_code:
-          type: string
-          description: Marketing or campaign tracking code.
-          default: ""
-          example: "GGL-CPC-2026"
-        caller_id:
-          type: string
-          description: Caller/agent identifier.
-          default: ""
-          example: "AGENT01"
         concession_id:
           type: integer
           description: Discount/concession plan ID to apply.
           default: 0
           example: 0
-        promo_global:
-          type: integer
-          description: Global promotional offer number.
-          default: 0
-          example: 0
+        source:
+          type: string
+          description: Distribution source tag for analytics tracking.
+          maxLength: 50
+          default: "api"
+          example: "google_ads"
+        gclid:
+          type: string
+          description: Google Click ID for marketing attribution.
+          maxLength: 255
+        gid:
+          type: string
+          description: Google Analytics ID for tracking.
+          maxLength: 255
+        botid:
+          type: string
+          description: Bot/chat identifier for tracking.
+          maxLength: 255
 
     UpdateReservationRequest:
       type: object
@@ -326,96 +393,247 @@ components:
           description: Note text to attach to the reservation.
           example: "Customer confirmed move-in for the 20th"
 
-    SendConfirmationRequest:
+    TrackReservationRequest:
       type: object
       required:
         - site_code
+        - unit_id
+        - waiting_id
       properties:
         site_code:
           $ref: "#/components/schemas/SiteCode"
-        move_in_link:
+        unit_id:
+          type: integer
+          description: StorageMaker unit ID.
+          example: 10042
+        waiting_id:
+          type: integer
+          description: SMD WaitingID from SOAP reservation.
+          example: 8821
+        event_type:
           type: string
-          format: uri
-          description: Optional move-in guide URL to embed in the confirmation email.
-          default: ""
-          example: "https://extraspaceasia.com.sg/move-in"
+          enum: [reservation, move_in]
+          description: >
+            Type of event. `reservation` sets status to `created`;
+            `move_in` sets status to `moved_in` and records `moved_in_at`.
+          default: "reservation"
+          example: "reservation"
+        global_waiting_num:
+          type: integer
+          description: Global waiting number from SMD.
+          example: 12345
+        tenant_id:
+          type: integer
+          description: SMD tenant ID (optional).
+          example: 67890
+        quoted_rate:
+          type: number
+          format: float
+          description: Quoted monthly rate.
+          default: 0
+          example: 280.00
+        concession_id:
+          type: integer
+          description: Discount/concession plan ID.
+          default: 0
+          example: 0
+        needed_date:
+          type: string
+          format: date
+          description: Desired move-in date (YYYY-MM-DD).
+          example: "2026-03-17"
+        first_name:
+          type: string
+          maxLength: 100
+          example: "John"
+        last_name:
+          type: string
+          maxLength: 100
+          example: "Smith"
+        email:
+          type: string
+          maxLength: 100
+          example: "john@example.com"
+        phone:
+          type: string
+          maxLength: 20
+          example: "+6591234567"
+        mobile:
+          type: string
+          maxLength: 20
+        source_name:
+          type: string
+          maxLength: 64
+          default: "ESA Backend"
+        comment:
+          type: string
+          maxLength: 500
+        source:
+          type: string
+          description: Distribution source tag.
+          maxLength: 50
+          default: "api"
+        gclid:
+          type: string
+          description: Google Click ID.
+          maxLength: 255
+        gid:
+          type: string
+          description: Google Analytics ID.
+          maxLength: 255
+        botid:
+          type: string
+          description: Bot/chat identifier.
+          maxLength: 255
+
+    TrackEventRequest:
+      type: object
+      required:
+        - site_code
+        - waiting_id
+        - event_type
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        waiting_id:
+          type: integer
+          description: SMD WaitingID of the tracked reservation.
+          example: 8821
+        event_type:
+          type: string
+          enum: [move_in, cancellation, expiry]
+          description: >
+            Lifecycle event type. Updates status and sets the corresponding
+            timestamp column (`moved_in_at`, `cancelled_at`, or `expired_at`).
+          example: "move_in"
+        comment:
+          type: string
+          description: Event notes (appended to existing comment with ` | ` separator).
+          maxLength: 500
+          example: "Confirmed move-in completed"
+
+    TrackBatchRequest:
+      type: object
+      required:
+        - records
+      properties:
+        records:
+          type: array
+          maxItems: 100
+          description: >
+            Array of reservation tracking records (max 100). Each record follows
+            the same schema as `POST /api/reservations/track`.
+          items:
+            $ref: "#/components/schemas/TrackReservationRequest"
 
     # -------------------------------------------------------------------------
     # Response bodies
     # -------------------------------------------------------------------------
 
-    QuickReservationResponse:
-      allOf:
-        - $ref: "#/components/schemas/RetResult"
-        - type: object
-          required: [success, site_code, unit_id]
-          properties:
-            success:
-              type: boolean
-              example: true
-            site_code:
-              $ref: "#/components/schemas/SiteCode"
-            unit_id:
-              type: integer
-              example: 10042
+    ReserveUnitResponse:
+      type: object
+      required: [success, site_code, unit_id, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        unit_id:
+          type: integer
+          example: 10042
+        tenant_id:
+          type: string
+          nullable: true
+          description: TenantID created by TenantNewDetailed_v3.
+          example: "67890"
+        waiting_id:
+          type: string
+          nullable: true
+          description: >
+            WaitingID returned by ReservationNewWithSource_v6 (from `Ret_Code`
+            field in SOAP response). Null if SOAP did not return one.
+          example: "8821"
+        global_waiting_num:
+          type: string
+          nullable: true
+          description: Global waiting number (from `Ret_Msg` field in SOAP response).
+          example: "12345"
+        message:
+          type: string
+          example: "Reservation created"
 
     CreateReservationResponse:
-      allOf:
-        - $ref: "#/components/schemas/RetResult"
-        - type: object
-          required: [success, site_code, unit_id]
-          properties:
-            success:
-              type: boolean
-              example: true
-            site_code:
-              $ref: "#/components/schemas/SiteCode"
-            unit_id:
-              type: integer
-              example: 10042
-            waiting_id:
-              type: string
-              nullable: true
-              description: >
-                WaitingID assigned by SMD (from `WaitingID` or `iWaitingID` in
-                SOAP response). Null if SOAP did not return one.
-              example: "8821"
-            raw:
-              type: object
-              nullable: true
-              description: Raw first record from the SOAP response, passed through unchanged.
-              additionalProperties: true
+      type: object
+      required: [success, site_code, unit_id, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        unit_id:
+          type: integer
+          example: 10042
+        tenant_id:
+          type: integer
+          description: The tenant_id provided in the request.
+          example: 12345
+        waiting_id:
+          type: string
+          nullable: true
+          description: >
+            WaitingID returned by ReservationNewWithSource_v6 (from `Ret_Code`
+            field in SOAP response). Null if SOAP did not return one.
+          example: "8821"
+        global_waiting_num:
+          type: string
+          nullable: true
+          description: Global waiting number (from `Ret_Msg` field in SOAP response).
+          example: "12345"
+        message:
+          type: string
+          example: "Reservation created"
 
     UpdateReservationResponse:
-      allOf:
-        - $ref: "#/components/schemas/RetResult"
-        - type: object
-          required: [success, waiting_id]
-          properties:
-            success:
-              type: boolean
-              example: true
-            waiting_id:
-              type: integer
-              example: 8821
-            raw:
-              type: object
-              nullable: true
-              description: Raw first record from the SOAP response.
-              additionalProperties: true
+      type: object
+      required: [success, waiting_id]
+      properties:
+        success:
+          type: boolean
+          example: true
+        waiting_id:
+          type: integer
+          example: 8821
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from ReservationUpdate_v4 SOAP response.
+          example: "0"
+        message:
+          type: string
+          description: Return message from SOAP, or "Reservation updated" if null.
+          example: "Reservation updated"
 
     CancelReservationResponse:
-      allOf:
-        - $ref: "#/components/schemas/RetResult"
-        - type: object
-          required: [success, waiting_id]
-          properties:
-            success:
-              type: boolean
-              example: true
-            waiting_id:
-              type: integer
-              example: 8821
+      type: object
+      required: [success, waiting_id]
+      properties:
+        success:
+          type: boolean
+          example: true
+        waiting_id:
+          type: integer
+          example: 8821
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from ReservationUpdate_v4 SOAP response.
+          example: "0"
+        message:
+          type: string
+          description: Return message from SOAP, or "Reservation cancelled" if null.
+          example: "Reservation cancelled"
 
     ReservationRecord:
       type: object
@@ -485,30 +703,24 @@ components:
           example: 2
 
     AddNoteResponse:
-      allOf:
-        - $ref: "#/components/schemas/RetResult"
-        - type: object
-          required: [success, waiting_id]
-          properties:
-            success:
-              type: boolean
-              example: true
-            waiting_id:
-              type: integer
-              example: 8821
-
-    SendConfirmationResponse:
-      allOf:
-        - $ref: "#/components/schemas/RetResult"
-        - type: object
-          required: [success, waiting_id]
-          properties:
-            success:
-              type: boolean
-              example: true
-            waiting_id:
-              type: integer
-              example: 8821
+      type: object
+      required: [success, waiting_id]
+      properties:
+        success:
+          type: boolean
+          example: true
+        waiting_id:
+          type: integer
+          example: 8821
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from ReservationNoteInsert SOAP response.
+          example: "0"
+        message:
+          type: string
+          description: Return message from SOAP, or "Note added" if null.
+          example: "Note added"
 
     FeeRecord:
       type: object
@@ -532,6 +744,161 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FeeRecord"
+
+    TrackResponse:
+      type: object
+      required: [success, id, event_type]
+      properties:
+        success:
+          type: boolean
+          example: true
+        id:
+          type: integer
+          description: Database record ID from api_reservations table.
+          example: 42
+        event_type:
+          type: string
+          example: "reservation"
+
+    TrackEventResponse:
+      type: object
+      required: [success, waiting_id, status]
+      properties:
+        success:
+          type: boolean
+          example: true
+        waiting_id:
+          type: integer
+          example: 8821
+        status:
+          type: string
+          description: Updated status value.
+          example: "moved_in"
+        moved_in_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present when event_type is move_in.
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present when event_type is cancellation.
+        expired_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Present when event_type is expiry.
+
+    TrackBatchResponse:
+      type: object
+      required: [success, processed, inserted, updated, errors]
+      properties:
+        success:
+          type: boolean
+          example: true
+        processed:
+          type: integer
+          description: Total records successfully processed (inserted + updated).
+          example: 8
+        inserted:
+          type: integer
+          description: Number of new records inserted.
+          example: 5
+        updated:
+          type: integer
+          description: Number of existing records updated (upsert conflict).
+          example: 3
+        errors:
+          type: array
+          description: Per-record errors with array index and message.
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              error:
+                type: string
+          example:
+            - index: 2
+              error: "site_code is required"
+
+    UnitAvailabilityReservationsResponse:
+      type: object
+      required: [reservations, count]
+      properties:
+        reservations:
+          type: object
+          description: >
+            Map of `site_code:unit_id` → reservation details. Only includes
+            reservations with status `created` (active).
+          additionalProperties:
+            type: object
+            properties:
+              waiting_id:
+                type: integer
+              tenant_id:
+                type: integer
+              first_name:
+                type: string
+              last_name:
+                type: string
+              quoted_rate:
+                type: number
+              needed_date:
+                type: string
+                format: date
+                nullable: true
+              expires_date:
+                type: string
+                format: date
+                nullable: true
+              status:
+                type: string
+              source:
+                type: string
+              source_name:
+                type: string
+              reserved_at:
+                type: string
+                format: date-time
+                nullable: true
+              soap_synced_at:
+                type: string
+                format: date-time
+                nullable: true
+              followup_date:
+                type: string
+                format: date
+                nullable: true
+              inquiry_type:
+                type: integer
+              rental_type_id:
+                type: integer
+              paid_reserve_fee:
+                type: number
+              reserve_fee_receipt_id:
+                type: integer
+              concession_id:
+                type: integer
+          example:
+            "LSETUP:10042":
+              waiting_id: 8821
+              tenant_id: 0
+              first_name: "John"
+              last_name: "Smith"
+              quoted_rate: 280.00
+              needed_date: "2026-03-20"
+              status: "created"
+              source_name: "Website"
+        count:
+          type: integer
+          example: 1
+        last_synced:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most recent soap_synced_at across returned records.
 
   responses:
     400BadRequest:
@@ -599,24 +966,29 @@ components:
 paths:
 
   # ---------------------------------------------------------------------------
-  # POST /api/reservations/quick
+  # POST /api/reservations/reserve
   # ---------------------------------------------------------------------------
-  /api/reservations/quick:
+  /api/reservations/reserve:
     post:
-      summary: Quick walk-in reservation (MakeReservation)
-      operationId: reservationQuick
+      summary: Reserve unit (TenantNewDetailed_v3 + ReservationNewWithSource_v6)
+      operationId: reservationReserve
       description: >
-        Creates a reservation using the simpler SMD `MakeReservation` SOAP operation.
-        Accepts name and phone directly without requiring an existing tenant ID.
-        Intended for the unit-availability tool page walk-in flow.
+        Full reserve flow: creates a new tenant via `TenantNewDetailed_v3`, then
+        creates a reservation via `ReservationNewWithSource_v6`. Used by the
+        unit availability tool's walk-in reservation modal.
 
-        **SOAP operation**: `MakeReservation`
+        Also records the reservation in the `api_reservations` tracking table for
+        distribution analytics (source, gclid, gid, botid).
+
+        **SOAP operations**: `TenantNewDetailed_v3`, then `ReservationNewWithSource_v6`
 
         **Audit event**: `RESERVATION_CREATED`
 
         **Rate limit**: 10 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:write`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       requestBody:
@@ -624,31 +996,34 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QuickReservationRequest"
+              $ref: "#/components/schemas/ReserveUnitRequest"
             example:
               site_code: "LSETUP"
               unit_id: 10042
-              tenant_name: "John"
-              tenant_last: "Smith"
+              first_name: "John"
+              last_name: "Smith"
               phone: "+6591234567"
               email: "john.smith@example.com"
-              notes: "Needs ground-floor access"
+              comment: "Needs ground-floor access"
+              quoted_rate: 280.00
+              concession_id: 0
       responses:
         "200":
           description: >
-            Reservation submitted. Check `ret_code` for the SMD-level result;
-            a non-zero code may indicate a business-rule rejection even when
-            HTTP 200 is returned.
+            Reservation submitted. The `waiting_id` contains the SMD-assigned
+            WaitingID (returned as `Ret_Code` from the SOAP response).
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/QuickReservationResponse"
+                $ref: "#/components/schemas/ReserveUnitResponse"
               example:
                 success: true
                 site_code: "LSETUP"
                 unit_id: 10042
-                ret_code: "0"
-                message: "Reservation created successfully"
+                tenant_id: "67890"
+                waiting_id: "8821"
+                global_waiting_num: "12345"
+                message: "Reservation created"
         "400":
           $ref: "#/components/responses/400BadRequest"
         "401":
@@ -667,13 +1042,12 @@ paths:
   # ---------------------------------------------------------------------------
   /api/reservations/create:
     post:
-      summary: Create full reservation (ReservationNewWithSource_v6)
+      summary: Create reservation for existing tenant (ReservationNewWithSource_v6)
       operationId: reservationCreate
       description: >
-        Creates a new reservation via the full SMD `ReservationNewWithSource_v6`
-        SOAP operation. Supports all SMD reservation fields including source
-        tracking, concession IDs, and quoted rates. Returns a `waiting_id`
-        assigned by SMD.
+        Creates a new reservation via `ReservationNewWithSource_v6` for an
+        existing tenant. Does NOT create a tenant — requires a valid `tenant_id`.
+        Also records in the `api_reservations` tracking table.
 
         Date fields default when omitted:
         - `needed_date` → UTC today + 1 day
@@ -685,8 +1059,10 @@ paths:
         **Audit event**: `RESERVATION_CREATED`
 
         **Rate limit**: 10 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:write`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       requestBody:
@@ -698,26 +1074,17 @@ paths:
             example:
               site_code: "LSETUP"
               unit_id: 10042
-              tenant_id: "0"
+              tenant_id: 12345
               needed_date: "2026-03-17"
-              expires_date: "2026-03-30"
-              followup_date: "2026-03-19"
               quoted_rate: 280.00
               comment: "Website enquiry"
-              source_id: 3
               source_name: "Website"
-              rental_type_id: 0
-              inquiry_type: 1
-              tracking_code: "GGL-CPC-2026"
-              caller_id: "AGENT01"
               concession_id: 0
-              promo_global: 0
       responses:
         "200":
           description: >
             Reservation created. The `waiting_id` field contains the SMD-assigned
-            WaitingID for subsequent operations. Check `ret_code` for SOAP-level
-            status.
+            WaitingID. Check `ret_code` for SOAP-level status.
           content:
             application/json:
               schema:
@@ -726,13 +1093,10 @@ paths:
                 success: true
                 site_code: "LSETUP"
                 unit_id: 10042
+                tenant_id: 12345
                 waiting_id: "8821"
-                ret_code: "0"
-                message: "Reservation created successfully"
-                raw:
-                  WaitingID: "8821"
-                  Ret_Code: "0"
-                  Ret_Msg: "Reservation created successfully"
+                global_waiting_num: "12345"
+                message: "Reservation created"
         "400":
           $ref: "#/components/responses/400BadRequest"
         "401":
@@ -760,9 +1124,11 @@ paths:
 
         **SOAP operation**: `ReservationList_v3`
 
-        **No rate limit** on read operations.
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:read`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       parameters:
@@ -816,6 +1182,8 @@ paths:
           $ref: "#/components/responses/401Unauthorized"
         "403":
           $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
         "500":
           $ref: "#/components/responses/500InternalError"
         "502":
@@ -834,8 +1202,12 @@ paths:
         result. Returns 404 if SOAP returns no records.
 
         **SOAP operation**: `ReservationList_v3`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:read`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       parameters:
@@ -877,6 +1249,8 @@ paths:
           $ref: "#/components/responses/403Forbidden"
         "404":
           $ref: "#/components/responses/404NotFound"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
         "500":
           $ref: "#/components/responses/500InternalError"
         "502":
@@ -896,8 +1270,10 @@ paths:
         **Audit event**: `RESERVATION_UPDATED`
 
         **Rate limit**: 10 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:write`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       parameters:
@@ -934,9 +1310,6 @@ paths:
                 waiting_id: 8821
                 ret_code: "0"
                 message: "Reservation updated"
-                raw:
-                  Ret_Code: "0"
-                  Ret_Msg: "Reservation updated"
         "400":
           $ref: "#/components/responses/400BadRequest"
         "401":
@@ -972,8 +1345,10 @@ paths:
         **Audit event**: `RESERVATION_CANCELLED`
 
         **Rate limit**: 10 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:write`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       parameters:
@@ -1023,6 +1398,7 @@ paths:
 
   # ---------------------------------------------------------------------------
   # GET /api/reservations/{waiting_id}/notes
+  # POST /api/reservations/{waiting_id}/notes
   # ---------------------------------------------------------------------------
   /api/reservations/{waiting_id}/notes:
     get:
@@ -1034,8 +1410,12 @@ paths:
         no notes exist.
 
         **SOAP operation**: `ReservationNotesRetrieve`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:read`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       parameters:
@@ -1073,6 +1453,8 @@ paths:
           $ref: "#/components/responses/401Unauthorized"
         "403":
           $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
         "500":
           $ref: "#/components/responses/500InternalError"
         "502":
@@ -1088,8 +1470,10 @@ paths:
         **SOAP operation**: `ReservationNoteInsert`
 
         **Rate limit**: 20 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:write`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       parameters:
@@ -1135,70 +1519,6 @@ paths:
           $ref: "#/components/responses/502SoapError"
 
   # ---------------------------------------------------------------------------
-  # POST /api/reservations/{waiting_id}/send-confirmation
-  # ---------------------------------------------------------------------------
-  /api/reservations/{waiting_id}/send-confirmation:
-    post:
-      summary: Send reservation confirmation email (SendReservationConfirmationEmail)
-      operationId: reservationSendConfirmation
-      description: >
-        Triggers the SMD `SendReservationConfirmationEmail` SOAP operation, which
-        sends a confirmation email to the address on file for the reservation.
-        An optional `move_in_link` URL is embedded in the email when provided.
-
-        **SOAP operation**: `SendReservationConfirmationEmail`
-
-        **Rate limit**: 5 requests per 60 seconds per API key (stricter to avoid
-        duplicate email sends).
-      tags:
-        - Reservations
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: waiting_id
-          in: path
-          required: true
-          description: The SMD WaitingID of the reservation.
-          schema:
-            type: integer
-          example: 8821
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SendConfirmationRequest"
-            example:
-              site_code: "LSETUP"
-              move_in_link: "https://extraspaceasia.com.sg/move-in"
-      responses:
-        "200":
-          description: >
-            Confirmation email dispatched. Check `ret_code` for SOAP-level status;
-            the SOAP layer controls actual delivery.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SendConfirmationResponse"
-              example:
-                success: true
-                waiting_id: 8821
-                ret_code: "0"
-                message: "Confirmation email sent"
-        "400":
-          $ref: "#/components/responses/400BadRequest"
-        "401":
-          $ref: "#/components/responses/401Unauthorized"
-        "403":
-          $ref: "#/components/responses/403Forbidden"
-        "429":
-          $ref: "#/components/responses/429TooManyRequests"
-        "500":
-          $ref: "#/components/responses/500InternalError"
-        "502":
-          $ref: "#/components/responses/502SoapError"
-
-  # ---------------------------------------------------------------------------
   # GET /api/reservations/fees
   # ---------------------------------------------------------------------------
   /api/reservations/fees:
@@ -1212,9 +1532,11 @@ paths:
 
         **SOAP operation**: `ReservationFeeRetrieve`
 
-        **No rate limit** on this read operation.
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:read`
       tags:
-        - Reservations
+        - SOAP Reservations
       security:
         - BearerAuth: []
       parameters:
@@ -1244,18 +1566,671 @@ paths:
           $ref: "#/components/responses/401Unauthorized"
         "403":
           $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
         "500":
           $ref: "#/components/responses/500InternalError"
         "502":
           $ref: "#/components/responses/502SoapError"
 
+  # ---------------------------------------------------------------------------
+  # POST /api/reservations/track
+  # ---------------------------------------------------------------------------
+  /api/reservations/track:
+    post:
+      summary: Track external reservation/move-in record
+      operationId: reservationTrack
+      description: >
+        Push an external reservation or move-in record into the `api_reservations`
+        tracking table. **No SOAP call** — data goes directly to the database.
+
+        Supports idempotent upsert on the `(site_code, waiting_id)` unique constraint.
+        On conflict, existing fields are updated with the new values, except
+        `tenant_id`, `global_waiting_num`, `gclid`, `gid`, and `botid` which use
+        COALESCE to preserve existing non-null values.
+
+        Use this endpoint to import reservations from external sources (Google Forms,
+        chatbots, CRM, etc.) for distribution analytics and lifecycle tracking.
+
+        **Database table**: `api_reservations` (esa_pbi)
+
+        **Audit event**: `RESERVATION_TRACKED`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:track`
+      tags:
+        - Reservation Tracking
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackReservationRequest"
+            example:
+              site_code: "LSETUP"
+              unit_id: 10042
+              waiting_id: 8821
+              event_type: "reservation"
+              first_name: "John"
+              last_name: "Smith"
+              phone: "+6591234567"
+              source: "google_ads"
+              gclid: "CjwKCAjw..."
+      responses:
+        "200":
+          description: Record tracked successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackResponse"
+              example:
+                success: true
+                id: 42
+                event_type: "reservation"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+
+  # ---------------------------------------------------------------------------
+  # PUT /api/reservations/track/event
+  # ---------------------------------------------------------------------------
+  /api/reservations/track/event:
+    put:
+      summary: Push lifecycle event on tracked reservation
+      operationId: reservationTrackEvent
+      description: >
+        Update the status of a tracked reservation with a lifecycle event.
+        **No SOAP call** — updates the `api_reservations` table directly.
+
+        Event type mapping:
+        - `move_in` → status=`moved_in`, sets `moved_in_at=NOW()`
+        - `cancellation` → status=`cancelled`, sets `cancelled_at=NOW()`
+        - `expiry` → status=`expired`, sets `expired_at=NOW()`
+
+        If `comment` is provided, it is appended to the existing comment with
+        a ` | ` separator.
+
+        Returns 404 if no matching `(site_code, waiting_id)` record exists.
+
+        **Database table**: `api_reservations` (esa_pbi)
+
+        **Audit event**: `RESERVATION_EVENT`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:track`
+      tags:
+        - Reservation Tracking
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackEventRequest"
+            example:
+              site_code: "LSETUP"
+              waiting_id: 8821
+              event_type: "move_in"
+              comment: "Confirmed move-in completed"
+      responses:
+        "200":
+          description: Event recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackEventResponse"
+              example:
+                success: true
+                waiting_id: 8821
+                status: "moved_in"
+                moved_in_at: "2026-03-20T08:30:00"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "404":
+          $ref: "#/components/responses/404NotFound"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/reservations/track/batch
+  # ---------------------------------------------------------------------------
+  /api/reservations/track/batch:
+    post:
+      summary: Bulk import tracked reservations
+      operationId: reservationTrackBatch
+      description: >
+        Batch import external reservation records (max 100 per request).
+        Each record uses the same schema and upsert logic as
+        `POST /api/reservations/track`.
+
+        Records are processed individually — a failure in one record does not
+        abort the entire batch. Failed records are reported in the `errors` array
+        with their array index and error message.
+
+        **Database table**: `api_reservations` (esa_pbi)
+
+        **Audit event**: `RESERVATION_BATCH_TRACKED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:track`
+      tags:
+        - Reservation Tracking
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackBatchRequest"
+            example:
+              records:
+                - site_code: "LSETUP"
+                  unit_id: 10042
+                  waiting_id: 8821
+                  event_type: "reservation"
+                  first_name: "John"
+                  last_name: "Smith"
+                - site_code: "LSETUP"
+                  unit_id: 10043
+                  waiting_id: 8822
+                  event_type: "move_in"
+                  first_name: "Jane"
+                  last_name: "Doe"
+      responses:
+        "200":
+          description: Batch processed (check `errors` for per-record failures).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrackBatchResponse"
+              example:
+                success: true
+                processed: 2
+                inserted: 1
+                updated: 1
+                errors: []
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/reservations/move-in/cost
+  # ---------------------------------------------------------------------------
+  /api/reservations/move-in/cost:
+    get:
+      summary: Get move-in cost breakdown
+      operationId: moveInCost
+      description: >
+        Returns the move-in cost breakdown for a unit via SOAP MoveInCostRetrieve
+        variants. Returns multiple charge rows (rent, admin fee, deposit, etc.).
+        Sum `total` across all rows for the exact payment amount required by
+        the move-in endpoints.
+
+        **Variants** (selected via `variant` query parameter):
+        - `standard` (default) — `MoveInCostRetrieveWithDiscount_v4`
+        - `28day` — `MoveInCostRetrieveWithDiscount_28DayBilling_v3` (28-day billing)
+        - `reservation` — `MoveInCostRetrieveWithDiscount_Reservation_v4` (requires `waiting_id`)
+        - `push_rate` — `MoveInCostRetrieveWithPushRate_v2` (simplest, fewest params)
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:read`
+      tags:
+        - Move-In
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_code
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+        - name: unit_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          example: 106020
+        - name: move_in_date
+          in: query
+          required: false
+          description: Move-in date (YYYY-MM-DD). Defaults to tomorrow.
+          schema:
+            type: string
+            format: date
+          example: "2026-04-10"
+        - name: concession_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: insurance_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: variant
+          in: query
+          required: false
+          description: >
+            Cost calculation variant. `standard` (default), `28day`,
+            `reservation` (requires waiting_id), or `push_rate`.
+          schema:
+            type: string
+            enum: [standard, 28day, reservation, push_rate]
+            default: standard
+        - name: waiting_id
+          in: query
+          required: false
+          description: Reservation WaitingID (required when variant=reservation).
+          schema:
+            type: integer
+        - name: promo_id
+          in: query
+          required: false
+          description: Promo global number (for variant=reservation).
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Cost breakdown with per-charge totals.
+          content:
+            application/json:
+              example:
+                site_code: "LSETUP"
+                unit_id: 106020
+                variant: "standard"
+                operation: "MoveInCostRetrieveWithDiscount_v4"
+                unit_name: "1003"
+                unit_type: "XL/110-130/DV/NC/SS/NP"
+                push_rate: 640.0
+                tenant_rate: 640.0
+                web_rate: 640.0
+                discount: 0.0
+                concession_id: -999
+                charges:
+                  - description: "First Monthly Rent Fee"
+                    amount: 448.0
+                    tax: 40.32
+                    total: 488.32
+                    required: true
+                  - description: "Administrative Fee"
+                    amount: 30.0
+                    tax: 2.7
+                    total: 32.7
+                    required: true
+                  - description: "Security Deposit"
+                    amount: 640.0
+                    tax: 0.0
+                    total: 640.0
+                    required: true
+                total: 1161.02
+                move_in_date: "2026-04-10"
+                currency_decimals: 2
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/reservations/move-in
+  # ---------------------------------------------------------------------------
+  /api/reservations/move-in:
+    post:
+      summary: Move-in from reservation (MoveInReservation_v6)
+      operationId: moveInReservation
+      description: >
+        Converts a reservation into a move-in via `MoveInReservation_v6`.
+        Payment amount must match the exact total from
+        `GET /api/reservations/move-in/cost`.
+
+
+        **CC bypass**: Set `pay_method=2` (cash) to bypass credit card validation.
+
+
+        **SOAP operation**: `MoveInReservation_v6` (sync) +
+        `PaymentSimpleCash` (perpetual + prepay only) +
+        `ScheduleTenantRateChange_v2` (when `ecri_auto_schedule_enabled`)
+        as async follow-ups.
+
+
+        **Audit event**: `MOVE_IN_COMPLETED`
+
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+
+        **Required scope**: `reservations:write`
+
+
+        **Idempotency**: Pass header `Idempotency-Key: <opaque-string>` to make
+        retries safe. Within 24h, replays of the same key return the cached
+        response with `idempotent_replay: true` instead of re-firing SOAP.
+        Bot **should** use this for every booking attempt.
+
+
+        **Sanity guard**: Returns `400` if `payment_amount` is more than $0.50
+        below the SOAP-truth move-in cost — prevents half-funded leases from
+        bot bugs or stale quotes. Use `GET /api/reservations/move-in/cost` to
+        get the authoritative number.
+
+
+        **Perpetual + prepay orchestration**: When the booked concession is
+        tied to a plan flagged `discount_perpetual=true` with
+        `prepayment_months > 0`, the handler internally splits the payment
+        into the SOAP MoveIn portion + a `PaymentSimpleCash` push for the
+        prepay surplus, and schedules a future `ScheduleTenantRateChange_v2`
+        to revert the rate at the end of the prepay window. The bot is
+        unaware of the SOAP chain — it just passes
+        `pricing.total_due_at_movein` from the recommend response as
+        `payment_amount` here. The orchestration runs inline on the happy
+        path (~2-3s); failures land in `mw_lease_followup_jobs` for the
+        worker to retry with exponential backoff.
+      tags:
+        - Move-In
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string, maxLength: 120 }
+          description: >
+            Opaque caller-provided string (e.g. UUID v4). Replays of the same
+            key on the same API key within 24h return the cached response.
+            Strongly recommended for every booking attempt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              site_code: "LSETUP"
+              waiting_id: 852514
+              tenant_id: 1112556
+              unit_id: 106096
+              payment_amount: 422.24
+              start_date: "2026-05-15"
+              end_date: "2027-05-15"
+              pay_method: 2
+              concession_id: 4666
+              insurance_id: 9649
+              session_id: "smoke-p2c-1730000000"
+              customer_id: "smoke_p2c"
+            schema:
+              type: object
+              properties:
+                site_code:        { type: string }
+                waiting_id:       { type: integer }
+                tenant_id:        { type: integer }
+                unit_id:          { type: integer }
+                payment_amount:
+                  type: number
+                  description: >
+                    Pass `pricing.total_due_at_movein` from the recommend
+                    response. For perpetual + prepay plans this includes the
+                    full prepayment up front.
+                start_date:       { type: string, format: date }
+                end_date:         { type: string, format: date }
+                pay_method:       { type: integer, default: 2 }
+                concession_id:    { type: integer, default: 0 }
+                insurance_id:     { type: integer, default: 0 }
+                session_id:
+                  type: string
+                  description: >
+                    Recommend session id — recommended for outcome
+                    reconciliation against `mw_recommendations_served`.
+                customer_id:
+                  type: string
+                  description: >
+                    PandaAI customer id — recommended for personalisation
+                    + audit trail.
+                test_mode:        { type: boolean, default: false }
+      responses:
+        "200":
+          description: >
+            Move-in result. `ledger_id` is the new ledger ID on success.
+            `followups` summarises the perpetual-orchestration outcome.
+          content:
+            application/json:
+              examples:
+                standard:
+                  summary: Standard plan (no perpetual orchestration)
+                  value:
+                    success: true
+                    site_code: "L017"
+                    unit_id: 107197
+                    tenant_id: 1112556
+                    waiting_id: 852514
+                    ledger_id: 593680
+                    lease_num: 1651
+                    ret_code: "593680"
+                    message: "Move-in completed"
+                    test_mode: false
+                    followups: { enqueued: 0, reason: "standard plan; ECRI schedule disabled or not applicable" }
+                perpetual_prepay:
+                  summary: Perpetual + 6-month prepay (orchestration ran inline)
+                  value:
+                    success: true
+                    site_code: "LSETUP"
+                    unit_id: 106096
+                    tenant_id: 1112556
+                    waiting_id: 852514
+                    ledger_id: 593680
+                    lease_num: 1651
+                    ret_code: "593680"
+                    message: "Move-in completed"
+                    test_mode: false
+                    followups:
+                      enqueued: 2
+                      job_ids: [2, 3]
+                      inline_ok: 2
+                      pending_retry: 0
+                      failed_permanent: 0
+                idempotent_replay:
+                  summary: Replay of an earlier Idempotency-Key
+                  value:
+                    success: true
+                    ledger_id: 593680
+                    lease_num: 1651
+                    message: "Move-in completed"
+                    idempotent_replay: true
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/reservations/move-in/direct
+  # ---------------------------------------------------------------------------
+  /api/reservations/move-in/direct:
+    post:
+      summary: Direct move-in with discount (MoveInWithDiscount_v7)
+      operationId: moveInDirect
+      description: >
+        Direct move-in via `MoveInWithDiscount_v7`. No reservation required
+        (set `waiting_id=0`). Includes billing frequency, source, and channel.
+
+        **CC bypass**: Set `pay_method=2` (cash).
+
+        **IMPORTANT**: `billing_frequency` is site-specific. For LSETUP, value 3
+        is monthly. Values 1 and 2 are rejected with error -28.
+
+        **SOAP operation**: `MoveInWithDiscount_v7`
+
+        **Audit event**: `MOVE_IN_COMPLETED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `reservations:write`
+      tags:
+        - Move-In
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            example:
+              site_code: "LSETUP"
+              tenant_id: 1111172
+              unit_id: 106020
+              payment_amount: 1161.02
+              billing_frequency: 3
+              start_date: "2026-04-10"
+              pay_method: 2
+              source_name: "ESA Backend"
+              test_mode: true
+      responses:
+        "200":
+          description: >
+            Move-in result. `ledger_id` is the new ledger ID on success.
+          content:
+            application/json:
+              example:
+                success: true
+                site_code: "LSETUP"
+                unit_id: 106020
+                tenant_id: 1111172
+                ledger_id: 592447
+                waiting_id: null
+                ret_code: "592447"
+                message: "Move-in completed"
+                test_mode: true
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/unit-availability/reservations
+  # ---------------------------------------------------------------------------
+  /api/unit-availability/reservations:
+    get:
+      summary: Get active reservation details for unit availability tool
+      operationId: unitAvailabilityReservations
+      description: >
+        Returns active reservation details from `api_reservations` for units
+        at the given sites. Only returns records with status `created` (active).
+        Used by the unit availability tool to enrich reserved unit badges with
+        tenant name, quoted rate, needed date, etc.
+
+        **Note**: This endpoint is in the main `api` blueprint, not the
+        `reservations` blueprint.
+
+        **No SOAP call** — reads from `api_reservations` table.
+
+        **Required scope**: `inventory:read`
+      tags:
+        - Unit Availability
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_codes
+          in: query
+          required: true
+          description: Comma-separated list of site codes (max 50).
+          schema:
+            type: string
+          example: "LSETUP,L017"
+      responses:
+        "200":
+          description: >
+            Map of `site_code:unit_id` → reservation details for active reservations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnitAvailabilityReservationsResponse"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+
 tags:
-  - name: Reservations
+  - name: SOAP Reservations
     description: >
       SOAP-backed reservation lifecycle management. All endpoints proxy to the
       SMD CallCenterWs SOAP service. The `site_code` parameter is validated
       against the `esa_pbi` database on every request.
 
       Required JWT scopes:
-      - `inventory:read` — GET endpoints
-      - `inventory:write` — POST/PUT endpoints
+      - `reservations:read` — GET endpoints
+      - `reservations:write` — POST/PUT endpoints
+  - name: Reservation Tracking
+    description: >
+      Database-backed reservation tracking for distribution analytics. No SOAP
+      calls — data goes directly to the `api_reservations` table in `esa_pbi`.
+      Supports external data sources (Google Forms, chatbots, CRM imports).
+
+      Required JWT scope: `reservations:track`
+  - name: Move-In
+    description: >
+      SOAP-backed move-in operations. Includes cost retrieval (multiple variants)
+      and move-in execution with credit card bypass via `pay_method=2` (cash).
+
+      Required JWT scopes:
+      - `reservations:read` — cost retrieval
+      - `reservations:write` — move-in execution
+  - name: Unit Availability
+    description: >
+      Endpoints supporting the unit availability tool. These read from the
+      `api_reservations` tracking table to enrich the UI.
+
+      Required JWT scope: `inventory:read`
