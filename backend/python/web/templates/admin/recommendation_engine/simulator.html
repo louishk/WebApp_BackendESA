@@ -120,8 +120,10 @@
             </div>
         </div>
 
-        <div style="margin-top: 0.8rem; display: flex; gap: 0.5rem;">
+        <div style="margin-top: 0.8rem; display: flex; flex-wrap: wrap; gap: 0.4rem;">
             <button type="button" id="sim-run" class="btn">Run Simulation</button>
+            <button type="button" id="sim-random-run" class="btn" style="background: #6366f1;" title="Randomize the form and run immediately">🎲 Random &amp; Run</button>
+            <button type="button" id="sim-random" class="btn btn-secondary" title="Fill the form with random valid values (does not run)">🎲 Randomize</button>
             <button type="button" id="sim-clear" class="btn btn-secondary">Clear</button>
         </div>
     </div>
@@ -386,6 +388,75 @@
         $('sim-movein').value = '';
         $('sim-duration').value = '6';
         $('sim-result').innerHTML = `<div class="sim-empty">Cleared. Run a new simulation.</div>`;
+    });
+
+    // ----- Randomize -----------------------------------------------------
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+    function chance(p) { return Math.random() < p; }
+    function setSingle(id, value) {
+        const sel = $(id);
+        Array.from(sel.options).forEach(o => o.selected = (o.value === value));
+    }
+    function clearMulti(id) {
+        Array.from($(id).options).forEach(o => o.selected = false);
+    }
+
+    function randomize() {
+        // Always pick a single random location — multi-site noise distorts the
+        // diagnostic and pool-size signal we want to inspect quickly.
+        const locs = Array.from($('sim-location').options).map(o => o.value);
+        if (!locs.length) {
+            alert('No sites available to randomize.');
+            return;
+        }
+        setSingle('sim-location', pick(locs));
+
+        // Filters — weighted so most rolls produce a non-empty pool. If we
+        // pinned every dimension we'd hit "no candidates" half the time.
+        clearMulti('sim-unit-type');
+        if (chance(0.4)) {
+            const ut = Array.from($('sim-unit-type').options).map(o => o.value);
+            if (ut.length) setSingle('sim-unit-type', pick(ut));
+        }
+        clearMulti('sim-climate');
+        if (chance(0.3)) {
+            const ct = Array.from($('sim-climate').options).map(o => o.value);
+            if (ct.length) setSingle('sim-climate', pick(ct));
+        }
+        clearMulti('sim-size-range');
+        if (chance(0.3)) {
+            const sr = Array.from($('sim-size-range').options).map(o => o.value);
+            if (sr.length) setSingle('sim-size-range', pick(sr));
+        }
+
+        // Channel — realistic distribution skewed toward chatbot
+        $('sim-channel').value = pick(['chatbot', 'chatbot', 'chatbot', 'web', 'api']);
+
+        // Duration — common lease lengths
+        $('sim-duration').value = pick([1, 3, 6, 6, 12, 12, 24]);
+
+        // Move-in date — 50% leave blank (today implicit), else 0–30 days out
+        if (chance(0.5)) {
+            const days = Math.floor(Math.random() * 31);
+            const d = new Date();
+            d.setDate(d.getDate() + days);
+            $('sim-movein').value = d.toISOString().slice(0, 10);
+        } else {
+            $('sim-movein').value = '';
+        }
+
+        // Coupon — usually blank, sometimes random text to exercise hidden_rate path
+        $('sim-coupon').value = chance(0.15) ? pick(['SUMMER', 'PROMO10', 'NEWUSER', 'STAFF']) : '';
+
+        // Misc — leave customer + maxdist alone for clean pool tests
+        $('sim-customer').value = '';
+        $('sim-maxdist').value = '';
+    }
+
+    $('sim-random').addEventListener('click', randomize);
+    $('sim-random-run').addEventListener('click', () => {
+        randomize();
+        $('sim-run').click();
     });
 })();
 </script>
