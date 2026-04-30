@@ -179,6 +179,67 @@ GET /api/reservations/<waiting_id>
   scope: reservations:read
 ```
 
+### "Customer is flexible on location / size / type" — send arrays
+
+`filters.location`, `filters.unit_type`, `filters.climate_type`, and
+`filters.size_range` all accept either a scalar string or an array. When
+the customer signals flexibility ("I'd take Yishun OR Tampines",
+"climate-controlled OR not", "30 to 50 sqft"), pass arrays so the
+recommender's pool is naturally larger and Slot 2 / Slot 3 are more
+likely to fire with meaningful options.
+
+```jsonc
+POST /api/recommendations
+{
+  "mode": "recommendation",
+  "duration_months": 6,
+  "filters": {
+    "location":     ["L017", "L018", "L022"],   // any of these sites
+    "unit_type":    ["W", "L"],                  // walk-in OR locker
+    "climate_type": ["A", "AD"],                 // climate-controlled
+    "size_range":   ["30-35", "35-40", "40-45"]  // a band, not a point
+  },
+  "context": { "channel": "chatbot", "request_id": "...", "session_id": "..." }
+}
+```
+
+Slot definitions with multi-value input:
+- **Slot 1 Best Match** — cheapest unit matching the union of all values.
+- **Slot 2 Best Alternative** — first available of three strategies:
+  1. *Same-site 2nd-cheapest* — second-cheapest unit at the same site as
+     Slot 1, different unit_id. No travel cost. Tagged
+     `match_flags.alternative_strategy = "same_site_2nd"`.
+  2. *Neighbour close* — cheapest match at the nearest other site within
+     `max_distance_km` (default 50 km). Tagged `"neighbour_close"` with
+     `match_flags.distance_km`.
+  3. *Neighbour far* — same as above but within 1.5× radius. Tagged
+     `"neighbour_far"` AND `match_flags.travel_warning = true` so the bot
+     can disclose the distance.
+- **Slot 3 Best Price** — progressively relaxes dimensions to find a
+  strictly cheaper unit. `match_flags.relaxed_dims` lists what was dropped.
+
+### "I want a unit at L017 but L017 is fully booked"
+
+When the strict filter yields zero candidates at the requested location(s),
+the recommender automatically relaxes dimensions in this order:
+
+1. drop `unit_type`
+2. also drop `climate_type`
+3. also expand `size_range` ±2 buckets
+4. also drop `size_range` entirely
+
+Geography stays fixed — Slot 2's neighbour search is the only path that
+reaches another site. The response carries:
+
+- `stats.pool_rescue_step` — comma list of dims that were relaxed
+- `stats.saturation_signal = true` — a flag the bot can use to phrase
+  "your preferred site/spec is in high demand, here's what we found"
+- Each rescued slot's `match_flags.relaxed_dims` lists the same dims
+  so per-slot disclosure is possible.
+
+If even the loosest relax + neighbour search yields nothing, slots come
+back null — the bot should then escalate to a human or offer a callback.
+
 ### "Show me what's available at Yishun" (raw inventory, no quote)
 
 Prefer `POST /api/recommendations` so concessions/restrictions/channel

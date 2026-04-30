@@ -610,6 +610,93 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
     return result
 
 
+def progressive_relax_pool(
+    req: RecommendationRequest,
+    db_session,
+    min_pool_size: int = 1,
+) -> Tuple[List[CandidateRow], List[str], Dict[str, Any]]:
+    """
+    When the strict pool returns nothing (or fewer than min_pool_size), step
+    through dimension relaxations until enough candidates are found.
+
+    Geography is NOT relaxed here — that's slot 2's job (mw_site_distance).
+    We only relax the dim filters that the customer named, in the order
+    where each step is least disruptive to their stated need:
+
+        step 1  drop unit_type
+        step 2  also drop climate_type
+        step 3  also expand size_range to ±2 buckets
+        step 4  also drop size_range entirely
+
+    Returns (pool, relaxed_dims, relaxed_filters) where relaxed_filters is
+    the actual filter dict that produced the rescued pool. The caller
+    should swap req.filters to this so slot 2's neighbour search and
+    slot 3's progressive widening both inherit the relaxation — otherwise
+    they stay locked on the original strict spec and may emit nothing.
+    Returns ([], [], {}) when even the loosest step finds nothing inside
+    the requested locations.
+
+    Caller (the route) tags every emitted slot with
+    match_flags.relaxed_dims so the bot can render
+    "I dropped your <X> requirement to find this".
+    """
+    from copy import copy
+
+    base_filters = dict(req.filters)
+    requested_sizes = list(base_filters.get('size_range') or [])
+
+    expanded_sizes: List[str] = []
+    if requested_sizes:
+        try:
+            from common.size_range_window import size_range_neighbours_step
+            seen: set[str] = set()
+            for s in requested_sizes:
+                for nb in size_range_neighbours_step(s, n_steps=2):
+                    if nb not in seen:
+                        expanded_sizes.append(nb)
+                        seen.add(nb)
+        except Exception as exc:
+            logger.warning("progressive_relax_pool: size step expansion failed: %s", exc)
+            expanded_sizes = list(requested_sizes)
+
+    steps: List[Tuple[Dict[str, Any], List[str]]] = []
+
+    # step 1 — drop unit_type
+    s1 = dict(base_filters); s1.pop('unit_type', None)
+    if s1 != base_filters:
+        steps.append((s1, ['unit_type']))
+
+    # step 2 — also drop climate_type
+    s2 = dict(s1); s2.pop('climate_type', None)
+    if s2 != s1:
+        steps.append((s2, ['unit_type', 'climate_type']))
+
+    # step 3 — also expand size_range ±2 buckets
+    if expanded_sizes:
+        s3 = dict(s2); s3['size_range'] = expanded_sizes
+        if s3 != s2:
+            steps.append((s3, ['unit_type', 'climate_type', 'size_range_expanded']))
+
+    # step 4 — also drop size_range entirely
+    s4 = dict(s2); s4.pop('size_range', None)
+    if s4 != (steps[-1][0] if steps else s2):
+        steps.append((s4, ['unit_type', 'climate_type', 'size_range']))
+
+    for filters, relaxed_dims in steps:
+        relaxed_req = copy(req)
+        relaxed_req.filters = filters
+        try:
+            pool = fetch_candidate_pool(relaxed_req, db_session)
+        except Exception as exc:
+            logger.warning("progressive_relax_pool: step %s pool fetch failed: %s",
+                           relaxed_dims, exc)
+            continue
+        if len(pool) >= min_pool_size:
+            return pool, relaxed_dims, filters
+
+    return [], [], {}
+
+
 # ---------------------------------------------------------------------------
 # Slot builders
 # ---------------------------------------------------------------------------
@@ -643,24 +730,35 @@ def build_slot2(
     pool: List[CandidateRow],
     req: RecommendationRequest,
     db_session,
+    slot1: Optional[CandidateRow] = None,
 ) -> Optional[CandidateRow]:
     """
-    Slot 2 — same dim filters as slot 1 but at a DIFFERENT site, picked by
-    proximity from mw_site_distance.
+    Slot 2 — "Best Alternative". Resolved in priority order so the most
+    convenient option for the customer wins:
 
-    The base `pool` is restricted to req.filters.location, so we run a
-    second pool fetch with location swapped to the nearest site(s) within
-    max_distance_km. First neighbouring site that produces any candidate
-    matching the rest of the filters wins.
+      1. SAME-SITE 2ND-CHEAPEST — if the pool at the requested location
+         set has ≥ 2 distinct units, pick the cheapest unit that is NOT
+         slot 1's. No travel cost; cleanest UX.
+      2. NEAREST NEIGHBOUR (within max_distance_km) — fall back to
+         mw_site_distance and take the cheapest match within the default
+         radius (50 km in SG, admin-tunable).
+      3. EXPANDED RADIUS (≤ 1.5× max_distance_km) — second tier; tagged
+         with travel_warning=true so the bot can disclose the distance.
 
-    Returns None when nothing qualifies within the radius.
+    Tags the returned row with private attributes the route picks up to
+    populate match_flags:
+      _slot2_strategy : 'same_site_2nd' | 'neighbour_close' | 'neighbour_far'
+      _slot2_distance_km : float | None  (None for same-site)
+      _slot2_travel_warning : bool
+
+    Returns None only when no unit can be found within 1.5× the radius;
+    Change B's progressive_relax_pool then handles the dim-relax fallback.
     """
     locations = req.filters.get('location', [])
     if not locations:
         return None
 
-    # max_distance_km can be overridden per-request (constraint); otherwise
-    # falls back to the global admin setting, otherwise 50 km.
+    # max_distance_km — per-request override → admin global → 50 km default.
     try:
         from web.services import recommender_settings
         global_default = recommender_settings.get_setting('slot2_max_distance_km', db_session)
@@ -668,10 +766,37 @@ def build_slot2(
         global_default = 50
     max_dist = req.constraints.get('max_distance_km') or global_default
 
-    # Step 1: order neighbouring sites by distance.
-    # Distance is symmetric, so we union (from→to) and (to→from) — many
-    # admin tables only seed one direction. Preserve the smaller distance
-    # when both directions exist.
+    try:
+        far_factor = float(recommender_settings.get_setting('slot2_far_radius_factor', db_session) or 1.5)
+    except Exception:
+        far_factor = 1.5
+    far_dist = float(max_dist) * far_factor
+
+    # ---- Strategy 1: same-site 2nd-cheapest ---------------------------
+    # "Same site" means the pool at any of the requested locations. Pool
+    # is already location-filtered so any row whose unit_id != slot1's is
+    # a candidate. Pick the cheapest such row to keep slot 2 attractive.
+    if slot1 is not None and pool:
+        same_site_alts = [
+            r for r in pool
+            if r.unit_id != slot1.unit_id and r.site_code in set(locations)
+        ]
+        if same_site_alts:
+            best = min(
+                same_site_alts,
+                key=lambda r: (r.effective_rate is None, r.effective_rate or Decimal('0'))
+            )
+            try:
+                best._slot2_strategy = 'same_site_2nd'  # type: ignore[attr-defined]
+                best._slot2_distance_km = None          # type: ignore[attr-defined]
+                best._slot2_travel_warning = False      # type: ignore[attr-defined]
+            except Exception:
+                pass
+            return best
+
+    # ---- Strategies 2 & 3: neighbour search ---------------------------
+    # Distance table is symmetric; the seeder may only have one direction.
+    # UNION both halves and take the minimum distance per neighbour.
     try:
         dist_rows = db_session.execute(text("""
             SELECT neighbour, MIN(distance_km) AS d FROM (
@@ -684,10 +809,10 @@ def build_slot2(
                 WHERE to_site_code   = ANY(:locs)
             ) bidir
             WHERE neighbour <> ALL(:locs)
-              AND distance_km <= :max_km
+              AND distance_km <= :far_km
             GROUP BY neighbour
             ORDER BY d ASC
-        """), {'locs': locations, 'max_km': max_dist}).fetchall()
+        """), {'locs': locations, 'far_km': far_dist}).fetchall()
     except Exception as exc:
         logger.warning("build_slot2: mw_site_distance query failed: %s", exc)
         return None
@@ -695,11 +820,8 @@ def build_slot2(
     if not dist_rows:
         return None
 
-    # Step 2: re-run the pool query but at each neighbour in turn, taking
-    # the first one that has matching inventory. Same filter set as the
-    # original request — just swap the location.
     from copy import copy
-    for neighbour, _dist in dist_rows:
+    for neighbour, dist in dist_rows:
         neighbour_req = copy(req)
         neighbour_req.filters = dict(req.filters, location=[neighbour])
         try:
@@ -712,6 +834,14 @@ def build_slot2(
                 neighbour_pool,
                 key=lambda r: (r.effective_rate is None, r.effective_rate or Decimal('0'))
             )
+            try:
+                d_km = float(dist) if dist is not None else None
+                far = bool(d_km is not None and d_km > float(max_dist))
+                best._slot2_strategy = 'neighbour_far' if far else 'neighbour_close'  # type: ignore[attr-defined]
+                best._slot2_distance_km = d_km                                         # type: ignore[attr-defined]
+                best._slot2_travel_warning = far                                       # type: ignore[attr-defined]
+            except Exception:
+                pass
             return best
 
     return None

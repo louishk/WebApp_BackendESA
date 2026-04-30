@@ -293,6 +293,22 @@ components:
                 When the relax strategy expanded the size_range filter,
                 this lists the buckets the search ran against. Null
                 otherwise.
+            pool_rescue_step:
+              type: string
+              nullable: true
+              description: |
+                When the strict filter yielded 0 candidates, the recommender
+                progressively relaxed dims (unit_type → climate_type →
+                size_range ±2 → drop size_range) until it found stock.
+                This field lists the relaxations that were applied
+                (comma-separated). Null when no rescue was needed.
+            saturation_signal:
+              type: boolean
+              description: |
+                True when the response was built off a rescued pool —
+                signals high demand at the customer's preferred site/spec.
+                Bot UI can phrase "your preferred option is in high demand,
+                here's what we found".
         slots:
           type: array
           minItems: 1
@@ -376,6 +392,43 @@ components:
           type: number
           nullable: true
           description: Back-compat alias of `size_sqft`. Will be removed in v2.
+        match_flags:
+          type: object
+          description: |
+            Per-slot annotations explaining how the slot was resolved when
+            the recommender had to relax or expand the strict request.
+            Empty object when the slot was an exact, in-radius match.
+          properties:
+            alternative_strategy:
+              type: string
+              nullable: true
+              enum: [same_site_2nd, neighbour_close, neighbour_far]
+              description: |
+                Slot 2 only. Tells the bot how this alternative was chosen:
+                  same_site_2nd  — second-cheapest at the same site as Slot 1
+                  neighbour_close — nearest other site within max_distance_km
+                  neighbour_far   — within 1.5× radius (see travel_warning)
+            distance_km:
+              type: number
+              nullable: true
+              description: |
+                Slot 2 only. Driving distance to the alternative site;
+                null when alternative_strategy = "same_site_2nd".
+            travel_warning:
+              type: boolean
+              nullable: true
+              description: |
+                Slot 2 only. True when the alternative is in the 1.0–1.5×
+                radius band; the bot should disclose the distance.
+            relaxed_dims:
+              type: array
+              nullable: true
+              items: { type: string }
+              description: |
+                Set on slots whose pool was rescued via dimension relaxation
+                (unit_type / climate_type / size_range / size_range_expanded)
+                or chosen by Slot 3's progressive widening. Lists every
+                dimension the recommender dropped or expanded to find this unit.
         plan_id:
           type: integer
           description: |

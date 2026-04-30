@@ -336,6 +336,36 @@ def recommend():
 
         candidates_pool_size = len(pool)
 
+        # Pool rescue — Change B. When the strict pool is empty (no inventory
+        # matches the customer's filters at the requested location set),
+        # progressively relax dimensions until we find something. Geography
+        # stays put — slot 2's neighbour search handles the geo expansion
+        # separately so the customer never gets pushed across the country
+        # silently. Every slot built off a rescued pool is tagged with
+        # match_flags.relaxed_dims so the bot can disclose what was dropped.
+        pool_rescue_step: Optional[str] = None
+        saturation_signal: bool = False
+        rescue_dims: List[str] = []
+        if req.mode == 'recommendation' and not pool:
+            try:
+                rescued_pool, rescue_dims, rescued_filters = recommender.progressive_relax_pool(req, db)
+            except Exception as exc:
+                logger.warning("progressive_relax_pool failed request_id=%s: %s",
+                               request_id, exc)
+                rescued_pool = []
+                rescue_dims = []
+                rescued_filters = {}
+            if rescued_pool:
+                pool = rescued_pool
+                candidates_pool_size = len(pool)
+                pool_rescue_step = ','.join(rescue_dims) if rescue_dims else 'rescue'
+                saturation_signal = True
+                # Slot 2 / Slot 3 must see the same relaxation — they
+                # re-query the pool at neighbour sites or with widened
+                # size bands and would otherwise stay locked on the
+                # original strict filters and emit nothing.
+                req.filters = rescued_filters
+
         # 9. Build slots
         # In quote mode there is no slot 2 / slot 3 — the bot already named
         # the exact unit it wants priced. Slot 1 is the cheapest concession
@@ -346,8 +376,18 @@ def recommend():
             slot3_row = None
         else:
             slot1_row = recommender.build_slot1(pool, req)
-            slot2_row = recommender.build_slot2(pool, req, db)
+            slot2_row = recommender.build_slot2(pool, req, db, slot1=slot1_row)
             slot3_row = recommender.build_slot3(pool, req, slot1_row, db)
+            # Tag rescued rows so match_flags carries the relaxed_dims.
+            if rescue_dims:
+                for row in (slot1_row, slot2_row, slot3_row):
+                    if row is not None:
+                        try:
+                            existing = list(getattr(row, '_slot3_relaxed_dims', []) or [])
+                            merged = sorted(set(existing) | set(rescue_dims))
+                            row._slot3_relaxed_dims = merged  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
 
         # Ensure all slot unit_ids are distinct (guards against edge cases)
         slot_unit_ids: set[int] = set()
@@ -414,6 +454,11 @@ def recommend():
             relaxed = getattr(row, '_slot3_relaxed_dims', None)
             if relaxed:
                 mf['relaxed_dims'] = list(relaxed)
+            strat = getattr(row, '_slot2_strategy', None)
+            if strat:
+                mf['alternative_strategy'] = strat
+                mf['distance_km'] = getattr(row, '_slot2_distance_km', None)
+                mf['travel_warning'] = bool(getattr(row, '_slot2_travel_warning', False))
             return _serialise_slot(num, row, quote, db_session=db, match_flags=mf)
 
         slots_payload = [
@@ -454,6 +499,8 @@ def recommend():
                 'relax_strategy_used': relax_used,
                 'excluded_unit_ids_count': len(excluded_unit_ids),
                 'size_relaxed_to': size_relaxed_to,
+                'pool_rescue_step': pool_rescue_step,
+                'saturation_signal': saturation_signal,
             },
             'slots': slots_payload,
             'next_turn': {
