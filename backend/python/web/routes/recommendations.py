@@ -196,7 +196,9 @@ def _serialise_slot(
         # Rate" at move-in to enforce it in SiteLink).
         'discount_perpetual': bool(row.discount_perpetual),
         # Phase 4 Part 2 — orchestration metadata.
-        'prepayment_months': row.prepayment_months,
+        # prepayment_months is filled below from req.duration_months when
+        # the plan is Prepaid+perpetual; left NULL otherwise.
+        'prepayment_months': None,
         'post_prepay_uplift_pct': (
             float(row.post_prepay_ecri_pct) if row.post_prepay_ecri_pct is not None else None
         ),
@@ -212,9 +214,23 @@ def _serialise_slot(
     # Phase 4 Part 2 — perpetual+prepay disclosure block.
     # Computes total_due_at_movein and the post-prepay rate so the bot can
     # quote both today's payment and the future rate change in one shot.
+    #
+    # Triggered when:
+    #   discount_perpetual = TRUE   (plan flag)
+    #   payment_terms     = 'Prepaid'  (plan setting — customer pays full duration up front)
+    #
+    # The prepayment window = customer's req.duration_months (already bounded
+    # by the plan's min/max_duration_months at the candidate-pool level).
+    # ECRI auto-scheduled at move_in_date + req.duration_months.
     perpetual_extras: Dict[str, Any] = {}
     customer_disclosure: Optional[Dict[str, Any]] = None
-    if row.discount_perpetual and row.prepayment_months and quote and quote.breakdown:
+    duration_for_prepay = None
+    payment_terms = (row.payment_terms or '').strip().lower()
+    is_prepaid_plan = (payment_terms == 'prepaid')
+    if (row.discount_perpetual and is_prepaid_plan
+            and quote and quote.breakdown
+            and (quote.duration_months or 0) > 1):
+        duration_for_prepay = int(quote.duration_months)
         try:
             from web.services import recommender_settings as _rs
             ecri_pct = (
@@ -250,17 +266,23 @@ def _serialise_slot(
         all_in_after = (rate_after + rent_tax_after + ins_premium + ins_tax).quantize(Decimal('0.01'))
 
         # total_due_at_movein = move-in cost (= breakdown[0].total)
-        # PLUS (prepayment_months - 1) full recurring periods.
+        # PLUS (duration_months - 1) full recurring periods, since the
+        # customer prepays the entire lease duration up front for
+        # Prepaid+perpetual plans.
         first_total = quote.breakdown[0].total or Decimal('0')
         per_period = recurring.total or Decimal('0')
-        prepay_extra = per_period * (Decimal(row.prepayment_months) - Decimal('1'))
+        prepay_extra = per_period * (Decimal(duration_for_prepay) - Decimal('1'))
         total_due = (first_total + prepay_extra).quantize(Decimal('0.01'))
 
         from dateutil.relativedelta import relativedelta as _relativedelta
         try:
-            change_date = quote.breakdown[0].billing_date + _relativedelta(months=row.prepayment_months)
+            change_date = quote.breakdown[0].billing_date + _relativedelta(months=duration_for_prepay)
         except Exception:
             change_date = None
+
+        # Reflect the dynamic prepayment window in terms so the bot can
+        # display "X months prepaid" matching the customer's duration.
+        terms_block['prepayment_months'] = duration_for_prepay
 
         perpetual_extras['total_due_at_movein'] = _dec_to_num(total_due)
         # Rate-only (technical — what gets locked via SOAP TenantRate)
@@ -278,7 +300,7 @@ def _serialise_slot(
         # isn't surprised by insurance + tax on the actual bill. Rent-only
         # rate is mentioned for transparency.
         fine_print = [
-            f"Pay ${float(total_due):.2f} today to lock {row.prepayment_months} months at ${float(all_in_during):.2f}/month all-in.",
+            f"Pay ${float(total_due):.2f} today to lock {duration_for_prepay} months at ${float(all_in_during):.2f}/month all-in.",
             f"That's ${float(eff_rate):.2f} rent + ${float(ins_premium):.2f} insurance + ${float(all_in_during - eff_rate - ins_premium):.2f} tax.",
         ]
         if change_date:
@@ -292,7 +314,7 @@ def _serialise_slot(
             'fine_print': fine_print,
             'fine_print_template': {
                 'amount':                  _dec_to_num(total_due),
-                'lock_months':             row.prepayment_months,
+                'lock_months':             duration_for_prepay,
                 # Rate-only (technical)
                 'lock_rate':               _dec_to_num(eff_rate),
                 'new_rate':                _dec_to_num(rate_after),

@@ -363,9 +363,11 @@ def _build_plan_from_form(form, plan=None, config_options=None):
     plan.hidden_rate = form.get('hidden_rate') == 'on'
     plan.coupon_code = (form.get('coupon_code') or '').strip().upper() or None
     plan.discount_perpetual = form.get('discount_perpetual') == 'on'
-    # Prepayment + ECRI override (parsed only when value is a real number).
-    pp_raw = (form.get('prepayment_months') or '').strip()
-    plan.prepayment_months = int(pp_raw) if pp_raw.isdigit() and int(pp_raw) > 0 else None
+    # Prepayment behaviour now derives from payment_terms='Prepaid' +
+    # discount_perpetual flag — the customer's lease duration determines
+    # the prepay window, not a fixed plan value. Keep the column as-is
+    # for backward-compat data; new edits leave it NULL.
+    plan.prepayment_months = None
     ecri_raw = (form.get('post_prepay_ecri_pct') or '').strip()
     if ecri_raw:
         try:

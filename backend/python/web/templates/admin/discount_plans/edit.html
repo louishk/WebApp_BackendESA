@@ -601,17 +601,13 @@
                             the customer will actually pay. Leave off for true first-month-only promos.
                         </div>
                         <div style="margin-top: 0.6rem; padding-left: 0.4rem; border-left: 2px solid #e5e7eb;">
-                            <label style="font-weight: 500;">Prepayment months
-                                <input type="number" name="prepayment_months" id="prepayment_months"
-                                       min="1" max="60" step="1"
-                                       value="{{ plan.prepayment_months or '' if plan else '' }}"
-                                       placeholder="e.g. 6"
-                                       style="width: 5rem; margin-left: 0.4rem;">
-                            </label>
                             <div class="hint" style="margin: 0.2rem 0 0.5rem;">
-                                Customer prepays N months upfront at the discounted rate. Leave blank for open-ended perpetual (no prepay).
-                                The /move-in handler will push the surplus via SOAP <code>PaymentSimpleCash</code> so SiteLink's
-                                <code>dPaidThru</code> advances by exactly N months.
+                                <strong>Prepayment behaviour</strong> is driven by the plan's <em>Payment Terms</em> field
+                                (in the Terms section above). When Payment Terms = <code>Prepaid</code> AND this checkbox
+                                is on, the customer prepays the full lease duration up front (whatever they pick within
+                                <code>min_duration_months</code>–<code>max_duration_months</code>) — no fixed amount. The
+                                <code>/move-in</code> handler pushes the surplus via SOAP <code>PaymentSimpleCash</code>
+                                so SiteLink's <code>dPaidThru</code> advances by exactly that many months.
                             </div>
                             <label style="font-weight: 500;">Post-prepay ECRI uplift (%)
                                 <input type="number" name="post_prepay_ecri_pct" id="post_prepay_ecri_pct"

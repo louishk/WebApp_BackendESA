@@ -125,7 +125,7 @@ def _enqueue_and_run_followups(
         if concession_id and concession_id > 0:
             plan_row = mw.execute(text("""
                 SELECT p.id, p.plan_name, p.discount_perpetual,
-                       p.prepayment_months, p.post_prepay_ecri_pct
+                       p.payment_terms, p.post_prepay_ecri_pct
                 FROM mw_discount_plans p
                 JOIN jsonb_array_elements(p.linked_concessions) AS lc
                   ON TRUE
@@ -168,6 +168,21 @@ def _enqueue_and_run_followups(
 
         # Resolve master switches + defaults
         ecri_pct_default = Decimal(str(_rs.get_setting('ecri_default_pct', mw) or 5.0))
+
+        # Determine if this booking is a Prepaid+perpetual lease.
+        # Prepayment window = the lease length the customer is signing for
+        # (computed below from start/end dates), bounded by the plan's
+        # min/max_duration_months at quote time.
+        plan_payment_terms = (plan_row[3] or '').strip().lower()  # 'prepaid' | 'flexible' | ''
+        is_prepaid_plan = (plan_payment_terms == 'prepaid')
+
+        # Compute the lease duration in whole months. start_date / end_date
+        # came from the request body — if missing or 1-year default, derive
+        # from the difference.
+        lease_duration_months = _months_between(
+            request_data.get('start_date'), request_data.get('end_date'),
+        )
+
         ctx = _po.OrchestrationContext(
             site_code=site_code, ledger_id=ledger_id,
             tenant_id=tenant_id, unit_id=unit_id,
@@ -176,7 +191,9 @@ def _enqueue_and_run_followups(
             soap_movein_cost=Decimal(str(soap_cost)),
             effective_rate=Decimal(str(eff_rate)),
             discount_perpetual=bool(plan_row[2]),
-            prepayment_months=int(plan_row[3]) if plan_row[3] else None,
+            # Dynamic prepay window — only when plan is Prepaid+perpetual.
+            # Customer's lease length = the prepayment window.
+            prepayment_months=(lease_duration_months if (bool(plan_row[2]) and is_prepaid_plan and lease_duration_months and lease_duration_months >= 2) else None),
             post_prepay_ecri_pct=Decimal(str(plan_row[4])) if plan_row[4] is not None else None,
             concession_b_prepay=bool(concession_row[5]) if concession_row else False,
             concession_prepaid_months=int(concession_row[6] or 0) if concession_row else 0,
@@ -335,6 +352,23 @@ def _compute_effective_rate(*, site_code, unit_id, concession_row) -> Decimal:
     except Exception as exc:
         logger.warning("effective_rate calc failed: %s", exc)
         return Decimal('0')
+
+
+def _months_between(start, end) -> Optional[int]:
+    """Whole-month difference end - start. Returns None if either is missing
+    or invalid. Used to compute the lease's prepayment window from the
+    customer's start/end dates so we don't need a fixed plan-level value."""
+    if not start or not end:
+        return None
+    try:
+        s = _coerce_to_date(start)
+        e = _coerce_to_date(end)
+    except Exception:
+        return None
+    months = (e.year - s.year) * 12 + (e.month - s.month)
+    if e.day < s.day:
+        months -= 1
+    return max(months, 0) or None
 
 
 def _coerce_to_date(value) -> date:
