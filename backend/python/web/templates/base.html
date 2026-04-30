@@ -359,7 +359,7 @@
            class="{{ 'active' if request.endpoint and request.endpoint.startswith('recommendation_engine.simulator') else '' }}">Simulator</a>
         <a href="{{ url_for('recommendation_engine.unit_availability') }}"
            class="{{ 'active' if request.endpoint and 'unit_availability' in request.endpoint else '' }}">Unit Availability</a>
-        <a href="{{ url_for('recommendation_engine.site_distance') }}"
+        <a href="{{ url_for('admin.site_distance') }}"
            class="{{ 'active' if request.endpoint and 'site_distance' in request.endpoint else '' }}">Site Distance</a>
         <a href="{{ url_for('recommendation_engine.lease_followups') }}"
            class="{{ 'active' if request.endpoint and 'lease_followup' in request.endpoint else '' }}">Lease Follow-ups</a>
