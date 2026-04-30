@@ -357,6 +357,8 @@
            class="{{ 'active' if request.endpoint in ('recommendation_engine.index', 'recommendation_engine.save_settings') else '' }}">Settings</a>
         <a href="{{ url_for('recommendation_engine.simulator') }}"
            class="{{ 'active' if request.endpoint and request.endpoint.startswith('recommendation_engine.simulator') else '' }}">Simulator</a>
+        <a href="{{ url_for('recommendation_engine.feed') }}"
+           class="{{ 'active' if request.endpoint and request.endpoint.startswith('recommendation_engine.feed') else '' }}">Feed</a>
         <a href="{{ url_for('recommendation_engine.unit_availability') }}"
            class="{{ 'active' if request.endpoint and 'unit_availability' in request.endpoint else '' }}">Unit Availability</a>
         <a href="{{ url_for('admin.site_distance') }}"

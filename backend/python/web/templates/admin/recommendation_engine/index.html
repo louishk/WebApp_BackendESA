@@ -33,6 +33,37 @@
 </div>
 
 <!-- ===================================================================== -->
+<!-- Live API Health (last 7 days) -->
+<!-- ===================================================================== -->
+<div style="margin-top: 1.25rem;">
+    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.4rem;">
+        <h3 style="margin: 0; font-size: 1rem; color: var(--esa-navy);">Live API Health <span style="font-weight: 400; color: #6b7280; font-size: 0.8rem;">— last 7 days</span></h3>
+        <a href="{{ url_for('recommendation_engine.feed') }}" style="font-size: 0.78rem;">View Feed →</a>
+    </div>
+    <div class="form-grid">
+        <div class="card" style="padding: 1rem;">
+            <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">API calls</div>
+            <div style="font-size: 1.8rem; font-weight: 700; color: var(--esa-navy);">{{ "{:,}".format(live_total) }}</div>
+            <div style="font-size: 0.85rem; color: #555;">recorded in mw_recommendations_served</div>
+        </div>
+        <div class="card" style="padding: 1rem;">
+            <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Conversion</div>
+            <div style="font-size: 1.8rem; font-weight: 700; color: #059669;">
+                {% if live_total %}{{ "%.1f"|format(100.0 * live_booked / live_total) }}%{% else %}—{% endif %}
+            </div>
+            <div style="font-size: 0.85rem; color: #555;">{{ live_booked }} booked of {{ live_total }}</div>
+        </div>
+        <div class="card" style="padding: 1rem;">
+            <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Zero-pool rate</div>
+            <div style="font-size: 1.8rem; font-weight: 700; color: {% if live_total and (100.0 * live_empty / live_total) >= 10 %}#dc2626{% else %}#b45309{% endif %};">
+                {% if live_total %}{{ "%.1f"|format(100.0 * live_empty / live_total) }}%{% else %}—{% endif %}
+            </div>
+            <div style="font-size: 0.85rem; color: #555;">{{ live_empty }} call(s) saw empty candidate pool</div>
+        </div>
+    </div>
+</div>
+
+<!-- ===================================================================== -->
 <!-- Candidate Filtering -->
 <!-- ===================================================================== -->
 <div class="card" style="margin-top: 1.25rem; padding: 1rem;">

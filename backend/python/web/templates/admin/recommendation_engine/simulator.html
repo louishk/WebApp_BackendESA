@@ -223,11 +223,28 @@
                 discountNote = `<span style="color:#059669; font-size: 0.72rem;">📌 Discount window: first ${w} month${w === 1 ? '' : 's'} (SiteLink iInMonth=${w}).</span><br>`;
             }
         }
+        // Slot match-flag chips (relaxed dims, slot-2 distance, travel warning)
+        const mf = s.match_flags || {};
+        const mfChips = [];
+        if (Array.isArray(mf.relaxed_dims) && mf.relaxed_dims.length) {
+            mfChips.push(`<span style="background:#fef3c7; color:#92400e; padding:0.05rem 0.35rem; border-radius:3px; font-size: 0.7rem;">relaxed: ${mf.relaxed_dims.join(', ')}</span>`);
+        }
+        if (mf.distance_km !== undefined && mf.distance_km !== null) {
+            mfChips.push(`<span style="background:#dbeafe; color:#1e40af; padding:0.05rem 0.35rem; border-radius:3px; font-size: 0.7rem;">${mf.distance_km.toFixed(1)} km away</span>`);
+        }
+        if (mf.travel_warning) {
+            mfChips.push(`<span style="background:#fee2e2; color:#991b1b; padding:0.05rem 0.35rem; border-radius:3px; font-size: 0.7rem;">⚠ travel warning</span>`);
+        }
+        if (mf.alternative_strategy) {
+            mfChips.push(`<span style="background:#ede9fe; color:#6d28d9; padding:0.05rem 0.35rem; border-radius:3px; font-size: 0.7rem;">${mf.alternative_strategy}</span>`);
+        }
+        const mfRow = mfChips.length ? `<div style="margin-bottom: 0.35rem; display: flex; gap: 0.3rem; flex-wrap: wrap;">${mfChips.join('')}</div>` : '';
         return `
         <div class="slot-card">
             <h4>${hidden}Slot ${s.slot} · ${s.label}
                 <span class="price">$${fmt(p.first_month_total)}</span>
             </h4>
+            ${mfRow}
             <div class="meta">
                 <strong>${s.facility}</strong> · unit <code>${s.unit_id}</code>
                 · type <code>${s.unit_type || '—'}</code>
@@ -310,6 +327,16 @@
         const filterChips = Object.entries(filters)
             .map(([k, v]) => `<span style="background:#dbeafe; padding:0.05rem 0.35rem; border-radius:3px; margin-right:0.25rem;">${k}=${Array.isArray(v) ? v.join(',') : v}</span>`)
             .join('');
+        const signalChips = [];
+        if (stats.relax_strategy_used && stats.relax_strategy_used !== 'none') {
+            signalChips.push(`<span style="background:#fef3c7; color:#92400e; padding:0.05rem 0.35rem; border-radius:3px;">relax: ${stats.relax_strategy_used}</span>`);
+        }
+        if (stats.pool_rescue_step) {
+            signalChips.push(`<span style="background:#fee2e2; color:#991b1b; padding:0.05rem 0.35rem; border-radius:3px;">pool rescue: ${stats.pool_rescue_step}</span>`);
+        }
+        if (stats.saturation_signal) {
+            signalChips.push(`<span style="background:#fee2e2; color:#991b1b; padding:0.05rem 0.35rem; border-radius:3px;">⚠ saturation</span>`);
+        }
         root.innerHTML = `
             <div class="stats-bar">
                 Pool: <strong>${stats.candidates_pool_size}</strong> rows
@@ -318,9 +345,10 @@
                 | served at ${data.served_at.substring(11,19)} UTC
                 · req <code>${data.request_id.substring(0, 12)}…</code>
             </div>
-            <div style="font-size: 0.75rem; color: #6b7280; margin-bottom: 0.6rem;">
+            <div style="font-size: 0.75rem; color: #6b7280; margin-bottom: 0.4rem;">
                 Filters: ${filterChips || '<em>none</em>'}
             </div>
+            ${signalChips.length ? `<div style="font-size: 0.75rem; margin-bottom: 0.6rem; display: flex; gap: 0.4rem; flex-wrap: wrap;">${signalChips.join('')}</div>` : ''}
             ${renderDiagnostic(data.diagnostic)}
             ${data.slots.map(renderSlot).join('')}
         `;

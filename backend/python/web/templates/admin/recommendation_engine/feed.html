@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+
+{% block title %}Recommendation Feed - ESA Backend{% endblock %}
+
+{% block content %}
+<style>
+.feed-filters {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 0.9rem;
+}
+.feed-filters .field { display: flex; flex-direction: column; gap: 0.2rem; }
+.feed-filters label { font-size: 0.7rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.feed-filters select, .feed-filters input {
+    padding: 0.3rem 0.45rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    background: #fff;
+}
+
+.feed-summary {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.7rem;
+    font-size: 0.78rem;
+}
+.feed-summary .pill {
+    padding: 0.25rem 0.55rem;
+    border-radius: 4px;
+    background: #f3f4f6;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+}
+.feed-summary .pill strong { color: var(--esa-navy); }
+.feed-summary .pill.warn { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+.feed-summary .pill.bad  { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+.feed-summary .pill.good { background: #d1fae5; border-color: #a7f3d0; color: #065f46; }
+
+.feed-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.76rem;
+}
+.feed-table th {
+    background: var(--esa-gray, #f3f4f6);
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #4b5563;
+    border-bottom: 1px solid #d1d5db;
+    white-space: nowrap;
+}
+.feed-table td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: middle;
+}
+.feed-table tr.feed-row { cursor: pointer; }
+.feed-table tr.feed-row:hover td { background: #f9fafb; }
+.feed-table .mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.72rem; color: #4b5563; }
+
+.feed-table .chip {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.68rem;
+    background: #f3f4f6;
+    color: #374151;
+}
+.feed-table .chip.booked { background: #d1fae5; color: #065f46; }
+.feed-table .chip.empty  { background: #fee2e2; color: #991b1b; }
+.feed-table .chip.relax  { background: #fef3c7; color: #92400e; }
+
+.feed-detail-row td {
+    background: #fafafa;
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid #e5e7eb;
+}
+.feed-detail-row pre {
+    background: #1f2937;
+    color: #e5e7eb;
+    padding: 0.7rem 0.9rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    overflow: auto;
+    max-height: 360px;
+    margin: 0.4rem 0 0;
+}
+.feed-detail-row .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.7rem;
+}
+@media (max-width: 900px) {
+    .feed-detail-row .detail-grid { grid-template-columns: 1fr; }
+}
+
+.feed-pager {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+    font-size: 0.82rem;
+}
+.feed-pager .btn-sm {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.78rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #fff;
+    color: var(--esa-navy);
+    text-decoration: none;
+}
+.feed-pager .btn-sm:hover { background: #f3f4f6; }
+.feed-pager .btn-sm.disabled { opacity: 0.4; pointer-events: none; }
+</style>
+
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1 style="font-size: 1.3rem; margin: 0;">Recommendation Feed</h1>
+    <a href="{{ url_for('recommendation_engine.index') }}" class="btn btn-secondary">← Engine Settings</a>
+</div>
+
+<p style="color: #555; max-width: 760px; margin: 0.4rem 0 1rem;">
+    Live <code>/api/recommendations</code> calls recorded in
+    <code>mw_recommendations_served</code>. Click a row to expand the full
+    request payload + response envelope.
+</p>
+
+<form method="GET" class="feed-filters">
+    <div class="field">
+        <label>Days</label>
+        <select name="days" onchange="this.form.submit()">
+            {% for d in [1, 3, 7, 14, 30, 60, 90] %}
+            <option value="{{ d }}" {% if d == days %}selected{% endif %}>{{ d }}d</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="field">
+        <label>Channel</label>
+        <select name="channel" onchange="this.form.submit()">
+            <option value="">All</option>
+            {% for cb in channel_breakdown %}
+            <option value="{{ cb.channel }}" {% if cb.channel == channel %}selected{% endif %}>{{ cb.channel }} ({{ cb.n }})</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="field">
+        <label>Booking</label>
+        <select name="booking" onchange="this.form.submit()">
+            <option value="any"      {% if booking_status == 'any' %}selected{% endif %}>Any</option>
+            <option value="booked"   {% if booking_status == 'booked' %}selected{% endif %}>Booked only</option>
+            <option value="unbooked" {% if booking_status == 'unbooked' %}selected{% endif %}>Unbooked only</option>
+        </select>
+    </div>
+    <div class="field">
+        <label>Per page</label>
+        <select name="per_page" onchange="this.form.submit()">
+            {% for n in [25, 50, 100, 200] %}
+            <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</form>
+
+<div class="feed-summary">
+    <span class="pill"><strong>{{ "{:,}".format(agg.n) }}</strong> calls</span>
+    <span class="pill good"><strong>{{ agg.booked }}</strong> booked
+        {% if agg.n %}({{ "%.1f"|format(100.0 * agg.booked / agg.n) }}%){% endif %}
+    </span>
+    <span class="pill {% if agg.n and (100.0 * agg.empty_pool / agg.n) >= 10 %}bad{% else %}warn{% endif %}">
+        <strong>{{ agg.empty_pool }}</strong> zero-pool
+        {% if agg.n %}({{ "%.1f"|format(100.0 * agg.empty_pool / agg.n) }}%){% endif %}
+    </span>
+    <span class="pill"><strong>{{ agg.sessions }}</strong> sessions</span>
+    <span class="pill"><strong>{{ agg.channels }}</strong> channels</span>
+</div>
+
+{% if rows %}
+<div class="card" style="overflow-x: auto; padding: 0.5rem;">
+    <table class="feed-table">
+        <thead>
+            <tr>
+                <th style="width: 130px;">Served</th>
+                <th>Request</th>
+                <th>Channel</th>
+                <th>Mode</th>
+                <th title="Pool size — 0 = no candidates matched">Pool</th>
+                <th>Slots</th>
+                <th>Filters</th>
+                <th>Relax</th>
+                <th>Outcome</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rows %}
+            <tr class="feed-row" data-id="{{ r.id }}">
+                <td class="mono" title="{{ r.served_at }}">
+                    {{ r.served_at.strftime('%m-%d %H:%M:%S') if r.served_at else '—' }}
+                </td>
+                <td class="mono" title="session: {{ r.session_id or '—' }}{% if r.customer_id %} · cust: {{ r.customer_id }}{% endif %}">
+                    {{ (r.request_id[:14] + '…') if r.request_id and r.request_id|length > 14 else (r.request_id or '—') }}
+                </td>
+                <td><span class="chip">{{ r.channel or '—' }}</span></td>
+                <td>{{ r.mode }}{% if r.level %} · <span style="color:#6b7280;">{{ r.level }}</span>{% endif %}</td>
+                <td>
+                    {% if r.candidates_pool_size == 0 %}
+                        <span class="chip empty">0</span>
+                    {% else %}
+                        <strong>{{ r.candidates_pool_size }}</strong>
+                        {% if r.total_matches and r.total_matches != r.candidates_pool_size %}
+                            <span style="color:#9ca3af; font-size: 0.7rem;"> / {{ r.total_matches }}</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
+                <td class="mono" style="font-size: 0.7rem;">
+                    {% if r.slot1_unit_id %}1: {{ r.slot1_unit_id }}{% if r.slot1_first_month %} · ${{ "%.0f"|format(r.slot1_first_month) }}{% endif %}{% endif %}
+                    {% if r.slot2_unit_id %}<br>2: {{ r.slot2_unit_id }}{% endif %}
+                    {% if r.slot3_unit_id %}<br>3: {{ r.slot3_unit_id }}{% endif %}
+                    {% if not r.slot1_unit_id and not r.slot2_unit_id and not r.slot3_unit_id %}—{% endif %}
+                </td>
+                <td style="max-width: 260px; font-size: 0.7rem; color: #6b7280; word-break: break-word;">
+                    {% set f = r.filters_applied or {} %}
+                    {% if f.location %}loc: {{ (f.location | join(',')) if f.location is iterable and f.location is not string else f.location }}{% endif %}
+                    {% if f.unit_type %} · ut: {{ (f.unit_type | join(',')) if f.unit_type is iterable and f.unit_type is not string else f.unit_type }}{% endif %}
+                    {% if f.climate_type %} · cl: {{ (f.climate_type | join(',')) if f.climate_type is iterable and f.climate_type is not string else f.climate_type }}{% endif %}
+                    {% if f.size_range %} · sz: {{ (f.size_range | join(',')) if f.size_range is iterable and f.size_range is not string else f.size_range }}{% endif %}
+                    {% if f.coupon_code %} · 🎟 {{ f.coupon_code }}{% endif %}
+                </td>
+                <td>
+                    {% if r.relax_strategy %}<span class="chip relax">{{ r.relax_strategy }}</span>{% else %}—{% endif %}
+                </td>
+                <td>
+                    {% if r.booked_unit_id %}
+                        <span class="chip booked">booked → slot {{ r.booked_slot or '?' }}</span>
+                    {% else %}
+                        <span style="color:#9ca3af;">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="feed-pager">
+    {% set qs = '&days=' ~ days ~ '&channel=' ~ channel ~ '&booking=' ~ booking_status ~ '&per_page=' ~ per_page %}
+    <a class="btn-sm {% if page <= 1 %}disabled{% endif %}" href="?page=1{{ qs }}">« First</a>
+    <a class="btn-sm {% if page <= 1 %}disabled{% endif %}" href="?page={{ page - 1 }}{{ qs }}">‹ Prev</a>
+    <span style="color: #6b7280;">Page {{ page }} of {{ pages }} ({{ "{:,}".format(total) }} rows)</span>
+    <a class="btn-sm {% if page >= pages %}disabled{% endif %}" href="?page={{ page + 1 }}{{ qs }}">Next ›</a>
+    <a class="btn-sm {% if page >= pages %}disabled{% endif %}" href="?page={{ pages }}{{ qs }}">Last »</a>
+</div>
+{% else %}
+<div class="card" style="padding: 1.5rem; color: #6b7280; text-align: center;">
+    No recommendation calls in the selected window.
+    {% if days < 30 %}
+    Try widening the time range.
+    {% endif %}
+</div>
+{% endif %}
+
+<script>
+(function () {
+    'use strict';
+    const detailUrlBase = "{{ url_for('recommendation_engine.feed_detail', row_id=0) }}".replace('/0.json', '');
+
+    function fmtJson(obj) {
+        try { return JSON.stringify(obj, null, 2); }
+        catch (e) { return String(obj); }
+    }
+
+    document.querySelectorAll('tr.feed-row').forEach(function (tr) {
+        tr.addEventListener('click', async function () {
+            // Collapse if already expanded
+            const next = tr.nextElementSibling;
+            if (next && next.classList.contains('feed-detail-row')) {
+                next.remove();
+                return;
+            }
+            // Collapse any other open detail
+            document.querySelectorAll('tr.feed-detail-row').forEach(n => n.remove());
+
+            const id = tr.dataset.id;
+            const colCount = tr.children.length;
+            const detailTr = document.createElement('tr');
+            detailTr.className = 'feed-detail-row';
+            const td = document.createElement('td');
+            td.colSpan = colCount;
+            td.innerHTML = `<div style="color:#6b7280; font-size:0.8rem;">Loading detail for #${id}…</div>`;
+            detailTr.appendChild(td);
+            tr.parentNode.insertBefore(detailTr, tr.nextSibling);
+
+            try {
+                const resp = await fetch(`${detailUrlBase}/${id}.json`, {
+                    credentials: 'same-origin',
+                    headers: {'Accept': 'application/json'},
+                });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                const meta = [
+                    `<strong>session_id</strong>: <code>${data.session_id || '—'}</code>`,
+                    `<strong>customer_id</strong>: <code>${data.customer_id || '—'}</code>`,
+                    `<strong>previous_request_id</strong>: <code>${data.previous_request_id || '—'}</code>`,
+                    `<strong>picked_slot</strong>: ${data.picked_slot ?? '—'}`,
+                    `<strong>action</strong>: ${data.action || '—'}`,
+                    `<strong>relax_strategy</strong>: ${data.relax_strategy || '—'}`,
+                    `<strong>candidates_pool_size</strong>: ${data.candidates_pool_size ?? '—'}`,
+                    `<strong>total_matches</strong>: ${data.total_matches ?? '—'}`,
+                ].join(' &middot; ');
+                td.innerHTML = `
+                    <div style="font-size:0.78rem; color:#374151; margin-bottom: 0.5rem;">${meta}</div>
+                    <div class="detail-grid">
+                        <div>
+                            <div style="font-size:0.7rem; color:#6b7280; text-transform:uppercase; letter-spacing:0.04em; font-weight:600;">Request payload</div>
+                            <pre>${fmtJson(data.request_payload)}</pre>
+                        </div>
+                        <div>
+                            <div style="font-size:0.7rem; color:#6b7280; text-transform:uppercase; letter-spacing:0.04em; font-weight:600;">Full response envelope</div>
+                            <pre>${fmtJson(data.full_response)}</pre>
+                        </div>
+                    </div>`;
+            } catch (e) {
+                td.innerHTML = `<div style="color:#991b1b; font-size:0.85rem;">Failed to load detail: ${e.message}</div>`;
+            }
+        });
+    });
+}());
+</script>
+{% endblock %}

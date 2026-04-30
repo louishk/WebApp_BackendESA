@@ -70,6 +70,23 @@ def index():
         candidate_count = session.execute(text(
             "SELECT COUNT(*) FROM mw_unit_discount_candidates"
         )).scalar() or 0
+
+        # Last-7-day live API health from mw_recommendations_served.
+        # Conversion % = rows where booked_unit_id IS NOT NULL.
+        # Zero-pool % = rows where candidates_pool_size = 0 (= the engine
+        # had nothing to recommend with the customer's filters).
+        live_stats_row = session.execute(text("""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN booked_unit_id IS NOT NULL THEN 1 ELSE 0 END) AS booked,
+                SUM(CASE WHEN candidates_pool_size = 0 THEN 1 ELSE 0 END) AS empty_pool
+            FROM mw_recommendations_served
+            WHERE served_at >= NOW() - INTERVAL '7 days'
+        """)).fetchone()
+        live_total = (live_stats_row[0] if live_stats_row else 0) or 0
+        live_booked = (live_stats_row[1] if live_stats_row else 0) or 0
+        live_empty = (live_stats_row[2] if live_stats_row else 0) or 0
+
         # Live tunables for the form
         settings_specs = recommender_settings.list_specs()
         settings_values = recommender_settings.get_all_settings(session)
@@ -80,9 +97,163 @@ def index():
         excluded_count=excluded_count,
         unit_type_count=unit_type_count,
         candidate_count=candidate_count,
+        live_total=live_total,
+        live_booked=live_booked,
+        live_empty=live_empty,
         settings_specs=settings_specs,
         settings_values=settings_values,
     )
+
+
+# ---------------------------------------------------------------------------
+# Feed — recent live API calls (mw_recommendations_served browser)
+# ---------------------------------------------------------------------------
+
+@recommendation_engine_bp.route('/feed', methods=['GET'])
+@login_required
+def feed():
+    """Paginated browser of the last N live /api/recommendations calls.
+
+    Surfaces what the consumer-facing API actually did: filters, pool size,
+    relax strategy, served slots, and (when present) the booking outcome.
+    Filters: channel, days, booking_status (any/booked/unbooked).
+    """
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = min(200, max(10, int(request.args.get('per_page', 50))))
+    except (TypeError, ValueError):
+        per_page = 50
+    try:
+        days = min(90, max(1, int(request.args.get('days', 7))))
+    except (TypeError, ValueError):
+        days = 7
+    channel = (request.args.get('channel') or '').strip()
+    booking_status = (request.args.get('booking') or 'any').strip()
+
+    where = ["served_at >= NOW() - make_interval(days => :days)"]
+    params: dict = {'days': days}
+    if channel:
+        where.append("channel = :channel")
+        params['channel'] = channel
+    if booking_status == 'booked':
+        where.append("booked_unit_id IS NOT NULL")
+    elif booking_status == 'unbooked':
+        where.append("booked_unit_id IS NULL")
+    where_clause = " AND ".join(where)
+
+    offset = (page - 1) * per_page
+
+    session = _get_session()
+    try:
+        total = session.execute(text(
+            f"SELECT COUNT(*) FROM mw_recommendations_served WHERE {where_clause}"
+        ), params).scalar() or 0
+
+        rows = session.execute(text(f"""
+            SELECT id, served_at, request_id, session_id, customer_id,
+                   channel, mode, level, relax_strategy,
+                   filters_applied, candidates_pool_size, total_matches,
+                   slot1_unit_id, slot1_first_month,
+                   slot2_unit_id, slot3_unit_id,
+                   booked_unit_id, booked_slot, booked_at
+            FROM mw_recommendations_served
+            WHERE {where_clause}
+            ORDER BY served_at DESC
+            LIMIT :lim OFFSET :off
+        """), {**params, 'lim': per_page, 'off': offset}).mappings().all()
+
+        # Summary cards for the current filter window
+        agg = session.execute(text(f"""
+            SELECT
+                COUNT(*) AS n,
+                SUM(CASE WHEN booked_unit_id IS NOT NULL THEN 1 ELSE 0 END) AS booked,
+                SUM(CASE WHEN candidates_pool_size = 0 THEN 1 ELSE 0 END) AS empty_pool,
+                COUNT(DISTINCT session_id) AS sessions,
+                COUNT(DISTINCT channel) AS channels
+            FROM mw_recommendations_served
+            WHERE {where_clause}
+        """), params).fetchone()
+
+        # Channel breakdown for the chip row
+        channel_rows = session.execute(text(f"""
+            SELECT channel, COUNT(*) AS n
+            FROM mw_recommendations_served
+            WHERE {where_clause}
+            GROUP BY channel
+            ORDER BY n DESC
+        """), params).fetchall()
+    finally:
+        session.close()
+
+    pages = (total + per_page - 1) // per_page if per_page else 1
+    return render_template(
+        'admin/recommendation_engine/feed.html',
+        rows=rows,
+        page=page,
+        per_page=per_page,
+        pages=pages,
+        total=total,
+        days=days,
+        channel=channel,
+        booking_status=booking_status,
+        agg={
+            'n': (agg[0] if agg else 0) or 0,
+            'booked': (agg[1] if agg else 0) or 0,
+            'empty_pool': (agg[2] if agg else 0) or 0,
+            'sessions': (agg[3] if agg else 0) or 0,
+            'channels': (agg[4] if agg else 0) or 0,
+        },
+        channel_breakdown=[{'channel': r[0], 'n': r[1]} for r in channel_rows],
+    )
+
+
+@recommendation_engine_bp.route('/feed/<int:row_id>.json', methods=['GET'])
+@login_required
+def feed_detail(row_id: int):
+    """Return the full request_payload + full_response for one served row."""
+    session = _get_session()
+    try:
+        row = session.execute(text("""
+            SELECT id, served_at, request_id, session_id, customer_id,
+                   channel, mode, level, picked_slot, action,
+                   previous_request_id, relax_strategy,
+                   request_payload, filters_applied,
+                   candidates_pool_size, total_matches,
+                   full_response,
+                   booked_unit_id, booked_plan_id, booked_at, booked_slot
+            FROM mw_recommendations_served
+            WHERE id = :id
+        """), {'id': row_id}).mappings().first()
+    finally:
+        session.close()
+    if not row:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify({
+        'id': row['id'],
+        'served_at': row['served_at'].isoformat() if row['served_at'] else None,
+        'request_id': row['request_id'],
+        'session_id': row['session_id'],
+        'customer_id': row['customer_id'],
+        'channel': row['channel'],
+        'mode': row['mode'],
+        'level': row['level'],
+        'picked_slot': row['picked_slot'],
+        'action': row['action'],
+        'previous_request_id': row['previous_request_id'],
+        'relax_strategy': row['relax_strategy'],
+        'request_payload': row['request_payload'],
+        'filters_applied': row['filters_applied'],
+        'candidates_pool_size': row['candidates_pool_size'],
+        'total_matches': row['total_matches'],
+        'full_response': row['full_response'],
+        'booked_unit_id': row['booked_unit_id'],
+        'booked_plan_id': row['booked_plan_id'],
+        'booked_at': row['booked_at'].isoformat() if row['booked_at'] else None,
+        'booked_slot': row['booked_slot'],
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +357,19 @@ def simulator_run():
         # whether the breakdown's "discount only month 1" matches the
         # campaign's marketing intent or reveals a SiteLink config gap.
         in_month = getattr(row, 'in_month', None)
+        # Slot-level flags the live API surfaces under match_flags.
+        match_flags: dict = {}
+        relaxed = getattr(row, '_slot3_relaxed_dims', None)
+        if relaxed:
+            match_flags['relaxed_dims'] = list(relaxed)
+        if slot_num == 2:
+            d_km = getattr(row, '_slot2_distance_km', None)
+            if d_km is not None:
+                match_flags['distance_km'] = float(d_km)
+            match_flags['travel_warning'] = bool(getattr(row, '_slot2_travel_warning', False))
+            alt = getattr(row, '_slot2_strategy', None)
+            if alt:
+                match_flags['alternative_strategy'] = alt
         return {
             'slot': slot_num,
             'label': label,
@@ -203,6 +387,7 @@ def simulator_run():
             'authorised_channels': dc_list,
             'smart_lock': row.smart_lock,
             'discount_window_months': in_month,
+            'match_flags': match_flags,
             'pricing': _quote_to_json(quote),
         }
 
@@ -271,6 +456,10 @@ def simulator_run():
                 'distinct_sites_in_pool': len({r.site_code for r in pool}),
                 'distinct_plans_in_pool': len({r.plan_id for r in pool}),
                 'filters_applied': {k: v for k, v in req.filters.items() if v},
+                # Signals the live route persists to mw_recommendations_served.
+                'relax_strategy_used': req.context.get('_relax_strategy'),
+                'pool_rescue_step': req.context.get('_pool_rescue_step'),
+                'saturation_signal': bool(req.context.get('_saturation_signal')),
             },
             'diagnostic': diagnostic,
             'slots': [
