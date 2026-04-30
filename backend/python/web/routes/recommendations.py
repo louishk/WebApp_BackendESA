@@ -233,9 +233,21 @@ def _serialise_slot(
         if recurring is None:
             recurring = quote.breakdown[0]
 
-        # Effective recurring rate (rent only, post-discount, pre-tax)
+        # Rate-only figures (rent post-discount, ex-tax) — the value SiteLink
+        # records as the lease's TenantRate via ScheduleTenantRateChange_v2.
         eff_rate = (recurring.rent or Decimal('0')) - (recurring.discount or Decimal('0'))
         rate_after = (eff_rate * (Decimal('1') + Decimal(str(ecri_pct)) / Decimal('100'))).quantize(Decimal('0.01'))
+
+        # All-in figures (what the customer actually pays each month) — rent
+        # + insurance + rent_tax + insurance_tax. Bot quotes these to
+        # customers; rate_* numbers above are technical anchors only.
+        ins_premium = (recurring.insurance or Decimal('0')).quantize(Decimal('0.01'))
+        ins_tax = (recurring.insurance_tax or Decimal('0')).quantize(Decimal('0.01'))
+        all_in_during = (recurring.total or Decimal('0')).quantize(Decimal('0.01'))
+        # Post-window all-in = rate_after + same insurance + recomputed rent_tax
+        rent_tax_rate = ((recurring.rent_tax or Decimal('0')) / (recurring.rent or Decimal('1'))) if (recurring.rent or 0) else Decimal('0')
+        rent_tax_after = (rate_after * rent_tax_rate).quantize(Decimal('0.01'))
+        all_in_after = (rate_after + rent_tax_after + ins_premium + ins_tax).quantize(Decimal('0.01'))
 
         # total_due_at_movein = move-in cost (= breakdown[0].total)
         # PLUS (prepayment_months - 1) full recurring periods.
@@ -244,7 +256,6 @@ def _serialise_slot(
         prepay_extra = per_period * (Decimal(row.prepayment_months) - Decimal('1'))
         total_due = (first_total + prepay_extra).quantize(Decimal('0.01'))
 
-        from datetime import timedelta
         from dateutil.relativedelta import relativedelta as _relativedelta
         try:
             change_date = quote.breakdown[0].billing_date + _relativedelta(months=row.prepayment_months)
@@ -252,29 +263,46 @@ def _serialise_slot(
             change_date = None
 
         perpetual_extras['total_due_at_movein'] = _dec_to_num(total_due)
+        # Rate-only (technical — what gets locked via SOAP TenantRate)
         perpetual_extras['rate_during_prepay'] = _dec_to_num(eff_rate)
         perpetual_extras['rate_after_prepay'] = _dec_to_num(rate_after)
+        # All-in (what the customer pays — rent + insurance + tax)
+        perpetual_extras['monthly_all_in_during_prepay'] = _dec_to_num(all_in_during)
+        perpetual_extras['monthly_all_in_after_prepay'] = _dec_to_num(all_in_after)
+        perpetual_extras['monthly_insurance_premium'] = _dec_to_num(ins_premium)
+        perpetual_extras['monthly_insurance_tax'] = _dec_to_num(ins_tax)
         perpetual_extras['rate_change_date'] = change_date.isoformat() if change_date else None
 
         # Customer-facing disclosure for the bot to read verbatim.
+        # Frame the headline number as the all-in monthly so the customer
+        # isn't surprised by insurance + tax on the actual bill. Rent-only
+        # rate is mentioned for transparency.
         fine_print = [
-            f"Pay ${float(total_due):.2f} today to lock ${float(eff_rate):.2f}/month for {row.prepayment_months} months.",
+            f"Pay ${float(total_due):.2f} today to lock {row.prepayment_months} months at ${float(all_in_during):.2f}/month all-in.",
+            f"That's ${float(eff_rate):.2f} rent + ${float(ins_premium):.2f} insurance + ${float(all_in_during - eff_rate - ins_premium):.2f} tax.",
         ]
         if change_date:
             fine_print.append(
-                f"After {change_date.isoformat()}, your rate adjusts to "
-                f"${float(rate_after):.2f}/month ({ecri_pct:g}% increase)."
+                f"After {change_date.isoformat()}, monthly adjusts to "
+                f"${float(all_in_after):.2f} all-in (rent +{ecri_pct:g}% ECRI)."
             )
+        fine_print.append("Insurance is changeable — see insurance.options for higher coverage tiers.")
         fine_print.append("You can move out at any time after move-in.")
         customer_disclosure = {
             'fine_print': fine_print,
             'fine_print_template': {
-                'amount':      _dec_to_num(total_due),
-                'lock_rate':   _dec_to_num(eff_rate),
-                'lock_months': row.prepayment_months,
-                'from_date':   change_date.isoformat() if change_date else None,
-                'new_rate':    _dec_to_num(rate_after),
-                'uplift_pct':  ecri_pct,
+                'amount':                  _dec_to_num(total_due),
+                'lock_months':             row.prepayment_months,
+                # Rate-only (technical)
+                'lock_rate':               _dec_to_num(eff_rate),
+                'new_rate':                _dec_to_num(rate_after),
+                # All-in (customer-facing)
+                'monthly_all_in':          _dec_to_num(all_in_during),
+                'monthly_all_in_after':    _dec_to_num(all_in_after),
+                'insurance_premium':       _dec_to_num(ins_premium),
+                'insurance_tax':           _dec_to_num(ins_tax),
+                'from_date':               change_date.isoformat() if change_date else None,
+                'uplift_pct':              ecri_pct,
             },
         }
 

@@ -667,6 +667,37 @@ components:
             Date when `rate_after_prepay` takes effect = move-in date
             + `terms.prepayment_months`. Null on plans without a prepay
             window.
+        # ── All-in monthly figures (what the customer actually pays) ──
+        # rate_during_prepay / rate_after_prepay above are RENT ONLY (the
+        # technical anchor SOAP records via TenantRate). For customer
+        # disclosure use the all_in_* fields below.
+        monthly_all_in_during_prepay:
+          type: number
+          nullable: true
+          description: |
+            Customer's actual monthly bill during the prepay window —
+            rent + insurance + rent_tax + insurance_tax. Use this number
+            for any text the customer reads ("$X/month").
+        monthly_all_in_after_prepay:
+          type: number
+          nullable: true
+          description: |
+            Same all-in figure but after the post-prepay rate change
+            kicks in. = rate_after_prepay × (1 + rent_tax%) + insurance + insurance_tax.
+        monthly_insurance_premium:
+          type: number
+          nullable: true
+          description: |
+            Insurance premium baked into monthly_all_in_*. Matches
+            `insurance.selected.premium` (the default cheapest tier).
+            If the customer picks a different `insurance.options[]` tier,
+            adjust this + monthly_all_in_* + total_due_at_movein client-side
+            (delta-only computation; no extra recommend call).
+        monthly_insurance_tax:
+          type: number
+          nullable: true
+          description: |
+            Tax on the insurance premium component. Site-specific rate.
         confidence:
           type: string
           enum: [high, low_unsupported_concession]

@@ -414,10 +414,20 @@ const API_ENDPOINTS = {
                                 "rate_during_prepay": 80.50,
                                 "rate_after_prepay": 84.52,
                                 "rate_change_date": "2026-11-15",
+                                "monthly_all_in_during_prepay": 91.01,
+                                "monthly_all_in_after_prepay":  95.40,
+                                "monthly_insurance_premium":     3.00,
+                                "monthly_insurance_tax":         0.27,
                                 "total_contract": 693.76, "monthly_average": 115.63
                             },
                             "customer_disclosure": {
-                                "fine_print": ["Pay $693.76 today to lock $80.50/month for 6 months.", "After 2026-11-15, your rate adjusts to $84.52/month (5.0% increase).", "You can move out at any time after move-in."]
+                                "fine_print": [
+                                    "Pay $693.76 today to lock 6 months at $91.01/month all-in.",
+                                    "That's $80.50 rent + $3.00 insurance + $7.51 tax.",
+                                    "After 2026-11-15, monthly adjusts to $95.40 all-in (rent +5% ECRI).",
+                                    "Insurance is changeable — see insurance.options for higher coverage tiers.",
+                                    "You can move out at any time after move-in."
+                                ]
                             }
                         }
                     ],

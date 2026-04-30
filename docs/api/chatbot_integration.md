@@ -246,30 +246,78 @@ understand what they're committing to.
   },
 
   "pricing": {
-    "first_month_total":   140.18,    // legacy field — SOAP-truth move-in cost
-    "total_contract":      574.03,
-    "total_due_at_movein": 574.03,    // ← bot charges this
-    "rate_during_prepay":  49.70,     // monthly rent during 6-mo prepay window
-    "rate_after_prepay":   52.18,     // = 49.70 × 1.05 (auto-scheduled at end of window)
-    "rate_change_date":    "2026-11-15",
-    "monthly_average":     95.67,
+    "first_month_total":      140.18,    // legacy — calculator's move-in cost
+    "total_contract":         574.03,
+    "total_due_at_movein":    574.03,    // ← bot charges this
+    // ── Rate-only (technical — what SOAP records via TenantRate) ──
+    "rate_during_prepay":     49.70,     // rent only, post-discount, ex-tax
+    "rate_after_prepay":      52.18,     // = 49.70 × 1.05 after ECRI
+    "rate_change_date":       "2026-11-15",
+    // ── All-in (what the customer actually pays each month) ──
+    "monthly_all_in_during_prepay": 57.41,  // rent + insurance + rent_tax + insurance_tax
+    "monthly_all_in_after_prepay":  60.22,  // post-ECRI all-in
+    "monthly_insurance_premium":     3.00,
+    "monthly_insurance_tax":         0.27,
+    "monthly_average":               95.67,
     "breakdown": [...]
   },
 
   "customer_disclosure": {
     "fine_print": [
-      "Pay $574.03 today to lock $49.70/month for 6 months.",
-      "After 2026-11-15, your rate adjusts to $52.18/month (5.0% increase).",
+      "Pay $574.03 today to lock 6 months at $57.41/month all-in.",
+      "That's $49.70 rent + $3.00 insurance + $4.71 tax.",
+      "After 2026-11-15, monthly adjusts to $60.22 all-in (rent +5% ECRI).",
+      "Insurance is changeable — see insurance.options for higher coverage tiers.",
       "You can move out at any time after move-in."
     ],
     "fine_print_template": {
-      "amount":      574.03,  "lock_rate":   49.70,
-      "lock_months": 6,       "new_rate":    52.18,
-      "from_date":   "2026-11-15", "uplift_pct": 5.0
+      "amount":                574.03,
+      "lock_months":           6,
+      "lock_rate":             49.70,    // rent only, technical
+      "new_rate":              52.18,    // rent only, post-ECRI
+      "monthly_all_in":        57.41,    // bot uses this for headline language
+      "monthly_all_in_after":  60.22,
+      "insurance_premium":      3.00,
+      "insurance_tax":          0.27,
+      "from_date":             "2026-11-15",
+      "uplift_pct":            5.0
     }
   }
 }
 ```
+
+### Why TWO sets of monthly numbers?
+
+| Field | Type | Use |
+|---|---|---|
+| `rate_during_prepay` / `rate_after_prepay` | **rent only**, post-discount, ex-tax | Matches what SOAP `ScheduleTenantRateChange_v2` records as the lease's `dcNewRate`. Use for technical / audit purposes. |
+| `monthly_all_in_during_prepay` / `monthly_all_in_after_prepay` | **rent + insurance + tax** | What the customer actually sees on their bill. Use this for customer-facing language. |
+
+Don't quote `rate_during_prepay` to a customer — they'll be billed `monthly_all_in_during_prepay` and feel surprised by the gap.
+
+### Customer changes the insurance choice
+
+The default `insurance.selected` is the cheapest available premium. If
+the customer picks a different tier from `insurance.options[]`, the bot
+has two paths:
+
+**Option A — client-side delta (preferred, no extra API call)**:
+
+```javascript
+const chosen = slot.insurance.options.find(o => o.id === userPickedId);
+const default = slot.insurance.selected;
+const delta = chosen.premium - default.premium;     // e.g. $7 - $3 = $4
+const tax_rate = slot.pricing.monthly_insurance_tax / slot.pricing.monthly_insurance_premium;
+const new_all_in = slot.pricing.monthly_all_in_during_prepay + delta * (1 + tax_rate);
+const new_total_due = slot.pricing.total_due_at_movein + delta * (1 + tax_rate) * slot.terms.prepayment_months;
+```
+
+Pass `new_total_due` as `payment_amount` on `/move-in` and pass
+`chosen.id` as `insurance_id` — the SOAP MoveIn applies the right
+coverage and the orchestrator's prepayment surplus matches.
+
+**Option B — re-call `/api/recommendations`**: omitted in v1; client-side
+delta is the simpler shape and avoids the round-trip.
 
 **Plan-shape behaviour** — the same response shape covers all 4 plan
 combinations; `terms.discount_perpetual` + `terms.prepayment_months`
