@@ -351,7 +351,7 @@
     {% endif %}
 
     {# --- Recommendation Engine tertiary navbar --- #}
-    {% if request.endpoint and 'recommendation_engine' in request.endpoint %}
+    {% if request.endpoint and ('recommendation_engine' in request.endpoint or 'site_distance' in request.endpoint) %}
     <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
         <a href="{{ url_for('recommendation_engine.index') }}"
            class="{{ 'active' if request.endpoint in ('recommendation_engine.index', 'recommendation_engine.save_settings') else '' }}">Settings</a>
@@ -461,16 +461,13 @@
     </div>
     {% endif %}
 
-    {% if request.endpoint and ('list_configs' in request.endpoint or 'edit_config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint or 'admin_siteinfo' in request.endpoint or 'services_page' in request.endpoint or 'site_billing_config' in request.endpoint or 'site_distance' in request.endpoint) and 'discount_plans' not in request.endpoint %}
+    {% if request.endpoint and ('list_configs' in request.endpoint or 'edit_config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint or 'admin_siteinfo' in request.endpoint or 'services_page' in request.endpoint or 'site_billing_config' in request.endpoint) and 'discount_plans' not in request.endpoint %}
     <div class="sub-navbar">
         <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if 'list_configs' in request.endpoint or 'edit_config' in request.endpoint else '' }}">Config</a>
         <a href="{{ url_for('admin.list_secrets') }}" class="{{ 'active' if 'secret' in request.endpoint else '' }}">Secrets</a>
         <a href="{{ url_for('admin.type_mappings') }}" class="{{ 'active' if 'type_mapping' in request.endpoint else '' }}">Type Mappings</a>
         <a href="{{ url_for('admin_siteinfo.list_sites') }}" class="{{ 'active' if 'admin_siteinfo' in request.endpoint else '' }}">Site Info</a>
         <a href="{{ url_for('admin.site_billing_config_list') }}" class="{{ 'active' if 'site_billing_config' in request.endpoint else '' }}">Billing Config</a>
-        {% if current_user.can_manage_configs() %}
-        <a href="{{ url_for('admin.site_distance') }}" class="{{ 'active' if 'site_distance' in request.endpoint else '' }}">Site Distances</a>
-        {% endif %}
         <a href="{{ url_for('admin.services_page') }}" class="{{ 'active' if 'services_page' in request.endpoint else '' }}">Services</a>
     </div>
     {% endif %}
