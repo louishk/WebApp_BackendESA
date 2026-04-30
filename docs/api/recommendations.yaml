@@ -69,7 +69,11 @@ components:
           type: string
           enum: [recommendation, availability, quote, compare]
           default: recommendation
-          description: Only `recommendation` is implemented in v1; others return 501.
+          description: |
+            `recommendation` — 3-slot envelope (default).
+            `quote`          — price one specific unit (filters.unit_id required;
+                               filters.concession_id optional → cheapest if absent).
+            `availability` / `compare` — return 501 in v1.
         level:
           type: string
           enum: [standard, top_n, single_best, comprehensive]
@@ -142,6 +146,20 @@ components:
             Optional. Required ONLY when the customer presents a hidden-rate
             promo code. Without a matching code, hidden_rate plans are
             silently dropped from the pool. Server upper-cases for matching.
+        unit_id:
+          oneOf:
+            - type: integer
+            - type: array
+              items: { type: integer }
+          description: |
+            **mode=quote only.** SiteLink UnitID(s) to price. Ignored on
+            mode=recommendation.
+        concession_id:
+          type: integer
+          description: |
+            **mode=quote only.** Lock the quote to a specific concession.
+            When omitted, the recommender picks the cheapest concession
+            available for the unit.
 
     Constraints:
       type: object
@@ -248,20 +266,83 @@ components:
           type: object
           properties:
             candidates_pool_size: { type: integer }
-            distinct_sites_in_pool: { type: integer }
-            distinct_plans_in_pool: { type: integer }
-            filter_applied: { type: object }
+            total_matches_before_slotting: { type: integer }
+            filter_applied:
+              type: array
+              items: { type: string }
+              description: |
+                Names of server-side filters that fired on this request,
+                e.g. ["hidden_rate_suppressed"].
+            relax_strategy_used:
+              type: string
+              description: |
+                Which relax strategy ran on this turn (none /
+                size_plus_one / wider_size_band / next_nearest_site /
+                expand_unit_type / different_options).
+            excluded_unit_ids_count:
+              type: integer
+              description: |
+                How many already-served unit_ids the server skipped on
+                this turn. Lets the bot say "I excluded the 3 units I
+                showed you earlier".
+            size_relaxed_to:
+              type: array
+              nullable: true
+              items: { type: string }
+              description: |
+                When the relax strategy expanded the size_range filter,
+                this lists the buckets the search ran against. Null
+                otherwise.
         slots:
           type: array
-          minItems: 3
+          minItems: 1
           maxItems: 3
           description: |
-            Always exactly 3 entries. Each is a Slot object or `null` when
-            no qualifying inventory was found for that role.
+            For mode=recommendation: always exactly 3 entries (Best Match /
+            Nearest Available / Best Price). Any role can be `null` when no
+            qualifying inventory was found.
+            For mode=quote: a single entry sized to filters.unit_id.
           items:
             oneOf:
               - $ref: '#/components/schemas/Slot'
               - type: 'null'
+        next_turn:
+          type: object
+          description: |
+            Continuity tokens for the bot's next call. Pass `previous_request_id`
+            on the next /api/recommendations call to chain the conversation
+            (server fetches prior filters + excludes already-served units).
+          properties:
+            previous_request_id: { type: string }
+            session_id: { type: string }
+            supported_actions:
+              type: array
+              items:
+                type: string
+                enum:
+                  - more_like_this
+                  - different_options
+                  - different_size
+                  - different_site
+        pricing_note:
+          type: string
+          description: |
+            Reminder that the price is a calculator quote. Always re-fetch
+            GET /api/reservations/move-in/cost at booking time to get the
+            SOAP-truth `dcPaymentAmount` before charging.
+        reserve_template:
+          type: object
+          description: |
+            Hint for what to POST to /api/reservations/reserve when the
+            customer accepts a slot. Reduces bot integration surface.
+          properties:
+            endpoint: { type: string, example: "POST /api/reservations/reserve" }
+            required:
+              type: array
+              items: { type: string }
+            recommended:
+              type: array
+              items: { type: string }
         tracking_id:
           type: integer
           description: |
@@ -287,10 +368,14 @@ components:
         unit_type: { type: string, nullable: true, example: "W" }
         climate_type: { type: string, nullable: true, example: "A" }
         size_range: { type: string, nullable: true, example: "30-35" }
-        size_sqft_actual:
+        size_sqft:
           type: number
           nullable: true
           description: Actual sqft from dcWidth × dcLength when available.
+        size_sqft_actual:
+          type: number
+          nullable: true
+          description: Back-compat alias of `size_sqft`. Will be removed in v2.
         plan_id:
           type: integer
           description: |
@@ -303,6 +388,89 @@ components:
             ccws_discount.ConcessionID. **Required** in
             /api/reservations/reserve and /move-in. Use 0 when slot is
             standard rate (concession_id=0 in the response).
+        concession_name:
+          type: string
+          nullable: true
+          description: |
+            Human-readable concession label (sPlanName from ccws_discount,
+            e.g. "Moving Season 2026"). Null for standard-rate rows.
+        discount_summary:
+          type: string
+          nullable: true
+          description: |
+            One-line, customer-facing summary of the discount, e.g.
+            "5% off first month", "$50 off first 3 months (max $150)",
+            "Pay 11, get 12 — free month". Null when there's no discount.
+        headlines:
+          type: object
+          description: |
+            Top-level numbers for natural-language rendering. Saves the
+            bot from iterating breakdown[0] for the common questions.
+          properties:
+            first_month_rent: { type: number, nullable: true }
+            first_month_discount: { type: number, nullable: true }
+            first_month_insurance: { type: number, nullable: true }
+            first_month_tax: { type: number, nullable: true }
+            deposit_amount: { type: number, nullable: true }
+            admin_fee_amount: { type: number, nullable: true }
+            monthly_after_promo:
+              type: number
+              nullable: true
+              description: |
+                The recurring monthly cost once the discount window expires
+                (rent + insurance + tax). Null when the lease has only one
+                billing month or every month carries a discount.
+        terms:
+          type: object
+          description: Lock-in / payment / validity metadata for the plan.
+          properties:
+            lock_in_months:
+              type: integer
+              nullable: true
+              description: Integer months parsed from lock_in_period.
+            lock_in_period:
+              type: string
+              nullable: true
+              description: Raw string fallback (e.g. "12 months").
+            payment_terms:
+              type: string
+              nullable: true
+            min_duration_months: { type: integer, nullable: true }
+            max_duration_months: { type: integer, nullable: true }
+            promo_valid_until:
+              type: string
+              format: date
+              nullable: true
+              description: |
+                Earliest of plan period_end / promo_period_end /
+                booking_period_end. null = no expiry on file.
+        insurance:
+          type: object
+          nullable: true
+          description: |
+            Coverage picker payload. `selected` is what the quote was
+            calculated against (cheapest available premium). `options` is
+            the full list so the bot can offer a higher coverage tier.
+            `min_required` is null for v1 (Phase 4.B.d will sync from SOAP).
+          properties:
+            selected:
+              type: object
+              nullable: true
+              properties:
+                id: { type: integer }
+                coverage_amount: { type: number }
+                premium: { type: number }
+            options:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: integer }
+                  coverage_amount: { type: number }
+                  premium: { type: number }
+            min_required:
+              type: number
+              nullable: true
         std_rate:
           type: number
           description: Pre-discount monthly rent.

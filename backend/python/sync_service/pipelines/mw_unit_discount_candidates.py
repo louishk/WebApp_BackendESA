@@ -61,6 +61,8 @@ _INSERT_COLS: Tuple[str, ...] = (
     'distribution_channel', 'hidden_rate', 'coupon_code',
     'discount_type', 'discount_numeric', 'discount_segmentation',
     'is_active', 'smart_lock', 'effective_rate', 'computed_at',
+    # Phase 3.6 — NL-friendly fields for chatbot rendering.
+    'concession_name', 'size_sqft', 'lock_in_months', 'promo_valid_until',
 )
 
 
@@ -177,7 +179,8 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                 SELECT "SiteID", "UnitID", "UnitTypeID", "sLocationCode",
                        "sTypeName", "bCorporate",
                        "dcStdRate", "dcStdSecDep", "dcWebRate", "dcPushRate",
-                       "dcBoardRate", "dcPreferredRate"
+                       "dcBoardRate", "dcPreferredRate",
+                       "dcWidth", "dcLength"
                 FROM ccws_available_units
                 WHERE "SiteID" = ANY(:sids)
             """), {'sids': site_ids}).mappings().all()
@@ -353,6 +356,53 @@ def _jsonb_or_none(value: Optional[Dict[str, Any]]) -> Optional[str]:
     return json.dumps(value)
 
 
+def _parse_lock_in_months(raw: Any) -> Optional[int]:
+    """Best-effort integer-month extraction from `lock_in_period`.
+
+    Plans store this as a free string (e.g. "12", "12 months", "0",
+    "no lock-in", ""). Return the leading integer if present, else None.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    digits: List[str] = []
+    for ch in s:
+        if ch.isdigit():
+            digits.append(ch)
+        elif digits:
+            break
+    if not digits:
+        return None
+    try:
+        return int(''.join(digits))
+    except ValueError:
+        return None
+
+
+def _earliest_date(*candidates):
+    """Return the earliest non-null date in `candidates`, or None."""
+    real = [c for c in candidates if c is not None]
+    if not real:
+        return None
+    return min(real)
+
+
+def _size_sqft(width: Any, length: Any) -> Optional[Decimal]:
+    """Width × length, rounded to 2dp. None if either side is missing/zero."""
+    if width is None or length is None:
+        return None
+    try:
+        w = Decimal(width)
+        l = Decimal(length)
+    except Exception:
+        return None
+    if w <= 0 or l <= 0:
+        return None
+    return (w * l).quantize(Decimal('0.01'))
+
+
 def _effective_rate(
     std: Optional[Decimal],
     pct: Optional[Decimal],
@@ -426,6 +476,13 @@ def _compose_candidates(
 
     for plan in plan_rows:
         is_stdrate = bool(plan.get('is_stdrate_override'))
+        # Phase 3.6 — plan-scoped NL derivations precomputed once per plan.
+        plan_lock_in_months = _parse_lock_in_months(plan.get('lock_in_period'))
+        plan_valid_until = _earliest_date(
+            plan.get('period_end'),
+            plan.get('promo_period_end'),
+            plan.get('booking_period_end'),
+        )
         linked = plan.get('linked_concessions') or []
         # Guard is only needed for the concession path; stdrate plans don't use
         # linked_concessions at all, so a malformed value there is harmless.
@@ -586,6 +643,11 @@ def _compose_candidates(
                         'smart_lock': _jsonb_or_none(smart_lock_map.get((site_id, u['UnitID']))),
                         'effective_rate': std_rate,
                         'computed_at': computed_at,
+                        # Phase 3.6 — NL fields. Stdrate path has no concession.
+                        'concession_name': None,
+                        'size_sqft': _size_sqft(u.get('dcWidth'), u.get('dcLength')),
+                        'lock_in_months': plan_lock_in_months,
+                        'promo_valid_until': plan_valid_until,
                     })
         else:
             for link in linked:
@@ -720,6 +782,11 @@ def _compose_candidates(
                         'smart_lock': _jsonb_or_none(smart_lock_map.get((site_id, u['UnitID']))),
                         'effective_rate': _effective_rate(std_rate, pct_discount, fixed_discount),
                         'computed_at': computed_at,
+                        # Phase 3.6 — NL fields.
+                        'concession_name': conc.get('sPlanName'),
+                        'size_sqft': _size_sqft(u.get('dcWidth'), u.get('dcLength')),
+                        'lock_in_months': plan_lock_in_months,
+                        'promo_valid_until': plan_valid_until,
                     })
 
     # Dedup on PK — last writer wins — protects against duplicated linked_concession

@@ -74,6 +74,13 @@ class CandidateRow:
     prepaid_months: Optional[int]
     coupon_code: Optional[str] = None
     std_sec_dep: Optional[Decimal] = None
+    # Phase 3.6 — NL fields surfaced on each slot.
+    concession_name: Optional[str] = None
+    size_sqft: Optional[Decimal] = None
+    lock_in_months: Optional[int] = None
+    payment_terms: Optional[str] = None
+    promo_valid_until: Optional[Any] = None       # date or None
+    lock_in_period: Optional[str] = None          # raw string fallback
 
 
 class ValidationError(ValueError):
@@ -147,6 +154,23 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
             coerced = _coerce_list(val)
             if coerced:
                 filters[dim] = coerced
+
+    # Phase 4.B.b — `mode=quote` accepts unit_id (list or scalar) and
+    # optionally concession_id to lock a specific (unit, plan, concession).
+    unit_id_raw = raw_filters.get('unit_id')
+    if unit_id_raw is not None:
+        try:
+            uid_list = [int(v) for v in _coerce_list(unit_id_raw)]
+            if uid_list:
+                filters['unit_id'] = uid_list
+        except (TypeError, ValueError):
+            raise ValidationError("filters.unit_id must be integer(s)")
+    concession_id_raw = raw_filters.get('concession_id')
+    if concession_id_raw is not None:
+        try:
+            filters['concession_id'] = [int(concession_id_raw)]
+        except (TypeError, ValueError):
+            raise ValidationError("filters.concession_id must be an integer")
 
     # Coupon code — single string, normalised to upper-case for case-
     # insensitive match. Stored on filters so fetch_candidate_pool can
@@ -442,6 +466,13 @@ def _build_candidate_row(r: Any) -> CandidateRow:
         in_month=int(r['in_month']) if r.get('in_month') is not None else None,
         prepay=bool(r['prepay']) if r.get('prepay') is not None else None,
         prepaid_months=int(r['prepaid_months']) if r.get('prepaid_months') is not None else None,
+        # Phase 3.6 — NL fields.
+        concession_name=r.get('concession_name') or None,
+        size_sqft=_dec(r.get('size_sqft')),
+        lock_in_months=int(r['lock_in_months']) if r.get('lock_in_months') is not None else None,
+        payment_terms=r.get('payment_terms') or None,
+        promo_valid_until=r.get('promo_valid_until'),
+        lock_in_period=r.get('lock_in_period') or None,
     )
 
 
@@ -523,6 +554,14 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
             where_parts.append("size_range = ANY(:sizes)")
             params['sizes'] = req.filters['size_range']
 
+    # Phase 4.B.b — quote-mode filters (specific unit / concession).
+    if 'unit_id' in req.filters and req.filters['unit_id']:
+        where_parts.append("unit_id = ANY(:unit_ids)")
+        params['unit_ids'] = req.filters['unit_id']
+    if 'concession_id' in req.filters and req.filters['concession_id']:
+        where_parts.append("concession_id = :one_concession")
+        params['one_concession'] = int(req.filters['concession_id'][0])
+
     # Exclude already-served units
     if exclude_ids:
         where_parts.append("unit_id <> ALL(:exclude)")
@@ -547,7 +586,9 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
             plan_name, min_duration_months, max_duration_months,
             distribution_channel, hidden_rate, coupon_code,
             amt_type, pct_discount, fixed_discount, max_amount_off,
-            in_month, prepay, prepaid_months
+            in_month, prepay, prepaid_months,
+            concession_name, size_sqft, lock_in_months,
+            payment_terms, lock_in_period, promo_valid_until
         FROM mw_unit_discount_candidates
         WHERE {where_sql}
         ORDER BY unit_id, effective_rate ASC NULLS LAST
@@ -945,6 +986,110 @@ def _load_charge_descriptions(site_id: int, db_session) -> Dict[str, Any]:
             result['insurance_tax'] = ChargeTypeTax('Insurance', tax1_rate=t1, tax2_rate=t2)
 
     return result
+
+
+def render_discount_summary(
+    amt_type: Optional[int],
+    pct_discount: Optional[Decimal],
+    fixed_discount: Optional[Decimal],
+    in_month: Optional[int],
+    max_amount_off: Optional[Decimal],
+    prepay: Optional[bool],
+    prepaid_months: Optional[int],
+) -> Optional[str]:
+    """One-line, customer-facing summary of a concession.
+
+    Returns None when there's effectively no discount (so the bot can
+    suppress a "save 0%" line). Examples:
+        "5% off first month"
+        "10% off first 3 months (max $150)"
+        "$50 off first month"
+        "Free month — pay 11, get 12"
+    `iAmtType` semantics from SiteLink:
+        1 = percentage discount (use pct_discount)
+        2 = fixed-dollar discount (use fixed_discount)
+        3 = prepay/free-month style (uses prepaid_months)
+    The recommender treats unknown amt_types best-effort by inspecting
+    whichever value is non-zero.
+    """
+    has_pct = pct_discount is not None and Decimal(pct_discount) > 0
+    has_fixed = fixed_discount is not None and Decimal(fixed_discount) > 0
+    is_prepay = bool(prepay) or amt_type == 3 or (prepaid_months and prepaid_months > 0)
+
+    months = int(in_month) if in_month and in_month > 0 else 1
+    if months == 1:
+        scope = 'first month'
+    else:
+        scope = f'first {months} months'
+
+    if is_prepay and prepaid_months and prepaid_months > 0:
+        # "Pay 11, get 12" — total months = prepaid_months + freebie inferred from in_month
+        free = max(int(in_month or 1), 1)
+        paid = int(prepaid_months)
+        total = paid + free
+        return f"Pay {paid}, get {total} — free month"
+
+    if has_pct:
+        pct_int = int(Decimal(pct_discount))
+        pct_str = f"{pct_int}%" if Decimal(pct_discount) == pct_int else f"{pct_discount}%"
+        cap = ''
+        if max_amount_off is not None and Decimal(max_amount_off) > 0:
+            cap = f" (max ${int(Decimal(max_amount_off))})"
+        return f"{pct_str} off {scope}{cap}"
+
+    if has_fixed:
+        return f"${int(Decimal(fixed_discount))} off {scope}"
+
+    return None
+
+
+def _load_insurance_options(site_id: int, db_session) -> List[Dict[str, Any]]:
+    """All insurance coverage rows available at the site, cheapest first.
+
+    Bot uses this to render a coverage picker so the customer can opt
+    up/down before move-in. Each entry: id, coverage_amount, premium.
+    Returns [] on error.
+    """
+    try:
+        rows = db_session.execute(text("""
+            SELECT "InsurCoverageID", "dcCoverageAmount", "dcPremium"
+            FROM ccws_insurance_coverage
+            WHERE "SiteID" = :sid
+              AND ("dDeleted" IS NULL)
+            ORDER BY "dcPremium" ASC NULLS LAST
+        """), {'sid': site_id}).fetchall()
+        out = []
+        for cov_id, cov_amt, prem in rows:
+            out.append({
+                'id': int(cov_id) if cov_id is not None else None,
+                'coverage_amount': float(cov_amt) if cov_amt is not None else None,
+                'premium': float(prem) if prem is not None else None,
+            })
+        return out
+    except Exception as exc:
+        logger.warning("_load_insurance_options failed for site_id=%s: %s", site_id, exc)
+        try:
+            db_session.rollback()
+        except Exception:
+            pass
+        return []
+
+
+def _load_insurance_minimum(
+    site_id: int,
+    unit_type: Optional[str],
+    db_session,
+) -> Optional[float]:
+    """Minimum required coverage_amount for (site, unit_type).
+
+    Insurance minimums are SOAP-only (`InsuranceCoverageMinimumsRetrieve`)
+    and not yet mirrored in the middleware DB, so on the recommend hot
+    path we return None for v1. Bot can still call
+    `GET /api/reservations/insurance-minimums?site_code=...` if it needs
+    the per-unit-type minimum before move-in. Phase 4.B.d will sync this
+    table so we can answer it locally without the SOAP hop.
+    """
+    return None
 
 
 def _load_insurance_premium(site_id: int, db_session) -> Decimal:

@@ -98,10 +98,42 @@ def _serialise_quote(quote) -> Dict[str, Any]:
     }
 
 
+def _build_headlines(quote) -> Dict[str, Any]:
+    """Pull the headline numbers out of breakdown[0] + post-promo month
+    so the bot can answer common customer questions ("what's the deposit?",
+    "what's the monthly after the promo?") without iterating the breakdown.
+    """
+    if not quote or not quote.breakdown:
+        return {}
+    first = quote.breakdown[0]
+    # First month with no discount applied — used as "monthly_after_promo".
+    # If only month 1 has a discount (in_month=1), month 2 is the post-promo
+    # rent. Pick the earliest non-discounted month; fall back to last.
+    post_promo = None
+    for mb in quote.breakdown[1:]:
+        if (mb.discount or 0) == 0 and (mb.deposit or 0) == 0 and (mb.admin_fee or 0) == 0:
+            post_promo = mb
+            break
+    if post_promo is None and len(quote.breakdown) > 1:
+        post_promo = quote.breakdown[-1]
+    return {
+        'first_month_rent': _dec_to_num(first.rent),
+        'first_month_discount': _dec_to_num(first.discount),
+        'first_month_insurance': _dec_to_num(first.insurance),
+        'first_month_tax': _dec_to_num(
+            (first.rent_tax or 0) + (first.insurance_tax or 0)
+        ),
+        'deposit_amount': _dec_to_num(first.deposit),
+        'admin_fee_amount': _dec_to_num(first.admin_fee),
+        'monthly_after_promo': _dec_to_num(post_promo.total) if post_promo else None,
+    }
+
+
 def _serialise_slot(
     slot_num: int,
     row: CandidateRow,
     quote,
+    db_session=None,
     match_flags: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     # Parse distribution_channel CSV → list (empty/null → null = "all channels")
@@ -109,6 +141,57 @@ def _serialise_slot(
     dc_list: Optional[List[str]] = None
     if dc_raw:
         dc_list = [c.strip() for c in dc_raw.split(',') if c.strip()]
+
+    # Phase 3.6 — discount summary, headlines, terms, insurance.
+    discount_summary = recommender.render_discount_summary(
+        amt_type=row.amt_type,
+        pct_discount=row.pct_discount,
+        fixed_discount=row.fixed_discount,
+        in_month=row.in_month,
+        max_amount_off=row.max_amount_off,
+        prepay=row.prepay,
+        prepaid_months=row.prepaid_months,
+    )
+
+    insurance_block: Optional[Dict[str, Any]] = None
+    if db_session is not None:
+        try:
+            options = recommender._load_insurance_options(row.site_id, db_session)
+        except Exception:
+            options = []
+        # Selected = the option whose premium matches the quote's
+        # first_month insurance line (the calculator picks the cheapest
+        # available premium today).
+        selected = None
+        if options and quote and quote.breakdown:
+            target = float(quote.breakdown[0].insurance or 0)
+            for opt in options:
+                if opt.get('premium') is not None and abs(float(opt['premium']) - target) < 0.005:
+                    selected = opt
+                    break
+        if selected is None and options:
+            selected = options[0]
+        insurance_block = {
+            'selected': selected,
+            'options': options,
+            'min_required': recommender._load_insurance_minimum(
+                row.site_id, row.unit_type, db_session
+            ),
+        }
+
+    terms_block = {
+        'lock_in_months': row.lock_in_months,
+        'lock_in_period': row.lock_in_period,   # raw string fallback
+        'payment_terms': row.payment_terms,
+        'min_duration_months': row.min_duration_months,
+        'max_duration_months': row.max_duration_months,
+        'promo_valid_until': (
+            row.promo_valid_until.isoformat()
+            if hasattr(row.promo_valid_until, 'isoformat')
+            else row.promo_valid_until
+        ),
+    }
+
     return {
         'slot': slot_num,
         'label': _SLOT_LABELS.get(slot_num, f'Slot {slot_num}'),
@@ -118,16 +201,23 @@ def _serialise_slot(
         'unit_type': row.unit_type,
         'climate_type': row.climate_type,
         'size_range': row.size_range,
-        'size_sqft_actual': None,   # dcWidth×dcLength not on candidate table in v1
+        'size_sqft': _dec_to_num(row.size_sqft),
+        'size_sqft_actual': _dec_to_num(row.size_sqft),  # back-compat alias
         'price': _dec_to_num(quote.first_month_total),
         'plan_id': row.plan_id,
+        'plan_name': row.plan_name or None,
         'concession_id': row.concession_id,
+        'concession_name': row.concession_name,
+        'discount_summary': discount_summary,
         'smart_lock': row.smart_lock,
         # Authorised channels for this plan. null = open to all (the
         # recommender only emits plans the caller is authorised for, but
         # we expose the full list so 3rd parties can confirm scope).
         'authorised_channels': dc_list,
         'is_hidden_rate': bool(row.hidden_rate),
+        'headlines': _build_headlines(quote),
+        'terms': terms_block,
+        'insurance': insurance_block,
         'pricing': _serialise_quote(quote),
     }
 
@@ -188,13 +278,20 @@ def recommend():
             'received': channel,
         }), 400
 
-    # 3. Mode dispatch
-    if req.mode != 'recommendation':
+    # 3. Mode dispatch — `recommendation` (3-slot) and `quote` (single unit).
+    if req.mode not in ('recommendation', 'quote'):
         return jsonify({
             'error': 'mode not implemented',
-            'supported': ['recommendation'],
+            'supported': ['recommendation', 'quote'],
             'mode': req.mode,
         }), 501
+
+    # `quote` mode requires filters.unit_id and skips slot 2/3 entirely.
+    if req.mode == 'quote' and not req.filters.get('unit_id'):
+        return jsonify({
+            'error': 'mode=quote requires filters.unit_id',
+            'field': 'filters.unit_id',
+        }), 400
 
     # 4. Level dispatch
     if req.level != 'standard':
@@ -240,9 +337,17 @@ def recommend():
         candidates_pool_size = len(pool)
 
         # 9. Build slots
-        slot1_row = recommender.build_slot1(pool, req)
-        slot2_row = recommender.build_slot2(pool, req, db)
-        slot3_row = recommender.build_slot3(pool, req, slot1_row, db)
+        # In quote mode there is no slot 2 / slot 3 — the bot already named
+        # the exact unit it wants priced. Slot 1 is the cheapest concession
+        # available for that unit (or the explicit concession_id, when given).
+        if req.mode == 'quote':
+            slot1_row = pool[0] if pool else None
+            slot2_row = None
+            slot3_row = None
+        else:
+            slot1_row = recommender.build_slot1(pool, req)
+            slot2_row = recommender.build_slot2(pool, req, db)
+            slot3_row = recommender.build_slot3(pool, req, slot1_row, db)
 
         # Ensure all slot unit_ids are distinct (guards against edge cases)
         slot_unit_ids: set[int] = set()
@@ -305,7 +410,7 @@ def recommend():
         def _build_slot_obj(num: int, row, quote) -> Optional[Dict]:
             if row is None or quote is None:
                 return None
-            return _serialise_slot(num, row, quote)
+            return _serialise_slot(num, row, quote, db_session=db)
 
         slots_payload = [
             _build_slot_obj(1, slot1_row, slot1_quote),
@@ -325,6 +430,13 @@ def recommend():
             else:
                 slots_with_quotes.append(None)
 
+        # Phase 3.7 — surface continuity tokens so the bot can render a
+        # follow-up turn without re-deriving them.
+        excluded_unit_ids = req.constraints.get('exclude_unit_ids') or []
+        size_relaxed_to = req.filters.get('size_range') if relax_used in (
+            'size_plus_one', 'wider_size_band'
+        ) else None
+
         envelope: Dict[str, Any] = {
             'mode': req.mode,
             'level': req.level,
@@ -335,8 +447,33 @@ def recommend():
                 'total_matches_before_slotting': total_matches_before_slotting,
                 'candidates_pool_size': candidates_pool_size,
                 'filter_applied': filter_applied,
+                'relax_strategy_used': relax_used,
+                'excluded_unit_ids_count': len(excluded_unit_ids),
+                'size_relaxed_to': size_relaxed_to,
             },
             'slots': slots_payload,
+            'next_turn': {
+                'previous_request_id': request_id,
+                'session_id': req.context.get('session_id'),
+                'supported_actions': [
+                    'more_like_this', 'different_options',
+                    'different_size', 'different_site',
+                ],
+            },
+            'pricing_note': (
+                'Calculator-quoted; re-fetch '
+                'GET /api/reservations/move-in/cost at booking time '
+                'for SOAP-truth before charging.'
+            ),
+            'reserve_template': {
+                'endpoint': 'POST /api/reservations/reserve',
+                'required': [
+                    'site_code', 'unit_id', 'concession_id',
+                    'first_name', 'last_name', 'phone', 'email',
+                    'needed_date',
+                ],
+                'recommended': ['plan_id', 'session_id', 'customer_id'],
+            },
             'tracking_id': None,  # filled after log_served
         }
 

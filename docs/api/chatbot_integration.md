@@ -105,8 +105,13 @@ sync:*  scheduler:*  ecri:*  statistics:*
 │     concession_id: s1.concession_id,                                   │
 │     first_name, last_name, phone, email, ... (customer data),          │
 │     needed_date: "2026-05-01",                                         │
-│     # optional but recommended for outcome attribution                 │
-│     session_id, customer_id, plan_id: s1.plan_id                       │
+│     # STRONGLY RECOMMENDED — outcome reconciliation falls back to      │
+│     # heuristics when these are missing and may misattribute on a      │
+│     # busy day. Always pass the recommend response's session_id +      │
+│     # request_id and the customer_id you used to recommend.            │
+│     session_id, customer_id,                                           │
+│     previous_request_id: <recommend response.request_id>,              │
+│     plan_id: s1.plan_id                                                │
 │   }                                                                    │
 │ ← { tenant_id, waiting_id, global_waiting_num }                        │
 │                                                                        │

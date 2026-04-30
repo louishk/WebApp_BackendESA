@@ -4266,6 +4266,12 @@ class UnitDiscountCandidate(Base, BaseModel):
     effective_rate = Column(Numeric(14, 4))
     computed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    # Phase 3.6 — NL-friendly fields the recommender returns to chatbots.
+    concession_name = Column(Text)              # ccws_discount.sPlanName
+    size_sqft = Column(Numeric(10, 2))          # dcWidth × dcLength
+    lock_in_months = Column(Integer)            # parsed from lock_in_period
+    promo_valid_until = Column(Date)            # earliest expiry across plan windows
+
     __table_args__ = (
         Index('idx_mudc_site_unit', 'site_id', 'unit_id'),
         Index('idx_mudc_plan', 'plan_id'),
