@@ -200,6 +200,13 @@ def _serialise_slot(
         'post_prepay_uplift_pct': (
             float(row.post_prepay_ecri_pct) if row.post_prepay_ecri_pct is not None else None
         ),
+        # Native SiteLink prepay (concession.bPrepay=true). When set, SOAP
+        # MoveInCostRetrieve will return a bundle of iPrePaidMonths-worth
+        # of rent for the move-in payment. Bot should defer to
+        # /api/reservations/move-in/cost for the authoritative total.
+        'native_prepay_months': (
+            int(row.prepaid_months) if (row.prepay and row.prepaid_months) else None
+        ),
     }
 
     # Phase 4 Part 2 — perpetual+prepay disclosure block.
