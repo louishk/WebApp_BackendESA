@@ -14,7 +14,9 @@ value or use the _default_date() / _PLACEHOLDER_DOB helpers.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
+from decimal import Decimal
+from typing import Any, Dict, Optional
 
 from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy import text
@@ -91,6 +93,261 @@ def _link_recommendation(
             mw_session.close()
         except Exception:
             pass
+
+
+def _enqueue_and_run_followups(
+    *, ledger_id: int, site_code: str, tenant_id: int, unit_id: int,
+    concession_id: Optional[int], payment_amount: Decimal,
+    move_in_date, request_data: dict,
+) -> Dict[str, Any]:
+    """Phase 4 Part 2 — perpetual+prepay orchestration after MoveIn.
+
+    1. Resolve the booked plan + concession for the move-in.
+    2. Compute the SOAP-truth move-in cost (used to calculate prepay surplus).
+    3. Build orchestration jobs (PaymentSimpleCash, ScheduleTenantRateChange)
+       via perpetual_orchestrator.
+    4. Enqueue them into mw_lease_followup_jobs.
+    5. Try to execute pending jobs for this lease inline.
+    6. Return a summary the bot sees in the /move-in response.
+
+    Best-effort end-to-end. If any step fails, the lease is already
+    moved in; the queue catches up via the worker.
+    """
+    from web.services import recommender_settings as _rs
+    from web.services import perpetual_orchestrator as _po
+    from web.services import lease_followup_queue as _q
+
+    # Pull plan + concession context from middleware
+    mw = current_app.get_middleware_session()
+    try:
+        plan_row = None
+        concession_row = None
+        if concession_id and concession_id > 0:
+            plan_row = mw.execute(text("""
+                SELECT p.id, p.plan_name, p.discount_perpetual,
+                       p.prepayment_months, p.post_prepay_ecri_pct
+                FROM mw_discount_plans p
+                JOIN jsonb_array_elements(p.linked_concessions) AS lc
+                  ON TRUE
+                WHERE (lc->>'concession_id')::int = :cid
+                  AND p.is_active = TRUE
+                LIMIT 1
+            """), {'cid': concession_id}).fetchone()
+
+            concession_row = mw.execute(text("""
+                SELECT "ConcessionID", "iAmtType", "dcPCDiscount",
+                       "dcFixedDiscount", "iInMonth", "bPrepay",
+                       "iPrePaidMonths"
+                FROM ccws_discount
+                JOIN mw_siteinfo s ON s."SiteID" = ccws_discount."SiteID"
+                WHERE "ConcessionID" = :cid AND s."SiteCode" = :sc
+                LIMIT 1
+            """), {'cid': concession_id, 'sc': site_code}).fetchone()
+
+        if not plan_row:
+            # Non-perpetual / standard concession — only the universal
+            # ECRI schedule still applies (if its master switch is on).
+            return _ecri_only_path(
+                mw=mw, ledger_id=ledger_id, site_code=site_code,
+                tenant_id=tenant_id, unit_id=unit_id,
+                payment_amount=payment_amount, move_in_date=move_in_date,
+                concession_row=concession_row, request_data=request_data,
+            )
+
+        # Compute SOAP move-in cost so we can split payment vs prepay surplus.
+        # Use our internal calculator (matches SOAP to the cent).
+        soap_cost = _compute_soap_movein_cost(
+            site_code=site_code, unit_id=unit_id,
+            concession_id=concession_id, move_in_date=move_in_date,
+        )
+
+        # Effective recurring rate (post-discount) for the rate-change calc
+        eff_rate = _compute_effective_rate(
+            site_code=site_code, unit_id=unit_id, concession_row=concession_row,
+        )
+
+        # Resolve master switches + defaults
+        ecri_pct_default = Decimal(str(_rs.get_setting('ecri_default_pct', mw) or 5.0))
+        ctx = _po.OrchestrationContext(
+            site_code=site_code, ledger_id=ledger_id,
+            tenant_id=tenant_id, unit_id=unit_id,
+            move_in_date=move_in_date if isinstance(move_in_date, date) else _coerce_to_date(move_in_date),
+            payment_amount=Decimal(str(payment_amount)),
+            soap_movein_cost=Decimal(str(soap_cost)),
+            effective_rate=Decimal(str(eff_rate)),
+            discount_perpetual=bool(plan_row[2]),
+            prepayment_months=int(plan_row[3]) if plan_row[3] else None,
+            post_prepay_ecri_pct=Decimal(str(plan_row[4])) if plan_row[4] is not None else None,
+            concession_b_prepay=bool(concession_row[5]) if concession_row else False,
+            concession_prepaid_months=int(concession_row[6] or 0) if concession_row else 0,
+            ecri_default_pct=ecri_pct_default,
+            ecri_default_offset_months=int(_rs.get_setting('ecri_default_offset_months', mw) or 12),
+            ecri_min_offset_months=int(_rs.get_setting('ecri_min_offset_months', mw) or 6),
+            ecri_auto_schedule_enabled=bool(_rs.get_setting('ecri_auto_schedule_enabled', mw)),
+            perpetual_auto_payment_enabled=bool(_rs.get_setting('perpetual_auto_payment_enabled', mw)),
+            related_request_id=request_data.get('previous_request_id'),
+            related_session_id=clamp(request_data.get('session_id', ''), 64) or None,
+            related_customer_id=clamp(request_data.get('customer_id', ''), 120) or None,
+        )
+
+        jobs = _po.determine_followups(ctx)
+        if not jobs:
+            return {'enqueued': 0, 'inline_ok': 0, 'pending': 0,
+                    'reason': 'no follow-ups required (master switches off or plan does not need them)'}
+
+        ids = _q.enqueue(jobs, mw)
+        mw.commit()
+
+        # Attempt inline execution
+        outcome = _q.execute_pending_for_ledger(ledger_id, mw)
+        mw.commit()
+
+        return {
+            'enqueued': len(ids),
+            'job_ids':  ids,
+            'inline_ok':       outcome.get('ok', 0),
+            'inline_failed':   outcome.get('failed', 0),
+            'pending_retry':   outcome.get('pending_retry', 0),
+            'failed_permanent': outcome.get('failed_permanent', 0),
+        }
+    finally:
+        try:
+            mw.close()
+        except Exception:
+            pass
+
+
+def _ecri_only_path(*, mw, ledger_id, site_code, tenant_id, unit_id,
+                    payment_amount, move_in_date, concession_row, request_data) -> Dict[str, Any]:
+    """When the booked concession isn't tied to a perpetual plan, the only
+    follow-up that may apply is the universal ECRI schedule. Stays gated
+    behind ecri_auto_schedule_enabled."""
+    from web.services import recommender_settings as _rs
+    from web.services import perpetual_orchestrator as _po
+    from web.services import lease_followup_queue as _q
+
+    eff_rate = _compute_effective_rate(
+        site_code=site_code, unit_id=unit_id, concession_row=concession_row,
+    )
+    ctx = _po.OrchestrationContext(
+        site_code=site_code, ledger_id=ledger_id,
+        tenant_id=tenant_id, unit_id=unit_id,
+        move_in_date=move_in_date if isinstance(move_in_date, date) else _coerce_to_date(move_in_date),
+        payment_amount=Decimal(str(payment_amount)),
+        soap_movein_cost=Decimal(str(payment_amount)),  # no split needed
+        effective_rate=Decimal(str(eff_rate)),
+        discount_perpetual=False,
+        prepayment_months=None,
+        post_prepay_ecri_pct=None,
+        concession_b_prepay=bool(concession_row[5]) if concession_row else False,
+        concession_prepaid_months=int(concession_row[6] or 0) if concession_row else 0,
+        ecri_default_pct=Decimal(str(_rs.get_setting('ecri_default_pct', mw) or 5.0)),
+        ecri_default_offset_months=int(_rs.get_setting('ecri_default_offset_months', mw) or 12),
+        ecri_min_offset_months=int(_rs.get_setting('ecri_min_offset_months', mw) or 6),
+        ecri_auto_schedule_enabled=bool(_rs.get_setting('ecri_auto_schedule_enabled', mw)),
+        perpetual_auto_payment_enabled=False,
+        related_request_id=request_data.get('previous_request_id'),
+        related_session_id=clamp(request_data.get('session_id', ''), 64) or None,
+        related_customer_id=clamp(request_data.get('customer_id', ''), 120) or None,
+    )
+
+    jobs = _po.determine_followups(ctx)
+    if not jobs:
+        return {'enqueued': 0, 'reason': 'standard plan; ECRI schedule disabled or not applicable'}
+
+    ids = _q.enqueue(jobs, mw)
+    mw.commit()
+    outcome = _q.execute_pending_for_ledger(ledger_id, mw)
+    mw.commit()
+    return {
+        'enqueued': len(ids),
+        'job_ids': ids,
+        'inline_ok': outcome.get('ok', 0),
+        'pending_retry': outcome.get('pending_retry', 0),
+    }
+
+
+def _compute_soap_movein_cost(*, site_code, unit_id, concession_id, move_in_date) -> Decimal:
+    """Lightweight SOAP cost retrieve. Returns total of all charges + tax."""
+    from common.soap_client import SOAPFaultError
+    soap_client = None
+    try:
+        soap_client = _get_cc_soap_client()
+        rows = soap_client.call(
+            operation="MoveInCostRetrieveWithDiscount_v4",
+            parameters={
+                "sLocationCode": site_code,
+                "iUnitID": str(unit_id),
+                "dMoveInDate": move_in_date.isoformat() if hasattr(move_in_date, 'isoformat') else str(move_in_date),
+                "InsuranceCoverageID": "0",
+                "ConcessionPlanID": str(concession_id) if concession_id else "0",
+                "iPromoGlobalNum": "0",
+                "ChannelType": "0",
+                "bApplyInsuranceCredit": "false",
+            },
+            soap_action=_cc_soap_action("MoveInCostRetrieveWithDiscount_v4"),
+            namespace=CC_NS,
+            result_tag="Table",
+        )
+        total = Decimal('0')
+        for c in rows or []:
+            amt = Decimal(str(c.get('ChargeAmount') or 0))
+            t1 = Decimal(str(c.get('Tax1') or 0))
+            t2 = Decimal(str(c.get('Tax2') or 0))
+            total += amt + t1 + t2
+        return total
+    except Exception as exc:
+        logger.warning("soap movein cost retrieve failed: %s", exc)
+        return Decimal('0')
+    finally:
+        if soap_client:
+            try: soap_client.close()
+            except Exception: pass
+
+
+def _compute_effective_rate(*, site_code, unit_id, concession_row) -> Decimal:
+    """Effective monthly rent (post-discount, pre-tax) for the lease.
+
+    Pulls the unit's std_rate from ccws_available_units / ccws_units
+    and applies the concession's pct/fixed discount.
+    """
+    from common.config_loader import get_database_url
+    from sqlalchemy import create_engine
+    try:
+        engine = create_engine(get_database_url('middleware'))
+        with engine.connect() as conn:
+            r = conn.execute(text("""
+                SELECT "dcStdRate" FROM ccws_units
+                WHERE "sLocationCode" = :sc AND "UnitID" = :uid
+                LIMIT 1
+            """), {'sc': site_code, 'uid': unit_id}).fetchone()
+        std = Decimal(str(r[0])) if r and r[0] is not None else Decimal('0')
+
+        if not concession_row:
+            return std
+        pct = Decimal(str(concession_row[2] or 0))   # dcPCDiscount
+        fixed = Decimal(str(concession_row[3] or 0)) # dcFixedDiscount
+        if pct > 0:
+            return (std * (Decimal('1') - pct / Decimal('100'))).quantize(Decimal('0.01'))
+        if fixed > 0:
+            return (std - fixed).quantize(Decimal('0.01'))
+        return std
+    except Exception as exc:
+        logger.warning("effective_rate calc failed: %s", exc)
+        return Decimal('0')
+
+
+def _coerce_to_date(value) -> date:
+    """Best-effort coerce ISO string / datetime / date to date."""
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    s = str(value)
+    try:
+        return datetime.fromisoformat(s.replace('Z', '+00:00')).date()
+    except Exception:
+        return date.today()
 
 
 def _record_reservation(**kwargs):
@@ -2255,6 +2512,31 @@ def move_in_reservation():
                 f"ret_code={ret_code} ret_msg={ret_msg}"
             )
 
+        # ── Phase 4 Part 2 — perpetual+prepay orchestration ─────────────
+        # After a successful MoveIn, enqueue follow-up SOAP calls
+        # (PaymentSimpleCash for prepay surplus, ScheduleTenantRateChange_v2
+        # for the future ECRI). Best-effort inline execution; whatever
+        # doesn't complete inline is picked up by the worker.
+        followup_summary: Optional[dict] = None
+        if success and not test_mode:
+            try:
+                followup_summary = _enqueue_and_run_followups(
+                    ledger_id=int(ret_code),
+                    site_code=site_code,
+                    tenant_id=int(tenant_id),
+                    unit_id=int(unit_id),
+                    concession_id=concession_id,
+                    payment_amount=Decimal(str(payment_amount)),
+                    move_in_date=needed,
+                    request_data=data,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Perpetual orchestration failed for ledger %s: %s",
+                    ret_code, exc, exc_info=True,
+                )
+                followup_summary = {'error': str(exc)[:200]}
+
         return jsonify({
             'success': success,
             'site_code': site_code,
@@ -2266,6 +2548,7 @@ def move_in_reservation():
             'ret_code': ret_code,
             'message': ret_msg if not success else 'Move-in completed',
             'test_mode': test_mode,
+            'followups': followup_summary,
         })
 
     except SOAPFaultError as e:

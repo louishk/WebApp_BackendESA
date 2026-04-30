@@ -154,6 +154,12 @@ class SchedulerEngine:
         # Register all enabled pipelines
         self._register_pipelines()
 
+        # Phase 4 Part 2 — register the lease follow-up worker. Polls
+        # mw_lease_followup_jobs every 10 s for pending SOAP follow-ups
+        # (PaymentSimpleCash + ScheduleTenantRateChange) that the
+        # /api/reservations/move-in handler couldn't complete inline.
+        self._register_lease_followup_worker()
+
         # Update scheduler state in database
         self._update_state('running')
 
@@ -222,16 +228,63 @@ class SchedulerEngine:
             self._update_state('running')
             logger.info("Scheduler resumed")
 
+    def _register_lease_followup_worker(self):
+        """Register the periodic lease follow-up worker (Phase 4 Part 2).
+
+        Polls mw_lease_followup_jobs every 10 s, executes pending jobs
+        (one PaymentSimpleCash, one ScheduleTenantRateChange_v2) with
+        FOR UPDATE SKIP LOCKED for safe concurrent processing. Failed
+        jobs go to status='failed_permanent' after 5 attempts and the
+        existing alert_manager fires.
+
+        The /api/reservations/move-in handler also runs the queue inline
+        so the happy path completes in a single request — this worker
+        is the safety net for retries + transient failures.
+        """
+        try:
+            self._scheduler.add_job(
+                func=self._run_lease_followup_worker,
+                trigger=IntervalTrigger(seconds=10),
+                id='lease_followup_worker',
+                name='Lease Follow-up Worker',
+                replace_existing=True,
+                max_instances=1,    # Don't pile on if a tick takes longer than 10s
+                coalesce=True,
+            )
+            logger.info("Registered lease_followup_worker (interval=10s)")
+        except Exception as exc:
+            logger.error("Failed to register lease_followup_worker: %s", exc)
+
+    def _run_lease_followup_worker(self):
+        """One iteration: drain up to 10 pending follow-up jobs."""
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from common.config_loader import get_database_url
+        from web.services.lease_followup_queue import execute_pending_batch
+
+        try:
+            engine = create_engine(get_database_url('middleware'))
+            Session = sessionmaker(bind=engine)
+            db = Session()
+            try:
+                outcome = execute_pending_batch(db, batch_size=10)
+                db.commit()
+                if any(v > 0 for v in outcome.values()):
+                    logger.info("lease_followup_worker outcome: %s", outcome)
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.error("lease_followup_worker iteration failed: %s", exc)
+
     def _register_pipelines(self):
-        """Register all enabled pipelines with APScheduler.
-        Skips pipelines managed by the orchestrator to prevent dual execution."""
+        """Register all enabled scheduler-owned pipelines with APScheduler.
+
+        SchedulerConfig.from_db() already filters to managed_by='scheduler' via
+        the neutral pipeline_registry. Orchestrator pipelines never reach here.
+        """
         for name, pipeline in self.config.pipelines.items():
             if not pipeline.enabled:
                 logger.debug(f"Skipping disabled pipeline: {name}")
-                continue
-
-            if pipeline.managed_by == 'orchestrator':
-                logger.info(f"Skipping orchestrator-managed pipeline: {name}")
                 continue
 
             try:

@@ -4300,3 +4300,41 @@ class RecommenderExcludedUnitType(Base, BaseModel):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     created_by = Column(String(120))
     updated_by = Column(String(120))
+
+
+class LeaseFollowupJob(Base, BaseModel):
+    """
+    Durable queue of post-MoveIn SOAP follow-up calls.
+
+    The /api/reservations/move-in handler enqueues rows here after a
+    successful SOAP MoveIn — one per follow-up action that needs to fire
+    (PaymentSimpleCash for prepay surplus, ScheduleTenantRateChange_v2 for
+    the future ECRI). The handler then attempts to execute pending rows
+    inline before responding to the bot, so the happy path completes in a
+    single request. Rows that fail or aren't reached inline are picked up
+    by the worker in backend-scheduler with exponential backoff.
+
+    After 5 failed attempts a job moves to status='failed_permanent' and
+    operations gets alerted via the existing alert_manager. Manual retry
+    is available on /admin/recommendation-engine/lease-followups.
+    """
+    __tablename__ = 'mw_lease_followup_jobs'
+
+    id              = Column(BigInteger, primary_key=True, autoincrement=True)
+    created_at      = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at      = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    ledger_id       = Column(Integer, nullable=False, index=True)
+    site_code       = Column(String(20), nullable=False)
+    tenant_id       = Column(Integer)
+    unit_id         = Column(Integer)
+    action_type     = Column(String(40), nullable=False)
+    payload         = Column(JSONB, nullable=False)
+    status          = Column(String(20), nullable=False, default='pending')
+    attempts        = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    last_attempt_at = Column(DateTime(timezone=True))
+    last_error      = Column(Text)
+    soap_response   = Column(JSONB)
+    related_request_id  = Column(String(64))
+    related_session_id  = Column(String(64))
+    related_customer_id = Column(String(120))
