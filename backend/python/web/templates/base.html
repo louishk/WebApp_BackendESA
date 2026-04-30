@@ -352,7 +352,7 @@
 
     {# --- Recommendation Engine tertiary navbar --- #}
     {% if request.endpoint and 'recommendation_engine' in request.endpoint %}
-    <div class="sub-navbar" style="background: #f0f5fa; border-top: 1px solid #d0dde8;">
+    <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
         <a href="{{ url_for('recommendation_engine.index') }}"
            class="{{ 'active' if request.endpoint in ('recommendation_engine.index', 'recommendation_engine.save_settings') else '' }}">Settings</a>
         <a href="{{ url_for('recommendation_engine.simulator') }}"
