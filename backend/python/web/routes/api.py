@@ -3057,7 +3057,7 @@ def _apply_plan_json(plan, data, is_create=False):
         'rate_rules', 'rate_rules_sites',
         'collateral_url', 'registration_flow',
     ]
-    BOOL_FIELDS = ['hidden_rate', 'available_for_chatbot', 'is_active']
+    BOOL_FIELDS = ['hidden_rate', 'discount_perpetual', 'available_for_chatbot', 'is_active']
     JSONB_FIELDS = [
         'applicable_sites', 'offers', 'terms_conditions', 'terms_conditions_cn',
         'terms_conditions_translations',

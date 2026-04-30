@@ -386,6 +386,7 @@ def calculate_duration_breakdown(
     unit_id: int = 0,
     plan_id: int = 0,
     concession_id: int = 0,
+    discount_perpetual: bool = False,
 ) -> DurationQuote:
     """
     Compute a month-by-month cost breakdown for the requested tenure.
@@ -526,11 +527,15 @@ def calculate_duration_breakdown(
         # Full rent (no proration on months 2+)
         full_rent = _round2(_rate)
 
-        # Discount: apply only within concession_in_month window
-        if month_idx <= concession_in_month:
+        # Discount: apply only within concession_in_month window OR for the
+        # entire lease when the plan was flagged discount_perpetual (operator
+        # applies Tenant's Rate at move-in to bake the discount in).
+        if discount_perpetual or month_idx <= concession_in_month:
             if _pc > Decimal("0"):
                 disc = _round2(full_rent * _pc / Decimal("100"))
-                if _max_off is not None:
+                # SiteLink stores dcMaxAmountOff=0 to mean "no cap" — only
+                # apply the cap when it's a real positive ceiling.
+                if _max_off is not None and _max_off > Decimal("0"):
                     disc = min(disc, _max_off)
             elif _fixed > Decimal("0"):
                 disc = min(_round2(_fixed), full_rent)

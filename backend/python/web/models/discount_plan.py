@@ -85,6 +85,15 @@ class DiscountPlan(Base):
     # =========================================================================
     hidden_rate = Column(Boolean, default=False, comment="Whether rate is hidden from public")
     coupon_code = Column(String(100), comment="Unlock code for hidden_rate plans; ignored when hidden_rate is False")
+    discount_perpetual = Column(
+        Boolean, default=False, nullable=False,
+        comment="When TRUE, the recommender's calculator applies the discount to "
+                "every billing month of the lease (not just iInMonth=1). Used for "
+                "concessions where ops staff manually click 'Apply Tenant's Rate' "
+                "at move-in to make the discount perpetual. Part 2 will automate "
+                "the rate write so this flag eventually becomes a hint to the bot "
+                "rather than a manual workaround indicator.",
+    )
     available_for_chatbot = Column(Boolean, default=False, comment="Available for chatbot promotion")
     chatbot_notes = Column(String(255), comment="ChatBot availability notes")
     switch_to_us = Column(String(50), default='Not Eligible', comment="Switch-To-Us eligibility")
@@ -186,6 +195,8 @@ class DiscountPlan(Base):
             'terms_conditions_translations': self.terms_conditions_translations or {},
             # Promotion brief
             'hidden_rate': self.hidden_rate,
+            'coupon_code': self.coupon_code,
+            'discount_perpetual': bool(self.discount_perpetual),
             'available_for_chatbot': self.available_for_chatbot,
             'chatbot_notes': self.chatbot_notes,
             'switch_to_us': self.switch_to_us,

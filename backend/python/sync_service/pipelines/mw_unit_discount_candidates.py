@@ -63,6 +63,11 @@ _INSERT_COLS: Tuple[str, ...] = (
     'is_active', 'smart_lock', 'effective_rate', 'computed_at',
     # Phase 3.6 — NL-friendly fields for chatbot rendering.
     'concession_name', 'size_sqft', 'lock_in_months', 'promo_valid_until',
+    # Phase 4 Part 1 — operator-applied "perpetual" intent flag. When true
+    # the calculator should apply the concession's discount to every month
+    # of the lease, not just iInMonth=1, because operations will manually
+    # set Tenant's Rate at move-in (Part 2 will automate this).
+    'discount_perpetual',
 )
 
 
@@ -136,7 +141,7 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                        booking_period_start, booking_period_end,
                        period_start, period_end,
                        move_in_range, lock_in_period, payment_terms,
-                       distribution_channel, hidden_rate, coupon_code,
+                       distribution_channel, hidden_rate, coupon_code, discount_perpetual,
                        discount_type, discount_numeric, discount_segmentation,
                        is_active, is_stdrate_override
                 FROM mw_discount_plans
@@ -643,6 +648,7 @@ def _compose_candidates(
                         'distribution_channel': plan.get('distribution_channel'),
                         'hidden_rate': plan.get('hidden_rate'),
                         'coupon_code': plan.get('coupon_code'),
+                        'discount_perpetual': bool(plan.get('discount_perpetual')),
                         'discount_type': plan.get('discount_type'),
                         'discount_numeric': plan.get('discount_numeric'),
                         'discount_segmentation': plan.get('discount_segmentation'),
@@ -782,6 +788,7 @@ def _compose_candidates(
                         'distribution_channel': plan.get('distribution_channel'),
                         'hidden_rate': plan.get('hidden_rate'),
                         'coupon_code': plan.get('coupon_code'),
+                        'discount_perpetual': bool(plan.get('discount_perpetual')),
                         'discount_type': plan.get('discount_type'),
                         'discount_numeric': plan.get('discount_numeric'),
                         'discount_segmentation': plan.get('discount_segmentation'),

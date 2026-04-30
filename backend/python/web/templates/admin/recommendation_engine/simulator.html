@@ -201,12 +201,25 @@
             ? `<span style="color:#6366f1;">🔑 ${(s.smart_lock.keypad_ids || []).join(',')}${s.smart_lock.padlock_id ? ' / 🔒'+s.smart_lock.padlock_id : ''}</span>`
             : '';
         // Discount window note — explains "why is the discount only on month 1?"
+        // Distinguishes three cases:
+        //   1. Plan flagged discount_perpetual=true — operator applies Tenant's
+        //      Rate at move-in; calculator already discounted every month.
+        //   2. iInMonth >= duration — discount covers the full lease natively.
+        //   3. iInMonth < duration — partial coverage; staff must extend.
         let discountNote = '';
-        if (s.discount_window_months !== null && s.discount_window_months !== undefined) {
-            const w = s.discount_window_months;
-            if (w === 1) {
-                discountNote = `<span style="color:#b45309; font-size: 0.72rem;">📌 SiteLink concession iInMonth=1 → discount applies first month only. Edit in SiteLink to extend.</span><br>`;
-            } else if (w > 1 && w < 999) {
+        const w = s.discount_window_months;
+        const dur = p.duration_months;
+        const perp = s.terms && s.terms.discount_perpetual;
+        if (perp) {
+            discountNote = `<span style="color:#059669; font-size: 0.72rem;">📌 Discount applied to all ${dur} month${dur === 1 ? '' : 's'} (plan flagged <code>discount_perpetual</code> — ops staff must click "Apply Tenant's Rate" at move-in to enforce it in SiteLink, until automation lands).</span><br>`;
+        } else if (w !== null && w !== undefined) {
+            if (w >= 999) {
+                discountNote = `<span style="color:#059669; font-size: 0.72rem;">📌 Discount applies for the entire lease (SiteLink iInMonth=${w}).</span><br>`;
+            } else if (dur && w < dur) {
+                discountNote = `<span style="color:#b45309; font-size: 0.72rem;">⚠️ Discount applies only to the first ${w} of ${dur} month${dur === 1 ? '' : 's'} (SiteLink concession iInMonth=${w}). To make perpetual: tick <code>Apply discount perpetually</code> on the discount plan, or raise iInMonth on the SiteLink concession.</span><br>`;
+            } else if (w === dur) {
+                discountNote = `<span style="color:#059669; font-size: 0.72rem;">📌 Discount covers the full ${dur}-month lease (SiteLink iInMonth=${w}).</span><br>`;
+            } else {
                 discountNote = `<span style="color:#059669; font-size: 0.72rem;">📌 Discount window: first ${w} month${w === 1 ? '' : 's'} (SiteLink iInMonth=${w}).</span><br>`;
             }
         }

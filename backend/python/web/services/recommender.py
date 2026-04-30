@@ -81,6 +81,8 @@ class CandidateRow:
     payment_terms: Optional[str] = None
     promo_valid_until: Optional[Any] = None       # date or None
     lock_in_period: Optional[str] = None          # raw string fallback
+    # Phase 4 Part 1 — operator-applied perpetual intent.
+    discount_perpetual: bool = False
 
 
 class ValidationError(ValueError):
@@ -473,6 +475,7 @@ def _build_candidate_row(r: Any) -> CandidateRow:
         payment_terms=r.get('payment_terms') or None,
         promo_valid_until=r.get('promo_valid_until'),
         lock_in_period=r.get('lock_in_period') or None,
+        discount_perpetual=bool(r.get('discount_perpetual')),
     )
 
 
@@ -588,7 +591,8 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
             amt_type, pct_discount, fixed_discount, max_amount_off,
             in_month, prepay, prepaid_months,
             concession_name, size_sqft, lock_in_months,
-            payment_terms, lock_in_period, promo_valid_until
+            payment_terms, lock_in_period, promo_valid_until,
+            discount_perpetual
         FROM mw_unit_discount_candidates
         WHERE {where_sql}
         ORDER BY unit_id, effective_rate ASC NULLS LAST
@@ -1053,6 +1057,7 @@ def quote_slot(
             concession_in_month=concession_in_month,
             concession_prepay_months=concession_prepay_months,
             max_amount_off=max_amount_off,
+            discount_perpetual=row.discount_perpetual,
             unit_id=row.unit_id,
             plan_id=row.plan_id,
             concession_id=row.concession_id,
@@ -1159,6 +1164,7 @@ def render_discount_summary(
     max_amount_off: Optional[Decimal],
     prepay: Optional[bool],
     prepaid_months: Optional[int],
+    discount_perpetual: bool = False,
 ) -> Optional[str]:
     """One-line, customer-facing summary of a concession.
 
@@ -1187,7 +1193,11 @@ def render_discount_summary(
     )
 
     months = int(in_month) if in_month and in_month > 0 else 1
-    if months == 1:
+    # Perpetual flag overrides the iInMonth window — ops applies the
+    # discount across the full lease via Tenant's Rate at move-in.
+    if discount_perpetual:
+        scope = 'every month'
+    elif months == 1:
         scope = 'first month'
     else:
         scope = f'first {months} months'

@@ -151,6 +151,7 @@ def _serialise_slot(
         max_amount_off=row.max_amount_off,
         prepay=row.prepay,
         prepaid_months=row.prepaid_months,
+        discount_perpetual=bool(row.discount_perpetual),
     )
 
     insurance_block: Optional[Dict[str, Any]] = None
@@ -190,6 +191,10 @@ def _serialise_slot(
             if hasattr(row.promo_valid_until, 'isoformat')
             else row.promo_valid_until
         ),
+        # Phase 4 Part 1 — when true, the discount in `pricing.breakdown`
+        # has been applied to every month (operator clicks "Apply Tenant's
+        # Rate" at move-in to enforce it in SiteLink).
+        'discount_perpetual': bool(row.discount_perpetual),
     }
 
     return {
@@ -209,6 +214,11 @@ def _serialise_slot(
         'concession_id': row.concession_id,
         'concession_name': row.concession_name,
         'discount_summary': discount_summary,
+        # SiteLink iInMonth — number of consecutive billing months the
+        # concession applies to (1 = first month only). Surfaced so the
+        # simulator + bot can disclose "discount applies for the first N
+        # months" when N < the requested lease duration.
+        'discount_window_months': row.in_month,
         'smart_lock': row.smart_lock,
         # Authorised channels for this plan. null = open to all (the
         # recommender only emits plans the caller is authorised for, but

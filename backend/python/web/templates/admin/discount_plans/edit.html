@@ -589,6 +589,19 @@
                         <div class="hint">Hidden plans only surface to bot/web channels when the booking provides this exact code.</div>
                     </div>
                     <div class="form-group">
+                        <div class="toggle-row">
+                            <input type="checkbox" name="discount_perpetual" id="discount_perpetual"
+                                   {{ 'checked' if plan and plan.discount_perpetual }}>
+                            <label for="discount_perpetual">Apply discount perpetually</label>
+                        </div>
+                        <div class="hint">
+                            Tick when the SiteLink concession is set to <code>iInMonth=1</code> but ops staff click
+                            <strong>"Apply Tenant's Rate"</strong> at move-in to bake the discount into the recurring rent.
+                            With this flag on, the recommender quotes the discounted price every month — matching what
+                            the customer will actually pay. Leave off for true first-month-only promos.
+                        </div>
+                    </div>
+                    <div class="form-group">
                         <label>Switch To Us</label>
                         <select name="switch_to_us">
                             <option value="">-- Select --</option>
