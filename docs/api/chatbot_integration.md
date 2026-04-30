@@ -327,8 +327,17 @@ tell the bot which one it's quoting:
 |---|---|---|
 | Regular, no prepay | 1 month + admin + dep + ins | First month at discounted rate; standard renewal at +12 mo |
 | Regular + SiteLink-native prepay (`bPrepay=true`) | N months bundled by SOAP | Locked discount for N mo; standard renewal at +N+1 mo |
-| Perpetual, no prepay | 1 month + admin + dep + ins | Discount applies forever; rate adjusts at +12 mo |
-| **Perpetual + custom prepay** | 1 month move-in + (N−1) × discounted recurring | Discount + prepay locked for N mo; rate adjusts at +N |
+| Perpetual, Flexible payment | 1 month + admin + dep + ins | Discount applies forever; rate adjusts at +12 mo |
+| **Perpetual + Prepaid payment** | 1 month move-in + (N−1) × discounted recurring | Discount + prepay locked for N mo; rate adjusts at +N |
+
+> **Dynamic prepayment window**: `terms.prepayment_months` is **not a
+> fixed plan setting** — it equals the customer's chosen
+> `request.duration_months` whenever the matched plan has
+> `discount_perpetual=true` AND `payment_terms="Prepaid"`. The plan's
+> `min_duration_months` / `max_duration_months` already bound the
+> customer's choice, so a 6–12 mo plan auto-quotes 6 / 7 / … / 12 mo
+> prepayment depending on what the bot asks for. No re-config needed
+> when offering different lease lengths from the same plan.
 
 Behind the scenes, after the bot's `/move-in` call succeeds, the middleware
 fires up to two follow-up SOAP calls (PaymentSimpleCash for the prepay

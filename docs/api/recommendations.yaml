@@ -509,10 +509,17 @@ components:
               type: integer
               nullable: true
               description: |
-                Months of rent the customer prepays at move-in for
-                perpetual plans. Null = no prepay required. When set,
-                `pricing.total_due_at_movein` = move-in cost + (N-1) ×
-                discounted recurring total.
+                Months of rent the customer prepays at move-in. **Dynamic
+                — equals the customer's `request.duration_months`** when
+                the matched plan has `discount_perpetual=true` AND the
+                plan-level `payment_terms = "Prepaid"`. The plan's
+                `min_duration_months`/`max_duration_months` already
+                bound what the customer can pick. Null when the plan is
+                Flexible or non-perpetual.
+
+                When set: `pricing.total_due_at_movein` = move-in cost
+                + (N-1) × discounted recurring total, and
+                `pricing.rate_change_date` = move_in_date + N months.
             post_prepay_uplift_pct:
               type: number
               nullable: true

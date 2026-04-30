@@ -407,7 +407,7 @@ const API_ENDPOINTS = {
                             "plan_id": 10, "plan_name": "Moving Season SG",
                             "concession_id": 11872, "concession_name": "SS-TAC-Move-R-30%",
                             "discount_summary": "30% off every month",
-                            "terms": {"discount_perpetual": true, "prepayment_months": 6, "post_prepay_uplift_pct": 5.0, "native_prepay_months": null},
+                            "terms": {"discount_perpetual": true, "prepayment_months": 6, "post_prepay_uplift_pct": 5.0, "native_prepay_months": null, "_note": "prepayment_months is dynamic — matches request.duration_months when plan is perpetual + payment_terms=Prepaid"},
                             "pricing": {
                                 "first_month_total": 238.71,
                                 "total_due_at_movein": 693.76,
