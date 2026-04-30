@@ -56,9 +56,11 @@ def _require_config_permission(f):
 @recommendation_engine_bp.route('/')
 @login_required
 def index():
-    """Landing page — lists the configuration tools in this module."""
-    from web.services import recommender_settings
+    """Dashboard — live API health, candidate health, navigation hints.
 
+    Settings live on the dedicated /settings page so this stays a glanceable
+    operational view.
+    """
     session = _get_session()
     try:
         excluded_count = session.execute(text(
@@ -72,24 +74,42 @@ def index():
         )).scalar() or 0
 
         # Last-7-day live API health from mw_recommendations_served.
-        # Conversion % = rows where booked_unit_id IS NOT NULL.
-        # Zero-pool % = rows where candidates_pool_size = 0 (= the engine
-        # had nothing to recommend with the customer's filters).
         live_stats_row = session.execute(text("""
             SELECT
                 COUNT(*) AS total,
                 SUM(CASE WHEN booked_unit_id IS NOT NULL THEN 1 ELSE 0 END) AS booked,
-                SUM(CASE WHEN candidates_pool_size = 0 THEN 1 ELSE 0 END) AS empty_pool
+                SUM(CASE WHEN candidates_pool_size = 0 THEN 1 ELSE 0 END) AS empty_pool,
+                COUNT(DISTINCT session_id) AS sessions
             FROM mw_recommendations_served
             WHERE served_at >= NOW() - INTERVAL '7 days'
         """)).fetchone()
         live_total = (live_stats_row[0] if live_stats_row else 0) or 0
         live_booked = (live_stats_row[1] if live_stats_row else 0) or 0
         live_empty = (live_stats_row[2] if live_stats_row else 0) or 0
+        live_sessions = (live_stats_row[3] if live_stats_row else 0) or 0
 
-        # Live tunables for the form
-        settings_specs = recommender_settings.list_specs()
-        settings_values = recommender_settings.get_all_settings(session)
+        # Channel breakdown — what's actually using the API
+        channel_rows = session.execute(text("""
+            SELECT channel, COUNT(*) AS n,
+                   SUM(CASE WHEN booked_unit_id IS NOT NULL THEN 1 ELSE 0 END) AS booked
+            FROM mw_recommendations_served
+            WHERE served_at >= NOW() - INTERVAL '7 days'
+            GROUP BY channel
+            ORDER BY n DESC
+        """)).fetchall()
+
+        # Lease follow-up DLQ health — count by status
+        dlq_rows = session.execute(text("""
+            SELECT status, COUNT(*) AS n
+            FROM mw_lease_followup_jobs
+            GROUP BY status
+        """)).fetchall()
+        dlq_stats = {r[0]: r[1] for r in dlq_rows}
+
+        # Most recent served call (for "last activity" timestamp)
+        last_served = session.execute(text(
+            "SELECT MAX(served_at) FROM mw_recommendations_served"
+        )).scalar()
     finally:
         session.close()
     return render_template(
@@ -100,8 +120,49 @@ def index():
         live_total=live_total,
         live_booked=live_booked,
         live_empty=live_empty,
+        live_sessions=live_sessions,
+        last_served=last_served,
+        channel_breakdown=[{'channel': r[0], 'n': r[1], 'booked': r[2] or 0} for r in channel_rows],
+        dlq_stats=dlq_stats,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Settings — dedicated editor page
+# ---------------------------------------------------------------------------
+
+@recommendation_engine_bp.route('/settings', methods=['GET'])
+@login_required
+def settings_page():
+    """Standalone settings editor.
+
+    Loads each setting with its spec default + last-changed metadata so the
+    UI can flag drift from default and show audit attribution.
+    """
+    from web.services import recommender_settings
+
+    session = _get_session()
+    try:
+        settings_specs = recommender_settings.list_specs()
+        settings_values = recommender_settings.get_all_settings(session)
+        meta_rows = session.execute(text("""
+            SELECT key, updated_at, updated_by
+            FROM mw_recommender_settings
+        """)).fetchall()
+    finally:
+        session.close()
+
+    meta = {
+        r[0]: {
+            'updated_at': r[1].isoformat() if r[1] else None,
+            'updated_by': r[2],
+        } for r in meta_rows
+    }
+    return render_template(
+        'admin/recommendation_engine/settings.html',
         settings_specs=settings_specs,
         settings_values=settings_values,
+        settings_meta=meta,
     )
 
 
@@ -566,7 +627,7 @@ def save_settings():
         flash(f'Saved {changed} setting change(s).', 'success')
     else:
         flash('No changes to save.', 'info')
-    return redirect(url_for('recommendation_engine.index'))
+    return redirect(url_for('recommendation_engine.settings_page'))
 
 
 # ---------------------------------------------------------------------------

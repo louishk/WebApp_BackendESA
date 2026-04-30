@@ -3,172 +3,282 @@
 {% block title %}Recommendation Engine - ESA Backend{% endblock %}
 
 {% block content %}
+<style>
+.reco-dash-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+.reco-stat {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.reco-stat .label {
+    font-size: 0.7rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}
+.reco-stat .value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: var(--esa-navy);
+    line-height: 1.1;
+    margin-top: 0.1rem;
+}
+.reco-stat .value.warn { color: #b45309; }
+.reco-stat .value.bad  { color: #dc2626; }
+.reco-stat .value.good { color: #059669; }
+.reco-stat .sub {
+    font-size: 0.78rem;
+    color: #6b7280;
+    margin-top: 0.15rem;
+}
+
+.reco-section-title {
+    margin: 1.4rem 0 0.5rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.reco-section-title h2 {
+    font-size: 0.95rem;
+    color: var(--esa-navy);
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 700;
+}
+.reco-section-title .hint { font-size: 0.78rem; color: #6b7280; }
+.reco-section-title a { font-size: 0.8rem; }
+
+.channel-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.channel-table th {
+    background: #f3f4f6;
+    text-align: left;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #4b5563;
+    border-bottom: 1px solid #d1d5db;
+}
+.channel-table td {
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid #f3f4f6;
+}
+.channel-table .bar {
+    display: inline-block;
+    height: 6px;
+    background: var(--esa-navy);
+    border-radius: 3px;
+    vertical-align: middle;
+    margin-right: 0.4rem;
+}
+
+.dlq-row {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+.dlq-pill {
+    padding: 0.35rem 0.7rem;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    background: #f3f4f6;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+}
+.dlq-pill .n { font-weight: 700; }
+.dlq-pill.pending { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
+.dlq-pill.running { background: #dbeafe; border-color: #bfdbfe; color: #1e40af; }
+.dlq-pill.success { background: #d1fae5; border-color: #a7f3d0; color: #065f46; }
+.dlq-pill.failed_permanent { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
+
+.quick-link-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.6rem;
+}
+.quick-link {
+    display: block;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 0.7rem 0.9rem;
+    text-decoration: none;
+    color: var(--esa-navy);
+    transition: all 0.12s;
+}
+.quick-link:hover {
+    border-color: var(--esa-navy);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    text-decoration: none;
+}
+.quick-link .qtitle { font-weight: 600; font-size: 0.88rem; }
+.quick-link .qdesc { font-size: 0.74rem; color: #6b7280; margin-top: 0.15rem; line-height: 1.35; }
+</style>
+
 <div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
-    <h1>Recommendation Engine</h1>
-    <a href="{{ url_for('recommendation_engine.simulator') }}" class="btn">🧪 Simulator</a>
-</div>
-
-<p style="color: #555; max-width: 720px;">
-    Configure what feeds the unit-level discount recommender. Discount plans
-    themselves are managed under
-    <a href="{{ url_for('discount_plans.list_plans') }}">Discount Plans</a>.
-</p>
-
-<div class="form-grid" style="margin-top: 1.25rem;">
-    <div class="card" style="padding: 1rem;">
-        <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Unit types</div>
-        <div style="font-size: 1.8rem; font-weight: 700; color: var(--esa-navy);">{{ unit_type_count }}</div>
-        <div style="font-size: 0.85rem; color: #555;">in mw_dim_unit_type</div>
-    </div>
-    <div class="card" style="padding: 1rem;">
-        <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Excluded unit types</div>
-        <div style="font-size: 1.8rem; font-weight: 700; color: #dc2626;">{{ excluded_count }}</div>
-        <div style="font-size: 0.85rem; color: #555;">globally removed from candidates</div>
-    </div>
-    <div class="card" style="padding: 1rem;">
-        <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Candidate rows</div>
-        <div style="font-size: 1.8rem; font-weight: 700; color: #059669;">{{ "{:,}".format(candidate_count) }}</div>
-        <div style="font-size: 0.85rem; color: #555;">in mw_unit_discount_candidates</div>
-    </div>
-</div>
-
-<!-- ===================================================================== -->
-<!-- Live API Health (last 7 days) -->
-<!-- ===================================================================== -->
-<div style="margin-top: 1.25rem;">
-    <div style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.4rem;">
-        <h3 style="margin: 0; font-size: 1rem; color: var(--esa-navy);">Live API Health <span style="font-weight: 400; color: #6b7280; font-size: 0.8rem;">— last 7 days</span></h3>
-        <a href="{{ url_for('recommendation_engine.feed') }}" style="font-size: 0.78rem;">View Feed →</a>
-    </div>
-    <div class="form-grid">
-        <div class="card" style="padding: 1rem;">
-            <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">API calls</div>
-            <div style="font-size: 1.8rem; font-weight: 700; color: var(--esa-navy);">{{ "{:,}".format(live_total) }}</div>
-            <div style="font-size: 0.85rem; color: #555;">recorded in mw_recommendations_served</div>
-        </div>
-        <div class="card" style="padding: 1rem;">
-            <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Conversion</div>
-            <div style="font-size: 1.8rem; font-weight: 700; color: #059669;">
-                {% if live_total %}{{ "%.1f"|format(100.0 * live_booked / live_total) }}%{% else %}—{% endif %}
-            </div>
-            <div style="font-size: 0.85rem; color: #555;">{{ live_booked }} booked of {{ live_total }}</div>
-        </div>
-        <div class="card" style="padding: 1rem;">
-            <div style="font-size: 0.75rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em;">Zero-pool rate</div>
-            <div style="font-size: 1.8rem; font-weight: 700; color: {% if live_total and (100.0 * live_empty / live_total) >= 10 %}#dc2626{% else %}#b45309{% endif %};">
-                {% if live_total %}{{ "%.1f"|format(100.0 * live_empty / live_total) }}%{% else %}—{% endif %}
-            </div>
-            <div style="font-size: 0.85rem; color: #555;">{{ live_empty }} call(s) saw empty candidate pool</div>
-        </div>
-    </div>
-</div>
-
-<!-- ===================================================================== -->
-<!-- Candidate Filtering -->
-<!-- ===================================================================== -->
-<div class="card" style="margin-top: 1.25rem; padding: 1rem;">
-    <h3 style="margin-top: 0;">Candidate Filtering</h3>
-    <p style="font-size: 0.85rem; color: #666; margin-top: 0;">
-        Rules applied at <strong>candidate build time</strong> to trim which
-        (unit × plan × concession) triples ever reach the recommender. Each
-        filter runs every time the <code>mw_unit_discount_candidates</code>
-        pipeline refreshes.
-    </p>
-    <ul style="line-height: 1.9; margin-top: 0.5rem;">
-        <li>
-            <a href="{{ url_for('recommendation_engine.unit_availability') }}"><strong>Unit Type Availability</strong></a>
-            &mdash; permanently exclude entire unit types (Mailbox, BizPlus, Parking, &hellip;).
-            <span style="font-size: 0.8rem; color: #6b7280;">Currently {{ excluded_count }} excluded.</span>
-        </li>
-        <li style="color: #9ca3af;">
-            <em>More filters coming</em>: per-site overrides, occupancy thresholds,
-            unit-shape / pillar rules.
-        </li>
-    </ul>
-</div>
-
-<!-- ===================================================================== -->
-<!-- Engine Settings — admin-tunable global behaviour -->
-<!-- ===================================================================== -->
-<div class="card" style="margin-top: 1rem; padding: 1rem;">
-    <h3 style="margin-top: 0;">Engine Settings</h3>
-    <p style="font-size: 0.85rem; color: #666; margin-top: 0;">
-        Global tunables for the recommendation engine. Saves take effect within ~60 seconds (no service restart needed). Caller can still override per-request via <code>constraints.*</code> on the API call.
-    </p>
-
-    {% if current_user.can_manage_configs() %}
-    <form method="POST" action="{{ url_for('recommendation_engine.save_settings') }}" style="margin-top: 0.75rem;">
-        {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
-
-        {% set group_titles = {'slot': 'Slot Tuning', 'pricing': 'Pricing', 'pool': 'Pool Composition', 'ops': 'Operational'} %}
-        {% for group_key, group_title in group_titles.items() %}
-            {% set group_specs = settings_specs | selectattr('group', 'equalto', group_key) | list %}
-            {% if group_specs %}
-            <details class="sub-section" open style="margin-top: 0.6rem;">
-                <summary style="font-weight: 600; color: var(--esa-navy);">{{ group_title }}</summary>
-                <div style="margin-top: 0.5rem;">
-                    {% for spec in group_specs %}
-                    <div class="form-group" style="margin-bottom: 0.85rem; padding: 0.5rem 0; border-bottom: 1px dashed #e5e7eb;">
-                        <label for="set_{{ spec.key }}" style="display: block; font-weight: 600; font-size: 0.85rem; color: #1f2937;">
-                            {{ spec.label }}
-                            {% if spec.min_value is not none and spec.max_value is not none %}
-                                <span style="font-weight: 400; color: #6b7280; font-size: 0.7rem;">range {{ spec.min_value | int }}–{{ spec.max_value | int }}</span>
-                            {% endif %}
-                        </label>
-                        {% if spec.type_ == 'bool' %}
-                            <label class="toggle-row" style="margin-top: 0.25rem;">
-                                <input type="checkbox" name="{{ spec.key }}" id="set_{{ spec.key }}"
-                                       {{ 'checked' if settings_values.get(spec.key) else '' }}>
-                                <span style="font-size: 0.85rem; color: #4b5563;">Enabled</span>
-                            </label>
-                        {% else %}
-                            <input type="number" name="{{ spec.key }}" id="set_{{ spec.key }}"
-                                   value="{{ settings_values.get(spec.key) }}"
-                                   {% if spec.min_value is not none %}min="{{ spec.min_value }}"{% endif %}
-                                   {% if spec.max_value is not none %}max="{{ spec.max_value }}"{% endif %}
-                                   step="1" style="max-width: 140px;">
-                        {% endif %}
-                        <div class="hint" style="margin-top: 0.2rem; font-size: 0.75rem; color: #6b7280;">{{ spec.description }}</div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </details>
+    <div>
+        <h1 style="margin: 0; font-size: 1.3rem;">Recommendation Engine</h1>
+        <div style="font-size: 0.78rem; color: #6b7280; margin-top: 0.15rem;">
+            {% if last_served %}
+                Last API call: {{ last_served.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+            {% else %}
+                <em>No API calls recorded yet.</em>
             {% endif %}
-        {% endfor %}
-
-        <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.6rem;">
-            <button type="submit" class="btn">Save Settings</button>
-            <span style="font-size: 0.78rem; color: #6b7280;">Changes propagate to recommender within ~60s.</span>
         </div>
-    </form>
-    {% else %}
-    <p style="margin-top: 0.5rem; color: #b45309; font-size: 0.85rem;">⚠ Read-only — config-management permission required to edit.</p>
-    <ul style="line-height: 1.8;">
-        {% for spec in settings_specs %}
-        <li><strong>{{ spec.label }}</strong>: <code>{{ settings_values.get(spec.key) }}</code></li>
-        {% endfor %}
-    </ul>
-    {% endif %}
+    </div>
+    <div style="display: flex; gap: 0.4rem;">
+        <a href="{{ url_for('recommendation_engine.simulator') }}" class="btn btn-secondary">🧪 Simulator</a>
+        <a href="{{ url_for('recommendation_engine.feed') }}" class="btn">View Feed →</a>
+    </div>
 </div>
 
-<!-- ===================================================================== -->
-<!-- Related controls -->
-<!-- ===================================================================== -->
-<div class="card" style="margin-top: 1rem; padding: 1rem;">
-    <h3 style="margin-top: 0;">Related controls</h3>
-    <ul style="line-height: 1.9;">
-        <li>
-            <a href="{{ url_for('admin.site_billing_config_list') }}"><strong>Site Billing Config</strong></a>
-            &mdash; per-site proration rules (anniversary vs 1st-of-month, late-move-in threshold). Drives how the calculator builds the month-by-month breakdown.
-        </li>
-        <li>
-            <a href="{{ url_for('admin.site_distance') }}"><strong>Site Distances</strong></a>
-            &mdash; nearest-site picker for Slot 2 (Nearest Available). Real km values from GPS; admin can override per-pair.
-        </li>
-        <li>
-            <a href="{{ url_for('discount_plans.list_plans') }}"><strong>Discount Plans</strong></a>
-            &mdash; manage the plans themselves (restrictions, hidden_rate / coupon, distribution channels, periods).
-        </li>
-    </ul>
+<!-- ============================================================ -->
+<!-- Live API health (last 7d)                                     -->
+<!-- ============================================================ -->
+<div class="reco-section-title">
+    <h2>Live API · Last 7 days</h2>
+    <a href="{{ url_for('recommendation_engine.feed') }}">Drill into Feed →</a>
+</div>
+<div class="reco-dash-grid">
+    <div class="reco-stat">
+        <div class="label">API calls</div>
+        <div class="value">{{ "{:,}".format(live_total) }}</div>
+        <div class="sub">{{ live_sessions }} unique session(s)</div>
+    </div>
+    <div class="reco-stat">
+        <div class="label">Conversion</div>
+        <div class="value good">
+            {% if live_total %}{{ "%.1f"|format(100.0 * live_booked / live_total) }}%{% else %}—{% endif %}
+        </div>
+        <div class="sub">{{ live_booked }} booked of {{ live_total }}</div>
+    </div>
+    <div class="reco-stat">
+        <div class="label">Zero-pool rate</div>
+        {% set zero_pct = (100.0 * live_empty / live_total) if live_total else 0 %}
+        <div class="value {% if zero_pct >= 10 %}bad{% elif zero_pct >= 5 %}warn{% else %}good{% endif %}">
+            {% if live_total %}{{ "%.1f"|format(zero_pct) }}%{% else %}—{% endif %}
+        </div>
+        <div class="sub">{{ live_empty }} call(s) saw no candidates</div>
+    </div>
+</div>
+
+{% if channel_breakdown %}
+<div class="card" style="padding: 0.75rem 1rem;">
+    <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.4rem;">Channel breakdown</div>
+    <table class="channel-table">
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th style="text-align: right;">Calls</th>
+                <th style="text-align: right;">Booked</th>
+                <th style="text-align: right;">Conversion</th>
+                <th style="width: 35%;">Volume</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% set max_n = channel_breakdown[0].n if channel_breakdown else 1 %}
+            {% for c in channel_breakdown %}
+            <tr>
+                <td><strong>{{ c.channel }}</strong></td>
+                <td style="text-align: right;">{{ "{:,}".format(c.n) }}</td>
+                <td style="text-align: right;">{{ c.booked }}</td>
+                <td style="text-align: right;">
+                    {% if c.n %}{{ "%.1f"|format(100.0 * c.booked / c.n) }}%{% else %}—{% endif %}
+                </td>
+                <td>
+                    <span class="bar" style="width: {{ (100 * c.n / max_n) | round(0) }}%;"></span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ============================================================ -->
+<!-- Candidate pool health                                         -->
+<!-- ============================================================ -->
+<div class="reco-section-title">
+    <h2>Candidate Pool</h2>
+    <a href="{{ url_for('recommendation_engine.unit_availability') }}">Manage exclusions →</a>
+</div>
+<div class="reco-dash-grid">
+    <div class="reco-stat">
+        <div class="label">Unit types</div>
+        <div class="value">{{ unit_type_count }}</div>
+        <div class="sub">defined in mw_dim_unit_type</div>
+    </div>
+    <div class="reco-stat">
+        <div class="label">Excluded types</div>
+        <div class="value {% if excluded_count > 0 %}warn{% endif %}">{{ excluded_count }}</div>
+        <div class="sub">globally removed from pool</div>
+    </div>
+    <div class="reco-stat">
+        <div class="label">Candidate rows</div>
+        <div class="value good">{{ "{:,}".format(candidate_count) }}</div>
+        <div class="sub">unit × plan × concession triples</div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Lease follow-up DLQ                                           -->
+<!-- ============================================================ -->
+{% if dlq_stats %}
+<div class="reco-section-title">
+    <h2>Lease Follow-up DLQ</h2>
+    <a href="{{ url_for('recommendation_engine.lease_followups') }}">Review jobs →</a>
+</div>
+<div class="dlq-row">
+    {% for status in ['failed_permanent', 'pending', 'running', 'success'] %}
+        {% if status in dlq_stats %}
+        <div class="dlq-pill {{ status }}">
+            <span class="n">{{ dlq_stats[status] }}</span> {{ status.replace('_', ' ') }}
+        </div>
+        {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- ============================================================ -->
+<!-- Quick links                                                   -->
+<!-- ============================================================ -->
+<div class="reco-section-title">
+    <h2>Configuration</h2>
+</div>
+<div class="quick-link-grid">
+    <a class="quick-link" href="{{ url_for('recommendation_engine.settings_page') }}">
+        <div class="qtitle">⚙ Engine Settings</div>
+        <div class="qdesc">Slot tuning, pricing, pool composition, perpetual/ECRI defaults.</div>
+    </a>
+    <a class="quick-link" href="{{ url_for('recommendation_engine.unit_availability') }}">
+        <div class="qtitle">🔒 Unit-Type Availability</div>
+        <div class="qdesc">Exclude entire unit types (Mailbox, BizPlus, &hellip;) from candidates.</div>
+    </a>
+    <a class="quick-link" href="{{ url_for('admin.site_distance') }}">
+        <div class="qtitle">📏 Site Distances</div>
+        <div class="qdesc">Inter-site km grid that drives Slot 2 (Nearest Available).</div>
+    </a>
+    <a class="quick-link" href="{{ url_for('discount_plans.list_plans') }}">
+        <div class="qtitle">🏷 Discount Plans</div>
+        <div class="qdesc">Plans, concessions, hidden rates, distribution channels.</div>
+    </a>
+    <a class="quick-link" href="{{ url_for('admin.site_billing_config_list') }}">
+        <div class="qtitle">📅 Site Billing Config</div>
+        <div class="qdesc">Anniversary vs 1st-of-month proration per site.</div>
+    </a>
 </div>
 {% endblock %}

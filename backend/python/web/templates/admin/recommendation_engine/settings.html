@@ -1,0 +1,499 @@
+{% extends "base.html" %}
+
+{% block title %}Engine Settings - ESA Backend{% endblock %}
+
+{% block content %}
+<style>
+.set-page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.6rem;
+}
+.set-page-header h1 { font-size: 1.3rem; color: var(--esa-navy); margin: 0; }
+.set-page-header p  { margin: 0.2rem 0 0; font-size: 0.82rem; color: #6b7280; max-width: 720px; }
+
+.set-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #fff;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.set-toolbar input[type="search"] {
+    flex: 0 0 280px;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.set-toolbar .change-count {
+    flex: 1;
+    font-size: 0.82rem;
+    color: #6b7280;
+}
+.set-toolbar .change-count.has-changes { color: #059669; font-weight: 600; }
+
+.set-group-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.set-group-header {
+    background: var(--esa-navy);
+    color: #fff;
+    padding: 0.55rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.set-group-header h2 { font-size: 0.92rem; margin: 0; color: #fff; font-weight: 600; }
+.set-group-header .desc { font-size: 0.74rem; color: rgba(255,255,255,0.72); margin-left: 0.4rem; }
+.set-group-header .badge {
+    margin-left: auto;
+    background: rgba(255,255,255,0.16);
+    color: #fff;
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 500;
+}
+
+.set-row {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) 200px 200px;
+    gap: 0.85rem;
+    padding: 0.65rem 1rem;
+    border-bottom: 1px solid #f3f4f6;
+    align-items: start;
+}
+.set-row:last-child { border-bottom: none; }
+.set-row.is-modified { background: #ecfdf5; }
+.set-row.is-non-default { background: #fffbeb; }
+.set-row.is-modified.is-non-default { background: #ecfdf5; }
+.set-row.is-hidden { display: none; }
+
+@media (max-width: 800px) {
+    .set-row { grid-template-columns: 1fr; }
+}
+
+.set-row .label-block .lbl {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: #1f2937;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.set-row .label-block .key {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.7rem;
+    color: #9ca3af;
+    background: #f3f4f6;
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+}
+.set-row .label-block .desc {
+    font-size: 0.78rem;
+    color: #6b7280;
+    margin-top: 0.2rem;
+    line-height: 1.4;
+}
+.set-row .label-block .meta {
+    font-size: 0.7rem;
+    color: #9ca3af;
+    margin-top: 0.3rem;
+    font-style: italic;
+}
+.set-row .label-block .pill {
+    display: inline-block;
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+}
+.set-row .label-block .pill.modified { background: #d1fae5; color: #065f46; }
+.set-row .label-block .pill.non-default { background: #fef3c7; color: #92400e; }
+
+.set-row .input-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: flex-start;
+}
+.set-row input[type="number"] {
+    width: 130px;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+}
+.set-row .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.set-row .range-hint {
+    font-size: 0.7rem;
+    color: #9ca3af;
+}
+
+.set-row .default-block {
+    font-size: 0.78rem;
+    color: #6b7280;
+    line-height: 1.5;
+    padding-top: 0.3rem;
+}
+.set-row .default-block code {
+    background: #f3f4f6;
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.74rem;
+}
+.set-row .reset-link {
+    background: none;
+    border: none;
+    color: var(--esa-navy);
+    cursor: pointer;
+    font-size: 0.74rem;
+    padding: 0;
+    text-decoration: underline;
+    margin-top: 0.2rem;
+    display: block;
+}
+.set-row .reset-link:hover { color: #dc2626; }
+.set-row .reset-link:disabled { color: #d1d5db; cursor: not-allowed; text-decoration: none; }
+
+.set-empty {
+    padding: 2rem;
+    text-align: center;
+    color: #9ca3af;
+    font-size: 0.85rem;
+}
+
+.set-save-bar {
+    position: sticky;
+    bottom: 0;
+    background: #fff;
+    border-top: 2px solid var(--esa-navy);
+    padding: 0.7rem 1rem;
+    margin-top: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    box-shadow: 0 -2px 6px rgba(0,0,0,0.06);
+    z-index: 4;
+}
+.set-save-bar.hidden { display: none; }
+</style>
+
+<div class="set-page-header">
+    <div>
+        <h1>Engine Settings</h1>
+        <p>
+            Tunables that govern slot selection, pricing strictness, pool composition, and perpetual/ECRI behaviour. Saves take effect within ~60 seconds (no service restart). Per-request <code>constraints.*</code> overrides on <code>/api/recommendations</code> still win.
+        </p>
+    </div>
+    <a href="{{ url_for('recommendation_engine.index') }}" class="btn btn-secondary">← Dashboard</a>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <div style="margin-bottom: 0.8rem;">
+            {% for category, message in messages %}
+                <div style="padding: 0.6rem 0.9rem; border-radius: 5px; margin-bottom: 0.4rem;
+                    {% if category == 'error' %}background: #fee2e2; color: #dc2626; border: 1px solid #fecaca;{% endif %}
+                    {% if category == 'success' %}background: #d1fae5; color: #059669; border: 1px solid #a7f3d0;{% endif %}
+                    {% if category == 'info' %}background: #dbeafe; color: #2563eb; border: 1px solid #bfdbfe;{% endif %}
+                ">{{ message }}</div>
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endwith %}
+
+{% if not current_user.can_manage_configs() %}
+<div style="padding: 0.8rem 1rem; background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; border-radius: 5px; margin-bottom: 1rem; font-size: 0.85rem;">
+    ⚠ Read-only mode — config-management permission required to edit values.
+</div>
+{% endif %}
+
+<form method="POST" action="{{ url_for('recommendation_engine.save_settings') }}" id="set-form">
+    {% if csrf_token %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endif %}
+
+    <div class="set-toolbar">
+        <input type="search" id="set-search" placeholder="Filter settings…" autocomplete="off">
+        <span class="change-count" id="set-change-count">No unsaved changes.</span>
+        <button type="button" class="btn btn-secondary" id="set-discard" disabled>Discard</button>
+        <button type="submit" class="btn" id="set-save" disabled>Save changes</button>
+    </div>
+
+    {% set group_meta = {
+        'slot':      {'title': 'Slot Tuning',         'desc': 'Distance, size band, savings thresholds for slots 2 & 3.'},
+        'pricing':   {'title': 'Pricing',             'desc': 'How aggressively to filter low-confidence quotes.'},
+        'pool':      {'title': 'Pool Composition',    'desc': 'Defaults for which units enter the candidate pool.'},
+        'ops':       {'title': 'Operational',         'desc': 'Alerts, integration toggles, audit-impacting flags.'},
+        'perpetual': {'title': 'Perpetual & ECRI',    'desc': 'Defaults for tenant rate uplifts and prepaid leases.'},
+    } %}
+    {% set group_order = ['slot', 'pricing', 'pool', 'ops', 'perpetual'] %}
+
+    {% for group_key in group_order %}
+        {% set group_specs = settings_specs | selectattr('group', 'equalto', group_key) | list %}
+        {% if group_specs %}
+        {% set gm = group_meta.get(group_key, {'title': group_key, 'desc': ''}) %}
+        <div class="set-group-card" data-group="{{ group_key }}">
+            <div class="set-group-header">
+                <h2>{{ gm.title }}</h2>
+                <span class="desc">{{ gm.desc }}</span>
+                <span class="badge">{{ group_specs|length }} setting{{ '' if group_specs|length == 1 else 's' }}</span>
+            </div>
+            <div class="set-group-body">
+                {% for spec in group_specs %}
+                    {% set current_val = settings_values.get(spec.key) %}
+                    {% set default_val = spec.default %}
+                    {% set is_non_default = (current_val != default_val) %}
+                    {% set m = settings_meta.get(spec.key) %}
+                    <div class="set-row {% if is_non_default %}is-non-default{% endif %}"
+                         data-key="{{ spec.key }}"
+                         data-label="{{ spec.label|lower }} {{ spec.key|lower }} {{ spec.description|lower }}">
+                        <div class="label-block">
+                            <div class="lbl">
+                                {{ spec.label }}
+                                <span class="key">{{ spec.key }}</span>
+                                {% if is_non_default %}<span class="pill non-default">non-default</span>{% endif %}
+                                <span class="pill modified" data-modified-pill style="display: none;">modified</span>
+                            </div>
+                            <div class="desc">{{ spec.description }}</div>
+                            {% if m and m.updated_at %}
+                            <div class="meta">
+                                Last changed by <strong>{{ m.updated_by or 'unknown' }}</strong>
+                                at <span class="ts">{{ m.updated_at[:19].replace('T', ' ') }} UTC</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <div class="input-block">
+                            {% if spec.type_ == 'bool' %}
+                                <label class="toggle-row">
+                                    <input type="checkbox"
+                                           name="{{ spec.key }}"
+                                           id="set_{{ spec.key }}"
+                                           data-default="{{ '1' if default_val else '0' }}"
+                                           data-original="{{ '1' if current_val else '0' }}"
+                                           {{ 'checked' if current_val else '' }}
+                                           {% if not current_user.can_manage_configs() %}disabled{% endif %}>
+                                    <span style="font-size: 0.8rem; color: #4b5563;">Enabled</span>
+                                </label>
+                            {% else %}
+                                <input type="number"
+                                       name="{{ spec.key }}"
+                                       id="set_{{ spec.key }}"
+                                       value="{{ current_val }}"
+                                       data-default="{{ default_val }}"
+                                       data-original="{{ current_val }}"
+                                       {% if spec.type_ == 'int' %}step="1"{% else %}step="0.1"{% endif %}
+                                       {% if spec.min_value is not none %}min="{{ spec.min_value }}"{% endif %}
+                                       {% if spec.max_value is not none %}max="{{ spec.max_value }}"{% endif %}
+                                       {% if not current_user.can_manage_configs() %}readonly{% endif %}>
+                                {% if spec.min_value is not none and spec.max_value is not none %}
+                                <span class="range-hint">range: {{ spec.min_value }} – {{ spec.max_value }}</span>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+                        <div class="default-block">
+                            Default:
+                            {% if spec.type_ == 'bool' %}
+                                <code>{{ 'true' if default_val else 'false' }}</code>
+                            {% else %}
+                                <code>{{ default_val }}</code>
+                            {% endif %}
+                            {% if current_user.can_manage_configs() %}
+                            <button type="button" class="reset-link" data-reset="{{ spec.key }}"
+                                {% if not is_non_default %}disabled{% endif %}>
+                                Reset to default
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    {% endfor %}
+
+    <div class="set-empty" id="set-no-match" style="display: none;">
+        No settings match your filter.
+    </div>
+
+    {% if current_user.can_manage_configs() %}
+    <div class="set-save-bar hidden" id="set-save-bar">
+        <strong style="font-size: 0.9rem;" id="set-save-bar-count">0 changes</strong>
+        <span style="color: #6b7280; font-size: 0.8rem;">Saves apply within ~60s; no service restart needed.</span>
+        <span style="flex: 1;"></span>
+        <button type="button" class="btn btn-secondary" id="set-discard-bottom">Discard</button>
+        <button type="submit" class="btn">Save changes</button>
+    </div>
+    {% endif %}
+</form>
+
+<script>
+(function () {
+    'use strict';
+
+    const form = document.getElementById('set-form');
+    if (!form) return;
+
+    const search   = document.getElementById('set-search');
+    const noMatch  = document.getElementById('set-no-match');
+    const countEl  = document.getElementById('set-change-count');
+    const saveBtn  = document.getElementById('set-save');
+    const discardBtn = document.getElementById('set-discard');
+    const saveBar  = document.getElementById('set-save-bar');
+    const saveBarCount = document.getElementById('set-save-bar-count');
+    const discardBottom = document.getElementById('set-discard-bottom');
+
+    const inputs = Array.from(form.querySelectorAll('.set-row input[type="number"], .set-row input[type="checkbox"]'));
+
+    function isModified(inp) {
+        const orig = inp.dataset.original;
+        if (inp.type === 'checkbox') {
+            return (inp.checked ? '1' : '0') !== orig;
+        }
+        // numeric — compare as floats to avoid "5" vs "5.0" false positives
+        const a = parseFloat(inp.value);
+        const b = parseFloat(orig);
+        if (isNaN(a) && isNaN(b)) return false;
+        if (isNaN(a) || isNaN(b)) return true;
+        return Math.abs(a - b) > 1e-6;
+    }
+
+    function refreshRowState(inp) {
+        const row = inp.closest('.set-row');
+        if (!row) return;
+        const modPill = row.querySelector('[data-modified-pill]');
+        const resetBtn = row.querySelector('.reset-link');
+        const mod = isModified(inp);
+        row.classList.toggle('is-modified', mod);
+        if (modPill) modPill.style.display = mod ? '' : 'none';
+
+        // Reset-to-default availability based on CURRENT value (not original)
+        if (resetBtn) {
+            const def = inp.dataset.default;
+            let isDefault;
+            if (inp.type === 'checkbox') {
+                isDefault = (inp.checked ? '1' : '0') === def;
+            } else {
+                isDefault = Math.abs(parseFloat(inp.value) - parseFloat(def)) < 1e-6;
+            }
+            resetBtn.disabled = isDefault;
+        }
+    }
+
+    function refreshChangeCount() {
+        const n = inputs.filter(isModified).length;
+        if (n === 0) {
+            countEl.textContent = 'No unsaved changes.';
+            countEl.classList.remove('has-changes');
+            if (saveBtn) saveBtn.disabled = true;
+            if (discardBtn) discardBtn.disabled = true;
+            if (saveBar) saveBar.classList.add('hidden');
+        } else {
+            const label = `${n} unsaved change${n === 1 ? '' : 's'}`;
+            countEl.textContent = label;
+            countEl.classList.add('has-changes');
+            if (saveBtn) saveBtn.disabled = false;
+            if (discardBtn) discardBtn.disabled = false;
+            if (saveBar) saveBar.classList.remove('hidden');
+            if (saveBarCount) saveBarCount.textContent = label;
+        }
+    }
+
+    inputs.forEach(function (inp) {
+        const evt = inp.type === 'checkbox' ? 'change' : 'input';
+        inp.addEventListener(evt, function () {
+            refreshRowState(inp);
+            refreshChangeCount();
+        });
+        // Initial state pass — flag pre-set non-defaults' reset button correctly
+        refreshRowState(inp);
+    });
+
+    // Reset-to-default buttons
+    form.querySelectorAll('[data-reset]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const key = btn.dataset.reset;
+            const inp = form.querySelector(`#set_${CSS.escape(key)}`);
+            if (!inp) return;
+            const def = inp.dataset.default;
+            if (inp.type === 'checkbox') {
+                inp.checked = def === '1';
+            } else {
+                inp.value = def;
+            }
+            refreshRowState(inp);
+            refreshChangeCount();
+        });
+    });
+
+    // Discard — restore every input to its data-original
+    function discardAll() {
+        inputs.forEach(function (inp) {
+            const orig = inp.dataset.original;
+            if (inp.type === 'checkbox') {
+                inp.checked = orig === '1';
+            } else {
+                inp.value = orig;
+            }
+            refreshRowState(inp);
+        });
+        refreshChangeCount();
+    }
+    if (discardBtn) discardBtn.addEventListener('click', discardAll);
+    if (discardBottom) discardBottom.addEventListener('click', discardAll);
+
+    // Search filter — match against label + key + description
+    function applyFilter() {
+        const q = (search.value || '').trim().toLowerCase();
+        let visibleAny = false;
+        form.querySelectorAll('.set-row').forEach(function (row) {
+            const blob = row.dataset.label || '';
+            const visible = !q || blob.indexOf(q) !== -1;
+            row.classList.toggle('is-hidden', !visible);
+            if (visible) visibleAny = true;
+        });
+        // Hide group cards whose visible-row count is zero
+        form.querySelectorAll('.set-group-card').forEach(function (card) {
+            const anyVisible = card.querySelector('.set-row:not(.is-hidden)') !== null;
+            card.style.display = anyVisible ? '' : 'none';
+        });
+        noMatch.style.display = visibleAny ? 'none' : '';
+    }
+    search.addEventListener('input', applyFilter);
+
+    // Warn before navigating away with unsaved changes
+    let _submitting = false;
+    form.addEventListener('submit', function () { _submitting = true; });
+    window.addEventListener('beforeunload', function (e) {
+        if (_submitting) return;
+        if (inputs.some(isModified)) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+
+    refreshChangeCount();
+}());
+</script>
+{% endblock %}
