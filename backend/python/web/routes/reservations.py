@@ -532,7 +532,7 @@ def _reservation_soap_call(site_code, operation, params, result_tag="RT",
 
 @reservations_bp.route('/reserve', methods=['POST'])
 @require_auth
-@require_api_scope('reservations:write')
+@require_api_scope(('recommender:write', 'reservations:write'))
 @rate_limit_api(max_requests=10, window_seconds=60)
 def reservation_reserve():
     """
@@ -1671,7 +1671,7 @@ _EVENT_STATUS_MAP = {
 
 @reservations_bp.route('/track', methods=['POST'])
 @require_auth
-@require_api_scope('reservations:track')
+@require_api_scope(('recommender:track', 'reservations:track'))
 @rate_limit_api(max_requests=30, window_seconds=60)
 def reservation_track():
     """
@@ -1849,7 +1849,7 @@ def reservation_track():
 
 @reservations_bp.route('/track/event', methods=['PUT'])
 @require_auth
-@require_api_scope('reservations:track')
+@require_api_scope(('recommender:track', 'reservations:track'))
 @rate_limit_api(max_requests=30, window_seconds=60)
 def reservation_track_event():
     """
@@ -1962,7 +1962,7 @@ def reservation_track_event():
 
 @reservations_bp.route('/track/batch', methods=['POST'])
 @require_auth
-@require_api_scope('reservations:track')
+@require_api_scope(('recommender:track', 'reservations:track'))
 @rate_limit_api(max_requests=5, window_seconds=60)
 def reservation_track_batch():
     """
@@ -2188,7 +2188,7 @@ _COST_VARIANTS = {
 
 @reservations_bp.route('/move-in/cost')
 @require_auth
-@require_api_scope('reservations:read')
+@require_api_scope(('recommender:read', 'reservations:read'))
 @rate_limit_api(max_requests=30, window_seconds=60)
 def move_in_cost():
     """
@@ -2386,7 +2386,7 @@ def move_in_cost():
 
 @reservations_bp.route('/move-in', methods=['POST'])
 @require_auth
-@require_api_scope('reservations:write')
+@require_api_scope(('recommender:write', 'reservations:write'))
 @rate_limit_api(max_requests=5, window_seconds=60)
 def move_in_reservation():
     """

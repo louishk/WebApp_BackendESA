@@ -33,7 +33,10 @@ API_SCOPES = {
     'reservation_fees:write': 'Create/update/delete per-site reservation fees',
     'billing:read': 'Read billing data (tax rates, charges, ledgers, payments)',
     'billing:write': 'Write billing operations (add charges, apply payments, refunds)',
-    'recommender': 'POST /api/recommendations — chatbot/booking quote engine',
+    'recommender': 'Legacy alias of recommender:read (kept for backward compat)',
+    'recommender:read': 'Recommendation engine read — POST /api/recommendations + GET /api/reservations/move-in/cost',
+    'recommender:write': 'Recommendation engine write — POST /api/reservations/reserve + POST /api/reservations/move-in (idempotent + perpetual/prepay orchestration)',
+    'recommender:track': 'Recommendation engine outcome tracking — POST/PUT /api/reservations/track*',
 }
 
 # Defaults

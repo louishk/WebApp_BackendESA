@@ -64,7 +64,11 @@ KNOWN_API_SCOPES = [
     'inventory:read',
     'reservations:read',
     'reservations:write',
-    'recommender',          # POST /api/recommendations — chatbot key gets this
+    'reservations:track',
+    'recommender',           # legacy: alias of recommender:read
+    'recommender:read',      # POST /api/recommendations + GET /reservations/move-in/cost
+    'recommender:write',     # POST /reservations/reserve + POST /reservations/move-in
+    'recommender:track',     # POST/PUT /reservations/track*
 ]
 
 
@@ -313,13 +317,17 @@ def require_api_scope(scope):
     - Session and JWT users: always pass (they use RBAC roles instead).
     - API key users: must have the scope in their key's scopes list.
 
+    `scope` can be a single string or a list/tuple — when a list is given,
+    any-of semantics apply (the caller's key needs at least one of them).
+    The list form is used for endpoints that accept both a new scope and
+    a legacy alias so existing keys keep working.
+
     Usage:
-        @app.route('/api/discount-plans')
-        @require_auth
         @require_api_scope('discount_plans:read')
-        def list_plans():
-            ...
+        @require_api_scope(('recommender:write', 'reservations:write'))
     """
+    accepted = (scope,) if isinstance(scope, str) else tuple(scope)
+
     def decorator(f):
         @wraps(f)
         def decorated(*args, **kwargs):
@@ -327,10 +335,14 @@ def require_api_scope(scope):
             # or a list of scopes for API key users
             scopes = getattr(g, 'api_key_scopes', None)
             if scopes is not None:
-                if scope not in scopes:
+                if not any(s in scopes for s in accepted):
                     return jsonify({
                         'error': 'Forbidden',
-                        'message': f'API key missing required scope: {scope}'
+                        'message': (
+                            'API key missing required scope: '
+                            + (accepted[0] if len(accepted) == 1
+                               else 'any of ' + ', '.join(accepted))
+                        )
                     }), 403
             return f(*args, **kwargs)
         return decorated

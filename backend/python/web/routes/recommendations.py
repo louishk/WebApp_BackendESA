@@ -370,7 +370,7 @@ def _serialise_slot(
 
 @recommendations_bp.route('', methods=['POST'])
 @require_auth
-@require_api_scope('recommender')
+@require_api_scope(('recommender:read', 'recommender'))
 @rate_limit_api(max_requests=120)
 def recommend():
     """

@@ -389,12 +389,13 @@ function copyField(elementId) {
 
 const API_ENDPOINTS = {
     "🤖 Chatbot Booking Flow (Recommendation Engine)": {
-        "description": "Purpose-built end-to-end booking pipeline for the chatbot. Quote → reserve → confirm price → move-in. Pricing is computed by the recommender, perpetual+prepay orchestration is automatic, and session_id/customer_id flow through every call so outcomes link back to the recommendation that produced them.",
-        "read_scope": "recommender",
-        "write_scope": "reservations:write",
+        "description": "Purpose-built end-to-end booking pipeline for the chatbot. Quote → reserve → confirm price → move-in. Pricing is computed by the recommender, perpetual+prepay orchestration is automatic, and session_id/customer_id flow through every call so outcomes link back to the recommendation that produced them. Use the dedicated recommender:read/write/track scopes — these endpoints also still accept the legacy reservations:* / recommender scopes for backward compatibility.",
+        "read_scope": "recommender:read",
+        "write_scope": "recommender:write",
+        "track_scope": "recommender:track",
         "endpoints": [
             {
-                "method": "POST", "path": "/api/recommendations", "scope": "recommender",
+                "method": "POST", "path": "/api/recommendations", "scope": "recommender:read",
                 "description": "Step 1 · Quote. Returns a 3-slot envelope (Best Match / Best Alternative / Best Price). Stateful: chain turns via context.previous_request_id + picked_slot.",
                 "body": {
                     "mode":            {"type": "string",  "required": false, "description": "'recommendation' (default, 3-slot envelope) or 'quote' (single unit; requires filters.unit_id)"},
@@ -442,7 +443,7 @@ const API_ENDPOINTS = {
                 }
             },
             {
-                "method": "POST", "path": "/api/reservations/reserve", "scope": "reservations:write",
+                "method": "POST", "path": "/api/reservations/reserve", "scope": "recommender:write",
                 "description": "Step 2 · Hold the unit (creates tenant + reservation in SiteLink). Pass session_id + customer_id from /recommendations so the move-in outcome can link back to the slot the customer picked.",
                 "body": {
                     "site_code":    {"type": "string",  "required": true,  "description": "Location code (e.g. LSETUP)"},
@@ -465,7 +466,7 @@ const API_ENDPOINTS = {
                 "example_response": {"success": true, "site_code": "LSETUP", "unit_id": 106155, "tenant_id": "1109544", "waiting_id": "848757", "global_waiting_num": "809363726", "message": "Reservation created"}
             },
             {
-                "method": "GET", "path": "/api/reservations/move-in/cost", "scope": "reservations:read",
+                "method": "GET", "path": "/api/reservations/move-in/cost", "scope": "recommender:read",
                 "description": "Step 3 · Confirm price (SOAP-truth). Bot calls this right before charging the customer. Authoritative number = `total`.",
                 "params": {
                     "site_code":     {"type": "string",  "required": true,  "description": "Location code"},
@@ -488,7 +489,7 @@ const API_ENDPOINTS = {
                 }
             },
             {
-                "method": "POST", "path": "/api/reservations/move-in", "scope": "reservations:write",
+                "method": "POST", "path": "/api/reservations/move-in", "scope": "recommender:write",
                 "description": "Step 4 · Convert reservation → move-in. Pass `Idempotency-Key` header (UUID per booking attempt) to safely retry. For perpetual+prepay plans the middleware orchestrates SOAP follow-ups (PaymentSimpleCash + ScheduleTenantRateChange) — bot just passes the single payment_amount from /move-in/cost.",
                 "body": {
                     "site_code":      {"type": "string",  "required": true,  "description": "Location code"},
@@ -512,7 +513,7 @@ const API_ENDPOINTS = {
                 }
             },
             {
-                "method": "POST", "path": "/api/reservations/track", "scope": "reservations:track",
+                "method": "POST", "path": "/api/reservations/track", "scope": "recommender:track",
                 "description": "Outcome tracking · Upsert an external reservation record (by site_code + waiting_id). Use to capture chatbot-originated reservations for analytics + outcome reconciliation.",
                 "body": {
                     "site_code":         {"type": "string",  "required": true,  "description": "Location code"},
@@ -538,7 +539,7 @@ const API_ENDPOINTS = {
                 "example_response": {"success": true, "id": 123, "event_type": "reservation"}
             },
             {
-                "method": "PUT", "path": "/api/reservations/track/event", "scope": "reservations:track",
+                "method": "PUT", "path": "/api/reservations/track/event", "scope": "recommender:track",
                 "description": "Outcome tracking · Push a lifecycle event (move_in / cancellation / expiry) against a tracked reservation.",
                 "body": {
                     "site_code":   {"type": "string", "required": true,  "description": "Location code"},
@@ -549,7 +550,7 @@ const API_ENDPOINTS = {
                 "example_response": {"success": true, "waiting_id": 848768, "status": "moved_in", "moved_in_at": "2026-03-18T10:30:00"}
             },
             {
-                "method": "POST", "path": "/api/reservations/track/batch", "scope": "reservations:track",
+                "method": "POST", "path": "/api/reservations/track/batch", "scope": "recommender:track",
                 "description": "Outcome tracking · Batch import reservation records (max 100 per call, 5 req/min).",
                 "body": {
                     "records": {"type": "array", "required": true, "description": "Array of reservation objects (same schema as /track)"}
@@ -989,6 +990,20 @@ const USER_SCOPES = new Set({{ api_key.scopes | tojson if api_key and api_key.sc
 const KEY_PREFIX = "{{ 'esa_' + api_key.key_id if api_key else 'esa_xxxxxxxx' }}";
 const BASE_URL = "https://backend.extraspace.com.sg";
 
+// Scope aliases — chatbot-flow endpoints accept either the new dedicated
+// recommender:* scope or the legacy scope. The docs filter must show the
+// endpoint to a key that holds either side.
+const SCOPE_ALIASES = {
+    "recommender:read":  ["recommender", "reservations:read"],
+    "recommender:write": ["reservations:write"],
+    "recommender:track": ["reservations:track"],
+};
+function userHasScope(scope) {
+    if (USER_SCOPES.has(scope)) return true;
+    const aliases = SCOPE_ALIASES[scope] || [];
+    return aliases.some(a => USER_SCOPES.has(a));
+}
+
 function buildCurl(endpoint) {
     const key = KEY_PREFIX + ".your_secret_here";
     const url = BASE_URL + endpoint.path;
@@ -1103,16 +1118,17 @@ function buildApiReference() {
 
     for (const [groupName, groupDef] of Object.entries(API_ENDPOINTS)) {
         // Filter endpoints to only those the user has the scope for
-        const visibleEndpoints = groupDef.endpoints.filter(ep => USER_SCOPES.has(ep.scope));
+        // (or holds a legacy alias that the route still accepts).
+        const visibleEndpoints = groupDef.endpoints.filter(ep => userHasScope(ep.scope));
         if (visibleEndpoints.length === 0) continue;
 
         anyRendered = true;
         const groupId = "api-group-" + groupIndex;
         groupIndex++;
 
-        const scopeBadges = [groupDef.read_scope, groupDef.write_scope]
+        const scopeBadges = [groupDef.read_scope, groupDef.write_scope, groupDef.track_scope]
             .filter(Boolean)
-            .filter(s => USER_SCOPES.has(s))
+            .filter(s => userHasScope(s))
             .map(s => {
                 const cls = s.endsWith(":write") ? "scope-write" : "scope-read";
                 return `<span class="scope-badge ${cls}">${esc(s)}</span>`;
