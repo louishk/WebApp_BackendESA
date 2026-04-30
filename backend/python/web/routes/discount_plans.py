@@ -363,6 +363,18 @@ def _build_plan_from_form(form, plan=None, config_options=None):
     plan.hidden_rate = form.get('hidden_rate') == 'on'
     plan.coupon_code = (form.get('coupon_code') or '').strip().upper() or None
     plan.discount_perpetual = form.get('discount_perpetual') == 'on'
+    # Prepayment + ECRI override (parsed only when value is a real number).
+    pp_raw = (form.get('prepayment_months') or '').strip()
+    plan.prepayment_months = int(pp_raw) if pp_raw.isdigit() and int(pp_raw) > 0 else None
+    ecri_raw = (form.get('post_prepay_ecri_pct') or '').strip()
+    if ecri_raw:
+        try:
+            v = float(ecri_raw)
+            plan.post_prepay_ecri_pct = v if 0 <= v <= 50 else None
+        except ValueError:
+            plan.post_prepay_ecri_pct = None
+    else:
+        plan.post_prepay_ecri_pct = None
     plan.switch_to_us = _validate_config_value(form.get('switch_to_us', '').strip(), 'switch_to_us') or 'Not Eligible'
     plan.referral_program = _validate_config_value(form.get('referral_program', '').strip(), 'referral_program') or 'Not Eligible'
     # Distribution channel (multi-choice checkboxes, stored comma-separated, validated against config)

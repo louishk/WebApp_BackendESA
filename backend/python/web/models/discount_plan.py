@@ -94,6 +94,20 @@ class DiscountPlan(Base):
                 "the rate write so this flag eventually becomes a hint to the bot "
                 "rather than a manual workaround indicator.",
     )
+    # Phase 4 Part 2 — perpetual + prepay orchestration.
+    prepayment_months = Column(
+        Integer, nullable=True,
+        comment="N months prepaid upfront at the discounted rate. NULL = no prepay required. "
+                "When set, /api/reservations/move-in pushes the surplus via SOAP "
+                "PaymentSimpleCash so SiteLink's dPaidThru advances by exactly N months. "
+                "Schedules the post-prepay rate change at move_in_date + N.",
+    )
+    post_prepay_ecri_pct = Column(
+        Numeric(5, 2), nullable=True,
+        comment="Plan-level override for the ECRI uplift % applied at the end of the "
+                "prepay window. NULL = use the global ecri_default_pct from "
+                "mw_recommender_settings.",
+    )
     available_for_chatbot = Column(Boolean, default=False, comment="Available for chatbot promotion")
     chatbot_notes = Column(String(255), comment="ChatBot availability notes")
     switch_to_us = Column(String(50), default='Not Eligible', comment="Switch-To-Us eligibility")
@@ -197,6 +211,8 @@ class DiscountPlan(Base):
             'hidden_rate': self.hidden_rate,
             'coupon_code': self.coupon_code,
             'discount_perpetual': bool(self.discount_perpetual),
+            'prepayment_months': self.prepayment_months,
+            'post_prepay_ecri_pct': float(self.post_prepay_ecri_pct) if self.post_prepay_ecri_pct is not None else None,
             'available_for_chatbot': self.available_for_chatbot,
             'chatbot_notes': self.chatbot_notes,
             'switch_to_us': self.switch_to_us,

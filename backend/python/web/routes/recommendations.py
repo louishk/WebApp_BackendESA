@@ -195,7 +195,81 @@ def _serialise_slot(
         # has been applied to every month (operator clicks "Apply Tenant's
         # Rate" at move-in to enforce it in SiteLink).
         'discount_perpetual': bool(row.discount_perpetual),
+        # Phase 4 Part 2 — orchestration metadata.
+        'prepayment_months': row.prepayment_months,
+        'post_prepay_uplift_pct': (
+            float(row.post_prepay_ecri_pct) if row.post_prepay_ecri_pct is not None else None
+        ),
     }
+
+    # Phase 4 Part 2 — perpetual+prepay disclosure block.
+    # Computes total_due_at_movein and the post-prepay rate so the bot can
+    # quote both today's payment and the future rate change in one shot.
+    perpetual_extras: Dict[str, Any] = {}
+    customer_disclosure: Optional[Dict[str, Any]] = None
+    if row.discount_perpetual and row.prepayment_months and quote and quote.breakdown:
+        try:
+            from web.services import recommender_settings as _rs
+            ecri_pct = (
+                float(row.post_prepay_ecri_pct)
+                if row.post_prepay_ecri_pct is not None
+                else float(_rs.get_setting('ecri_default_pct', db_session) or 5.0)
+            )
+        except Exception:
+            ecri_pct = 5.0
+
+        # Discounted recurring monthly = a non-month-1 line's `total` (rent + ins + tax)
+        recurring = None
+        for mb in quote.breakdown[1:]:
+            recurring = mb
+            break
+        if recurring is None:
+            recurring = quote.breakdown[0]
+
+        # Effective recurring rate (rent only, post-discount, pre-tax)
+        eff_rate = (recurring.rent or Decimal('0')) - (recurring.discount or Decimal('0'))
+        rate_after = (eff_rate * (Decimal('1') + Decimal(str(ecri_pct)) / Decimal('100'))).quantize(Decimal('0.01'))
+
+        # total_due_at_movein = move-in cost (= breakdown[0].total)
+        # PLUS (prepayment_months - 1) full recurring periods.
+        first_total = quote.breakdown[0].total or Decimal('0')
+        per_period = recurring.total or Decimal('0')
+        prepay_extra = per_period * (Decimal(row.prepayment_months) - Decimal('1'))
+        total_due = (first_total + prepay_extra).quantize(Decimal('0.01'))
+
+        from datetime import timedelta
+        from dateutil.relativedelta import relativedelta as _relativedelta
+        try:
+            change_date = quote.breakdown[0].billing_date + _relativedelta(months=row.prepayment_months)
+        except Exception:
+            change_date = None
+
+        perpetual_extras['total_due_at_movein'] = _dec_to_num(total_due)
+        perpetual_extras['rate_during_prepay'] = _dec_to_num(eff_rate)
+        perpetual_extras['rate_after_prepay'] = _dec_to_num(rate_after)
+        perpetual_extras['rate_change_date'] = change_date.isoformat() if change_date else None
+
+        # Customer-facing disclosure for the bot to read verbatim.
+        fine_print = [
+            f"Pay ${float(total_due):.2f} today to lock ${float(eff_rate):.2f}/month for {row.prepayment_months} months.",
+        ]
+        if change_date:
+            fine_print.append(
+                f"After {change_date.isoformat()}, your rate adjusts to "
+                f"${float(rate_after):.2f}/month ({ecri_pct:g}% increase)."
+            )
+        fine_print.append("You can move out at any time after move-in.")
+        customer_disclosure = {
+            'fine_print': fine_print,
+            'fine_print_template': {
+                'amount':      _dec_to_num(total_due),
+                'lock_rate':   _dec_to_num(eff_rate),
+                'lock_months': row.prepayment_months,
+                'from_date':   change_date.isoformat() if change_date else None,
+                'new_rate':    _dec_to_num(rate_after),
+                'uplift_pct':  ecri_pct,
+            },
+        }
 
     return {
         'slot': slot_num,
@@ -228,7 +302,8 @@ def _serialise_slot(
         'headlines': _build_headlines(quote),
         'terms': terms_block,
         'insurance': insurance_block,
-        'pricing': _serialise_quote(quote),
+        'pricing': {**_serialise_quote(quote), **perpetual_extras},
+        'customer_disclosure': customer_disclosure,
     }
 
 

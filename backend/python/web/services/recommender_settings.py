@@ -95,6 +95,48 @@ _SETTINGS_SPEC: list[SettingSpec] = [
         description='Audit promotes to ERROR (red) when Tactical/Seasonal plans have no promo period. Evergreen / stdrate-override are exempt.',
         group='ops',
     ),
+
+    # ───────── Perpetual Discount Orchestration ─────────
+    # Defaults consumed by the /api/reservations/move-in handler when a
+    # plan doesn't carry its own override. Two master switches gate the
+    # SOAP follow-up calls so admins can flip them independently after
+    # watching the audit log.
+    SettingSpec(
+        key='ecri_default_offset_months', type_='int', default=12,
+        label='ECRI default offset (months from move-in)',
+        description='When no plan-level override is set, schedule the ECRI rate change at move_in_date + this many months. Matches the typical 12-month renewal cadence.',
+        group='perpetual', min_value=1, max_value=60,
+    ),
+    SettingSpec(
+        key='ecri_default_pct', type_='float', default=5.0,
+        label='ECRI default uplift (%)',
+        description='Default % bump applied to the lease\'s effective rate when scheduling the future rate change. Per-plan post_prepay_ecri_pct overrides this.',
+        group='perpetual', min_value=0, max_value=50,
+    ),
+    SettingSpec(
+        key='ecri_min_offset_months', type_='int', default=6,
+        label='ECRI minimum offset floor (months)',
+        description='Hard floor — never schedule a rate change earlier than this many months from move-in, even if a plan\'s prepayment_months is shorter.',
+        group='perpetual', min_value=1, max_value=12,
+    ),
+    SettingSpec(
+        key='ecri_auto_schedule_enabled', type_='bool', default=False,
+        label='Enable auto-schedule of ECRI at move-in (master switch)',
+        description='When ON, every successful /move-in enqueues a ScheduleTenantRateChange_v2 SOAP call to set up the future ECRI. When OFF, the orchestrator only logs intent — manual ops workflow continues. Flip this first, payment automation second.',
+        group='perpetual',
+    ),
+    SettingSpec(
+        key='perpetual_auto_payment_enabled', type_='bool', default=False,
+        label='Enable auto-prepayment push for perpetual plans (master switch)',
+        description='When ON, perpetual+prepay plans push the prepay surplus via PaymentSimpleCash after MoveIn so dPaidThru advances by prepayment_months. When OFF, the bot can still quote the prepay total but the surplus stays as a credit balance until ops applies it manually.',
+        group='perpetual',
+    ),
+    SettingSpec(
+        key='move_in_cost_use_soap_fallback', type_='bool', default=True,
+        label='/move-in/cost — call SOAP for SOAP-truth confirmation',
+        description='When ON, the /move-in/cost endpoint calls SOAP MoveInCostRetrieveWithDiscount_Reservation_v4 as the right-before-charging confirmation, then adds the prepayment add-on from our calculator. When OFF, answers entirely from the calculator (saves one SOAP round-trip per booking; only safe when calculator is fully validated).',
+        group='perpetual',
+    ),
 ]
 
 # Lookup helper

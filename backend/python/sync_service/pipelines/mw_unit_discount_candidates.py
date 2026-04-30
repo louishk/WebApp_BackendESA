@@ -68,6 +68,10 @@ _INSERT_COLS: Tuple[str, ...] = (
     # of the lease, not just iInMonth=1, because operations will manually
     # set Tenant's Rate at move-in (Part 2 will automate this).
     'discount_perpetual',
+    # Phase 4 Part 2 — perpetual + prepay orchestration. Mirrors the plan-
+    # level fields onto the candidate row so the recommender doesn't need
+    # to re-join mw_discount_plans at quote time.
+    'prepayment_months', 'post_prepay_ecri_pct',
 )
 
 
@@ -142,6 +146,7 @@ class UnitDiscountCandidatesPipeline(BasePipeline):
                        period_start, period_end,
                        move_in_range, lock_in_period, payment_terms,
                        distribution_channel, hidden_rate, coupon_code, discount_perpetual,
+                       prepayment_months, post_prepay_ecri_pct,
                        discount_type, discount_numeric, discount_segmentation,
                        is_active, is_stdrate_override
                 FROM mw_discount_plans
@@ -649,6 +654,8 @@ def _compose_candidates(
                         'hidden_rate': plan.get('hidden_rate'),
                         'coupon_code': plan.get('coupon_code'),
                         'discount_perpetual': bool(plan.get('discount_perpetual')),
+                        'prepayment_months': plan.get('prepayment_months'),
+                        'post_prepay_ecri_pct': plan.get('post_prepay_ecri_pct'),
                         'discount_type': plan.get('discount_type'),
                         'discount_numeric': plan.get('discount_numeric'),
                         'discount_segmentation': plan.get('discount_segmentation'),
@@ -789,6 +796,8 @@ def _compose_candidates(
                         'hidden_rate': plan.get('hidden_rate'),
                         'coupon_code': plan.get('coupon_code'),
                         'discount_perpetual': bool(plan.get('discount_perpetual')),
+                        'prepayment_months': plan.get('prepayment_months'),
+                        'post_prepay_ecri_pct': plan.get('post_prepay_ecri_pct'),
                         'discount_type': plan.get('discount_type'),
                         'discount_numeric': plan.get('discount_numeric'),
                         'discount_segmentation': plan.get('discount_segmentation'),

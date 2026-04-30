@@ -83,6 +83,9 @@ class CandidateRow:
     lock_in_period: Optional[str] = None          # raw string fallback
     # Phase 4 Part 1 — operator-applied perpetual intent.
     discount_perpetual: bool = False
+    # Phase 4 Part 2 — orchestration parameters.
+    prepayment_months: Optional[int] = None
+    post_prepay_ecri_pct: Optional[Decimal] = None
 
 
 class ValidationError(ValueError):
@@ -476,6 +479,8 @@ def _build_candidate_row(r: Any) -> CandidateRow:
         promo_valid_until=r.get('promo_valid_until'),
         lock_in_period=r.get('lock_in_period') or None,
         discount_perpetual=bool(r.get('discount_perpetual')),
+        prepayment_months=int(r['prepayment_months']) if r.get('prepayment_months') is not None else None,
+        post_prepay_ecri_pct=_dec(r.get('post_prepay_ecri_pct')),
     )
 
 
@@ -592,7 +597,7 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
             in_month, prepay, prepaid_months,
             concession_name, size_sqft, lock_in_months,
             payment_terms, lock_in_period, promo_valid_until,
-            discount_perpetual
+            discount_perpetual, prepayment_months, post_prepay_ecri_pct
         FROM mw_unit_discount_candidates
         WHERE {where_sql}
         ORDER BY unit_id, effective_rate ASC NULLS LAST

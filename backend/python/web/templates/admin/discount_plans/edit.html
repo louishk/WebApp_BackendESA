@@ -600,6 +600,31 @@
                             With this flag on, the recommender quotes the discounted price every month — matching what
                             the customer will actually pay. Leave off for true first-month-only promos.
                         </div>
+                        <div style="margin-top: 0.6rem; padding-left: 0.4rem; border-left: 2px solid #e5e7eb;">
+                            <label style="font-weight: 500;">Prepayment months
+                                <input type="number" name="prepayment_months" id="prepayment_months"
+                                       min="1" max="60" step="1"
+                                       value="{{ plan.prepayment_months or '' if plan else '' }}"
+                                       placeholder="e.g. 6"
+                                       style="width: 5rem; margin-left: 0.4rem;">
+                            </label>
+                            <div class="hint" style="margin: 0.2rem 0 0.5rem;">
+                                Customer prepays N months upfront at the discounted rate. Leave blank for open-ended perpetual (no prepay).
+                                The /move-in handler will push the surplus via SOAP <code>PaymentSimpleCash</code> so SiteLink's
+                                <code>dPaidThru</code> advances by exactly N months.
+                            </div>
+                            <label style="font-weight: 500;">Post-prepay ECRI uplift (%)
+                                <input type="number" name="post_prepay_ecri_pct" id="post_prepay_ecri_pct"
+                                       min="0" max="50" step="0.1"
+                                       value="{{ plan.post_prepay_ecri_pct if plan and plan.post_prepay_ecri_pct is not none else '' }}"
+                                       placeholder="default"
+                                       style="width: 5rem; margin-left: 0.4rem;">
+                            </label>
+                            <div class="hint" style="margin: 0.2rem 0;">
+                                Plan-level override for the rate increase scheduled at the end of the prepay window.
+                                Leave blank to use the global default from <a href="{{ url_for('recommendation_engine.index') }}">Recommendation Engine settings</a>.
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Switch To Us</label>
