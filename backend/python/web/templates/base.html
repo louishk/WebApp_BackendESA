@@ -342,11 +342,27 @@
         <a href="{{ url_for('reservation_fees.page') }}" class="{{ 'active' if request.endpoint and 'reservation_fees' in request.endpoint else '' }}">Reservation Fees</a>
         {% endif %}
         {% if current_user.can_access_smart_lock() %}
-        <a href="{{ url_for('tools.smart_lock_keypads') }}" class="{{ 'active' if request.endpoint and 'smart_lock' in request.endpoint else '' }}">Smart Lock</a>
+        <a href="{{ url_for('tools.smart_lock_bridges') }}" class="{{ 'active' if request.endpoint and 'smart_lock' in request.endpoint else '' }}">Smart Lock</a>
         {% endif %}
         {% if current_user.can_access_scheduler() %}
         <a href="{{ url_for('orchestrator_ui.dashboard') }}" class="{{ 'active' if request.endpoint and 'orchestrator_ui' in request.endpoint else '' }}">Orchestrator</a>
         {% endif %}
+    </div>
+    {% endif %}
+
+    {# --- Recommendation Engine tertiary navbar --- #}
+    {% if request.endpoint and 'recommendation_engine' in request.endpoint %}
+    <div class="sub-navbar" style="background: #f0f5fa; border-top: 1px solid #d0dde8;">
+        <a href="{{ url_for('recommendation_engine.index') }}"
+           class="{{ 'active' if request.endpoint in ('recommendation_engine.index', 'recommendation_engine.save_settings') else '' }}">Settings</a>
+        <a href="{{ url_for('recommendation_engine.simulator') }}"
+           class="{{ 'active' if request.endpoint and request.endpoint.startswith('recommendation_engine.simulator') else '' }}">Simulator</a>
+        <a href="{{ url_for('recommendation_engine.unit_availability') }}"
+           class="{{ 'active' if request.endpoint and 'unit_availability' in request.endpoint else '' }}">Unit Availability</a>
+        <a href="{{ url_for('recommendation_engine.site_distance') }}"
+           class="{{ 'active' if request.endpoint and 'site_distance' in request.endpoint else '' }}">Site Distance</a>
+        <a href="{{ url_for('recommendation_engine.lease_followups') }}"
+           class="{{ 'active' if request.endpoint and 'lease_followup' in request.endpoint else '' }}">Lease Follow-ups</a>
     </div>
     {% endif %}
 
@@ -374,6 +390,7 @@
     {# --- Level 2: Smart Lock --- #}
     {% if request.endpoint and 'smart_lock' in request.endpoint %}
     <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
+        <a href="{{ url_for('tools.smart_lock_bridges') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_bridges' else '' }}">Bridges</a>
         <a href="{{ url_for('tools.smart_lock_keypads') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_keypads' else '' }}">Keypads</a>
         <a href="{{ url_for('tools.smart_lock_padlocks') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_padlocks' else '' }}">Padlocks</a>
         <a href="{{ url_for('tools.smart_lock_assignments') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_assignments' else '' }}">Unit Assignments</a>

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Lease Follow-ups - Recommendation Engine{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Lease Follow-ups</h1>
+    <a href="{{ url_for('recommendation_engine.index') }}" class="btn">← Back</a>
+</div>
+
+<p style="color: #555; max-width: 760px;">
+    Post-MoveIn SOAP follow-up jobs queued by <code>/api/reservations/move-in</code>.
+    Pending jobs are drained by the worker every 10s with exponential backoff.
+    Jobs that fail 5× become <strong>failed_permanent</strong> and need manual review.
+</p>
+
+<div class="form-grid" style="margin-top: 1rem; margin-bottom: 1.25rem;">
+    {% for status, color in [('pending', '#3b82f6'), ('running', '#a855f7'), ('success', '#16a34a'), ('failed_permanent', '#dc2626')] %}
+    <div class="card" style="padding: 0.75rem;">
+        <div style="font-size: 0.7rem; color: #888; text-transform: uppercase;">{{ status.replace('_', ' ') }}</div>
+        <div style="font-size: 1.6rem; font-weight: 700; color: {{ color }};">{{ stats.get(status, 0) }}</div>
+    </div>
+    {% endfor %}
+</div>
+
+<table class="data-table" style="font-size: 0.78rem;">
+    <thead>
+        <tr>
+            <th>id</th><th>created</th><th>ledger</th><th>site</th><th>action</th>
+            <th>status</th><th>tries</th><th>next attempt</th><th>last error</th><th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr style="background: {%- if r.status == 'failed_permanent' -%}#fef2f2{%- elif r.status == 'success' -%}#f0fdf4{%- elif r.status == 'pending' -%}#eff6ff{%- else -%}white{%- endif -%};">
+            <td>{{ r.id }}</td>
+            <td style="white-space: nowrap;">{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }}</td>
+            <td>{{ r.ledger_id }}</td>
+            <td>{{ r.site_code }}</td>
+            <td><code>{{ r.action_type }}</code></td>
+            <td><strong style="color: {%- if r.status == 'failed_permanent' -%}#dc2626{%- elif r.status == 'success' -%}#16a34a{%- elif r.status == 'pending' -%}#3b82f6{%- else -%}#888{%- endif -%};">{{ r.status }}</strong></td>
+            <td>{{ r.attempts }}</td>
+            <td style="white-space: nowrap;">{{ r.last_attempt_at.strftime('%H:%M:%S') if r.last_attempt_at else '—' }}</td>
+            <td style="max-width: 320px; overflow: hidden; text-overflow: ellipsis;">
+                <span title="{{ r.last_error or '' }}">{{ (r.last_error or '')[:80] }}</span>
+            </td>
+            <td>
+                {% if r.status in ('failed_permanent', 'pending') %}
+                <form method="POST"
+                      action="{{ url_for('recommendation_engine.lease_followup_retry', job_id=r.id) }}"
+                      style="display:inline;">
+                    <button type="submit" class="btn btn-sm">Retry</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" style="text-align: center; color: #888; padding: 2rem;">No follow-up jobs yet.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

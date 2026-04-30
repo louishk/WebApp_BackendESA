@@ -2361,6 +2361,13 @@ def move_in_reservation():
     Supports CC bypass via iPayMethod=2 (cash). Payment amount must
     match the exact total from GET /api/reservations/move-in/cost.
 
+    Idempotency
+    -----------
+    Pass header `Idempotency-Key: <opaque-string>`. Within 24h, the same
+    key on the same API key returns the cached response without firing
+    SOAP again. Critical for the bot's retry-on-network-blip path —
+    prevents accidental double move-ins.
+
     JSON body:
         site_code       — location code                [required]
         waiting_id      — reservation WaitingID         [required]
@@ -2376,10 +2383,29 @@ def move_in_reservation():
         test_mode       — true for dry run              [default: false]
     """
     from common.soap_client import SOAPFaultError
+    from web.utils import idempotency as _idem
 
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
+
+    # Phase 4 Part 2 — Idempotency-Key replay protection.
+    # Bot may pass header `Idempotency-Key: <opaque>`. If we have a fresh
+    # cache entry for (api_key_id, key, endpoint), return it as-is.
+    idem_key = (request.headers.get('Idempotency-Key') or '').strip()[:120]
+    api_key_id = getattr(g, 'api_key_id', None)
+    idem_db = current_app.get_middleware_session() if idem_key else None
+    if idem_key and idem_db is not None:
+        try:
+            cached = _idem.lookup(idem_key, '/api/reservations/move-in', api_key_id, idem_db)
+            if cached:
+                cached_status, cached_body = cached
+                cached_body = dict(cached_body)
+                cached_body['idempotent_replay'] = True
+                return jsonify(cached_body), cached_status
+        finally:
+            try: idem_db.close()
+            except Exception: pass
 
     # Required fields
     site_code = data.get('site_code', '').strip()
@@ -2419,6 +2445,32 @@ def move_in_reservation():
 
     if not _validate_site_code(site_code):
         return jsonify({'error': 'Invalid site_code'}), 400
+
+    # Phase 4 Part 2 — payment_amount sanity check.
+    # Bot must charge at least the SOAP move-in cost. If less, reject with 400
+    # before we hit SOAP and create a half-funded lease. 50¢ tolerance for
+    # rounding differences between calculator and SOAP.
+    concession_id_for_sanity = data.get('concession_id')
+    try:
+        cid_int = int(concession_id_for_sanity) if concession_id_for_sanity else 0
+    except (ValueError, TypeError):
+        cid_int = 0
+    _start_for_sanity_str = _parse_date(data.get('start_date'), 1)
+    try:
+        soap_cost_estimate = float(_compute_soap_movein_cost(
+            site_code=site_code, unit_id=unit_id,
+            concession_id=cid_int,
+            move_in_date=_coerce_to_date(_start_for_sanity_str),
+        ))
+    except Exception:
+        soap_cost_estimate = 0.0
+    if soap_cost_estimate > 0 and payment_amount < soap_cost_estimate - 0.50:
+        return jsonify({
+            'error': 'payment_amount is less than the required move-in cost',
+            'payment_amount': payment_amount,
+            'required_minimum': soap_cost_estimate,
+            'hint': 'Call GET /api/reservations/move-in/cost for the authoritative amount.',
+        }), 400
 
     # Optional fields
     start_date = _parse_date(data.get('start_date'), 1)
@@ -2527,7 +2579,7 @@ def move_in_reservation():
                     unit_id=int(unit_id),
                     concession_id=concession_id,
                     payment_amount=Decimal(str(payment_amount)),
-                    move_in_date=needed,
+                    move_in_date=_coerce_to_date(start_date),
                     request_data=data,
                 )
             except Exception as exc:
@@ -2537,7 +2589,7 @@ def move_in_reservation():
                 )
                 followup_summary = {'error': str(exc)[:200]}
 
-        return jsonify({
+        response_body = {
             'success': success,
             'site_code': site_code,
             'unit_id': unit_id,
@@ -2549,7 +2601,21 @@ def move_in_reservation():
             'message': ret_msg if not success else 'Move-in completed',
             'test_mode': test_mode,
             'followups': followup_summary,
-        })
+        }
+
+        # Cache the response under the Idempotency-Key for 24h replay
+        # protection. Only cache successful responses — caller can retry
+        # a 4xx with corrected input under the same key.
+        if idem_key and success:
+            try:
+                _idem_db = current_app.get_middleware_session()
+                _idem.store(idem_key, '/api/reservations/move-in',
+                            api_key_id, 200, response_body, _idem_db)
+                _idem_db.close()
+            except Exception as exc:
+                logger.warning("idempotency store failed: %s", exc)
+
+        return jsonify(response_body)
 
     except SOAPFaultError as e:
         logger.error(f"SOAP fault MoveInReservation_v6: {e}")

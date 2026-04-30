@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Site Distance - Recommendation Engine{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Site Distance Editor</h1>
+    <a href="{{ url_for('recommendation_engine.index') }}" class="btn">← Back</a>
+</div>
+
+<p style="color: #555; max-width: 760px;">
+    Drives Slot 2 (Best Alternative) when the customer's preferred site has no
+    matching inventory. Distances are <em>symmetric</em> — but the recommender
+    auto-unions both directions, so you only need to seed one row per pair.
+    Entries with <strong>distance_km ≥ 999</strong> are placeholders and will be skipped
+    by the recommender's default 50 km radius.
+</p>
+
+<div class="card" style="padding: 1rem; margin-bottom: 1.5rem;">
+    <h3 style="margin-top: 0;">Add / update a pair</h3>
+    <form method="POST" action="{{ url_for('recommendation_engine.site_distance_save') }}"
+          style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; align-items: end;">
+        <label>From
+            <select name="from_site_code" required>
+                <option value="">-- Select --</option>
+                {% for s in sites %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>To
+            <select name="to_site_code" required>
+                <option value="">-- Select --</option>
+                {% for s in sites %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Distance (km)
+            <input type="number" name="distance_km" step="0.1" min="0" max="2000" required>
+        </label>
+        <label style="display: flex; align-items: center; gap: 0.4rem; padding-bottom: 0.4rem;">
+            <input type="checkbox" name="same_country" checked>
+            Same country
+        </label>
+        <label style="grid-column: 1 / -1;">Notes
+            <input type="text" name="notes" maxlength="255" placeholder="optional">
+        </label>
+        <button type="submit" class="btn">Save</button>
+    </form>
+</div>
+
+<table class="data-table" style="font-size: 0.85rem;">
+    <thead>
+        <tr><th>From</th><th>To</th><th>Distance (km)</th><th>Same country</th><th>Notes</th><th></th></tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr style="background: {%- if r.distance_km >= 999 -%}#fef9c3{%- else -%}white{%- endif -%};">
+            <td>{{ r.from_site_code }}</td>
+            <td>{{ r.to_site_code }}</td>
+            <td>{{ '%.2f' % r.distance_km }}</td>
+            <td>{{ '✓' if r.same_country else '' }}</td>
+            <td style="max-width: 360px;">{{ r.notes or '' }}</td>
+            <td>
+                <form method="POST"
+                      action="{{ url_for('recommendation_engine.site_distance_delete', from_code=r.from_site_code, to_code=r.to_site_code) }}"
+                      style="display:inline;"
+                      onsubmit="return confirm('Delete {{ r.from_site_code }} → {{ r.to_site_code }}?');">
+                    <button type="submit" class="btn btn-sm" style="color: #dc2626;">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="text-align: center; color: #888; padding: 2rem;">No distance pairs configured.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

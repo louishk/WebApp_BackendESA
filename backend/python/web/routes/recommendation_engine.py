@@ -522,3 +522,176 @@ def api_exclusions():
         ])
     finally:
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 Part 2 — Lease Follow-ups DLQ
+# ---------------------------------------------------------------------------
+
+@recommendation_engine_bp.route('/lease-followups', methods=['GET'])
+@login_required
+@_require_config_permission
+def lease_followups():
+    """Read-only listing of mw_lease_followup_jobs grouped by status.
+
+    Pending = waiting for the next worker tick.
+    Failed_permanent = exhausted retries; ops should investigate +
+    optionally retry manually.
+    """
+    session = _get_session()
+    try:
+        rows = session.execute(text("""
+            SELECT id, ledger_id, site_code, action_type, status, attempts,
+                   created_at, updated_at, last_attempt_at, last_error,
+                   payload, soap_response, related_session_id, related_customer_id
+            FROM mw_lease_followup_jobs
+            ORDER BY
+                CASE status
+                    WHEN 'failed_permanent' THEN 0
+                    WHEN 'pending'          THEN 1
+                    WHEN 'running'          THEN 2
+                    WHEN 'success'          THEN 3
+                    ELSE 4
+                END,
+                updated_at DESC
+            LIMIT 200
+        """)).mappings().all()
+
+        # Stats for the page header
+        stats = session.execute(text("""
+            SELECT status, COUNT(*) AS n
+            FROM mw_lease_followup_jobs
+            GROUP BY status
+        """)).fetchall()
+        stat_map = {s[0]: s[1] for s in stats}
+
+        return render_template(
+            'admin/recommendation_engine/lease_followups.html',
+            rows=rows,
+            stats=stat_map,
+        )
+    finally:
+        session.close()
+
+
+@recommendation_engine_bp.route('/lease-followups/<int:job_id>/retry', methods=['POST'])
+@login_required
+@_require_config_permission
+def lease_followup_retry(job_id: int):
+    """Manual retry — resets status='pending' + next_attempt_at=NOW, runs once."""
+    from web.services import lease_followup_queue as _q
+    session = _get_session()
+    try:
+        outcome = _q.retry_job(job_id, session)
+        session.commit()
+        audit_log(
+            AuditEvent.SETTINGS_UPDATED,
+            f"Lease follow-up job {job_id} manually retried: outcome={outcome}",
+        )
+        flash(f'Retry outcome for job {job_id}: {outcome}', 'success' if outcome == 'ok' else 'warning')
+    except Exception as exc:
+        session.rollback()
+        flash(f'Retry failed: {exc}', 'error')
+    finally:
+        session.close()
+    return redirect(url_for('recommendation_engine.lease_followups'))
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 Part 2 — Site Distance editor (mw_site_distance)
+# ---------------------------------------------------------------------------
+
+@recommendation_engine_bp.route('/site-distance', methods=['GET'])
+@login_required
+@_require_config_permission
+def site_distance():
+    """List all (from_site, to_site, distance_km) pairs with edit form."""
+    session = _get_session()
+    try:
+        rows = session.execute(text("""
+            SELECT from_site_code, to_site_code, distance_km, same_country, notes
+            FROM mw_site_distance
+            ORDER BY from_site_code, distance_km
+        """)).mappings().all()
+        sites = session.execute(text("""
+            SELECT DISTINCT "SiteCode" FROM mw_siteinfo ORDER BY "SiteCode"
+        """)).fetchall()
+        return render_template(
+            'admin/recommendation_engine/site_distance.html',
+            rows=rows,
+            sites=[s[0] for s in sites],
+        )
+    finally:
+        session.close()
+
+
+@recommendation_engine_bp.route('/site-distance/save', methods=['POST'])
+@login_required
+@_require_config_permission
+def site_distance_save():
+    """Upsert a single (from_site, to_site) pair. Idempotent."""
+    from_site = (request.form.get('from_site_code') or '').strip().upper()
+    to_site = (request.form.get('to_site_code') or '').strip().upper()
+    try:
+        distance_km = float(request.form.get('distance_km', 0))
+    except (TypeError, ValueError):
+        flash('distance_km must be a number', 'error')
+        return redirect(url_for('recommendation_engine.site_distance'))
+    same_country = request.form.get('same_country') == 'on'
+    notes = (request.form.get('notes') or '').strip()[:255]
+
+    if not from_site or not to_site or from_site == to_site:
+        flash('from_site_code and to_site_code must differ and be non-empty', 'error')
+        return redirect(url_for('recommendation_engine.site_distance'))
+
+    session = _get_session()
+    try:
+        session.execute(text("""
+            INSERT INTO mw_site_distance
+                (from_site_code, to_site_code, distance_km, same_country, notes, updated_at, updated_by)
+            VALUES (:fs, :ts, :dk, :sc, :nt, NOW(), :ub)
+            ON CONFLICT (from_site_code, to_site_code) DO UPDATE SET
+                distance_km = EXCLUDED.distance_km,
+                same_country = EXCLUDED.same_country,
+                notes = EXCLUDED.notes,
+                updated_at = NOW(),
+                updated_by = EXCLUDED.updated_by
+        """), {
+            'fs': from_site, 'ts': to_site, 'dk': distance_km,
+            'sc': same_country, 'nt': notes or None,
+            'ub': current_user.email or current_user.id,
+        })
+        session.commit()
+        audit_log(
+            AuditEvent.SETTINGS_UPDATED,
+            f"Site distance {from_site}->{to_site} = {distance_km}km",
+        )
+        flash(f'Saved {from_site} → {to_site} = {distance_km} km', 'success')
+    except Exception as exc:
+        session.rollback()
+        flash(f'Save failed: {exc}', 'error')
+    finally:
+        session.close()
+    return redirect(url_for('recommendation_engine.site_distance'))
+
+
+@recommendation_engine_bp.route('/site-distance/<from_code>/<to_code>/delete', methods=['POST'])
+@login_required
+@_require_config_permission
+def site_distance_delete(from_code: str, to_code: str):
+    session = _get_session()
+    try:
+        session.execute(text("""
+            DELETE FROM mw_site_distance
+            WHERE from_site_code = :fs AND to_site_code = :ts
+        """), {'fs': from_code.upper(), 'ts': to_code.upper()})
+        session.commit()
+        audit_log(AuditEvent.SETTINGS_UPDATED,
+                  f"Site distance {from_code}->{to_code} deleted")
+        flash(f'Deleted {from_code} → {to_code}', 'success')
+    except Exception as exc:
+        session.rollback()
+        flash(f'Delete failed: {exc}', 'error')
+    finally:
+        session.close()
+    return redirect(url_for('recommendation_engine.site_distance'))
