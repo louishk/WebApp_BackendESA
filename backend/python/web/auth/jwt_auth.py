@@ -68,7 +68,6 @@ KNOWN_API_SCOPES = [
     'recommender',           # legacy: alias of recommender:read
     'recommender:read',      # POST /api/recommendations + GET /reservations/move-in/cost
     'recommender:write',     # POST /reservations/reserve + POST /reservations/move-in
-    'recommender:track',     # POST/PUT /reservations/track*
 ]
 
 

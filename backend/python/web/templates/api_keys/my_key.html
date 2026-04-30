@@ -364,6 +364,98 @@
             </div>
         </div>
 
+        <!-- ─────────── Identity & Run Tracking (REQUIRED reading) ─────────── -->
+        <div style="margin-bottom: 1.25rem; padding: 0.95rem 1.1rem; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; font-size: 0.83rem; color: #78350f;">
+            <strong style="font-size: 0.95rem;">🔑 Identity &amp; Run Tracking — required on every recommend call</strong>
+            <p style="margin: 0.5rem 0 0.6rem 0; line-height: 1.5;">
+                The recommender is <strong>stateful per conversation</strong>. Four context IDs glue every step together — from the first quote, through follow-up turns, to reserve and move-in. They are how the engine identifies which run / turn it is processing and how outcomes get reconciled back to the recommendation that produced the booking. <strong>All four fields are now mandatory</strong> on <code>POST /api/recommendations</code>; missing any one returns <code>400 ValidationError</code>.
+            </p>
+
+            <table style="width:100%; border-collapse: collapse; font-size: 0.8rem; background: white; margin-bottom: 0.65rem;">
+                <thead>
+                    <tr style="background: #fef3c7;">
+                        <th style="padding: 0.35rem 0.5rem; text-align: left; border: 1px solid #fcd34d;">Field</th>
+                        <th style="padding: 0.35rem 0.5rem; text-align: left; border: 1px solid #fcd34d;">Cardinality</th>
+                        <th style="padding: 0.35rem 0.5rem; text-align: left; border: 1px solid #fcd34d;">Who mints</th>
+                        <th style="padding: 0.35rem 0.5rem; text-align: left; border: 1px solid #fcd34d;">Purpose</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;"><code>request_id</code></td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Unique per turn</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Bot — fresh UUID per call</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Identifies THIS recommend call. Other turns reference it via <code>previous_request_id</code>. ≤ 64 chars.</td></tr>
+                    <tr><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;"><code>session_id</code></td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Stable per conversation</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Bot — once per chat</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Groups every turn of one chat AND the eventual reserve + move-in. Reconciliation key in <code>mw_recommendations_served</code>. ≤ 64 chars.</td></tr>
+                    <tr><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;"><code>customer_id</code></td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Stable per customer</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Channel-side (e.g. PandaAI user id)</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Cross-conversation identity. Outcome attribution + per-customer ranking. Use a stable surrogate for anonymous flows. ≤ 64 chars.</td></tr>
+                    <tr><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;"><code>channel</code></td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Per call</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Bot</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">One of <code>chatbot</code> / <code>web</code> / <code>api</code> / <code>admin</code>. Plans whose <code>distribution_channel</code> excludes this value are dropped.</td></tr>
+                    <tr style="background:#fef9c3;"><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;"><code>previous_request_id</code></td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Optional</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;">Bot — set on follow-up turns only</td><td style="padding: 0.3rem 0.5rem; border: 1px solid #fcd34d;"><strong>This is how the engine knows "this is a continuation".</strong> Server fetches the prior turn's filters as the BASE, layers current filters on top, and excludes already-served unit_ids. Pair with <code>picked_slot</code> + <code>action</code> to drive the relax strategy.</td></tr>
+                </tbody>
+            </table>
+
+            <strong>How the engine identifies which run / turn it is in</strong>
+            <ul style="margin: 0.35rem 0 0.6rem 1.25rem; padding: 0; line-height: 1.55;">
+                <li><strong>Turn 1</strong> — <code>previous_request_id</code> absent → fresh pool fetch, strict filters, <code>relax_strategy_used = "none"</code>.</li>
+                <li><strong>Turn 2+</strong> — <code>previous_request_id</code> set → <code>resume_session()</code> fetches the prior row from <code>mw_recommendations_served</code>, inherits its filters, layers current overrides, excludes prior <code>unit_id</code>s. <code>relax_strategy_used</code> = <code>size_plus_one</code> / <code>expand_unit_type</code> / <code>next_nearest_site</code> / <code>wider_size_band</code> based on <code>picked_slot</code> + <code>action</code>.</li>
+                <li>Every recommend call writes one row to <code>mw_recommendations_served</code>. Parent-child chain is <code>previous_request_id</code> → <code>request_id</code>. Conversation grouping is <code>session_id</code>. Booking attribution is <code>session_id</code> + <code>customer_id</code> on <code>/reserve</code> + <code>/move-in</code>.</li>
+            </ul>
+
+            <strong>Worked example — 3-turn conversation ending in a booking</strong>
+            <pre style="margin: 0.35rem 0 0 0; padding: 0.6rem 0.75rem; background: #1f2937; color: #f9fafb; border-radius: 4px; font-size: 0.74rem; line-height: 1.45; overflow-x: auto;"><code>// Turn 1 — fresh recommend
+POST /api/recommendations
+{
+  "duration_months": 6,
+  "filters": { "location": ["L017"], "size_range": ["30-35"] },
+  "context": {
+    "channel":     "chatbot",
+    "request_id":  "req-aaaa-1111",   // fresh UUID
+    "session_id":  "sess-conv-7",     // bot mints once per chat
+    "customer_id": "pandai_xyz_123"   // stable per customer
+  }
+}
+// → response.next_turn = { session_id, request_id: "req-aaaa-1111", ... }
+// → response.stats.relax_strategy_used = "none"
+
+// Turn 2 — customer wants more like slot 1
+POST /api/recommendations
+{
+  "duration_months": 6,
+  "filters": { "location": ["L017"], "size_range": ["30-35"] },
+  "context": {
+    "channel":             "chatbot",
+    "request_id":          "req-bbbb-2222",   // NEW per turn
+    "session_id":          "sess-conv-7",     // SAME as turn 1
+    "customer_id":         "pandai_xyz_123",  // SAME
+    "previous_request_id": "req-aaaa-1111",   // ← the link
+    "picked_slot":         1,
+    "action":              "more_like_this"
+  }
+}
+// → server inherits turn 1 filters, excludes turn 1's unit_ids,
+//   relax_strategy_used = "size_plus_one"
+
+// Turn 3 — customer accepts a slot, reserve + move-in
+POST /api/reservations/reserve
+{
+  "site_code": "L017", "unit_id": 107197, "concession_id": 11872,
+  "first_name": "Jane", "last_name": "Tan", "phone": "+65...",
+  "needed_date": "2026-05-01",
+  "session_id":  "sess-conv-7",     // ← link booking → recommendation
+  "customer_id": "pandai_xyz_123",  // ← same
+  "previous_request_id": "req-bbbb-2222"  // turn that produced the pick
+}
+// → tenant_id, waiting_id
+
+POST /api/reservations/move-in
+Headers: Idempotency-Key: &lt;UUID&gt;
+{
+  "site_code": "L017", "waiting_id": 848757, "tenant_id": 1109544,
+  "unit_id": 107197, "payment_amount": 693.76, "pay_method": 2,
+  "concession_id": 11872, "insurance_id": 1, "start_date": "2026-05-01",
+  "session_id":  "sess-conv-7",
+  "customer_id": "pandai_xyz_123"
+}
+// → ledger_id; mw_recommendations_served row updated with booked_unit_id +
+//   booked_concession_id, closing the loop.</code></pre>
+        </div>
+        <!-- ──────────────────── End Identity & Run Tracking ──────────────────── -->
+
         <div id="api-groups-container">
             <p style="font-size: 0.85rem; color: #888;">No API scopes assigned — contact an admin.</p>
         </div>
@@ -389,10 +481,9 @@ function copyField(elementId) {
 
 const API_ENDPOINTS = {
     "🤖 Chatbot Booking Flow (Recommendation Engine)": {
-        "description": "Purpose-built end-to-end booking pipeline for the chatbot. Quote → reserve → confirm price → move-in. Pricing is computed by the recommender, perpetual+prepay orchestration is automatic, and session_id/customer_id flow through every call so outcomes link back to the recommendation that produced them. Use the dedicated recommender:read/write/track scopes — these endpoints also still accept the legacy reservations:* / recommender scopes for backward compatibility.",
+        "description": "Purpose-built end-to-end booking pipeline for the chatbot. Quote → reserve → confirm price → move-in. Pricing is computed by the recommender, perpetual+prepay orchestration is automatic, and session_id/customer_id flow through every call so outcomes link back to the recommendation that produced them. Use the dedicated recommender:read/write scopes — these endpoints also still accept the legacy reservations:* / recommender scopes for backward compatibility.",
         "read_scope": "recommender:read",
         "write_scope": "recommender:write",
-        "track_scope": "recommender:track",
         "endpoints": [
             {
                 "method": "POST", "path": "/api/recommendations", "scope": "recommender:read",
@@ -402,7 +493,7 @@ const API_ENDPOINTS = {
                     "level":           {"type": "string",  "required": false, "description": "'standard' (default; only level supported in v1)"},
                     "duration_months": {"type": "integer", "required": true,  "description": "Lease length in months. Drives the breakdown + total_contract."},
                     "filters":         {"type": "object",  "required": true,  "description": "{location:[...], unit_type?:[...], climate_type?:[...], size_range?:[...], unit_id?:[...]} — arrays accepted everywhere; location is required."},
-                    "context":         {"type": "object",  "required": true,  "description": "{channel, request_id (unique per turn), session_id, customer_id?, previous_request_id?, picked_slot?, action?, move_in_date?}"},
+                    "context":         {"type": "object",  "required": true,  "description": "{channel, request_id, session_id, customer_id} ALL REQUIRED (≤64 chars each). Optional: previous_request_id (continuation), picked_slot+action (drives relax strategy on follow-up turns), move_in_date. See the 'Identity & Run Tracking' panel above for the full multi-turn worked example."},
                     "constraints":     {"type": "object",  "required": false, "description": "{max_distance_km?, exclude_unit_ids?:[]}"}
                 },
                 "example_response": {
@@ -511,10 +602,17 @@ const API_ENDPOINTS = {
                     "ret_code": "593680", "message": "Move-in completed", "test_mode": false,
                     "followups": {"enqueued": 2, "job_ids": [2, 3], "inline_ok": 2, "pending_retry": 0, "failed_permanent": 0}
                 }
-            },
+            }
+        ]
+    },
+    "📨 Reservation Tracking (Multi-Channel Lead Capture)": {
+        "description": "Cross-channel reservation/lead-capture ledger (api_reservations table). Use this to record reservations originated by *any* channel — website lead capture, chatbot, marketing partners, GA campaigns — together with attribution metadata (source, gclid, gid, botid). Independent of the chatbot booking flow: a chatbot can use it for outcome reconciliation, but so can a website form or a partner integration.",
+        "read_scope": "reservations:track",
+        "write_scope": "reservations:track",
+        "endpoints": [
             {
-                "method": "POST", "path": "/api/reservations/track", "scope": "recommender:track",
-                "description": "Outcome tracking · Upsert an external reservation record (by site_code + waiting_id). Use to capture chatbot-originated reservations for analytics + outcome reconciliation.",
+                "method": "POST", "path": "/api/reservations/track", "scope": "reservations:track",
+                "description": "Upsert an external reservation record (by site_code + waiting_id). Captures attribution: source, source_name, gclid, gid, botid.",
                 "body": {
                     "site_code":         {"type": "string",  "required": true,  "description": "Location code"},
                     "unit_id":           {"type": "integer", "required": true,  "description": "Unit ID"},
@@ -529,7 +627,7 @@ const API_ENDPOINTS = {
                     "concession_id":     {"type": "integer", "required": false, "description": "Discount concession ID"},
                     "needed_date":       {"type": "string",  "required": false, "description": "Move-in date YYYY-MM-DD"},
                     "comment":           {"type": "string",  "required": false, "description": "Notes"},
-                    "source":            {"type": "string",  "required": false, "description": "Channel: website, chatbot, etc. (default: api)"},
+                    "source":            {"type": "string",  "required": false, "description": "Channel: website, chatbot, partner, etc. (default: api)"},
                     "source_name":       {"type": "string",  "required": false, "description": "Source label for reporting"},
                     "gclid":             {"type": "string",  "required": false, "description": "Google Ads click ID"},
                     "gid":               {"type": "string",  "required": false, "description": "Campaign ID"},
@@ -539,8 +637,8 @@ const API_ENDPOINTS = {
                 "example_response": {"success": true, "id": 123, "event_type": "reservation"}
             },
             {
-                "method": "PUT", "path": "/api/reservations/track/event", "scope": "recommender:track",
-                "description": "Outcome tracking · Push a lifecycle event (move_in / cancellation / expiry) against a tracked reservation.",
+                "method": "PUT", "path": "/api/reservations/track/event", "scope": "reservations:track",
+                "description": "Push a lifecycle event (move_in / cancellation / expiry) against a tracked reservation.",
                 "body": {
                     "site_code":   {"type": "string", "required": true,  "description": "Location code"},
                     "waiting_id":  {"type": "integer","required": true,  "description": "The reservation to update"},
@@ -550,8 +648,8 @@ const API_ENDPOINTS = {
                 "example_response": {"success": true, "waiting_id": 848768, "status": "moved_in", "moved_in_at": "2026-03-18T10:30:00"}
             },
             {
-                "method": "POST", "path": "/api/reservations/track/batch", "scope": "recommender:track",
-                "description": "Outcome tracking · Batch import reservation records (max 100 per call, 5 req/min).",
+                "method": "POST", "path": "/api/reservations/track/batch", "scope": "reservations:track",
+                "description": "Batch import reservation records (max 100 per call, 5 req/min).",
                 "body": {
                     "records": {"type": "array", "required": true, "description": "Array of reservation objects (same schema as /track)"}
                 },
@@ -996,7 +1094,6 @@ const BASE_URL = "https://backend.extraspace.com.sg";
 const SCOPE_ALIASES = {
     "recommender:read":  ["recommender", "reservations:read"],
     "recommender:write": ["reservations:write"],
-    "recommender:track": ["reservations:track"],
 };
 function userHasScope(scope) {
     if (USER_SCOPES.has(scope)) return true;
@@ -1126,7 +1223,7 @@ function buildApiReference() {
         const groupId = "api-group-" + groupIndex;
         groupIndex++;
 
-        const scopeBadges = [groupDef.read_scope, groupDef.write_scope, groupDef.track_scope]
+        const scopeBadges = [groupDef.read_scope, groupDef.write_scope]
             .filter(Boolean)
             .filter(s => userHasScope(s))
             .map(s => {

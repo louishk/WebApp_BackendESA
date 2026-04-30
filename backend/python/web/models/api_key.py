@@ -36,7 +36,6 @@ API_SCOPES = {
     'recommender': 'Legacy alias of recommender:read (kept for backward compat)',
     'recommender:read': 'Recommendation engine read — POST /api/recommendations + GET /api/reservations/move-in/cost',
     'recommender:write': 'Recommendation engine write — POST /api/reservations/reserve + POST /api/reservations/move-in (idempotent + perpetual/prepay orchestration)',
-    'recommender:track': 'Recommendation engine outcome tracking — POST/PUT /api/reservations/track*',
 }
 
 # Defaults
