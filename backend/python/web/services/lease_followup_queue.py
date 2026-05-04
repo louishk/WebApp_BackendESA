@@ -106,8 +106,46 @@ def execute_pending_for_ledger(ledger_id: int, db_session) -> Dict[str, int]:
     return counts
 
 
+def recover_stuck_running(db_session, stale_after_minutes: int = 5) -> int:
+    """
+    M4 watchdog: reset jobs left in `status='running'` for too long back to
+    `pending`. Happens when the scheduler is killed mid-SOAP (VM restart,
+    OOM, deploy). Without this, the row would never retry and never alert.
+
+    Called once at startup AND on every batch tick (cheap query).
+    Returns the number of rows recovered.
+    """
+    result = db_session.execute(
+        text("""
+            UPDATE mw_lease_followup_jobs
+            SET status = 'pending',
+                last_error = COALESCE(last_error, '') ||
+                             ' [watchdog: recovered from stuck-running]',
+                updated_at = NOW()
+            WHERE status = 'running'
+              AND last_attempt_at IS NOT NULL
+              AND last_attempt_at < NOW() - make_interval(mins => :mins)
+        """),
+        {'mins': int(stale_after_minutes)},
+    )
+    recovered = result.rowcount or 0
+    if recovered:
+        logger.warning(
+            "lease_followup watchdog: recovered %d stuck-running job(s)",
+            recovered,
+        )
+    return recovered
+
+
 def execute_pending_batch(db_session, batch_size: int = 10) -> Dict[str, int]:
     """Worker entry point — drain N pending jobs across all leases."""
+    # Watchdog runs first so a stuck-running row gets re-enqueued and
+    # picked up in the same tick.
+    try:
+        recover_stuck_running(db_session)
+    except Exception as exc:
+        logger.warning("lease_followup watchdog query failed: %s", exc)
+
     rows = db_session.execute(
         text(f"""
             SELECT id FROM mw_lease_followup_jobs
@@ -168,6 +206,14 @@ def _run_single(job_id: int, db_session) -> str:
 
     try:
         soap_response = _execute_action(action_type, payload)
+        # M6: empty SOAP response list = no RT element returned. For these
+        # action types (PaymentSimpleCash, ScheduleTenantRateChange_v2) every
+        # success path returns at least one RT row; treat empty as a
+        # retryable fault so the worker doesn't silently mark it 'success'.
+        if isinstance(soap_response, list) and not soap_response:
+            raise SoapBusinessFault(
+                f"{action_type}: empty SOAP response (no RT element)"
+            )
         # Treat negative Ret_Code as a failure
         if isinstance(soap_response, list) and soap_response:
             ret_code = soap_response[0].get('Ret_Code')

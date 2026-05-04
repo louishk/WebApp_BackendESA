@@ -2475,8 +2475,20 @@ def move_in_reservation():
     idem_db = current_app.get_middleware_session() if idem_key else None
     if idem_key and idem_db is not None:
         try:
-            cached = _idem.lookup(idem_key, '/api/reservations/move-in', api_key_id, idem_db)
+            cached = _idem.lookup(
+                idem_key, '/api/reservations/move-in',
+                api_key_id, idem_db, request_body=data,
+            )
             if cached:
+                # H4: same Idempotency-Key + DIFFERENT request body =
+                # caller bug. Refuse with HTTP 422 instead of silently
+                # replaying the prior response (which would book the
+                # wrong unit).
+                if cached and cached[0] == _idem.BODY_MISMATCH:
+                    return jsonify({
+                        'error': 'idempotency_key_body_mismatch',
+                        'hint': 'This Idempotency-Key was previously used with a different request body. Use a NEW key for a new booking; reuse the same key only when retrying the SAME body.',
+                    }), 422
                 cached_status, cached_body = cached
                 cached_body = dict(cached_body)
                 cached_body['idempotent_replay'] = True
@@ -2804,7 +2816,13 @@ def move_in_reservation():
                     "Perpetual orchestration failed for ledger %s: %s",
                     ret_code, exc, exc_info=True,
                 )
-                followup_summary = {'error': str(exc)[:200]}
+                # H5: never surface internal exception text to clients.
+                # Real error is in the logger above (with exc_info=True).
+                followup_summary = {
+                    'error': 'orchestration_error',
+                    'follow_up_required': True,
+                    'hint': 'MoveIn succeeded but follow-up SOAP calls failed; ops alerted.',
+                }
 
         response_body = {
             'success': success,
@@ -2827,7 +2845,8 @@ def move_in_reservation():
             try:
                 _idem_db = current_app.get_middleware_session()
                 _idem.store(idem_key, '/api/reservations/move-in',
-                            api_key_id, 200, response_body, _idem_db)
+                            api_key_id, 200, response_body, _idem_db,
+                            request_body=data)
                 _idem_db.close()
             except Exception as exc:
                 logger.warning("idempotency store failed: %s", exc)

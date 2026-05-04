@@ -105,11 +105,13 @@ def determine_followups(ctx: OrchestrationContext) -> List[Dict[str, Any]]:
     # ── PaymentSimpleCash — only for orchestrated (custom) prepay ──
     if is_orchestrated_prepay:
         prepay_amount = ctx.payment_amount - ctx.soap_movein_cost
-        if prepay_amount <= Decimal('0.50'):
+        if prepay_amount <= Decimal('1.00'):
+            # M5: $1 threshold avoids firing PaymentSimpleCash for cents-level
+            # rounding noise. Real prepay surpluses are always many dollars.
             logger.info(
-                "Orchestrated-prepay flagged but no surplus payment "
-                "(payment=%s, soap_cost=%s). Skipping PaymentSimpleCash.",
-                ctx.payment_amount, ctx.soap_movein_cost,
+                "Orchestrated-prepay flagged but surplus too small "
+                "(payment=%s, soap_cost=%s, surplus=%s). Skipping PaymentSimpleCash.",
+                ctx.payment_amount, ctx.soap_movein_cost, prepay_amount,
             )
         elif not ctx.perpetual_auto_payment_enabled:
             logger.info(

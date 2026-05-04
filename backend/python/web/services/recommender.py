@@ -141,6 +141,10 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
         raise ValidationError("duration_months must be an integer")
     if duration_months < 1:
         raise ValidationError("duration_months must be >= 1")
+    if duration_months > 120:
+        # Caps the per-period iteration in mode=quote (perpetual+prepay).
+        # 10 years is well beyond any real lease scenario.
+        raise ValidationError("duration_months must be <= 120")
 
     # --- filters ---
     raw_filters = raw.get('filters') or {}
@@ -249,6 +253,10 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
         raise ValidationError("constraints must be an object")
 
     exclude_unit_ids = list(raw_constraints.get('exclude_unit_ids') or [])
+    if len(exclude_unit_ids) > 200:
+        # Caps the PostgreSQL array passed to `unit_id <> ALL(:exclude)`.
+        # 200 covers any realistic multi-turn exclusion chain.
+        raise ValidationError("constraints.exclude_unit_ids must contain <= 200 entries")
     try:
         exclude_unit_ids = [int(x) for x in exclude_unit_ids]
     except (TypeError, ValueError):
