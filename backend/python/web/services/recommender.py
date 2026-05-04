@@ -183,6 +183,19 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
         except (TypeError, ValueError):
             raise ValidationError("filters.concession_id must be an integer")
 
+    # filters.plan_id — cross-site brand handle. One plan_id maps to
+    # multiple concession_ids (one per site that offers the plan), so
+    # filtering by plan_id surfaces all units across all sites where
+    # that plan applies. Accepts scalar or list.
+    plan_id_raw = raw_filters.get('plan_id')
+    if plan_id_raw is not None:
+        try:
+            pid_list = [int(v) for v in _coerce_list(plan_id_raw)]
+            if pid_list:
+                filters['plan_id'] = pid_list
+        except (TypeError, ValueError):
+            raise ValidationError("filters.plan_id must be integer(s)")
+
     # Coupon code — single string, normalised to upper-case for case-
     # insensitive match. Stored on filters so fetch_candidate_pool can
     # parameterise it. None when not provided.
@@ -749,6 +762,9 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
     if 'concession_id' in req.filters and req.filters['concession_id']:
         where_parts.append("concession_id = :one_concession")
         params['one_concession'] = int(req.filters['concession_id'][0])
+    if 'plan_id' in req.filters and req.filters['plan_id']:
+        where_parts.append("plan_id = ANY(:plan_ids)")
+        params['plan_ids'] = req.filters['plan_id']
 
     # Exclude already-served units
     if exclude_ids:
