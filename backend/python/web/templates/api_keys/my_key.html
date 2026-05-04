@@ -525,16 +525,18 @@ const API_ENDPOINTS = {
                         "On success, the response includes <code>next_turn.request_id</code> + <code>next_turn.session_id</code> — copy <code>next_turn.request_id</code> into <code>previous_request_id</code> on the FOLLOWING turn."
                     ],
                     "decision_tree": {
-                        "intro": "After showing the 3 slots to the customer, the bot's NEXT recommend call depends on what the customer says:",
+                        "intro": "After showing the 3 slots to the customer, the bot's NEXT call depends on the customer's reply. Supported <code>action</code> values: <code>more_like_this</code>, <code>expand_size</code>, <code>different_type</code>. (<code>different_options</code> is reserved but currently a no-op — use <code>previous_request_id</code> alone for that case; served unit_ids are already excluded automatically.)",
                         "branches": [
-                            {"customer_says": "\"I'll take the first one\" / \"I want slot 2\" → bot proceeds to <code>POST /reserve</code> with the picked slot's fields.",
-                             "next_call": "Skip recommend; go to /reserve. Pass <code>session_id</code> + <code>customer_id</code> unchanged, plus <code>previous_request_id</code> = the recommend turn's <code>request_id</code> for attribution."},
-                            {"customer_says": "\"Show me more like that one\" / \"What else have you got similar?\" → bot wants more options NEAR the picked slot.",
-                             "next_call": "POST /api/recommendations again with <code>previous_request_id</code> = prior <code>request_id</code>, <code>picked_slot</code> = 1|2|3 (which one they liked), <code>action</code> = <code>\"more_like_this\"</code>. Engine inherits prior filters, excludes already-shown unit_ids, applies the relax strategy that fits the picked slot."},
-                            {"customer_says": "\"Anything else?\" / \"Other options?\" → bot wants a wider search around the SAME intent.",
-                             "next_call": "POST /api/recommendations again with <code>previous_request_id</code> = prior <code>request_id</code>, <code>action</code> = <code>\"different_options\"</code>, no <code>picked_slot</code>. Engine widens dimension relaxation."},
-                            {"customer_says": "\"Actually, I want something completely different\" — different size / location / climate / customer pivots.",
-                             "next_call": "<strong>Treat as a fresh Step 1.</strong> POST /api/recommendations with the NEW filters, fresh <code>request_id</code>, SAME <code>session_id</code> + <code>customer_id</code> (still the same conversation), and <strong>do NOT pass <code>previous_request_id</code> / <code>picked_slot</code> / <code>action</code></strong> — they would force the engine to inherit irrelevant prior filters. The session row chain stays linked via <code>session_id</code> for analytics."}
+                            {"customer_says": "\"I'll take the first one\" / \"I want slot 2\"",
+                             "next_call": "<strong>Skip recommend</strong> → go to <code>POST /reserve</code>. Pass <code>session_id</code> + <code>customer_id</code> unchanged, plus <code>previous_request_id</code> = the recommend turn's <code>request_id</code> for attribution."},
+                            {"customer_says": "\"More like THAT one\" / \"Got anything similar to slot 2?\"",
+                             "next_call": "POST /api/recommendations with <code>previous_request_id</code> + <code>picked_slot</code> = 1|2|3 + <code>action: \"more_like_this\"</code>. Engine applies the slot-specific relax: slot 1 → size_plus_one, slot 2 → next_nearest_site, slot 3 → size_plus_one. Already-shown unit_ids are auto-excluded."},
+                            {"customer_says": "\"Other options?\" / \"What else?\" (same intent, no specific slot)",
+                             "next_call": "POST /api/recommendations with <code>previous_request_id</code> alone. Engine inherits prior filters and excludes already-shown unit_ids; the natural next pool surfaces 3 fresh slots. <strong>Skip <code>action</code></strong> — auto-exclusion is the mechanism."},
+                            {"customer_says": "\"Slightly bigger size?\" or \"Different unit type?\"",
+                             "next_call": "POST /api/recommendations with <code>previous_request_id</code> + <code>action: \"expand_size\"</code> (widens <code>size_range</code> ±2 buckets) or <code>action: \"different_type\"</code> (drops <code>unit_type</code> filter)."},
+                            {"customer_says": "\"Actually I want something completely different\" — different location / size / intent.",
+                             "next_call": "<strong>Treat as fresh Step 1.</strong> POST /api/recommendations with NEW filters, NEW <code>request_id</code>, KEEP <code>session_id</code> + <code>customer_id</code> (still same chat), and <strong>do NOT pass <code>previous_request_id</code> / <code>picked_slot</code> / <code>action</code></strong>. Session chain stays linked via <code>session_id</code> for analytics."}
                         ]
                     }
                 },
@@ -546,53 +548,88 @@ const API_ENDPOINTS = {
                     "context":         {"type": "object",  "required": true,  "description": "Object. Required keys: channel, request_id, session_id, customer_id (see 'Identity & tracking' callout above for format spec). Optional keys: previous_request_id (string, set on follow-up turns), picked_slot (integer 1|2|3, paired with previous_request_id), action (string: 'more_like_this' | 'different_options'), move_in_date (ISO date YYYY-MM-DD)."},
                     "constraints":     {"type": "object",  "required": false, "description": "Object. All optional keys: max_distance_km (number, overrides slot-2 default radius), exclude_unit_ids (array of integers, max 200 items)."}
                 },
-                "example_request": {
-                    "_comment_turn1": "TURN 1 — fresh request. No previous_request_id. session_id minted by bot once for this chat.",
-                    "mode": "recommendation",
-                    "duration_months": 6,
-                    "filters": {
-                        "location":     ["L017"],
-                        "size_range":   ["30-35"],
-                        "climate_type": ["A", "AD"]
-                    },
-                    "context": {
-                        "channel":     "chatbot",
-                        "request_id":  "req-aaaa-1111",
-                        "session_id":  "sess-conv-7",
-                        "customer_id": "pandai_xyz_123"
-                    },
-                    "constraints": {
-                        "max_distance_km":   50,
-                        "exclude_unit_ids":  []
-                    },
-                    "_comment_turn2": "TURN 2 — customer liked slot 1, wants more like it. Engine inherits turn-1 filters, excludes shown unit_ids automatically.",
-                    "_example_turn2": {
-                        "mode": "recommendation",
-                        "duration_months": 6,
-                        "filters": {"location": ["L017"], "size_range": ["30-35"], "climate_type": ["A", "AD"]},
-                        "context": {
-                            "channel":             "chatbot",
-                            "request_id":          "req-bbbb-2222",
-                            "session_id":          "sess-conv-7",
-                            "customer_id":         "pandai_xyz_123",
-                            "previous_request_id": "req-aaaa-1111",
-                            "picked_slot":         1,
-                            "action":              "more_like_this"
+                "example_requests": [
+                    {
+                        "label": "Turn 1 — fresh recommend (start of conversation)",
+                        "note": "Bot mints a new <code>request_id</code> per turn and a new <code>session_id</code> once per conversation. No <code>previous_request_id</code>, <code>picked_slot</code>, or <code>action</code> on turn 1.",
+                        "body": {
+                            "mode": "recommendation",
+                            "duration_months": 6,
+                            "filters": {"location": ["L017"], "size_range": ["30-35"], "climate_type": ["A", "AD"]},
+                            "context": {
+                                "channel":     "chatbot",
+                                "request_id":  "req-aaaa-1111",
+                                "session_id":  "sess-conv-7",
+                                "customer_id": "pandai_xyz_123"
+                            },
+                            "constraints": {"max_distance_km": 50, "exclude_unit_ids": []}
                         }
                     },
-                    "_comment_turn3_pivot": "TURN 3 alt — customer pivoted to a totally different request (different city + bigger). Treat as fresh Step 1: NEW filters, NEW request_id, KEEP session_id + customer_id. DO NOT pass previous_request_id/picked_slot/action.",
-                    "_example_turn3_pivot": {
-                        "mode": "recommendation",
-                        "duration_months": 12,
-                        "filters": {"location": ["L029"], "size_range": ["50-60"]},
-                        "context": {
-                            "channel":     "chatbot",
-                            "request_id":  "req-cccc-3333",
-                            "session_id":  "sess-conv-7",
-                            "customer_id": "pandai_xyz_123"
+                    {
+                        "label": "Turn 2 — customer liked slot 1, wants \"more like that\"",
+                        "note": "Send <code>previous_request_id</code> = the request_id of turn 1, plus <code>picked_slot</code> + <code>action=\"more_like_this\"</code>. Engine inherits turn-1 filters and auto-excludes already-shown unit_ids. <code>session_id</code> + <code>customer_id</code> stay the same; <code>request_id</code> is new.",
+                        "body": {
+                            "mode": "recommendation",
+                            "duration_months": 6,
+                            "filters": {"location": ["L017"], "size_range": ["30-35"], "climate_type": ["A", "AD"]},
+                            "context": {
+                                "channel":             "chatbot",
+                                "request_id":          "req-bbbb-2222",
+                                "session_id":          "sess-conv-7",
+                                "customer_id":         "pandai_xyz_123",
+                                "previous_request_id": "req-aaaa-1111",
+                                "picked_slot":         1,
+                                "action":              "more_like_this"
+                            }
+                        }
+                    },
+                    {
+                        "label": "Turn 2 alt — customer wants \"any other options?\" (same intent, no specific slot)",
+                        "note": "Send <code>previous_request_id</code> alone. Engine inherits turn-1 filters and excludes already-shown unit_ids; the next pool naturally surfaces 3 fresh slots. Skip <code>picked_slot</code> and <code>action</code> — for this case, the auto-exclusion is the whole mechanism.",
+                        "body": {
+                            "mode": "recommendation",
+                            "duration_months": 6,
+                            "filters": {"location": ["L017"], "size_range": ["30-35"], "climate_type": ["A", "AD"]},
+                            "context": {
+                                "channel":             "chatbot",
+                                "request_id":          "req-bbbb-2223",
+                                "session_id":          "sess-conv-7",
+                                "customer_id":         "pandai_xyz_123",
+                                "previous_request_id": "req-aaaa-1111"
+                            }
+                        }
+                    },
+                    {
+                        "label": "Turn 2 alt — customer is flexible on size: \"What about a bit bigger?\"",
+                        "note": "<code>action=\"expand_size\"</code> widens <code>size_range</code> by ±2 buckets. <code>action=\"different_type\"</code> drops the <code>unit_type</code> filter. Combine with <code>previous_request_id</code> for served-unit exclusion.",
+                        "body": {
+                            "context": {
+                                "channel":             "chatbot",
+                                "request_id":          "req-bbbb-2224",
+                                "session_id":          "sess-conv-7",
+                                "customer_id":         "pandai_xyz_123",
+                                "previous_request_id": "req-aaaa-1111",
+                                "action":              "expand_size"
+                            },
+                            "_etc": "duration_months + filters as before"
+                        }
+                    },
+                    {
+                        "label": "Turn 3 — customer pivots to a completely different request",
+                        "note": "Different location, different size — the prior recommend is no longer relevant. Treat as a fresh Step 1: NEW <code>request_id</code>, NEW <code>filters</code>, KEEP <code>session_id</code> + <code>customer_id</code> (still the same chat). <strong>DO NOT pass <code>previous_request_id</code>, <code>picked_slot</code>, or <code>action</code></strong> — they would force the engine to inherit irrelevant prior filters.",
+                        "body": {
+                            "mode": "recommendation",
+                            "duration_months": 12,
+                            "filters": {"location": ["L029"], "size_range": ["50-60"]},
+                            "context": {
+                                "channel":     "chatbot",
+                                "request_id":  "req-cccc-3333",
+                                "session_id":  "sess-conv-7",
+                                "customer_id": "pandai_xyz_123"
+                            }
                         }
                     }
-                },
+                ],
                 "example_response": {
                     "mode": "recommendation", "level": "standard",
                     "stats": {"candidates_pool_size": 14, "relax_strategy_used": "none", "saturation_signal": false, "excluded_unit_ids_count": 0},
@@ -1514,7 +1551,23 @@ function buildEndpointDetail(ep, detailId) {
         </div>
     </div>`;
 
-    if (ep.example_request) {
+    if (Array.isArray(ep.example_requests) && ep.example_requests.length) {
+        // Multiple labeled examples (turn 1, turn 2, pivot, etc.)
+        let blocks = '';
+        ep.example_requests.forEach(ex => {
+            blocks += `<div style="margin-top:0.6rem;">
+                <div style="font-weight:600; font-size:0.78rem; color:#374151; margin-bottom:0.2rem;">${esc(ex.label || 'Example')}</div>`;
+            if (ex.note) {
+                blocks += `<div style="font-size:0.74rem; color:#6b7280; margin-bottom:0.3rem; line-height:1.45;">${ex.note}</div>`;
+            }
+            blocks += `<pre>${esc(JSON.stringify(ex.body, null, 2))}</pre>
+            </div>`;
+        });
+        html += `<div class="detail-section">
+            <div class="detail-label">Example Request Body</div>
+            ${blocks}
+        </div>`;
+    } else if (ep.example_request) {
         html += `<div class="detail-section">
             <div class="detail-label">Example Request Body</div>
             <pre>${esc(JSON.stringify(ep.example_request, null, 2))}</pre>
