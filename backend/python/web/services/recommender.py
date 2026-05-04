@@ -365,13 +365,18 @@ def relax_strategy(picked_slot: Optional[int], action: Optional[str]) -> str:
 # Session resume
 # ---------------------------------------------------------------------------
 
-# Recommendation hierarchy: max 3 levels deep.
+# Recommendation hierarchy: continuation chain depth.
 #   L1 — initial recommend (no previous_request_id)
-#   L2 — continuation off L1 (previous_request_id points to an L1 row)
-#   L3 — continuation off L2 (previous_request_id points to an L2 row)
-# Anything that would chain off an L3 row → HTTP 400. Customer must
-# either accept a slot or pivot to a fresh L1.
-_MAX_RECOMMENDATION_LEVEL = 3
+#   L2 — continuation off L1
+#   …
+#   LN — continuation off L(N-1)   (N = recommendation_max_chain_depth)
+# Anything beyond LN → HTTP 400. Customer must accept a slot or pivot.
+#
+# The default (3) lives in the recommender_settings spec; admins can
+# tune it via /admin/recommendation-engine/settings without a deploy.
+# Bounded fallback in case the settings table is unavailable.
+_DEFAULT_MAX_RECOMMENDATION_LEVEL = 3
+_HARD_MAX_RECOMMENDATION_LEVEL    = 6   # absolute ceiling — guards the chain walk loop
 
 
 def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequest:
@@ -393,6 +398,18 @@ def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequ
         req.context['_recommendation_level'] = 1
         return req
 
+    # Resolve the configured cap (admin-tunable). Clamp to the absolute
+    # hard ceiling so a misconfigured high value can't blow up the walk.
+    try:
+        from web.services import recommender_settings
+        configured_max = int(recommender_settings.get_setting(
+            'recommendation_max_chain_depth', db_session,
+        ) or _DEFAULT_MAX_RECOMMENDATION_LEVEL)
+    except Exception:
+        configured_max = _DEFAULT_MAX_RECOMMENDATION_LEVEL
+    max_level = max(1, min(configured_max, _HARD_MAX_RECOMMENDATION_LEVEL))
+    req.context['_max_recommendation_level'] = max_level
+
     # Walk the chain to compute level. Bounded to MAX+1 hops to defend
     # against accidental cycles.
     chain_depth = 0
@@ -400,7 +417,7 @@ def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequ
     chain_filters: Optional[Any] = None
     chain_slot_ids: Optional[Tuple[Any, Any, Any]] = None
     chain_session_id: Optional[str] = None
-    for _ in range(_MAX_RECOMMENDATION_LEVEL + 1):
+    for _ in range(max_level + 1):
         try:
             walk = db_session.execute(text("""
                 SELECT filters_applied,
@@ -429,9 +446,9 @@ def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequ
 
     # Current request's level = chain_depth (turns walked) + 1
     current_level = chain_depth + 1
-    if current_level > _MAX_RECOMMENDATION_LEVEL:
+    if current_level > max_level:
         raise ValidationError(
-            f"recommendation chain exceeds max depth ({_MAX_RECOMMENDATION_LEVEL}). "
+            f"recommendation chain exceeds max depth ({max_level}). "
             f"Either accept a slot via /reserve, or start a fresh recommend "
             f"WITHOUT previous_request_id (same session_id is fine)."
         )

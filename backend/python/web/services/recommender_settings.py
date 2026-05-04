@@ -138,6 +138,12 @@ _SETTINGS_SPEC: list[SettingSpec] = [
         group='perpetual',
     ),
     SettingSpec(
+        key='recommendation_max_chain_depth', type_='int', default=3,
+        label='Recommendation max chain depth',
+        description='Maximum number of consecutive /api/recommendations calls in one continuation chain (L1 → L2 → … → LN) before the engine refuses with HTTP 400. Higher = more back-and-forth allowed per booking flow; lower = forces the bot to commit or pivot sooner. The bot sees the cap via next_turn.next_level_allowed in each response. Default 3 matches the original product spec.',
+        group='slot', min_value=1, max_value=6,
+    ),
+    SettingSpec(
         key='movein_failure_postmortem_enabled', type_='bool', default=True,
         label='Move-in cost — post-mortem on failure',
         description='When ON, a failed SOAP MoveInReservation_v6 with a cost-related Ret_Msg triggers an automatic SOAP MoveInCostRetrieve so the 422 response can include calculator/SOAP/sent deltas — letting the bot diagnose drift and retry intelligently. When OFF, the bot just receives a generic failure without the diagnostic numbers. Independent of the comparison switch above; recommended ON regardless.',

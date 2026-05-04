@@ -660,10 +660,14 @@ def recommend():
                     'expand_locations', 'different_type',
                     'different_duration',
                 ],
-                # Bot must NOT chain a 4th call off the current request_id.
-                # If max depth reached, drop previous_request_id on the next
-                # call (fresh L1) or proceed to /reserve.
-                'next_level_allowed': req.context.get('_recommendation_level', 1) < 3,
+                # Bot must not chain another call off the current request_id
+                # once the configured max depth has been reached. Drop
+                # previous_request_id on the next call (fresh L1) or move
+                # on to /reserve.
+                'next_level_allowed': (
+                    req.context.get('_recommendation_level', 1)
+                    < req.context.get('_max_recommendation_level', 3)
+                ),
             },
             'pricing_note': (
                 'Calculator-quoted; re-fetch '
