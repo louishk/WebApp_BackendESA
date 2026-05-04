@@ -396,7 +396,7 @@ const API_ENDPOINTS = {
         "endpoints": [
             {
                 "method": "POST", "path": "/api/recommendations", "scope": "recommender:read",
-                "description": "Step 1 · Quote. Returns a 3-slot envelope (Best Match / Best Alternative / Best Price). Stateful: chain turns via context.previous_request_id + picked_slot.",
+                "description": "Quote. Returns a 3-slot envelope (Best Match / Best Alternative / Best Price). Stateful + hierarchical: max 3 levels deep per booking flow. <strong>Level 1</strong> = initial recommend (no <code>previous_request_id</code>). <strong>Level 2</strong> = continuation off L1 (sets <code>previous_request_id</code> + an <code>action</code>). <strong>Level 3</strong> = continuation off L2 (chains again). Anything that would chain off an L3 row → HTTP 400. Customer must accept a slot via /reserve, or pivot to a fresh L1 (drop <code>previous_request_id</code>; keep <code>session_id</code>). Response surfaces <code>stats.recommendation_level</code> (1|2|3) and <code>next_turn.next_level_allowed</code> (false on L3).",
                 "identity_spec": {
                     "intro": "Five identity fields tie a recommend turn to its conversation, its customer, and the eventual booking. Send all four required fields on every call. Send <code>previous_request_id</code> only on follow-up turns.",
                     "fields": [

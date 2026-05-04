@@ -370,7 +370,7 @@ def _serialise_slot(
 
 @recommendations_bp.route('', methods=['POST'])
 @require_auth
-@require_api_scope(('recommender:read', 'recommender'))
+@require_api_scope('recommender:read')
 @rate_limit_api(max_requests=120)
 def recommend():
     """
@@ -635,6 +635,7 @@ def recommend():
             'served_at': served_at,
             'ttl_seconds': 60,
             'stats': {
+                'recommendation_level': req.context.get('_recommendation_level', 1),
                 'total_matches_before_slotting': total_matches_before_slotting,
                 'candidates_pool_size': candidates_pool_size,
                 'filter_applied': filter_applied,
@@ -649,9 +650,15 @@ def recommend():
                 'previous_request_id': request_id,
                 'session_id': req.context.get('session_id'),
                 'supported_actions': [
-                    'more_like_this', 'different_options',
-                    'different_size', 'different_site',
+                    'more_like_this',
+                    'bigger_size', 'smaller_size',
+                    'expand_locations', 'different_type',
+                    'different_duration',
                 ],
+                # Bot must NOT chain a 4th call off the current request_id.
+                # If max depth reached, drop previous_request_id on the next
+                # call (fresh L1) or proceed to /reserve.
+                'next_level_allowed': req.context.get('_recommendation_level', 1) < 3,
             },
             'pricing_note': (
                 'Calculator-quoted; re-fetch '

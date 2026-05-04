@@ -352,6 +352,15 @@ def relax_strategy(picked_slot: Optional[int], action: Optional[str]) -> str:
 # Session resume
 # ---------------------------------------------------------------------------
 
+# Recommendation hierarchy: max 3 levels deep.
+#   L1 — initial recommend (no previous_request_id)
+#   L2 — continuation off L1 (previous_request_id points to an L1 row)
+#   L3 — continuation off L2 (previous_request_id points to an L2 row)
+# Anything that would chain off an L3 row → HTTP 400. Customer must
+# either accept a slot or pivot to a fresh L1.
+_MAX_RECOMMENDATION_LEVEL = 3
+
+
 def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequest:
     """
     If req.context['previous_request_id'] is set, fetch the prior served row,
@@ -359,28 +368,70 @@ def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequ
     all prior slot unit_ids in this session into constraints.exclude_unit_ids,
     and apply the relax strategy based on (picked_slot, action).
 
-    Mutates and returns req. No-op when previous_request_id is None.
+    Computes and stamps `_recommendation_level` (1, 2, or 3) on the
+    request context based on the chain depth. Raises ValidationError when
+    the chain would exceed level 3.
+
+    Mutates and returns req. No-op when previous_request_id is None
+    (level 1).
     """
     prev_id = req.context.get('previous_request_id')
     if not prev_id:
+        req.context['_recommendation_level'] = 1
         return req
 
-    try:
-        row = db_session.execute(text("""
-            SELECT filters_applied,
-                   slot1_unit_id, slot2_unit_id, slot3_unit_id,
-                   session_id
-            FROM mw_recommendations_served
-            WHERE request_id = :rid
-            LIMIT 1
-        """), {'rid': prev_id}).mappings().first()
-    except Exception as exc:
-        logger.warning("resume_session: failed to fetch prior row %s: %s", prev_id, exc)
-        return req
+    # Walk the chain to compute level. Bounded to MAX+1 hops to defend
+    # against accidental cycles.
+    chain_depth = 0
+    walk_id = prev_id
+    chain_filters: Optional[Any] = None
+    chain_slot_ids: Optional[Tuple[Any, Any, Any]] = None
+    chain_session_id: Optional[str] = None
+    for _ in range(_MAX_RECOMMENDATION_LEVEL + 1):
+        try:
+            walk = db_session.execute(text("""
+                SELECT filters_applied,
+                       slot1_unit_id, slot2_unit_id, slot3_unit_id,
+                       session_id, previous_request_id
+                FROM mw_recommendations_served
+                WHERE request_id = :rid
+                LIMIT 1
+            """), {'rid': walk_id}).mappings().first()
+        except Exception as exc:
+            logger.warning("resume_session: chain walk failed at %s: %s", walk_id, exc)
+            return req
+        if not walk:
+            logger.warning("resume_session: chain reference %s not found", walk_id)
+            return req
+        if chain_depth == 0:
+            # Capture the IMMEDIATE prior row's data for filter merge / exclusion
+            chain_filters = walk['filters_applied']
+            chain_slot_ids = (walk['slot1_unit_id'], walk['slot2_unit_id'], walk['slot3_unit_id'])
+            chain_session_id = walk['session_id']
+        chain_depth += 1
+        next_id = walk['previous_request_id']
+        if not next_id:
+            break
+        walk_id = next_id
 
-    if not row:
-        logger.warning("resume_session: previous_request_id %s not found", prev_id)
-        return req
+    # Current request's level = chain_depth (turns walked) + 1
+    current_level = chain_depth + 1
+    if current_level > _MAX_RECOMMENDATION_LEVEL:
+        raise ValidationError(
+            f"recommendation chain exceeds max depth ({_MAX_RECOMMENDATION_LEVEL}). "
+            f"Either accept a slot via /reserve, or start a fresh recommend "
+            f"WITHOUT previous_request_id (same session_id is fine)."
+        )
+    req.context['_recommendation_level'] = current_level
+
+    # Synthesize a `row` shape compatible with the existing merge code below.
+    row = {
+        'filters_applied': chain_filters,
+        'slot1_unit_id':   chain_slot_ids[0] if chain_slot_ids else None,
+        'slot2_unit_id':   chain_slot_ids[1] if chain_slot_ids else None,
+        'slot3_unit_id':   chain_slot_ids[2] if chain_slot_ids else None,
+        'session_id':      chain_session_id,
+    }
 
     # Merge prior filters: prior is base, current overrides per-key.
     prior_filters = row['filters_applied'] or {}
