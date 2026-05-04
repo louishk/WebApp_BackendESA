@@ -115,10 +115,10 @@ pipelines:
       table: mimo
       date_column: extract_date
   ccws_ledgers:
-    display_name: CCWS Tenant Ledgers & Charges
-    description: Sync tenants, ledgers and charges from CallCenterWs (LedgersByTenantID_v3 + ChargesAllByLedgerID). Incremental mode refreshes recent ledgers; required for fresh ECRI eligibility.
+    display_name: CCWS Tenant Ledgers & Charges (legacy)
+    description: MIGRATED to sync_service orchestrator (sync_service.pipelines.ccws_ledgers.CcwsLedgersPipeline). Disabled here to avoid double-runs.
     module_path: datalayer.tenant_ledger_charges_to_sql
-    enabled: true
+    enabled: false
     schedule:
       type: cron
       cron: 0 7 * * *
