@@ -521,8 +521,22 @@ const API_ENDPOINTS = {
                         "All values are case-sensitive.",
                         "Whitespace-only is rejected (server <code>.strip()</code>s before checking).",
                         "Any field exceeding 64 chars → HTTP 400.",
-                        "On success, the response includes <code>next_turn.session_id</code> + <code>next_turn.previous_request_id</code> — confirm the values match what you sent."
-                    ]
+                        "<code>duration_months</code> must be 1–120; <code>constraints.exclude_unit_ids</code> ≤ 200 entries.",
+                        "On success, the response includes <code>next_turn.request_id</code> + <code>next_turn.session_id</code> — copy <code>next_turn.request_id</code> into <code>previous_request_id</code> on the FOLLOWING turn."
+                    ],
+                    "decision_tree": {
+                        "intro": "After showing the 3 slots to the customer, the bot's NEXT recommend call depends on what the customer says:",
+                        "branches": [
+                            {"customer_says": "\"I'll take the first one\" / \"I want slot 2\" → bot proceeds to <code>POST /reserve</code> with the picked slot's fields.",
+                             "next_call": "Skip recommend; go to /reserve. Pass <code>session_id</code> + <code>customer_id</code> unchanged, plus <code>previous_request_id</code> = the recommend turn's <code>request_id</code> for attribution."},
+                            {"customer_says": "\"Show me more like that one\" / \"What else have you got similar?\" → bot wants more options NEAR the picked slot.",
+                             "next_call": "POST /api/recommendations again with <code>previous_request_id</code> = prior <code>request_id</code>, <code>picked_slot</code> = 1|2|3 (which one they liked), <code>action</code> = <code>\"more_like_this\"</code>. Engine inherits prior filters, excludes already-shown unit_ids, applies the relax strategy that fits the picked slot."},
+                            {"customer_says": "\"Anything else?\" / \"Other options?\" → bot wants a wider search around the SAME intent.",
+                             "next_call": "POST /api/recommendations again with <code>previous_request_id</code> = prior <code>request_id</code>, <code>action</code> = <code>\"different_options\"</code>, no <code>picked_slot</code>. Engine widens dimension relaxation."},
+                            {"customer_says": "\"Actually, I want something completely different\" — different size / location / climate / customer pivots.",
+                             "next_call": "<strong>Treat as a fresh Step 1.</strong> POST /api/recommendations with the NEW filters, fresh <code>request_id</code>, SAME <code>session_id</code> + <code>customer_id</code> (still the same conversation), and <strong>do NOT pass <code>previous_request_id</code> / <code>picked_slot</code> / <code>action</code></strong> — they would force the engine to inherit irrelevant prior filters. The session row chain stays linked via <code>session_id</code> for analytics."}
+                        ]
+                    }
                 },
                 "body": {
                     "mode":            {"type": "string",  "required": false, "description": "'recommendation' (default, 3-slot envelope) or 'quote' (single unit; requires filters.unit_id)"},
@@ -533,30 +547,69 @@ const API_ENDPOINTS = {
                     "constraints":     {"type": "object",  "required": false, "description": "Object. All optional keys: max_distance_km (number, overrides slot-2 default radius), exclude_unit_ids (array of integers, max 200 items)."}
                 },
                 "example_request": {
+                    "_comment_turn1": "TURN 1 — fresh request. No previous_request_id. session_id minted by bot once for this chat.",
                     "mode": "recommendation",
                     "duration_months": 6,
-                    "filters": {"location": ["L017"], "size_range": ["30-35"]},
+                    "filters": {
+                        "location":     ["L017"],
+                        "size_range":   ["30-35"],
+                        "climate_type": ["A", "AD"]
+                    },
                     "context": {
-                        "channel": "chatbot",
-                        "request_id": "req-aaaa-1111",
-                        "session_id": "sess-conv-7",
+                        "channel":     "chatbot",
+                        "request_id":  "req-aaaa-1111",
+                        "session_id":  "sess-conv-7",
                         "customer_id": "pandai_xyz_123"
+                    },
+                    "constraints": {
+                        "max_distance_km":   50,
+                        "exclude_unit_ids":  []
+                    },
+                    "_comment_turn2": "TURN 2 — customer liked slot 1, wants more like it. Engine inherits turn-1 filters, excludes shown unit_ids automatically.",
+                    "_example_turn2": {
+                        "mode": "recommendation",
+                        "duration_months": 6,
+                        "filters": {"location": ["L017"], "size_range": ["30-35"], "climate_type": ["A", "AD"]},
+                        "context": {
+                            "channel":             "chatbot",
+                            "request_id":          "req-bbbb-2222",
+                            "session_id":          "sess-conv-7",
+                            "customer_id":         "pandai_xyz_123",
+                            "previous_request_id": "req-aaaa-1111",
+                            "picked_slot":         1,
+                            "action":              "more_like_this"
+                        }
+                    },
+                    "_comment_turn3_pivot": "TURN 3 alt — customer pivoted to a totally different request (different city + bigger). Treat as fresh Step 1: NEW filters, NEW request_id, KEEP session_id + customer_id. DO NOT pass previous_request_id/picked_slot/action.",
+                    "_example_turn3_pivot": {
+                        "mode": "recommendation",
+                        "duration_months": 12,
+                        "filters": {"location": ["L029"], "size_range": ["50-60"]},
+                        "context": {
+                            "channel":     "chatbot",
+                            "request_id":  "req-cccc-3333",
+                            "session_id":  "sess-conv-7",
+                            "customer_id": "pandai_xyz_123"
+                        }
                     }
                 },
                 "example_response": {
                     "mode": "recommendation", "level": "standard",
-                    "stats": {"candidates_pool_size": 14, "relax_strategy_used": "none", "saturation_signal": false},
+                    "stats": {"candidates_pool_size": 14, "relax_strategy_used": "none", "saturation_signal": false, "excluded_unit_ids_count": 0},
                     "slots": [
                         {
                             "slot": 1, "label": "Best Match",
-                            "unit_id": 107197, "facility": "L017", "unit_type": "W", "climate_type": "AD", "size_range": "30-35",
+                            "unit_id": 107197, "facility": "L017", "unit_type": "W", "climate_type": "AD", "size_range": "30-35", "size_sqft": 32.5,
                             "plan_id": 10, "plan_name": "Moving Season SG",
                             "concession_id": 11872, "concession_name": "SS-TAC-Move-R-30%",
                             "discount_summary": "30% off every month",
-                            "terms": {"discount_perpetual": true, "prepayment_months": 6, "post_prepay_uplift_pct": 5.0, "native_prepay_months": null, "_note": "prepayment_months is dynamic — matches request.duration_months when plan is perpetual + payment_terms=Prepaid"},
+                            "match_flags": {"alternative_strategy": null, "relaxed_dims": [], "distance_km": 0, "travel_warning": false},
+                            "terms": {"discount_perpetual": true, "prepayment_months": 6, "post_prepay_uplift_pct": 5.0, "native_prepay_months": null, "lock_in_months": 0, "promo_valid_until": "2026-12-31"},
                             "pricing": {
                                 "first_month_total": 238.71,
                                 "total_due_at_movein": 693.76,
+                                "total_contract": 693.76,
+                                "monthly_average": 115.63,
                                 "rate_during_prepay": 80.50,
                                 "rate_after_prepay": 84.52,
                                 "rate_change_date": "2026-11-15",
@@ -564,8 +617,16 @@ const API_ENDPOINTS = {
                                 "monthly_all_in_after_prepay":  95.40,
                                 "monthly_insurance_premium":     3.00,
                                 "monthly_insurance_tax":         0.27,
-                                "total_contract": 693.76, "monthly_average": 115.63
+                                "breakdown": [
+                                    {"month_index": 1, "billing_date": "2026-05-15", "rent": 115.00, "discount": 34.50, "rent_proration_factor": 1.0, "insurance": 3.00, "deposit": 296.00, "admin_fee": 30.00, "rent_tax": 7.25, "insurance_tax": 0.27, "total": 238.71},
+                                    {"month_index": 2, "billing_date": "2026-06-15", "rent": 115.00, "discount": 34.50, "rent_proration_factor": 1.0, "insurance": 3.00, "deposit": 0,      "admin_fee": 0,    "rent_tax": 7.25, "insurance_tax": 0.27, "total": 91.01},
+                                    {"month_index": 3, "billing_date": "2026-07-15", "rent": 115.00, "discount": 34.50, "rent_proration_factor": 1.0, "insurance": 3.00, "deposit": 0,      "admin_fee": 0,    "rent_tax": 7.25, "insurance_tax": 0.27, "total": 91.01},
+                                    {"month_index": 4, "billing_date": "2026-08-15", "rent": 115.00, "discount": 34.50, "rent_proration_factor": 1.0, "insurance": 3.00, "deposit": 0,      "admin_fee": 0,    "rent_tax": 7.25, "insurance_tax": 0.27, "total": 91.01},
+                                    {"month_index": 5, "billing_date": "2026-09-15", "rent": 115.00, "discount": 34.50, "rent_proration_factor": 1.0, "insurance": 3.00, "deposit": 0,      "admin_fee": 0,    "rent_tax": 7.25, "insurance_tax": 0.27, "total": 91.01},
+                                    {"month_index": 6, "billing_date": "2026-10-15", "rent": 115.00, "discount": 34.50, "rent_proration_factor": 1.0, "insurance": 3.00, "deposit": 0,      "admin_fee": 0,    "rent_tax": 7.25, "insurance_tax": 0.27, "total": 91.01}
+                                ]
                             },
+                            "insurance": {"selected": {"id": 1, "coverage": 1000, "premium": 3.00}, "options": [{"id": 1, "coverage": 1000, "premium": 3.00}, {"id": 2, "coverage": 2000, "premium": 7.00}], "min_required": 1000},
                             "customer_disclosure": {
                                 "fine_print": [
                                     "Pay $693.76 today to lock 6 months at $91.01/month all-in.",
@@ -575,9 +636,42 @@ const API_ENDPOINTS = {
                                     "You can move out at any time after move-in."
                                 ]
                             }
+                        },
+                        {
+                            "slot": 2, "label": "Best Alternative",
+                            "unit_id": 107198, "facility": "L017", "unit_type": "W", "climate_type": "AD", "size_range": "30-35", "size_sqft": 33.0,
+                            "plan_id": 10, "plan_name": "Moving Season SG",
+                            "concession_id": 11872, "concession_name": "SS-TAC-Move-R-30%",
+                            "discount_summary": "30% off every month",
+                            "match_flags": {"alternative_strategy": "same_site_2nd", "relaxed_dims": [], "distance_km": 0, "travel_warning": false},
+                            "terms": {"discount_perpetual": true, "prepayment_months": 6, "post_prepay_uplift_pct": 5.0},
+                            "pricing": {"first_month_total": 244.10, "total_due_at_movein": 706.40, "monthly_all_in_during_prepay": 92.46, "rate_during_prepay": 81.80, "breakdown": ["...same shape, omitted for brevity..."]},
+                            "insurance": {"selected": {"id": 1, "coverage": 1000, "premium": 3.00}, "options": ["..."], "min_required": 1000},
+                            "customer_disclosure": {"fine_print": ["Same site (L017), slightly larger unit ($706.40 today)."]}
+                        },
+                        {
+                            "slot": 3, "label": "Best Price",
+                            "unit_id": 107201, "facility": "L017", "unit_type": "L", "climate_type": "AD", "size_range": "25-30", "size_sqft": 27.5,
+                            "plan_id": 10, "plan_name": "Moving Season SG",
+                            "concession_id": 11872, "concession_name": "SS-TAC-Move-R-30%",
+                            "discount_summary": "30% off every month",
+                            "match_flags": {"alternative_strategy": null, "relaxed_dims": ["unit_type"], "savings_pct": 18.3, "distance_km": 0, "travel_warning": false},
+                            "terms": {"discount_perpetual": true, "prepayment_months": 6, "post_prepay_uplift_pct": 5.0},
+                            "pricing": {"first_month_total": 196.85, "total_due_at_movein": 566.74, "monthly_all_in_during_prepay": 74.34, "rate_during_prepay": 65.80, "breakdown": ["...same shape, omitted for brevity..."]},
+                            "insurance": {"selected": {"id": 1, "coverage": 1000, "premium": 3.00}, "options": ["..."], "min_required": 1000},
+                            "customer_disclosure": {"fine_print": ["Save 18% — locker (L) instead of walk-in. Save $127 today."]}
                         }
                     ],
-                    "next_turn": {"previous_request_id": "req-1234", "session_id": "sess-abc", "supported_actions": ["more_like_this", "different_options", "different_size", "different_site"]}
+                    "next_turn": {
+                        "request_id": "req-aaaa-1111",
+                        "session_id": "sess-conv-7",
+                        "supported_actions": ["more_like_this", "different_options"],
+                        "_note": "Pass session_id (unchanged) + customer_id (unchanged) + previous_request_id=request_id on the next turn. picked_slot=1|2|3 + action=more_like_this drives the relax strategy; action=different_options widens the search."
+                    },
+                    "reserve_template": {
+                        "_note": "When the customer accepts a slot, copy these fields from the chosen slot into POST /api/reservations/reserve.",
+                        "site_code": "L017", "unit_id": 107197, "concession_id": 11872, "plan_id": 10
+                    }
                 }
             },
             {
@@ -1373,6 +1467,23 @@ function buildEndpointDetail(ep, detailId) {
             specHtml += '<ul style="margin:0.5rem 0 0 1.1rem; padding:0; line-height:1.5;">';
             spec.rules.forEach(r => { specHtml += `<li>${r}</li>`; });
             specHtml += '</ul>';
+        }
+        if (spec.decision_tree) {
+            const dt = spec.decision_tree;
+            specHtml += '<div style="margin-top:0.6rem; padding-top:0.5rem; border-top:1px solid #fcd34d;">';
+            specHtml += '<strong>Decision tree — what to send on the next call</strong>';
+            if (dt.intro) {
+                specHtml += `<div style="margin-top:0.3rem; line-height:1.5;">${dt.intro}</div>`;
+            }
+            if (dt.branches && dt.branches.length) {
+                specHtml += '<table style="width:100%; border-collapse:collapse; margin-top:0.4rem; font-size:0.75rem; background:white;">';
+                specHtml += '<thead><tr style="background:#fef3c7;"><th style="padding:0.3rem 0.5rem; text-align:left; border:1px solid #fcd34d;">If the customer says…</th><th style="padding:0.3rem 0.5rem; text-align:left; border:1px solid #fcd34d;">Bot's next API call</th></tr></thead><tbody>';
+                dt.branches.forEach(b => {
+                    specHtml += `<tr><td style="padding:0.32rem 0.5rem; border:1px solid #fcd34d; vertical-align:top;">${b.customer_says}</td><td style="padding:0.32rem 0.5rem; border:1px solid #fcd34d; vertical-align:top;">${b.next_call}</td></tr>`;
+                });
+                specHtml += '</tbody></table>';
+            }
+            specHtml += '</div>';
         }
         html += `<div class="detail-section" style="background:#fffbeb; border:1px solid #fcd34d; border-radius:4px; padding:0.6rem 0.75rem; font-size:0.78rem; color:#78350f;">${specHtml}</div>`;
     } else if (ep.identity_note) {
