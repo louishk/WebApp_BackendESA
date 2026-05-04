@@ -188,34 +188,41 @@ components:
 
     Context:
       type: object
-      required: [request_id]
+      required: [channel, request_id, session_id, customer_id]
       properties:
         request_id:
           type: string
+          maxLength: 64
           example: "uuid-v4"
           description: |
             Bot's correlation id for THIS turn. Must be unique per call.
             Server logs it; bot can later reference via `previous_request_id`.
+            Required. Max 64 chars. Generate a fresh UUID per turn.
         session_id:
           type: string
+          maxLength: 64
           description: |
-            Conversation anchor. Same value across multiple turns of one
-            convo. Server auto-generates if missing on the first turn.
+            Conversation anchor. Same value across every turn of one convo
+            AND on the subsequent /reserve and /move-in calls — that is the
+            link that ties recommendation → booking outcome in
+            `mw_recommendations_served` for end-to-end reconciliation.
+            Required. Max 64 chars. Bot mints once per conversation.
         customer_id:
           type: string
+          maxLength: 64
           example: "pandai_xyz_123"
           description: |
-            PandaAI's stable customer identifier. Captured for future
-            personalization (per-customer ranking based on past picks /
-            bookings). v1 just logs; no behaviour change yet.
+            Stable customer identifier from the calling channel
+            (e.g. PandaAI's per-user id). Required. Max 64 chars.
+            Used for outcome reconciliation and per-customer ranking.
+            For anonymous flows, pass a stable session-bound surrogate.
         channel:
           type: string
           enum: [chatbot, web, api, admin]
-          default: chatbot
           description: |
-            Calling channel. Plans whose `distribution_channel` doesn't
-            include this value are dropped. Empty plan distribution_channel
-            = open to all channels.
+            Calling channel. Required. Plans whose `distribution_channel`
+            doesn't include this value are dropped. Empty plan
+            distribution_channel = open to all channels.
         previous_request_id:
           type: string
           description: |
@@ -925,25 +932,30 @@ paths:
 # =============================================================================
 #
 # Turn 1 — fresh request:
-#   bot generates request_id, optionally session_id (else server fills)
-#   POST { filters, context: { request_id, session_id?, customer_id? }}
-#   ← { slots: [s1, s2, s3], session_id, tracking_id }
-#   bot stores session_id locally
+#   bot generates request_id (per turn) AND session_id (per conversation),
+#   plus customer_id and channel — all four are REQUIRED.
+#   POST { filters, context: { channel, request_id, session_id, customer_id }}
+#   ← { slots: [s1, s2, s3], next_turn: { session_id, request_id, ... } }
+#   bot reuses session_id + customer_id on every subsequent turn / booking.
 #
 # Turn 2 — customer wants more like slot 1:
 #   POST { filters, context: {
-#       request_id: <new uuid>,
-#       session_id: <same as turn 1>,
+#       channel:             "chatbot",
+#       request_id:          <new uuid>,
+#       session_id:          <same as turn 1>,
+#       customer_id:         <same as turn 1>,
 #       previous_request_id: <turn 1's request_id>,
-#       picked_slot: 1,
-#       action: more_like_this } }
+#       picked_slot:         1,
+#       action:              more_like_this } }
 #   ← { slots: [next 3 not-yet-shown], excludes prior unit_ids automatically }
 #
 # Turn 3 — customer accepts a slot, books:
 #   POST /api/reservations/reserve with the slot's
-#       { unit_id, concession_id, customer_data }
-#       (optionally include session_id, customer_id, plan_id for tighter
-#        outcome attribution — but the system reconciles even without)
+#       { unit_id, concession_id, customer_data,
+#         session_id, customer_id, plan_id }
+#       — pass the same session_id + customer_id used for recommend so the
+#         booking links cleanly to mw_recommendations_served for outcome
+#         tracking.
 #   ← reservation created, no payment, no concession applied yet
 #
 # Turn 4 — at actual move-in:

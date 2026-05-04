@@ -552,7 +552,11 @@ const API_ENDPOINTS = {
                     "quoted_rate":  {"type": "number",  "required": false, "description": "Quoted rate (default: 0)"},
                     "needed_date":  {"type": "string",  "required": false, "description": "Move-in date YYYY-MM-DD (default: tomorrow)"},
                     "source_name":  {"type": "string",  "required": false, "description": "Lead source (default: ESA Backend)"},
-                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID (default: 0)"}
+                    "concession_id":{"type": "integer", "required": false, "description": "Discount plan ID (default: 0). Pass concession_id from the picked recommend slot — 0 means standard rate (no discount), do NOT collapse to null."},
+                    "session_id":          {"type": "string", "required": true,  "description": "Same session_id used for /api/recommendations. Links this booking to the recommendation that produced it in mw_recommendations_served."},
+                    "customer_id":         {"type": "string", "required": true,  "description": "Same customer_id used for /api/recommendations."},
+                    "previous_request_id": {"type": "string", "required": false, "description": "request_id of the recommend turn that produced the picked slot — strongest attribution signal."},
+                    "plan_id":             {"type": "integer","required": false, "description": "plan_id from the picked recommend slot — extra attribution signal."}
                 },
                 "example_response": {"success": true, "site_code": "LSETUP", "unit_id": 106155, "tenant_id": "1109544", "waiting_id": "848757", "global_waiting_num": "809363726", "message": "Reservation created"}
             },
@@ -593,8 +597,8 @@ const API_ENDPOINTS = {
                     "insurance_id":   {"type": "integer", "required": false, "description": "Insurance coverage ID"},
                     "start_date":     {"type": "string",  "required": false, "description": "Lease start YYYY-MM-DD (default tomorrow)"},
                     "end_date":       {"type": "string",  "required": false, "description": "Lease end YYYY-MM-DD (default start + 365)"},
-                    "session_id":     {"type": "string",  "required": false, "description": "Recommend session id — recommended for outcome reconciliation"},
-                    "customer_id":    {"type": "string",  "required": false, "description": "PandaAI customer id — recommended for personalisation/audit"},
+                    "session_id":     {"type": "string",  "required": true,  "description": "Same session_id used on /recommendations + /reserve. Required for outcome reconciliation back to mw_recommendations_served."},
+                    "customer_id":    {"type": "string",  "required": true,  "description": "Same customer_id used on /recommendations + /reserve."},
                     "test_mode":      {"type": "boolean", "required": false, "description": "true = SOAP dry run (no orchestration follow-ups)"}
                 },
                 "example_response": {
@@ -1092,7 +1096,7 @@ const BASE_URL = "https://backend.extraspace.com.sg";
 // recommender:* scope or the legacy scope. The docs filter must show the
 // endpoint to a key that holds either side.
 const SCOPE_ALIASES = {
-    "recommender:read":  ["recommender", "reservations:read"],
+    "recommender:read":  ["reservations:read"],
     "recommender:write": ["reservations:write"],
 };
 function userHasScope(scope) {

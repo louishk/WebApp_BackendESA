@@ -580,6 +580,17 @@ def reservation_reserve():
     if not phone:
         return jsonify({'error': 'phone is required'}), 400
 
+    session_id = (data.get('session_id') or '').strip()
+    customer_id = (data.get('customer_id') or '').strip()
+    if not session_id:
+        return jsonify({'error': 'session_id is required (use the value from /api/recommendations)'}), 400
+    if not customer_id:
+        return jsonify({'error': 'customer_id is required (use the value from /api/recommendations)'}), 400
+    if len(session_id) > 64:
+        return jsonify({'error': 'session_id must be <= 64 characters'}), 400
+    if len(customer_id) > 64:
+        return jsonify({'error': 'customer_id must be <= 64 characters'}), 400
+
     try:
         unit_id = int(unit_id)
     except (ValueError, TypeError):
@@ -2476,6 +2487,17 @@ def move_in_reservation():
             return jsonify({'error': 'payment_amount must be greater than zero'}), 400
     except (ValueError, TypeError):
         return jsonify({'error': 'payment_amount must be a number'}), 400
+
+    session_id_in = (data.get('session_id') or '').strip()
+    customer_id_in = (data.get('customer_id') or '').strip()
+    if not session_id_in:
+        return jsonify({'error': 'session_id is required (use the value from /api/recommendations + /reserve)'}), 400
+    if not customer_id_in:
+        return jsonify({'error': 'customer_id is required (use the value from /api/recommendations + /reserve)'}), 400
+    if len(session_id_in) > 64:
+        return jsonify({'error': 'session_id must be <= 64 characters'}), 400
+    if len(customer_id_in) > 64:
+        return jsonify({'error': 'customer_id must be <= 64 characters'}), 400
 
     if not _validate_site_code(site_code):
         return jsonify({'error': 'Invalid site_code'}), 400

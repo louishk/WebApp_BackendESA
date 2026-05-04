@@ -112,12 +112,14 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
     Required fields:
       - filters.location (string or list of site codes)
       - duration_months (positive integer)
-      - context.request_id (non-empty string)
+      - context.channel (non-empty string)
+      - context.request_id (unique per turn, <= 64 chars)
+      - context.session_id (stable per conversation, <= 64 chars)
+      - context.customer_id (stable per customer, <= 64 chars)
 
     Optional but validated:
       - mode (default 'recommendation')
       - level (default 'standard')
-      - context.session_id (auto-generated if absent)
       - constraints.* (defaults applied for missing keys)
 
     All filter values are coerced to lists.
@@ -204,16 +206,31 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
     request_id = str(raw_ctx.get('request_id', '') or '').strip()
     if not request_id:
         raise ValidationError("context.request_id is required")
+    if len(request_id) > 64:
+        raise ValidationError("context.request_id must be <= 64 characters")
 
     session_id = str(raw_ctx.get('session_id', '') or '').strip()
     if not session_id:
-        session_id = str(uuid.uuid4())
+        raise ValidationError("context.session_id is required")
+    if len(session_id) > 64:
+        raise ValidationError("context.session_id must be <= 64 characters")
+
+    customer_id = raw_ctx.get('customer_id')
+    if customer_id is None or str(customer_id).strip() == '':
+        raise ValidationError("context.customer_id is required")
+    customer_id = str(customer_id).strip()
+    if len(customer_id) > 64:
+        raise ValidationError("context.customer_id must be <= 64 characters")
+
+    channel = str(raw_ctx.get('channel', '') or '').strip()
+    if not channel:
+        raise ValidationError("context.channel is required")
 
     context: Dict[str, Any] = {
-        'channel': str(raw_ctx.get('channel', 'api') or 'api').strip(),
+        'channel': channel,
         'request_id': request_id,
         'session_id': session_id,
-        'customer_id': raw_ctx.get('customer_id') or None,
+        'customer_id': customer_id,
         'previous_request_id': raw_ctx.get('previous_request_id') or None,
         'picked_slot': raw_ctx.get('picked_slot'),   # int or None
         'action': raw_ctx.get('action') or None,

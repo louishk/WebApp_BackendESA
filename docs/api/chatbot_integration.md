@@ -90,9 +90,14 @@ sync:*  scheduler:*  ecri:*  statistics:*
 │   body: {                                                              │
 │     filters: { location: ["L017"], size_range: ["30-35"] },            │
 │     duration_months: 6,                                                │
-│     context: { request_id, customer_id: "pandai_x", channel: "chatbot" │
+│     context: {                                                         │
+│       channel:     "chatbot",                                          │
+│       request_id:  <fresh uuid per turn>,                              │
+│       session_id:  <stable per conversation>,                          │
+│       customer_id: "pandai_x"                                          │
+│     }       ← all 4 are REQUIRED                                       │
 │   }                                                                    │
-│ ← { slots: [s1, s2, s3], session_id, tracking_id }                     │
+│ ← { slots: [s1, s2, s3], next_turn: { session_id, request_id, ... } }  │
 └────────────────────────────────────────────────────────────────────────┘
                                 ▼
 ┌─ TURN 2 — customer accepts slot 1's unit ─────────────────────────────┐
@@ -199,7 +204,12 @@ POST /api/recommendations
     "climate_type": ["A", "AD"],                 // climate-controlled
     "size_range":   ["30-35", "35-40", "40-45"]  // a band, not a point
   },
-  "context": { "channel": "chatbot", "request_id": "...", "session_id": "..." }
+  "context": {
+    "channel":     "chatbot",
+    "request_id":  "<fresh uuid per turn, ≤ 64 chars>",
+    "session_id":  "<stable per conversation, ≤ 64 chars>",
+    "customer_id": "<stable per customer, ≤ 64 chars>"
+  }   // all 4 fields REQUIRED on every recommend call
 }
 ```
 
