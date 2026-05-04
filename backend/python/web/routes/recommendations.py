@@ -459,8 +459,13 @@ def recommend():
     request_id = req.context['request_id']
     db = current_app.get_middleware_session()
     try:
-        # 6. Session resume (merges prior filters, excludes prior units)
-        req = recommender.resume_session(req, db)
+        # 6. Session resume (merges prior filters, excludes prior units).
+        # May raise ValidationError when the chain depth would exceed
+        # _MAX_RECOMMENDATION_LEVEL — bubble up as 400.
+        try:
+            req = recommender.resume_session(req, db)
+        except ValidationError as exc:
+            return jsonify({'error': str(exc), 'field': 'context.previous_request_id'}), 400
 
         relax_used = req.context.get('_relax_strategy', 'none')
 
