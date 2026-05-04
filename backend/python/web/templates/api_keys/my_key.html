@@ -1477,7 +1477,7 @@ function buildEndpointDetail(ep, detailId) {
             }
             if (dt.branches && dt.branches.length) {
                 specHtml += '<table style="width:100%; border-collapse:collapse; margin-top:0.4rem; font-size:0.75rem; background:white;">';
-                specHtml += '<thead><tr style="background:#fef3c7;"><th style="padding:0.3rem 0.5rem; text-align:left; border:1px solid #fcd34d;">If the customer says…</th><th style="padding:0.3rem 0.5rem; text-align:left; border:1px solid #fcd34d;">Bot's next API call</th></tr></thead><tbody>';
+                specHtml += '<thead><tr style="background:#fef3c7;"><th style="padding:0.3rem 0.5rem; text-align:left; border:1px solid #fcd34d;">If the customer says…</th><th style="padding:0.3rem 0.5rem; text-align:left; border:1px solid #fcd34d;">Next API call</th></tr></thead><tbody>';
                 dt.branches.forEach(b => {
                     specHtml += `<tr><td style="padding:0.32rem 0.5rem; border:1px solid #fcd34d; vertical-align:top;">${b.customer_says}</td><td style="padding:0.32rem 0.5rem; border:1px solid #fcd34d; vertical-align:top;">${b.next_call}</td></tr>`;
                 });
