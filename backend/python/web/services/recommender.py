@@ -1107,7 +1107,7 @@ def compute_first_month_cost_calculator(
     the first-month all-in total (rent + tax + insurance + admin + deposit).
 
     Used by /api/reservations/move-in's sanity guard when the admin flag
-    `movein_sanity_guard_use_calculator` is ON. Returns None if the
+    `movein_soap_cost_check_enabled` is OFF. Returns None if the
     candidate row, billing config, or charge descriptions are unavailable —
     caller falls back to SOAP.
     """

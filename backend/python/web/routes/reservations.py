@@ -2551,23 +2551,31 @@ def move_in_reservation():
     cost_source: Optional[str] = None  # 'calculator' | 'soap' | None
     move_in_date_for_sanity = _coerce_to_date(_start_for_sanity_str)
 
-    # Source toggle: admin flag movein_sanity_guard_use_calculator (default OFF)
-    use_calculator_first = False
+    # Toggle A: movein_soap_cost_check_enabled (default ON).
+    #   ON  → guard cross-checks payment_amount against SOAP MoveInCostRetrieve.
+    #   OFF → guard uses the internal calculator (no SOAP on the happy path),
+    #         falling back to SOAP only if the calculator can't compute.
+    soap_check_enabled = True
     try:
         from web.services import recommender_settings
         _settings_db = current_app.get_middleware_session()
         try:
-            use_calculator_first = bool(
+            soap_check_enabled = bool(
                 recommender_settings.get_setting(
-                    'movein_sanity_guard_use_calculator', _settings_db,
+                    'movein_soap_cost_check_enabled', _settings_db,
                 )
             )
         finally:
             _settings_db.close()
     except Exception as exc:
-        logger.warning("sanity guard: setting lookup failed (using SOAP): %s", exc)
+        logger.warning(
+            "sanity guard: setting lookup failed (defaulting to SOAP check ON): %s",
+            exc,
+        )
 
-    if use_calculator_first:
+    if not soap_check_enabled:
+        # Calculator-only path. SOAP is still used as a safety net if the
+        # calculator can't compute (missing candidate row, etc.).
         try:
             from web.services.recommender import compute_first_month_cost_calculator
             _calc_db = current_app.get_middleware_session()
@@ -2722,7 +2730,23 @@ def move_in_reservation():
             # MoveInCostRetrieve to surface the calc/SOAP/sent delta. The bot
             # can then decide to re-quote and retry (with a fresh
             # Idempotency-Key — the failed attempt is not cached).
-            if _is_cost_related_movein_failure(ret_msg):
+            # Gated by toggle B: movein_failure_postmortem_enabled (default ON).
+            postmortem_enabled = True
+            try:
+                from web.services import recommender_settings as _rs
+                _pm_db = current_app.get_middleware_session()
+                try:
+                    postmortem_enabled = bool(_rs.get_setting(
+                        'movein_failure_postmortem_enabled', _pm_db,
+                    ))
+                finally:
+                    _pm_db.close()
+            except Exception as exc:
+                logger.warning(
+                    "post-mortem: setting lookup failed (defaulting ON): %s", exc,
+                )
+
+            if postmortem_enabled and _is_cost_related_movein_failure(ret_msg):
                 try:
                     soap_truth = float(_compute_soap_movein_cost(
                         site_code=site_code, unit_id=unit_id,

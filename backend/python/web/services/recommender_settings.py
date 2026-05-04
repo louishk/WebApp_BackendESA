@@ -132,15 +132,15 @@ _SETTINGS_SPEC: list[SettingSpec] = [
         group='perpetual',
     ),
     SettingSpec(
-        key='move_in_cost_use_soap_fallback', type_='bool', default=True,
-        label='/move-in/cost — call SOAP for SOAP-truth confirmation',
-        description='When ON, the /move-in/cost endpoint calls SOAP MoveInCostRetrieveWithDiscount_Reservation_v4 as the right-before-charging confirmation, then adds the prepayment add-on from our calculator. When OFF, answers entirely from the calculator (saves one SOAP round-trip per booking; only safe when calculator is fully validated).',
+        key='movein_soap_cost_check_enabled', type_='bool', default=True,
+        label='Move-in cost — compare against SOAP',
+        description='Master switch for SOAP cost-retrieve cross-check on the booking flow. When ON: GET /move-in/cost returns SOAP truth (Step 3) AND POST /move-in re-validates payment_amount against SOAP before firing MoveInReservation_v6 (Step 4). Belt-and-braces — slower (2 extra SOAP calls per booking) but cross-checks every quote. When OFF: both paths use the internal calculator only — saves the round-trips on the happy path. Flip OFF only after the calculator has been verified parity with SOAP across all plan shapes in production.',
         group='perpetual',
     ),
     SettingSpec(
-        key='movein_sanity_guard_use_calculator', type_='bool', default=False,
-        label='/move-in sanity guard — use internal calculator (instead of SOAP)',
-        description='When ON, /api/reservations/move-in checks payment_amount against our internal calculator (no SOAP round-trip on the happy path). On calculator failure, falls back to SOAP automatically. When OFF, every /move-in calls SOAP MoveInCostRetrieve as a sanity check before firing MoveInReservation_v6 (slower but belt-and-braces during early rollout). Flip ON only after verifying calculator parity with SOAP across your plan shapes — the post-mortem cost-retrieve still catches drift either way.',
+        key='movein_failure_postmortem_enabled', type_='bool', default=True,
+        label='Move-in cost — post-mortem on failure',
+        description='When ON, a failed SOAP MoveInReservation_v6 with a cost-related Ret_Msg triggers an automatic SOAP MoveInCostRetrieve so the 422 response can include calculator/SOAP/sent deltas — letting the bot diagnose drift and retry intelligently. When OFF, the bot just receives a generic failure without the diagnostic numbers. Independent of the comparison switch above; recommended ON regardless.',
         group='perpetual',
     ),
 ]
