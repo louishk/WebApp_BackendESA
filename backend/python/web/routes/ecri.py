@@ -1529,6 +1529,19 @@ def api_analytics_summary():
             desc(ECRIBatch.executed_at)
         ).all()
 
+        # FX rates — used to normalise multi-currency rents to SGD
+        from sqlalchemy import text as _text
+        fx_rows = session.execute(_text(
+            "SELECT target_currency, rate FROM fx_rates "
+            "WHERE rate_date = (SELECT MAX(rate_date) FROM fx_rates)"
+        )).fetchall()
+        fx = {r[0]: float(r[1]) for r in fx_rows}
+        fx['SGD'] = 1.0
+
+        def _to_sgd(amt, cur):
+            rate = fx.get(cur or 'SGD', 1.0)
+            return float(amt) / rate if amt is not None else 0.0
+
         summary = {
             'total_batches': len(batches),
             'total_ledgers_processed': 0,
@@ -1540,6 +1553,7 @@ def api_analytics_summary():
 
         total_resolved = 0
         total_churned = 0
+        total_presumed_staying = 0
 
         for batch in batches:
             ledgers = session.query(ECRIBatchLedger).filter_by(batch_id=batch.batch_id).all()
@@ -1558,16 +1572,18 @@ def api_analytics_summary():
                 # Presumed-staying gain: everyone except confirmed churners
                 # contributes their increase_amt to monthly gain. Confirmed stayed
                 # outcomes plus pending ledgers all count toward the upside.
+                cur = getattr(led, 'currency', None) or 'SGD'
                 if o and o.outcome_type in ('moved_out', 'scheduled_out'):
                     total_resolved += 1
                     total_churned += 1
-                    batch_loss += float(led.new_rent)
+                    batch_loss += _to_sgd(led.new_rent, cur)
                     if o.outcome_type == 'moved_out':
                         batch_churned += 1
                     else:
                         batch_scheduled += 1
                 else:
-                    batch_gain += float(led.increase_amt)
+                    batch_gain += _to_sgd(led.increase_amt, cur)
+                    total_presumed_staying += 1
                     if o and o.outcome_type == 'stayed':
                         total_resolved += 1
                         batch_stayed += 1
@@ -1595,8 +1611,12 @@ def api_analytics_summary():
                     if (presumed_staying + churn_count) > 0 else None,
             })
 
-        if total_resolved > 0:
-            summary['overall_churn_rate'] = round(total_churned / total_resolved * 100, 1)
+        # Churn rate denom = presumed-staying (stayed + pending) + churned/scheduled,
+        # so the rate reflects the actual portfolio share that has churned, not
+        # just the resolved subset (which trends to 100% before the tracker catches up).
+        denom = total_presumed_staying + total_churned
+        if denom > 0:
+            summary['overall_churn_rate'] = round(total_churned / denom * 100, 2)
 
         summary['total_monthly_gain'] = round(summary['total_monthly_gain'], 2)
         summary['total_monthly_loss'] = round(summary['total_monthly_loss'], 2)
