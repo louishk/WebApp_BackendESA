@@ -223,7 +223,7 @@
             const resolvedPct = 100 - pendingPct;
 
             document.getElementById('revenue-stats').innerHTML = `
-                <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(totalGain)}</div><div class="label">Monthly Gain (Stayed)</div></div>
+                <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(totalGain)}</div><div class="label">Monthly Gain (Stayed + Pending)</div></div>
                 <div class="stat-card" style="background: #C41230;"><div class="value">${formatCurrency(totalLoss)}</div><div class="label">Monthly Loss (Churn + Sched)</div></div>
                 <div class="stat-card"><div class="value">${formatCurrency(totalNet)}</div><div class="label">Net Monthly (Realized)</div></div>
                 <div class="stat-card" id="planned-monthly-card"><div class="value">—</div><div class="label">Planned Monthly Uplift (SGD)</div></div>

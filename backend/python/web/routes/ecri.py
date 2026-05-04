@@ -1465,20 +1465,21 @@ def api_batch_outcomes(batch_id):
 
             groups[g]['count'] += 1
             outcome = outcome_map.get(led.ledger_id)
+            otype = outcome['outcome_type'] if outcome else None
 
-            if outcome:
-                otype = outcome['outcome_type']
+            if otype == 'moved_out':
+                groups[g]['moved_out'] += 1
+                groups[g]['monthly_loss_churn'] += float(led.new_rent)
+            elif otype == 'scheduled_out':
+                groups[g]['scheduled_out'] += 1
+                groups[g]['monthly_loss_scheduled'] += float(led.new_rent)
+            else:
+                # stayed or pending → presumed staying, contributes upside
+                groups[g]['monthly_gain_stayed'] += float(led.increase_amt)
                 if otype == 'stayed':
                     groups[g]['stayed'] += 1
-                    groups[g]['monthly_gain_stayed'] += float(led.increase_amt)
-                elif otype == 'moved_out':
-                    groups[g]['moved_out'] += 1
-                    groups[g]['monthly_loss_churn'] += float(led.new_rent)
-                elif otype == 'scheduled_out':
-                    groups[g]['scheduled_out'] += 1
-                    groups[g]['monthly_loss_scheduled'] += float(led.new_rent)
-            else:
-                groups[g]['pending'] += 1
+                else:
+                    groups[g]['pending'] += 1
 
         # Calculate rates
         for g in groups:
@@ -1550,40 +1551,48 @@ def api_analytics_summary():
             batch_stayed = 0
             batch_churned = 0
             batch_scheduled = 0
+            batch_pending = 0
 
             for led in ledgers:
                 o = outcome_map.get(led.ledger_id)
-                if o:
+                # Presumed-staying gain: everyone except confirmed churners
+                # contributes their increase_amt to monthly gain. Confirmed stayed
+                # outcomes plus pending ledgers all count toward the upside.
+                if o and o.outcome_type in ('moved_out', 'scheduled_out'):
                     total_resolved += 1
-                    if o.outcome_type == 'stayed':
-                        batch_stayed += 1
-                        batch_gain += float(led.increase_amt)
-                    elif o.outcome_type == 'moved_out':
+                    total_churned += 1
+                    batch_loss += float(led.new_rent)
+                    if o.outcome_type == 'moved_out':
                         batch_churned += 1
-                        total_churned += 1
-                        batch_loss += float(led.new_rent)
-                    elif o.outcome_type == 'scheduled_out':
+                    else:
                         batch_scheduled += 1
-                        total_churned += 1
-                        batch_loss += float(led.new_rent)
+                else:
+                    batch_gain += float(led.increase_amt)
+                    if o and o.outcome_type == 'stayed':
+                        total_resolved += 1
+                        batch_stayed += 1
+                    else:
+                        batch_pending += 1
 
             summary['total_ledgers_processed'] += len(ledgers)
             summary['total_monthly_gain'] += batch_gain
             summary['total_monthly_loss'] += batch_loss
 
             churn_count = batch_churned + batch_scheduled
+            presumed_staying = batch_stayed + batch_pending
             summary['batches'].append({
                 'batch_id': str(batch.batch_id),
                 'name': batch.name,
                 'executed_at': batch.executed_at.isoformat() if batch.executed_at else None,
                 'total_ledgers': len(ledgers),
                 'stayed': batch_stayed,
+                'pending': batch_pending,
                 'churned': batch_churned,
                 'scheduled_out': batch_scheduled,
                 'monthly_gain': round(batch_gain, 2),
                 'monthly_loss': round(batch_loss, 2),
-                'churn_rate': round(churn_count / (batch_stayed + churn_count) * 100, 1)
-                    if (batch_stayed + churn_count) > 0 else None,
+                'churn_rate': round(churn_count / (presumed_staying + churn_count) * 100, 1)
+                    if (presumed_staying + churn_count) > 0 else None,
             })
 
         if total_resolved > 0:
