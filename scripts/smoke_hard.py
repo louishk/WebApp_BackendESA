@@ -1136,6 +1136,121 @@ def test_13_relax_actions(base: str, key: str) -> Result:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Scenario 14 — Multi-action chain integrity (L1 → L2 → L3 → L4-rejected)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_14_chain_integrity(base: str, key: str) -> Result:
+    """
+    Verifies that a 3-deep continuation chain with DIFFERENT actions at
+    each level tracks correctly and the L4 cap fires.
+
+    Chain: L1 (fresh) → L2 (bigger_size) → L3 (more_like_this slot=1) → L4 (rejected)
+
+    Invariants checked:
+      - stats.recommendation_level: 1, 2, 3 in order
+      - stats.relax_strategy_used: none, size_step_up, size_plus_one
+      - next_turn.next_level_allowed: true, true, false
+      - excluded_unit_ids_count grows monotonically (3 → 6 by L3)
+      - Zero unit_id overlap between turns (auto-exclusion working)
+      - L4 attempt → HTTP 400 with "exceeds max depth" message
+    """
+    r = Result("14. Multi-action chain integrity (L1→L2→L3→L4-cap)")
+    print("\n[14] Multi-action chain integrity")
+
+    sid = f"smoke-chain-{uuid.uuid4().hex[:6]}"
+    cid = f"smoke-chain"
+    site = "L018"
+
+    failures: list[str] = []
+
+    def _slots(resp):
+        return [s for s in (resp.get('slots') or []) if s]
+
+    # L1
+    body1 = _req_body([site], duration=6, size_range=['12-14'],
+                      session_id=sid, customer_id=cid)
+    st1, r1 = _recommend(base, key, body1)
+    if st1 != 200:
+        r.failed(f"L1 HTTP {st1}: {r1}")
+        return r
+    s1_units = [s['unit_id'] for s in _slots(r1)]
+    if r1['stats']['recommendation_level'] != 1:
+        failures.append(f"L1 level={r1['stats']['recommendation_level']} (expected 1)")
+    if r1['stats']['relax_strategy_used'] != 'none':
+        failures.append(f"L1 strategy={r1['stats']['relax_strategy_used']} (expected 'none')")
+    if not r1['next_turn'].get('next_level_allowed'):
+        failures.append("L1 next_level_allowed=false (expected true)")
+    rid1 = r1['request_id']
+
+    # L2 — bigger_size
+    body2 = _req_body([site], duration=6, size_range=['12-14'],
+                      session_id=sid, customer_id=cid)
+    body2['context']['previous_request_id'] = rid1
+    body2['context']['action'] = 'bigger_size'
+    st2, r2 = _recommend(base, key, body2)
+    if st2 != 200:
+        r.failed(f"L2 HTTP {st2}: {r2}")
+        return r
+    s2_units = [s['unit_id'] for s in _slots(r2)]
+    if r2['stats']['recommendation_level'] != 2:
+        failures.append(f"L2 level={r2['stats']['recommendation_level']} (expected 2)")
+    if r2['stats']['relax_strategy_used'] != 'size_step_up':
+        failures.append(f"L2 strategy={r2['stats']['relax_strategy_used']} (expected 'size_step_up')")
+    if r2['stats']['excluded_unit_ids_count'] != len(s1_units):
+        failures.append(f"L2 excluded={r2['stats']['excluded_unit_ids_count']} (expected {len(s1_units)})")
+    if not r2['next_turn'].get('next_level_allowed'):
+        failures.append("L2 next_level_allowed=false (expected true)")
+    overlap_12 = set(s1_units) & set(s2_units)
+    if overlap_12:
+        failures.append(f"L1∩L2 unit overlap: {overlap_12} (auto-exclusion broken)")
+    rid2 = r2['request_id']
+
+    # L3 — more_like_this on slot 1
+    body3 = _req_body([site], duration=6, size_range=['12-14'],
+                      session_id=sid, customer_id=cid)
+    body3['context']['previous_request_id'] = rid2
+    body3['context']['action'] = 'more_like_this'
+    body3['context']['picked_slot'] = 1
+    st3, r3 = _recommend(base, key, body3)
+    if st3 != 200:
+        r.failed(f"L3 HTTP {st3}: {r3}")
+        return r
+    s3_units = [s['unit_id'] for s in _slots(r3)]
+    if r3['stats']['recommendation_level'] != 3:
+        failures.append(f"L3 level={r3['stats']['recommendation_level']} (expected 3)")
+    if r3['stats']['relax_strategy_used'] != 'size_plus_one':
+        failures.append(f"L3 strategy={r3['stats']['relax_strategy_used']} (expected 'size_plus_one')")
+    expected_excl_l3 = len(s1_units) + len(s2_units)
+    if r3['stats']['excluded_unit_ids_count'] != expected_excl_l3:
+        failures.append(f"L3 excluded={r3['stats']['excluded_unit_ids_count']} (expected {expected_excl_l3})")
+    if r3['next_turn'].get('next_level_allowed'):
+        failures.append("L3 next_level_allowed=true (expected false — at max depth)")
+    overlap_l3 = (set(s1_units) | set(s2_units)) & set(s3_units)
+    if overlap_l3:
+        failures.append(f"(L1∪L2)∩L3 unit overlap: {overlap_l3} (auto-exclusion broken)")
+    rid3 = r3['request_id']
+
+    # L4 — must be rejected
+    body4 = _req_body([site], duration=6, size_range=['12-14'],
+                      session_id=sid, customer_id=cid)
+    body4['context']['previous_request_id'] = rid3
+    body4['context']['action'] = 'different_type'
+    st4, r4 = _recommend(base, key, body4)
+    if st4 != 400:
+        failures.append(f"L4 HTTP {st4} (expected 400 with chain-depth error). body={r4}")
+    elif 'exceeds max depth' not in str(r4.get('error', '')).lower():
+        failures.append(f"L4 returned 400 but wrong error: {r4.get('error')}")
+
+    if failures:
+        r.failed(f"{len(failures)} chain check(s) failed: " + " | ".join(failures))
+    else:
+        r.passed(notes=f"L1→L2(bigger_size)→L3(more_like_this) chain ok; L4 rejected; "
+                       f"excluded counts {len(s1_units)}/{expected_excl_l3}; "
+                       f"zero unit overlap.")
+    return r
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1153,6 +1268,7 @@ SCENARIOS = {
     11: test_11_insurance_requote,
     12: test_12_random_fuzz,
     13: test_13_relax_actions,
+    14: test_14_chain_integrity,
 }
 
 
