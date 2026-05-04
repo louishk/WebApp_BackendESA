@@ -21,8 +21,9 @@ except ImportError:
     sys.exit(1)
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC  = ROOT / 'docs' / 'api' / 'recommendation_engine_public.md'
-DST  = ROOT / 'docs' / 'api' / 'recommendation_engine_public.html'
+SRC      = ROOT / 'docs' / 'api' / 'recommendation_engine_public.md'
+DST_HTML = ROOT / 'docs' / 'api' / 'recommendation_engine_public.html'
+DST_PDF  = ROOT / 'docs' / 'api' / 'recommendation_engine_public.pdf'
 
 CSS = """
 :root {
@@ -155,11 +156,42 @@ def main() -> int:
     )
 
     html = HTML_TEMPLATE.format(css=CSS.strip(), body=body_html)
-    DST.write_text(html, encoding='utf-8')
+    DST_HTML.write_text(html, encoding='utf-8')
 
-    src_kb = SRC.stat().st_size / 1024
-    dst_kb = DST.stat().st_size / 1024
-    print(f"Wrote {DST.relative_to(ROOT)}  ({src_kb:.1f} KB md → {dst_kb:.1f} KB html)")
+    src_kb  = SRC.stat().st_size / 1024
+    html_kb = DST_HTML.stat().st_size / 1024
+    print(f"Wrote {DST_HTML.relative_to(ROOT)}  ({src_kb:.1f} KB md → {html_kb:.1f} KB html)")
+
+    # PDF — uses weasyprint if available; otherwise skip gracefully.
+    try:
+        from weasyprint import HTML as WeasyHTML  # type: ignore
+    except ImportError:
+        print("(skipping PDF — pip install --user weasyprint to enable)")
+        return 0
+
+    # Print-flavoured stylesheet — light theme, larger margins, page numbers.
+    print_css = """
+    @page { size: A4; margin: 18mm 16mm; }
+    body { max-width: none; margin: 0; padding: 0; font-size: 10.5pt;
+           color: #1f2937; background: white; }
+    h1 { font-size: 22pt; }
+    h2 { font-size: 15pt; page-break-before: auto; page-break-after: avoid; }
+    h3 { font-size: 12pt; page-break-after: avoid; }
+    pre { background: #f3f4f6; color: #111827; font-size: 8.5pt;
+          padding: 0.55rem 0.75rem; border: 1px solid #e5e7eb; }
+    code { background: #f3f4f6; color: #111827; }
+    table { font-size: 9pt; }
+    th { background: #f9fafb; }
+    blockquote { background: #fffbeb; border-color: #fcd34d; color: #78350f; }
+    .doc-header { border-bottom: 1px solid #e5e7eb; }
+    .doc-header .crumbs { color: #6b7280; }
+    /* Avoid splitting common code blocks across pages */
+    pre, table { page-break-inside: avoid; }
+    """
+    pdf_html = HTML_TEMPLATE.format(css=print_css.strip(), body=body_html)
+    WeasyHTML(string=pdf_html, base_url=str(ROOT)).write_pdf(str(DST_PDF))
+    pdf_kb = DST_PDF.stat().st_size / 1024
+    print(f"Wrote {DST_PDF.relative_to(ROOT)}  ({pdf_kb:.1f} KB pdf)")
     return 0
 
 

@@ -6,7 +6,7 @@ Users can generate, view, and regenerate their key here.
 
 from pathlib import Path
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, make_response, abort
+from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, make_response, abort, jsonify
 from flask_login import login_required, current_user
 
 from web.utils.audit import audit_log, AuditEvent
@@ -18,6 +18,49 @@ api_keys_bp = Blueprint('api_keys', __name__, url_prefix='/api-keys')
 _DOCS_API_DIR = Path(__file__).resolve().parents[4] / 'docs' / 'api'
 _INTEGRATION_GUIDE_MD   = _DOCS_API_DIR / 'recommendation_engine_public.md'
 _INTEGRATION_GUIDE_HTML = _DOCS_API_DIR / 'recommendation_engine_public.html'
+_INTEGRATION_GUIDE_PDF  = _DOCS_API_DIR / 'recommendation_engine_public.pdf'
+
+
+def _is_doc_request_authorised() -> bool:
+    """
+    Doc access — accept either:
+      1. Logged-in session (current_user.is_authenticated)
+      2. Valid X-API-Key HEADER
+
+    Header-only on purpose: a credential-in-URL via ?key= would leak to
+    nginx access logs and gunicorn stdout. The shareable artifact is the
+    downloaded PDF / HTML, not the live URL.
+
+    No scope check, no quota counting (doc fetches must not eat API quota).
+    """
+    from flask_login import current_user
+    if current_user and current_user.is_authenticated:
+        return True
+
+    raw = (request.headers.get('X-API-Key') or '').strip()
+    if not raw or not raw.startswith('esa_') or '.' not in raw:
+        return False
+    try:
+        key_id, raw_secret = raw[4:].split('.', 1)
+    except ValueError:
+        return False
+    if not key_id or not raw_secret:
+        return False
+
+    try:
+        from web.models.api_key import ApiKey
+        db = current_app.get_db_session()
+        try:
+            api_key = db.query(ApiKey).filter_by(key_id=key_id).first()
+            if not api_key or not api_key.is_valid():
+                return False
+            if not api_key.verify_secret(raw_secret):
+                return False
+            return True
+        finally:
+            db.close()
+    except Exception:
+        return False
 
 
 def get_session():
@@ -138,49 +181,82 @@ def regenerate_key():
 @api_keys_bp.route('/integration-guide')
 def integration_guide():
     """
-    Public integration guide for the recommend + booking API.
-    Public on purpose — shareable URL for integration partners who do
-    not have access to the backend. The content is the API spec itself
-    (no secrets, no internals).
+    Integration guide for the recommend + booking API. Accessible to:
+      - logged-in admin users (session), OR
+      - anyone holding a valid API key, passed via the `X-API-Key` header.
 
-    Default: rendered HTML (text/html).
-    `?format=md`      → raw markdown (text/markdown).
-    `?download=1`     → forces Save-As (.md when format=md, .html otherwise).
+    Header-only on purpose: a `?key=` query param would leak to access
+    logs. The shareable artifact for partners is the downloaded PDF /
+    HTML / Markdown — admins download via the /api-keys/ page and send
+    the file directly (email, Slack, etc.).
+
+    Formats (via `?format=`):
+      - `html` (default) — rendered web page
+      - `md`             — raw markdown
+      - `pdf`            — printable A4 PDF
+
+    `?download=1` forces a Save-As prompt.
     """
+    if not _is_doc_request_authorised():
+        return jsonify({
+            'error': 'Authentication required',
+            'message': 'Pass your API key in the X-API-Key header.',
+        }), 401
+
     fmt = (request.args.get('format') or 'html').strip().lower()
     download = bool(request.args.get('download'))
 
     if fmt == 'md':
-        path, mime, filename = (
+        path, mime, filename, is_binary = (
             _INTEGRATION_GUIDE_MD,
             'text/markdown; charset=utf-8',
             'esa_recommendation_api_guide.md',
+            False,
+        )
+    elif fmt == 'pdf':
+        path, mime, filename, is_binary = (
+            _INTEGRATION_GUIDE_PDF,
+            'application/pdf',
+            'esa_recommendation_api_guide.pdf',
+            True,
         )
     else:
-        path, mime, filename = (
+        path, mime, filename, is_binary = (
             _INTEGRATION_GUIDE_HTML,
             'text/html; charset=utf-8',
             'esa_recommendation_api_guide.html',
+            False,
         )
 
     if not path.is_file():
         abort(404)
     try:
-        content = path.read_text(encoding='utf-8')
+        content = path.read_bytes() if is_binary else path.read_text(encoding='utf-8')
     except OSError:
         abort(500)
 
     resp = make_response(content)
     resp.headers['Content-Type'] = mime
-    # Public doc — let CDNs/browsers cache for 5 minutes.
-    resp.headers['Cache-Control'] = 'public, max-age=300'
-    # Defence-in-depth: the static HTML has no scripts today, but lock
-    # it down so a future doc edit can't accidentally introduce one.
-    resp.headers['Content-Security-Policy'] = (
-        "default-src 'none'; style-src 'unsafe-inline'; "
-        "img-src data:; base-uri 'none'; frame-ancestors 'none'"
-    )
+    # Auth-gated doc — don't let intermediaries cache it.
+    resp.headers['Cache-Control'] = 'private, max-age=0, must-revalidate'
     resp.headers['X-Content-Type-Options'] = 'nosniff'
-    if download:
-        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+    resp.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    # PDF / HTML inline display (no script execution).
+    if fmt != 'pdf':
+        resp.headers['Content-Security-Policy'] = (
+            "default-src 'none'; style-src 'unsafe-inline'; "
+            "img-src data:; base-uri 'none'; frame-ancestors 'none'"
+        )
+    if download or fmt == 'pdf':
+        disposition = 'attachment' if download else 'inline'
+        # RFC 6266 — `filename=` for legacy clients, `filename*=UTF-8''<pct>`
+        # for full Unicode support. Filenames are compile-time constants,
+        # but encode anyway to keep the pattern injection-safe if they
+        # ever become dynamic.
+        from urllib.parse import quote as _urlquote
+        encoded = _urlquote(filename, safe='')
+        resp.headers['Content-Disposition'] = (
+            f"{disposition}; filename=\"{filename}\"; "
+            f"filename*=UTF-8''{encoded}"
+        )
     return resp
