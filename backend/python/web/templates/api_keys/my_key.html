@@ -361,11 +361,20 @@
                     Perpetual+prepay plans: the middleware fans out the follow-up SOAP calls internally. Bot's contract stays single-amount (you pass <code>payment_amount</code>; we handle the rest).
                 </div>
                 <div style="margin-top: 0.55rem; padding-top: 0.45rem; border-top: 1px solid #bfdbfe; font-size: 0.83rem;">
-                    <strong>📘 Full integration guide:</strong>
-                    <a href="{{ url_for('api_keys.integration_guide') }}" target="_blank" style="margin-left: 0.35rem;">view</a>
-                    ·
-                    <a href="{{ url_for('api_keys.integration_guide', download=1) }}">download (.md)</a>
-                    <span style="color: #6b7280; margin-left: 0.5rem;">— covers identity model, multi-turn search (3 levels), reserve/move-in lifecycle, error semantics, idempotency, and a full worked example.</span>
+                    <strong>📘 Public integration guide</strong> (shareable URL — no login required):
+                    <div style="margin: 0.3rem 0 0 0; font-family: monospace; font-size: 0.82rem; user-select: all; padding: 0.35rem 0.5rem; background: white; border: 1px solid #bfdbfe; border-radius: 4px;">
+                        https://backend.extraspace.com.sg{{ url_for('api_keys.integration_guide') }}
+                    </div>
+                    <div style="margin-top: 0.35rem;">
+                        <a href="{{ url_for('api_keys.integration_guide') }}" target="_blank">View as web page</a>
+                        ·
+                        <a href="{{ url_for('api_keys.integration_guide', format='md') }}" target="_blank">View as markdown</a>
+                        ·
+                        <a href="{{ url_for('api_keys.integration_guide', format='md', download=1) }}">Download .md</a>
+                        ·
+                        <a href="{{ url_for('api_keys.integration_guide', download=1) }}">Download .html</a>
+                    </div>
+                    <span style="color: #6b7280; display: block; margin-top: 0.4rem;">Send this URL to your integration partner. Covers identity model, multi-turn search, reserve/cost lifecycle, error semantics, and a full worked example.</span>
                 </div>
             </div>
         </div>

@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Extra Space Asia — Recommendation & Booking API</title>
+  <meta name="description" content="Public integration guide for the Extra Space Asia recommendation and booking API.">
+  <style>:root {
+  --fg: #1f2937; --bg: #ffffff; --muted: #6b7280;
+  --code-bg: #f3f4f6; --code-fg: #111827;
+  --pre-bg: #1f2937; --pre-fg: #f9fafb;
+  --link: #1d4ed8; --link-hover: #1e40af;
+  --rule: #e5e7eb; --table-header: #f9fafb;
+  --note-bg: #fffbeb; --note-border: #fcd34d; --note-fg: #78350f;
+  --quick-bg: #eff6ff; --quick-border: #bfdbfe; --quick-fg: #1e3a8a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #f3f4f6; --bg: #0f172a; --muted: #94a3b8;
+    --code-bg: #1e293b; --code-fg: #e2e8f0;
+    --pre-bg: #0b1220; --pre-fg: #e2e8f0;
+    --link: #60a5fa; --link-hover: #93c5fd;
+    --rule: #334155; --table-header: #1e293b;
+    --note-bg: #422006; --note-border: #b45309; --note-fg: #fde68a;
+    --quick-bg: #0c1f3d; --quick-border: #1e40af; --quick-fg: #bfdbfe;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px; line-height: 1.6;
+  color: var(--fg); background: var(--bg);
+  max-width: 920px; margin: 0 auto; padding: 2rem 1.5rem 4rem;
+}
+h1 { font-size: 1.85rem; margin: 0 0 0.4rem; }
+h2 { font-size: 1.4rem; margin: 2.2rem 0 0.8rem; padding-top: 1rem;
+     border-top: 1px solid var(--rule); }
+h3 { font-size: 1.08rem; margin: 1.4rem 0 0.6rem; }
+h4 { font-size: 0.98rem; margin: 1rem 0 0.4rem; }
+p, ul, ol { margin: 0.6rem 0; }
+ul, ol { padding-left: 1.5rem; }
+li { margin: 0.15rem 0; }
+a { color: var(--link); text-decoration: none; }
+a:hover { color: var(--link-hover); text-decoration: underline; }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 1.6rem 0; }
+
+code {
+  background: var(--code-bg); color: var(--code-fg);
+  padding: 0.1em 0.35em; border-radius: 3px;
+  font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.88em;
+}
+pre {
+  background: var(--pre-bg); color: var(--pre-fg);
+  padding: 0.85rem 1rem; border-radius: 6px;
+  overflow-x: auto;
+  font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.82em; line-height: 1.5;
+}
+pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
+
+table {
+  border-collapse: collapse; width: 100%;
+  margin: 0.7rem 0; font-size: 0.9em;
+}
+th, td {
+  text-align: left; padding: 0.45rem 0.65rem;
+  border: 1px solid var(--rule); vertical-align: top;
+}
+th { background: var(--table-header); font-weight: 600; }
+
+blockquote {
+  margin: 0.7rem 0; padding: 0.7rem 1rem;
+  background: var(--note-bg); border: 1px solid var(--note-border);
+  border-left-width: 4px; border-radius: 4px; color: var(--note-fg);
+}
+blockquote p { margin: 0.2rem 0; }
+
+/* Header band */
+.doc-header {
+  margin: 0 0 1.6rem; padding-bottom: 1rem;
+  border-bottom: 1px solid var(--rule);
+}
+.doc-header .crumbs {
+  font-size: 0.82rem; color: var(--muted);
+  margin-bottom: 0.5rem; letter-spacing: 0.01em;
+}
+
+/* Anchor offset for in-page links */
+:target { scroll-margin-top: 1.5rem; }
+
+/* Mobile */
+@media (max-width: 600px) {
+  body { padding: 1rem; font-size: 14px; }
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.2rem; }
+  pre { font-size: 0.78em; }
+}</style>
+</head>
+<body>
+  <div class="doc-header">
+    <div class="crumbs">Extra Space Asia · API Integration Guide · v1</div>
+  </div>
+  <h1 id="extra-space-asia-recommendation-booking-api">Extra Space Asia — Recommendation &amp; Booking API</h1>
+<p>Build chat / web / mobile experiences that quote and reserve self-storage units through Extra Space Asia.</p>
+<ul>
+<li><strong>Base URL</strong> — <code>https://backend.extraspace.com.sg</code></li>
+<li><strong>Auth</strong> — <code>X-API-Key: esa_&lt;prefix&gt;.&lt;secret&gt;</code> on every request</li>
+<li><strong>Format</strong> — JSON in/out, UTF-8, ISO dates (<code>YYYY-MM-DD</code>), decimals as numbers (<code>91.01</code>)</li>
+<li><strong>Status</strong> — current scope is <strong>recommend → reserve → confirm price</strong>. Lease creation (move-in) is handled by Extra Space Asia operations and is not part of this integration.</li>
+</ul>
+<blockquote>
+<p><strong>Heads up:</strong> the recommender is <strong>stateful</strong>. Read <a href="#3--identity-model">§3 — Identity</a> before writing your first integration. Four context fields glue every step together — get them right and everything just works.</p>
+</blockquote>
+<hr>
+<h2 id="table-of-contents">Table of contents</h2>
+<ol>
+<li><a href="#1--quick-start">Quick-start (copy-paste)</a></li>
+<li><a href="#2--booking-lifecycle">Booking lifecycle</a></li>
+<li><a href="#3--identity-model">Identity model</a></li>
+<li><a href="#4--postapirecommendations"><code>POST /api/recommendations</code></a></li>
+<li><a href="#5--multi-turn-search">Multi-turn search (3 levels deep)</a></li>
+<li><a href="#6--postapireservationsreserve"><code>POST /api/reservations/reserve</code></a></li>
+<li><a href="#7--getapireservationsmove-incost"><code>GET /api/reservations/move-in/cost</code></a></li>
+<li><a href="#8--reservation-lifecycle">Reservation lifecycle (read/update/cancel)</a></li>
+<li><a href="#9--end-to-end">End-to-end worked example</a></li>
+<li><a href="#10--reference">Reference tables</a></li>
+<li><a href="#11--best-practices">Best practices</a></li>
+<li><a href="#12--support">Support</a></li>
+</ol>
+<hr>
+<h2 id="1-quick-start">1 · Quick-start</h2>
+<p>Five-minute integration test:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 1. Get a quote (3 priced unit slots)</span>
+curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://backend.extraspace.com.sg/api/recommendations<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-API-Key: </span><span class="nv">$ESA_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;duration_months&quot;: 6,</span>
+<span class="s1">    &quot;filters&quot;: { &quot;location&quot;: [&quot;L017&quot;], &quot;size_range&quot;: [&quot;30-35&quot;] },</span>
+<span class="s1">    &quot;context&quot;: {</span>
+<span class="s1">      &quot;channel&quot;:     &quot;chatbot&quot;,</span>
+<span class="s1">      &quot;request_id&quot;:  &quot;00000000-0000-0000-0000-000000000001&quot;,</span>
+<span class="s1">      &quot;session_id&quot;:  &quot;demo-session-1&quot;,</span>
+<span class="s1">      &quot;customer_id&quot;: &quot;demo-customer-1&quot;</span>
+<span class="s1">    }</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<p>You'll get back <strong>3 slots</strong> (Best Match / Best Alternative / Best Price) with full pricing, per-month breakdowns, and continuation tokens. From there:</p>
+<ul>
+<li>Customer accepts a slot → <code>POST /api/reservations/reserve</code> (§6)</li>
+<li>Show authoritative price → <code>GET /api/reservations/move-in/cost</code> (§7)</li>
+<li>Customer wants different options → recommend again with <code>previous_request_id</code> (§5)</li>
+</ul>
+<p><strong>Rate limits</strong></p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Limit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/recommendations</code></td>
+<td>120/min</td>
+</tr>
+<tr>
+<td><code>POST /api/reservations/reserve</code></td>
+<td>10/min</td>
+</tr>
+<tr>
+<td><code>GET /api/reservations/move-in/cost</code></td>
+<td>30/min</td>
+</tr>
+<tr>
+<td><code>PUT /api/reservations/&lt;id&gt;</code> (update/cancel)</td>
+<td>10/min</td>
+</tr>
+</tbody>
+</table>
+<p>HTTP 429 when over, with <code>retry_after</code> seconds in the body.</p>
+<hr>
+<h2 id="2-booking-lifecycle">2 · Booking lifecycle</h2>
+<div class="codehilite"><pre><span></span><code>                  ┌────────────────────────────────┐
+                  │ POST /api/recommendations      │ ←── repeat with action +
+                  │   Returns 3 priced slots       │     previous_request_id
+                  └────────────────────────────────┘     (max 3 levels deep)
+                                  ↓ customer accepts a slot
+                  ┌────────────────────────────────┐
+                  │ POST /api/reservations/reserve │
+                  │   Holds the unit. No payment.  │
+                  └────────────────────────────────┘
+                                  ↓ before showing total
+                  ┌────────────────────────────────┐
+                  │ GET  /api/reservations/        │
+                  │       move-in/cost             │
+                  │   Authoritative price.         │
+                  └────────────────────────────────┘
+                                  ↓
+                  Lease creation is handled by ESA ops (out of scope).
+</code></pre></div>
+
+<p>Optional reservation management between <strong>reserve</strong> and lease completion:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/reservations/&lt;waiting_id&gt;</code></td>
+<td>Read state</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/reservations/&lt;waiting_id&gt;</code></td>
+<td>Modify (move-in date, contact info)</td>
+</tr>
+<tr>
+<td><code>PUT</code></td>
+<td><code>/api/reservations/&lt;waiting_id&gt;/cancel</code></td>
+<td>Cancel</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="3-identity-model">3 · Identity model</h2>
+<p><strong>Four context fields are required on every recommend call.</strong> They tie every step of one customer's flow together — from first quote through follow-up turns to the held reservation.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Format</th>
+<th>Lifetime</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>channel</code></td>
+<td>enum: <code>chatbot</code> | <code>web</code> | <code>api</code> | <code>admin</code></td>
+<td>per call</td>
+<td>hardcoded by your integration</td>
+</tr>
+<tr>
+<td><code>request_id</code></td>
+<td>string ≤ 64 chars (UUID v4 recommended)</td>
+<td><strong>unique per turn</strong></td>
+<td>bot mints fresh per call</td>
+</tr>
+<tr>
+<td><code>session_id</code></td>
+<td>string ≤ 64 chars</td>
+<td><strong>per conversation</strong> — same on every recommend turn AND on <code>/reserve</code></td>
+<td>bot mints once at chat start</td>
+</tr>
+<tr>
+<td><code>customer_id</code></td>
+<td>string ≤ 64 chars</td>
+<td><strong>per customer lifetime</strong></td>
+<td>your channel's stable user id (or stable surrogate for anonymous flows)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Plus one optional field</strong> for follow-up turns:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>When to send</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>previous_request_id</code></td>
+<td>The <code>request_id</code> of the prior recommend turn. Tells the engine "this is a continuation". See §5.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Validation rules</strong>
+- All four core fields are mandatory; missing/empty/whitespace-only → HTTP 400.
+- Length cap: 64 chars per field.
+- Case-sensitive.
+- Server returns <code>next_turn.request_id</code> + <code>next_turn.session_id</code> in the response so you can confirm what got logged.</p>
+<hr>
+<h2 id="4-post-apirecommendations">4 · <code>POST /api/recommendations</code></h2>
+<p>Quote engine. Returns <strong>up to 3 priced slots</strong> matching the customer's intent.</p>
+<h3 id="minimal-request">Minimal request</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://backend.extraspace.com.sg/api/recommendations<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-API-Key: </span><span class="nv">$ESA_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;duration_months&quot;: 6,</span>
+<span class="s1">    &quot;filters&quot;: { &quot;location&quot;: [&quot;L017&quot;] },</span>
+<span class="s1">    &quot;context&quot;: {</span>
+<span class="s1">      &quot;channel&quot;: &quot;chatbot&quot;, &quot;request_id&quot;: &quot;&lt;uuid&gt;&quot;,</span>
+<span class="s1">      &quot;session_id&quot;: &quot;&lt;uuid&gt;&quot;, &quot;customer_id&quot;: &quot;user-42&quot;</span>
+<span class="s1">    }</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<h3 id="full-request-body">Full request body</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;recommendation&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;duration_months&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;filters&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;location&quot;</span><span class="p">:</span><span class="w">      </span><span class="p">[</span><span class="s2">&quot;L017&quot;</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;unit_type&quot;</span><span class="p">:</span><span class="w">     </span><span class="p">[</span><span class="s2">&quot;W&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;L&quot;</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;climate_type&quot;</span><span class="p">:</span><span class="w">  </span><span class="p">[</span><span class="s2">&quot;A&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;AD&quot;</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;size_range&quot;</span><span class="p">:</span><span class="w">    </span><span class="p">[</span><span class="s2">&quot;30-35&quot;</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="p">[</span><span class="mi">107197</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;concession_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11872</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;plan_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="p">[</span><span class="mi">10</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;coupon_code&quot;</span><span class="p">:</span><span class="w">   </span><span class="s2">&quot;PROMO123&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;context&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;channel&quot;</span><span class="p">:</span><span class="w">             </span><span class="s2">&quot;chatbot&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w">          </span><span class="s2">&quot;550e8400-e29b-41d4-a716-446655440000&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;session_id&quot;</span><span class="p">:</span><span class="w">          </span><span class="s2">&quot;sess-conv-7&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;customer_id&quot;</span><span class="p">:</span><span class="w">         </span><span class="s2">&quot;user_xyz_123&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;previous_request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;picked_slot&quot;</span><span class="p">:</span><span class="w">         </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;action&quot;</span><span class="p">:</span><span class="w">              </span><span class="s2">&quot;more_like_this&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;constraints&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;max_distance_km&quot;</span><span class="p">:</span><span class="w">  </span><span class="mi">50</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;exclude_unit_ids&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">107197</span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code></td>
+<td>optional</td>
+<td><code>recommendation</code> (default) or <code>quote</code> (single unit; requires <code>filters.unit_id</code>)</td>
+</tr>
+<tr>
+<td><code>duration_months</code></td>
+<td><strong>yes</strong></td>
+<td>integer 1–120</td>
+</tr>
+<tr>
+<td><code>filters.location</code></td>
+<td><strong>yes</strong></td>
+<td>array of site codes</td>
+</tr>
+<tr>
+<td><code>filters.unit_type</code></td>
+<td>optional</td>
+<td><code>W</code>/<code>WN</code>/<code>L</code>/<code>U</code>/<code>M</code>/<code>LL</code> (see §10)</td>
+</tr>
+<tr>
+<td><code>filters.climate_type</code></td>
+<td>optional</td>
+<td><code>A</code>/<code>AD</code>/<code>NC</code>/<code>RF</code> (see §10)</td>
+</tr>
+<tr>
+<td><code>filters.size_range</code></td>
+<td>optional</td>
+<td>sqft buckets like <code>"30-35"</code></td>
+</tr>
+<tr>
+<td><code>filters.unit_id</code></td>
+<td>optional</td>
+<td>array of integers — pin to specific unit(s)</td>
+</tr>
+<tr>
+<td><code>filters.plan_id</code></td>
+<td>optional</td>
+<td>array of integers — cross-site brand filter (one plan covers multiple per-site concessions)</td>
+</tr>
+<tr>
+<td><code>filters.concession_id</code></td>
+<td>optional</td>
+<td>single integer — pins a specific (unit, plan, concession) tuple</td>
+</tr>
+<tr>
+<td><code>filters.coupon_code</code></td>
+<td>optional</td>
+<td>string — gates coupon-only plans</td>
+</tr>
+<tr>
+<td><code>context.*</code></td>
+<td>mostly <strong>yes</strong></td>
+<td>see §3</td>
+</tr>
+<tr>
+<td><code>constraints.max_distance_km</code></td>
+<td>optional</td>
+<td>overrides default neighbour radius (50 km)</td>
+</tr>
+<tr>
+<td><code>constraints.exclude_unit_ids</code></td>
+<td>optional</td>
+<td>up to 200 ids — won't be shown</td>
+</tr>
+</tbody>
+</table>
+<h3 id="sample-response">Sample response</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;recommendation&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;550e8400-e29b-41d4-a716-446655440000&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;served_at&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-05-04T01:23:45Z&quot;</span><span class="p">,</span>
+
+<span class="w">  </span><span class="nt">&quot;stats&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;recommendation_level&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;candidates_pool_size&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">14</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;relax_strategy_used&quot;</span><span class="p">:</span><span class="w">  </span><span class="s2">&quot;none&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;saturation_signal&quot;</span><span class="p">:</span><span class="w">    </span><span class="kc">false</span>
+<span class="w">  </span><span class="p">},</span>
+
+<span class="w">  </span><span class="nt">&quot;slots&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;slot&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Best Match&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">107197</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;facility&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;unit_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;W&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;climate_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;AD&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;size_range&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;30-35&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;size_sqft&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">32.5</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;plan_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;plan_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Moving Season SG&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;concession_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11872</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;concession_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;SS-TAC-Move-R-30%&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;discount_summary&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;30% off every month&quot;</span><span class="p">,</span>
+
+<span class="w">      </span><span class="nt">&quot;match_flags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;alternative_strategy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;relaxed_dims&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[],</span>
+<span class="w">        </span><span class="nt">&quot;distance_km&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;travel_warning&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">      </span><span class="p">},</span>
+
+<span class="w">      </span><span class="nt">&quot;terms&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;discount_perpetual&quot;</span><span class="p">:</span><span class="w">     </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;prepayment_months&quot;</span><span class="p">:</span><span class="w">      </span><span class="mi">6</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;post_prepay_uplift_pct&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">5.0</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;lock_in_months&quot;</span><span class="p">:</span><span class="w">         </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;promo_valid_until&quot;</span><span class="p">:</span><span class="w">      </span><span class="s2">&quot;2026-12-31&quot;</span>
+<span class="w">      </span><span class="p">},</span>
+
+<span class="w">      </span><span class="nt">&quot;pricing&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;first_month_total&quot;</span><span class="p">:</span><span class="w">            </span><span class="mf">238.71</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;total_due_at_movein&quot;</span><span class="p">:</span><span class="w">          </span><span class="mf">693.76</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;total_contract&quot;</span><span class="p">:</span><span class="w">               </span><span class="mf">693.76</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;monthly_average&quot;</span><span class="p">:</span><span class="w">              </span><span class="mf">115.63</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;rate_during_prepay&quot;</span><span class="p">:</span><span class="w">           </span><span class="mf">80.50</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;rate_after_prepay&quot;</span><span class="p">:</span><span class="w">            </span><span class="mf">84.52</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;rate_change_date&quot;</span><span class="p">:</span><span class="w">             </span><span class="s2">&quot;2026-11-15&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;monthly_all_in_during_prepay&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">91.01</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;monthly_all_in_after_prepay&quot;</span><span class="p">:</span><span class="w">  </span><span class="mf">95.40</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;monthly_insurance_premium&quot;</span><span class="p">:</span><span class="w">    </span><span class="mf">3.00</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;monthly_insurance_tax&quot;</span><span class="p">:</span><span class="w">        </span><span class="mf">0.27</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;breakdown&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">          </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;month_index&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;billing_date&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-05-15&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;rent&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">115.00</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;discount&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">34.50</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;rent_proration_factor&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;insurance&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.00</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;deposit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">296.00</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;admin_fee&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">30.00</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;rent_tax&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">7.25</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;insurance_tax&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.27</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">238.71</span><span class="w"> </span><span class="p">},</span>
+<span class="w">          </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;month_index&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;billing_date&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-06-15&quot;</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;rent&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">115.00</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;discount&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">34.50</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;insurance&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.00</span><span class="p">,</span>
+<span class="w">            </span><span class="nt">&quot;deposit&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;admin_fee&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">91.01</span><span class="w"> </span><span class="p">}</span>
+<span class="w">          </span><span class="cm">/* ... one entry per month of duration_months ... */</span>
+<span class="w">        </span><span class="p">]</span>
+<span class="w">      </span><span class="p">},</span>
+
+<span class="w">      </span><span class="nt">&quot;insurance&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;selected&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;coverage&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;premium&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.00</span><span class="w"> </span><span class="p">},</span>
+<span class="w">        </span><span class="nt">&quot;options&quot;</span><span class="p">:</span><span class="w">  </span><span class="p">[</span>
+<span class="w">          </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;coverage&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;premium&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">3.00</span><span class="w"> </span><span class="p">},</span>
+<span class="w">          </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;coverage&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2000</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;premium&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">7.00</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="p">],</span>
+<span class="w">        </span><span class="nt">&quot;min_required&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1000</span>
+<span class="w">      </span><span class="p">},</span>
+
+<span class="w">      </span><span class="nt">&quot;customer_disclosure&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;fine_print&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">          </span><span class="s2">&quot;Pay $693.76 today to lock 6 months at $91.01/month all-in.&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;After 2026-11-15, monthly adjusts to $95.40 all-in (rent +5% adjustment).&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="s2">&quot;Insurance is changeable — see insurance.options for higher coverage tiers.&quot;</span>
+<span class="w">        </span><span class="p">]</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;slot&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Best Alternative&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;match_flags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;alternative_strategy&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;same_site_2nd&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">      </span><span class="nt">&quot;...&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;same shape as slot 1&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;slot&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;label&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Best Price&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;match_flags&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;relaxed_dims&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;unit_type&quot;</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;savings_pct&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">18.3</span><span class="w"> </span><span class="p">},</span>
+<span class="w">      </span><span class="nt">&quot;...&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;same shape — strictly cheaper than slot 1&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+
+<span class="w">  </span><span class="nt">&quot;next_turn&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;previous_request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;550e8400-e29b-41d4-a716-446655440000&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;session_id&quot;</span><span class="p">:</span><span class="w">          </span><span class="s2">&quot;sess-conv-7&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;supported_actions&quot;</span><span class="p">:</span><span class="w">   </span><span class="p">[</span><span class="s2">&quot;more_like_this&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;bigger_size&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;smaller_size&quot;</span><span class="p">,</span>
+<span class="w">                            </span><span class="s2">&quot;expand_locations&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;different_type&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;different_duration&quot;</span><span class="p">],</span>
+<span class="w">    </span><span class="nt">&quot;next_level_allowed&quot;</span><span class="p">:</span><span class="w">  </span><span class="kc">true</span>
+<span class="w">  </span><span class="p">},</span>
+
+<span class="w">  </span><span class="nt">&quot;reserve_template&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;endpoint&quot;</span><span class="p">:</span><span class="w">      </span><span class="s2">&quot;POST /api/reservations/reserve&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;site_code&quot;</span><span class="p">:</span><span class="w">     </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">107197</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;concession_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11872</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;plan_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">10</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="slot-semantics">Slot semantics</h3>
+<table>
+<thead>
+<tr>
+<th>Slot</th>
+<th>Label</th>
+<th>What it is</th>
+<th>Distinguished by <code>match_flags</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Best Match</td>
+<td>Cheapest unit matching every filter</td>
+<td><code>alternative_strategy: null</code>, <code>relaxed_dims: []</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Best Alternative</td>
+<td>Most convenient alternative</td>
+<td><code>alternative_strategy</code>: <code>same_site_2nd</code> / <code>neighbour_close</code> / <code>neighbour_far</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>Best Price</td>
+<td>Strictly cheaper unit at the same site</td>
+<td><code>relaxed_dims</code>: which dim was dropped; <code>savings_pct</code></td>
+</tr>
+</tbody>
+</table>
+<p>When the strict-filter pool is empty, the engine runs <strong>pool rescue</strong> — it relaxes dimensions until candidates appear. Surfaced as <code>stats.saturation_signal: true</code> + <code>stats.pool_rescue_step</code>. Each slot's <code>match_flags.relaxed_dims</code> shows what was relaxed for that specific slot.</p>
+<p>The response is guaranteed to contain <strong>≥ 2 slots in normal operation</strong>. Slot 3 is best-effort; <code>null</code> if no strictly-cheaper unit exists.</p>
+<h3 id="modequote-single-unit-pricing"><code>mode=quote</code> — single-unit pricing</h3>
+<p>For "what does unit X cost?" — pass <code>mode: "quote"</code> plus <code>filters.unit_id: [N]</code>. Returns one slot keyed to that unit. Pricing is <strong>cent-identical</strong> to what <code>mode=recommendation</code> returned for the same unit.</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;quote&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;duration_months&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;filters&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;location&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;L017&quot;</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">107197</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;context&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chatbot&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;session_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;customer_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr>
+<h2 id="5-multi-turn-search">5 · Multi-turn search</h2>
+<p>The recommender is <strong>hierarchical, max 3 levels deep</strong> per booking flow. Pass <code>previous_request_id</code> + <code>action</code> to continue from a prior turn.</p>
+<div class="codehilite"><pre><span></span><code>Level 1   Initial recommend                           ─── no previous_request_id
+Level 2   Continuation off L1                         ─── previous_request_id = L1.request_id
+Level 3   Continuation off L2                         ─── previous_request_id = L2.request_id
+Level 4   REJECTED with HTTP 400 ─── customer must accept a slot or pivot to a fresh L1
+</code></pre></div>
+
+<p><code>stats.recommendation_level</code> (1, 2, or 3) tells you where you are. <code>next_turn.next_level_allowed</code> flips to <code>false</code> on level-3 — that's your signal to stop chaining.</p>
+<h3 id="action-vocabulary">Action vocabulary</h3>
+<p>All actions require <code>previous_request_id</code>.</p>
+<table>
+<thead>
+<tr>
+<th><code>action</code></th>
+<th>What the engine does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>more_like_this</code> (paired with <code>picked_slot=1\|2\|3</code>)</td>
+<td>Slot-specific tightening. Slots 1/3 → size_range ±1 bucket. Slot 2 → next-nearest site.</td>
+</tr>
+<tr>
+<td><code>bigger_size</code></td>
+<td>Shift <code>size_range</code> ONE bucket up (e.g. <code>30-35</code> → <code>35-40</code>)</td>
+</tr>
+<tr>
+<td><code>smaller_size</code></td>
+<td>Shift <code>size_range</code> ONE bucket down</td>
+</tr>
+<tr>
+<td><code>expand_locations</code></td>
+<td>Add nearest neighbour sites (within <code>max_distance_km</code>) to <code>filters.location</code></td>
+</tr>
+<tr>
+<td><code>different_type</code></td>
+<td>Drop the <code>unit_type</code> filter</td>
+</tr>
+<tr>
+<td><code>different_duration</code></td>
+<td>Analytics signal — bot also changes <code>duration_months</code> so the engine re-quotes against the new length</td>
+</tr>
+</tbody>
+</table>
+<h3 id="decision-tree">Decision tree</h3>
+<table>
+<thead>
+<tr>
+<th>Customer says…</th>
+<th>Bot's next call</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"I'll take slot 1 / slot 2"</td>
+<td>Skip recommend → <code>POST /reserve</code></td>
+</tr>
+<tr>
+<td>"More like that one" / "Anything similar to slot 2?"</td>
+<td>recommend with <code>previous_request_id</code> + <code>picked_slot</code> + <code>action: "more_like_this"</code></td>
+</tr>
+<tr>
+<td>"Other options?" / "What else?"</td>
+<td>recommend with <code>previous_request_id</code> alone — auto-excludes shown units</td>
+</tr>
+<tr>
+<td>"Something bigger" / "Something smaller"</td>
+<td>recommend with <code>previous_request_id</code> + <code>action: "bigger_size"</code> (or <code>smaller_size</code>)</td>
+</tr>
+<tr>
+<td>"What about nearby locations?"</td>
+<td>recommend with <code>previous_request_id</code> + <code>action: "expand_locations"</code></td>
+</tr>
+<tr>
+<td>"Different unit type?"</td>
+<td>recommend with <code>previous_request_id</code> + <code>action: "different_type"</code></td>
+</tr>
+<tr>
+<td>"What if I lease for 12 months?"</td>
+<td>recommend with new <code>duration_months</code> + <code>action: "different_duration"</code></td>
+</tr>
+<tr>
+<td>"Actually I want something completely different"</td>
+<td><strong>Fresh L1</strong>: new filters, new <code>request_id</code>, <strong>keep</strong> <code>session_id</code> + <code>customer_id</code>, <strong>drop</strong> <code>previous_request_id</code>/<code>picked_slot</code>/<code>action</code></td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="6-post-apireservationsreserve">6 · <code>POST /api/reservations/reserve</code></h2>
+<p>Holds the unit and creates a tenant + reservation record. <strong>No payment is taken.</strong></p>
+<h3 id="minimal-request_1">Minimal request</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>https://backend.extraspace.com.sg/api/reservations/reserve<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-API-Key: </span><span class="nv">$ESA_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;site_code&quot;: &quot;L017&quot;, &quot;unit_id&quot;: 107197, &quot;concession_id&quot;: 11872,</span>
+<span class="s1">    &quot;first_name&quot;: &quot;Jane&quot;, &quot;last_name&quot;: &quot;Tan&quot;, &quot;phone&quot;: &quot;+6591234567&quot;,</span>
+<span class="s1">    &quot;needed_date&quot;: &quot;2026-05-15&quot;,</span>
+<span class="s1">    &quot;session_id&quot;: &quot;sess-conv-7&quot;,</span>
+<span class="s1">    &quot;customer_id&quot;: &quot;user_xyz_123&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<h3 id="body-fields">Body fields</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>site_code</code></td>
+<td><strong>yes</strong></td>
+<td>from the picked slot</td>
+</tr>
+<tr>
+<td><code>unit_id</code></td>
+<td><strong>yes</strong></td>
+<td>from the picked slot</td>
+</tr>
+<tr>
+<td><code>concession_id</code></td>
+<td><strong>yes</strong></td>
+<td>from the picked slot. <strong><code>0</code> = standard rate</strong> — pass <code>0</code>, never <code>null</code></td>
+</tr>
+<tr>
+<td><code>plan_id</code></td>
+<td>optional</td>
+<td>from the picked slot; attribution signal</td>
+</tr>
+<tr>
+<td><code>first_name</code>, <code>last_name</code>, <code>phone</code></td>
+<td><strong>yes</strong></td>
+<td>tenant identity</td>
+</tr>
+<tr>
+<td><code>email</code>, <code>mobile</code>, <code>address</code>, <code>city</code>, <code>postal_code</code>, <code>country</code></td>
+<td>optional</td>
+<td></td>
+</tr>
+<tr>
+<td><code>needed_date</code></td>
+<td>optional</td>
+<td><code>YYYY-MM-DD</code>, default = tomorrow</td>
+</tr>
+<tr>
+<td><code>comment</code>, <code>quoted_rate</code>, <code>source_name</code></td>
+<td>optional</td>
+<td></td>
+</tr>
+<tr>
+<td><code>session_id</code>, <code>customer_id</code></td>
+<td><strong>yes</strong></td>
+<td>must match the recommend call</td>
+</tr>
+<tr>
+<td><code>previous_request_id</code></td>
+<td>optional</td>
+<td>the picked slot's recommend <code>request_id</code> — strongest attribution</td>
+</tr>
+</tbody>
+</table>
+<h3 id="response">Response</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;success&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;site_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">107197</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;tenant_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;1109544&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;waiting_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;848757&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;global_waiting_num&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;809363726&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Reservation created&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>Hold on to <code>waiting_id</code> and <code>tenant_id</code> — both identify the held reservation for any subsequent read / modify / cancel call.</p>
+<hr>
+<h2 id="7-get-apireservationsmove-incost">7 · <code>GET /api/reservations/move-in/cost</code></h2>
+<p>Authoritative price for the held reservation. Call this <strong>right before showing the customer the total</strong>.</p>
+<h3 id="minimal-request_2">Minimal request</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-G<span class="w"> </span><span class="s2">&quot;https://backend.extraspace.com.sg/api/reservations/move-in/cost&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-API-Key: </span><span class="nv">$ESA_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">&quot;site_code=L017&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">&quot;unit_id=107197&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">&quot;concession_id=11872&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">&quot;insurance_id=1&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">&quot;move_in_date=2026-05-15&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">&quot;waiting_id=848757&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--data-urlencode<span class="w"> </span><span class="s2">&quot;variant=reservation&quot;</span>
+</code></pre></div>
+
+<h3 id="query-parameters">Query parameters</h3>
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>site_code</code></td>
+<td><strong>yes</strong></td>
+<td></td>
+</tr>
+<tr>
+<td><code>unit_id</code></td>
+<td><strong>yes</strong></td>
+<td></td>
+</tr>
+<tr>
+<td><code>concession_id</code></td>
+<td>optional</td>
+<td>same value used on <code>/reserve</code>; default <code>0</code></td>
+</tr>
+<tr>
+<td><code>insurance_id</code></td>
+<td>optional</td>
+<td>the slot's selected insurance, or <code>0</code> for none</td>
+</tr>
+<tr>
+<td><code>move_in_date</code></td>
+<td>optional</td>
+<td>default = tomorrow</td>
+</tr>
+<tr>
+<td><code>variant</code></td>
+<td>optional</td>
+<td><code>standard</code> (default) | <code>reservation</code> | <code>28day</code> | <code>push_rate</code>. Use <code>reservation</code> for a held reservation.</td>
+</tr>
+<tr>
+<td><code>waiting_id</code></td>
+<td>required when <code>variant=reservation</code></td>
+<td>from <code>/reserve</code></td>
+</tr>
+<tr>
+<td><code>promo_id</code></td>
+<td>optional</td>
+<td>only with <code>variant=reservation</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="response_1">Response</h3>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;site_code&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">107197</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;move_in_date&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-05-15&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;tenant_rate&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">80.50</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;discount&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">24.15</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">238.71</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;charges&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;First Monthly Rent Fee&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;amount&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">80.50</span><span class="p">,</span><span class="w">  </span><span class="nt">&quot;tax&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">7.25</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w">  </span><span class="mf">87.75</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Administrative Fee&quot;</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;amount&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">30.00</span><span class="p">,</span><span class="w">  </span><span class="nt">&quot;tax&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">2.70</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w">  </span><span class="mf">32.70</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Security Deposit&quot;</span><span class="p">,</span><span class="w">       </span><span class="nt">&quot;amount&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">296.00</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;tax&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.00</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">296.00</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;First Month Insurance&quot;</span><span class="p">,</span><span class="w">  </span><span class="nt">&quot;amount&quot;</span><span class="p">:</span><span class="w">  </span><span class="mf">3.00</span><span class="p">,</span><span class="w">  </span><span class="nt">&quot;tax&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.27</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;total&quot;</span><span class="p">:</span><span class="w">   </span><span class="mf">3.27</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The <code>total</code> field is the authoritative amount.</p>
+<hr>
+<h2 id="8-reservation-lifecycle">8 · Reservation lifecycle</h2>
+<p>For reading or modifying a held reservation.</p>
+<h3 id="read">Read</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span><span class="s2">&quot;https://backend.extraspace.com.sg/api/reservations/848757?site_code=L017&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-API-Key: </span><span class="nv">$ESA_API_KEY</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Returns the reservation's current state.</p>
+<h3 id="modify">Modify</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>https://backend.extraspace.com.sg/api/reservations/848757<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-API-Key: </span><span class="nv">$ESA_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;site_code&quot;: &quot;L017&quot;,</span>
+<span class="s1">    &quot;needed_date&quot;: &quot;2026-05-20&quot;,</span>
+<span class="s1">    &quot;first_name&quot;: &quot;Jane&quot;,</span>
+<span class="s1">    &quot;phone&quot;: &quot;+6591234567&quot;,</span>
+<span class="s1">    &quot;comment&quot;: &quot;Customer changed move-in date&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<p>Only fields you include in the body are written. Returns <code>{"success": true, "waiting_id": ..., "message": "Reservation updated"}</code>.</p>
+<h3 id="cancel">Cancel</h3>
+<div class="codehilite"><pre><span></span><code>curl<span class="w"> </span>-X<span class="w"> </span>PUT<span class="w"> </span>https://backend.extraspace.com.sg/api/reservations/848757/cancel<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;X-API-Key: </span><span class="nv">$ESA_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{ &quot;site_code&quot;: &quot;L017&quot; }&#39;</span>
+</code></pre></div>
+
+<p>Idempotent — cancelling an already-cancelled reservation returns success.</p>
+<hr>
+<h2 id="9-end-to-end">9 · End-to-end</h2>
+<p>A 3-turn chat ending in a held reservation with confirmed price.</p>
+<div class="codehilite"><pre><span></span><code>// ─── Turn 1 — fresh recommend ─────────────────────────────────────────
+POST /api/recommendations
+{
+  &quot;duration_months&quot;: 6,
+  &quot;filters&quot;: { &quot;location&quot;: [&quot;L017&quot;], &quot;size_range&quot;: [&quot;30-35&quot;] },
+  &quot;context&quot;: {
+    &quot;channel&quot;:     &quot;chatbot&quot;,
+    &quot;request_id&quot;:  &quot;req-aaaa-1111&quot;,
+    &quot;session_id&quot;:  &quot;sess-conv-7&quot;,
+    &quot;customer_id&quot;: &quot;user_xyz_123&quot;
+  }
+}
+// → 3 slots · stats.recommendation_level = 1 · next_level_allowed = true
+
+
+// ─── Turn 2 — &quot;show me something bigger&quot; ─────────────────────────────
+POST /api/recommendations
+{
+  &quot;duration_months&quot;: 6,
+  &quot;filters&quot;: { &quot;location&quot;: [&quot;L017&quot;], &quot;size_range&quot;: [&quot;30-35&quot;] },
+  &quot;context&quot;: {
+    &quot;channel&quot;:             &quot;chatbot&quot;,
+    &quot;request_id&quot;:          &quot;req-bbbb-2222&quot;,
+    &quot;session_id&quot;:          &quot;sess-conv-7&quot;,        // unchanged
+    &quot;customer_id&quot;:         &quot;user_xyz_123&quot;,       // unchanged
+    &quot;previous_request_id&quot;: &quot;req-aaaa-1111&quot;,
+    &quot;action&quot;:              &quot;bigger_size&quot;
+  }
+}
+// → 3 fresh slots in 35-40 range · stats.recommendation_level = 2
+
+
+// ─── Customer picks slot 1 — hold the unit ───────────────────────────
+POST /api/reservations/reserve
+{
+  &quot;site_code&quot;:     &quot;L017&quot;,
+  &quot;unit_id&quot;:       107298,
+  &quot;concession_id&quot;: 11872,
+  &quot;first_name&quot;:    &quot;Jane&quot;, &quot;last_name&quot;: &quot;Tan&quot;, &quot;phone&quot;: &quot;+6591234567&quot;,
+  &quot;email&quot;:         &quot;jane@example.com&quot;,
+  &quot;needed_date&quot;:   &quot;2026-05-15&quot;,
+  &quot;session_id&quot;:    &quot;sess-conv-7&quot;,
+  &quot;customer_id&quot;:   &quot;user_xyz_123&quot;,
+  &quot;previous_request_id&quot;: &quot;req-bbbb-2222&quot;
+}
+// → tenant_id = 1109544, waiting_id = 848757
+
+
+// ─── Confirm authoritative price right before showing the total ──────
+GET /api/reservations/move-in/cost
+    ?site_code=L017
+    &amp;unit_id=107298
+    &amp;concession_id=11872
+    &amp;insurance_id=1
+    &amp;move_in_date=2026-05-15
+    &amp;waiting_id=848757
+    &amp;variant=reservation
+// → { total: 238.71, charges: [...] }
+</code></pre></div>
+
+<hr>
+<h2 id="10-reference">10 · Reference</h2>
+<h3 id="unit-type-codes">Unit type codes</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>W</code></td>
+<td>Walk-in (full-size storage room)</td>
+</tr>
+<tr>
+<td><code>WN</code></td>
+<td>Wine storage</td>
+</tr>
+<tr>
+<td><code>L</code></td>
+<td>Locker (smaller, rack-style)</td>
+</tr>
+<tr>
+<td><code>U</code></td>
+<td>Upper-position locker</td>
+</tr>
+<tr>
+<td><code>M</code></td>
+<td>Mid-position locker</td>
+</tr>
+<tr>
+<td><code>LL</code></td>
+<td>Lower-position locker</td>
+</tr>
+</tbody>
+</table>
+<h3 id="climate-codes">Climate codes</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>A</code></td>
+<td>Air-conditioned</td>
+</tr>
+<tr>
+<td><code>AD</code></td>
+<td>Air-conditioned + dehumidified</td>
+</tr>
+<tr>
+<td><code>NC</code></td>
+<td>Non-climate</td>
+</tr>
+<tr>
+<td><code>RF</code></td>
+<td>Refrigerated (specialised)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="channel-codes">Channel codes</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>chatbot</code></td>
+<td>Conversational bot integration</td>
+</tr>
+<tr>
+<td><code>web</code></td>
+<td>Direct web booking</td>
+</tr>
+<tr>
+<td><code>api</code></td>
+<td>Generic API caller</td>
+</tr>
+<tr>
+<td><code>admin</code></td>
+<td>Admin tooling</td>
+</tr>
+</tbody>
+</table>
+<h3 id="common-error-responses">Common error responses</h3>
+<table>
+<thead>
+<tr>
+<th>HTTP</th>
+<th>Where</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>400</td>
+<td>any endpoint</td>
+<td>Invalid input — body has <code>error</code> field with the specific failure</td>
+</tr>
+<tr>
+<td>401</td>
+<td>any endpoint</td>
+<td>Missing / wrong <code>X-API-Key</code></td>
+</tr>
+<tr>
+<td>403</td>
+<td>any endpoint</td>
+<td>API key doesn't have the required scope</td>
+</tr>
+<tr>
+<td>400</td>
+<td><code>/recommendations</code></td>
+<td><code>recommendation chain exceeds max depth (3)</code> — drop <code>previous_request_id</code> and start a fresh L1</td>
+</tr>
+<tr>
+<td>200 + <code>success: false</code></td>
+<td><code>/reserve</code></td>
+<td>Unit got rented or unavailable. Body's <code>message</code> explains. Re-recommend with <code>constraints.exclude_unit_ids: [&lt;that unit_id&gt;]</code>.</td>
+</tr>
+<tr>
+<td>429</td>
+<td>any endpoint</td>
+<td>Rate limit exceeded; <code>retry_after</code> seconds in body</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="11-best-practices">11 · Best practices</h2>
+<ol>
+<li><strong>Send all four context IDs on every recommend call.</strong> Keep <code>session_id</code> + <code>customer_id</code> consistent across recommend → reserve.</li>
+<li><strong>Mint a fresh <code>request_id</code> per turn.</strong> Don't reuse it; it's the link key for <code>previous_request_id</code> on the next turn.</li>
+<li><strong>Re-fetch <code>/move-in/cost</code> immediately before showing the total</strong> to the customer. Pricing can shift if a session is long-running.</li>
+<li><strong>Treat HTTP 200 + <code>success: false</code> as a failure</strong> (most often "unit no longer available"). Re-recommend with the failed unit_id in <code>constraints.exclude_unit_ids</code>.</li>
+<li><strong>Stop chaining at level 3.</strong> Watch <code>next_turn.next_level_allowed</code> — <code>false</code> means encourage the customer to pick a slot or rephrase.</li>
+<li><strong><code>concession_id=0</code> = standard rate.</strong> Pass <code>0</code>, never <code>null</code>, when the picked slot has no discount.</li>
+<li><strong>Don't share API keys.</strong> One key per integration; rotate via Extra Space Asia ops if compromised.</li>
+</ol>
+<hr>
+<h2 id="12-support">12 · Support</h2>
+<ul>
+<li><strong>Integration questions</strong> — contact your Extra Space Asia integration manager.</li>
+<li><strong>Liveness check</strong> — <code>GET /api/health</code> returns <code>{"status": "ok"}</code> when the API is up.</li>
+<li><strong>API key management</strong> — <code>https://backend.extraspace.com.sg/api-keys/</code> (auth required).</li>
+</ul>
+</body>
+</html>

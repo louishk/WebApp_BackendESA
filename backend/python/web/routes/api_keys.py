@@ -15,11 +15,9 @@ api_keys_bp = Blueprint('api_keys', __name__, url_prefix='/api-keys')
 
 # Path to the public integration guide (markdown). Repo-relative so it works
 # in dev and on the VM without env-specific config.
-_INTEGRATION_GUIDE_PATH = (
-    # routes → web → python → backend → repo root  ⇒ parents[4]
-    Path(__file__).resolve().parents[4]
-    / 'docs' / 'api' / 'recommendation_engine_public.md'
-)
+_DOCS_API_DIR = Path(__file__).resolve().parents[4] / 'docs' / 'api'
+_INTEGRATION_GUIDE_MD   = _DOCS_API_DIR / 'recommendation_engine_public.md'
+_INTEGRATION_GUIDE_HTML = _DOCS_API_DIR / 'recommendation_engine_public.html'
 
 
 def get_session():
@@ -138,23 +136,51 @@ def regenerate_key():
 
 
 @api_keys_bp.route('/integration-guide')
-@login_required
 def integration_guide():
     """
-    Public integration guide for the recommend + booking API. Served as
-    text/markdown so any markdown viewer (or the browser's text rendering)
-    handles it. Add ?download=1 to force a Save-As prompt.
+    Public integration guide for the recommend + booking API.
+    Public on purpose — shareable URL for integration partners who do
+    not have access to the backend. The content is the API spec itself
+    (no secrets, no internals).
+
+    Default: rendered HTML (text/html).
+    `?format=md`      → raw markdown (text/markdown).
+    `?download=1`     → forces Save-As (.md when format=md, .html otherwise).
     """
-    if not _INTEGRATION_GUIDE_PATH.is_file():
+    fmt = (request.args.get('format') or 'html').strip().lower()
+    download = bool(request.args.get('download'))
+
+    if fmt == 'md':
+        path, mime, filename = (
+            _INTEGRATION_GUIDE_MD,
+            'text/markdown; charset=utf-8',
+            'esa_recommendation_api_guide.md',
+        )
+    else:
+        path, mime, filename = (
+            _INTEGRATION_GUIDE_HTML,
+            'text/html; charset=utf-8',
+            'esa_recommendation_api_guide.html',
+        )
+
+    if not path.is_file():
         abort(404)
     try:
-        content = _INTEGRATION_GUIDE_PATH.read_text(encoding='utf-8')
+        content = path.read_text(encoding='utf-8')
     except OSError:
         abort(500)
+
     resp = make_response(content)
-    resp.headers['Content-Type'] = 'text/markdown; charset=utf-8'
-    if request.args.get('download'):
-        resp.headers['Content-Disposition'] = (
-            'attachment; filename="esa_recommendation_api_guide.md"'
-        )
+    resp.headers['Content-Type'] = mime
+    # Public doc — let CDNs/browsers cache for 5 minutes.
+    resp.headers['Cache-Control'] = 'public, max-age=300'
+    # Defence-in-depth: the static HTML has no scripts today, but lock
+    # it down so a future doc edit can't accidentally introduce one.
+    resp.headers['Content-Security-Policy'] = (
+        "default-src 'none'; style-src 'unsafe-inline'; "
+        "img-src data:; base-uri 'none'; frame-ancestors 'none'"
+    )
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    if download:
+        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return resp
