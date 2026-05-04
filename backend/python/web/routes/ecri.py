@@ -1549,6 +1549,7 @@ def api_analytics_summary():
             batch_loss = 0
             batch_stayed = 0
             batch_churned = 0
+            batch_scheduled = 0
 
             for led in ledgers:
                 o = outcome_map.get(led.ledger_id)
@@ -1561,11 +1562,16 @@ def api_analytics_summary():
                         batch_churned += 1
                         total_churned += 1
                         batch_loss += float(led.new_rent)
+                    elif o.outcome_type == 'scheduled_out':
+                        batch_scheduled += 1
+                        total_churned += 1
+                        batch_loss += float(led.new_rent)
 
             summary['total_ledgers_processed'] += len(ledgers)
             summary['total_monthly_gain'] += batch_gain
             summary['total_monthly_loss'] += batch_loss
 
+            churn_count = batch_churned + batch_scheduled
             summary['batches'].append({
                 'batch_id': str(batch.batch_id),
                 'name': batch.name,
@@ -1573,10 +1579,11 @@ def api_analytics_summary():
                 'total_ledgers': len(ledgers),
                 'stayed': batch_stayed,
                 'churned': batch_churned,
+                'scheduled_out': batch_scheduled,
                 'monthly_gain': round(batch_gain, 2),
                 'monthly_loss': round(batch_loss, 2),
-                'churn_rate': round(batch_churned / (batch_stayed + batch_churned) * 100, 1)
-                    if (batch_stayed + batch_churned) > 0 else None,
+                'churn_rate': round(churn_count / (batch_stayed + churn_count) * 100, 1)
+                    if (batch_stayed + churn_count) > 0 else None,
             })
 
         if total_resolved > 0:
@@ -1587,6 +1594,21 @@ def api_analytics_summary():
         summary['net_monthly_impact'] = round(
             summary['total_monthly_gain'] - summary['total_monthly_loss'], 2
         )
+
+        # Portfolio-wide planned monthly uplift in SGD (FX-converted), pulled
+        # from the year-impact baseline so the KPI is non-zero before any
+        # outcomes resolve.
+        try:
+            from common.ecri_year_impact import compute_year_impact
+            from datetime import date as _date
+            yi = compute_year_impact(session, _date.today().year)
+            base_month = next(
+                (m for m in yi.get('months', []) if m['status'] == 'forecast' and m['planned_sgd'] > 0),
+                next((m for m in yi.get('months', []) if m['planned_sgd'] > 0), None),
+            )
+            summary['planned_monthly_uplift_sgd'] = base_month['planned_sgd'] if base_month else 0
+        except Exception:
+            summary['planned_monthly_uplift_sgd'] = None
 
         return jsonify(summary)
     finally:

@@ -24,13 +24,17 @@
             <div class="value" id="kpi-batches">-</div>
             <div class="label">Executed Batches</div>
         </div>
+        <div class="stat-card">
+            <div class="value" id="kpi-planned">-</div>
+            <div class="label">Planned Monthly Uplift (SGD)</div>
+        </div>
         <div class="stat-card" style="background: #28A745;">
             <div class="value" id="kpi-gain">-</div>
-            <div class="label">Monthly Gain</div>
+            <div class="label">Monthly Gain (Stayed)</div>
         </div>
         <div class="stat-card" style="background: #C41230;">
             <div class="value" id="kpi-loss">-</div>
-            <div class="label">Monthly Loss (Churn)</div>
+            <div class="label">Monthly Loss (Churn + Sched)</div>
         </div>
         <div class="stat-card">
             <div class="value" id="kpi-net">-</div>
@@ -38,9 +42,36 @@
         </div>
         <div class="stat-card">
             <div class="value" id="kpi-churn">-</div>
-            <div class="label">Churn Rate</div>
+            <div class="label">Churn Rate (incl. Sched)</div>
         </div>
     </div>
+</div>
+
+<!-- ECRI Impact on 2026 Book -->
+<div class="card">
+    <h2>ECRI Impact on 2026 Book</h2>
+    <p style="color:#666; font-size:0.85rem; margin-bottom:1rem;">
+        Cumulative revenue contribution from all executed ECRI batches, day-prorated. Past months are actuals (verified from churn); future months assume current active tenants persist.
+    </p>
+    <div class="stats-grid" id="year-impact-kpis" style="margin-bottom:1rem;"></div>
+    <div style="overflow-x:auto;">
+        <table id="year-impact-table">
+            <thead><tr>
+                <th>Month</th><th>Status</th>
+                <th style="text-align:right;">Planned (SGD)</th>
+                <th style="text-align:right;">Actual (SGD)</th>
+                <th style="text-align:right;">Churn Loss</th>
+                <th style="text-align:right;">Forecast (SGD)</th>
+            </tr></thead>
+            <tbody id="year-impact-tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Stage-Aware Action Items -->
+<div class="card" id="action-items-card" style="display:none;">
+    <h2>Action Items</h2>
+    <div id="action-items"></div>
 </div>
 
 <!-- Recent Batches -->
@@ -50,6 +81,7 @@
         <thead>
             <tr>
                 <th>Batch Name</th>
+                <th>Type</th>
                 <th>Status</th>
                 <th>Ledgers</th>
                 <th>Target %</th>
@@ -59,7 +91,7 @@
             </tr>
         </thead>
         <tbody id="batches-tbody">
-            <tr><td colspan="7" style="text-align: center; color: #666;">Loading batches...</td></tr>
+            <tr><td colspan="8" style="text-align: center; color: #666;">Loading batches...</td></tr>
         </tbody>
     </table>
 </div>
@@ -120,6 +152,8 @@
             const data = await res.json();
 
             document.getElementById('kpi-batches').textContent = data.total_batches;
+            const plannedEl = document.getElementById('kpi-planned');
+            if (plannedEl) plannedEl.textContent = data.planned_monthly_uplift_sgd != null ? formatCurrency(data.planned_monthly_uplift_sgd) : '-';
             document.getElementById('kpi-gain').textContent = formatCurrency(data.total_monthly_gain);
             document.getElementById('kpi-loss').textContent = formatCurrency(data.total_monthly_loss);
             document.getElementById('kpi-net').textContent = formatCurrency(data.net_monthly_impact);
@@ -137,7 +171,7 @@
             const tbody = document.getElementById('batches-tbody');
 
             if (!data.batches || data.batches.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No batches yet. Create your first batch from the Eligibility tab.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #666;">No batches yet. Create your first batch from the Eligibility tab.</td></tr>';
                 return;
             }
 
@@ -156,8 +190,13 @@
                     actions = `<a href="/ecri/batch/${b.batch_id}/analytics" class="btn btn-sm btn-secondary">Analytics</a>`;
                 }
 
+                const typeLabel = (b.batch_type === 'advance')
+                    ? '<span class="status status-running">Pre-Load</span>'
+                    : '<span style="color:#666;">Standard</span>';
+
                 return `<tr>
                     <td>${b.name || '-'}</td>
+                    <td>${typeLabel}</td>
                     <td><span class="status ${statusClass}">${b.status}</span></td>
                     <td>${b.total_ledgers}</td>
                     <td>${b.target_increase_pct ? b.target_increase_pct + '%' : (b.control_group_enabled ? 'Control Groups' : '-')}</td>
@@ -167,13 +206,125 @@
                 </tr>`;
             }).join('');
         } catch (e) {
-            document.getElementById('batches-tbody').innerHTML = '<tr><td colspan="7" style="text-align: center; color: #C41230;">Failed to load batches</td></tr>';
+            document.getElementById('batches-tbody').innerHTML = '<tr><td colspan="8" style="text-align: center; color: #C41230;">Failed to load batches</td></tr>';
         }
+    }
+
+    // Stage-aware action items
+    const USER_PERMS_DASH = {
+        can_request_ecri_exclusion: {{ 'true' if current_user.can_request_ecri_exclusion() else 'false' }},
+        can_finalize_ecri_batch: {{ 'true' if current_user.can_finalize_ecri_batch() else 'false' }},
+        can_execute_ecri_batch: {{ 'true' if current_user.can_execute_ecri_batch() else 'false' }},
+        can_manage_ecri: {{ 'true' if current_user.can_manage_ecri() else 'false' }},
+    };
+
+    function renderActionItems(batches) {
+        const items = [];
+        for (const b of batches) {
+            if (b.status === 'site_review' && USER_PERMS_DASH.can_request_ecri_exclusion) {
+                items.push(`<div style="margin-bottom:0.5rem; padding:0.5rem 1rem; background:#fef3c7; border-radius:6px;">
+                    <strong>${b.name||b.batch_id}</strong> — awaiting your site review.
+                    <a href="/ecri/batch/${b.batch_id}/review" class="btn btn-secondary" style="padding:2px 10px; font-size:0.82rem; margin-left:0.5rem;">Review</a>
+                </div>`);
+            } else if (b.status === 'site_review' && USER_PERMS_DASH.can_finalize_ecri_batch) {
+                items.push(`<div style="margin-bottom:0.5rem; padding:0.5rem 1rem; background:#fef3c7; border-radius:6px;">
+                    <strong>${b.name||b.batch_id}</strong> — exclusion requests pending your decision.
+                    <a href="/ecri/batch/${b.batch_id}/review" class="btn btn-secondary" style="padding:2px 10px; font-size:0.82rem; margin-left:0.5rem;">Decide</a>
+                </div>`);
+            } else if (b.status === 'rev_approved' && USER_PERMS_DASH.can_execute_ecri_batch) {
+                items.push(`<div style="margin-bottom:0.5rem; padding:0.5rem 1rem; background:#d1fae5; border-radius:6px;">
+                    <strong>${b.name||b.batch_id}</strong> — ready to execute.
+                    <a href="/ecri/batch/${b.batch_id}/review" class="btn" style="padding:2px 10px; font-size:0.82rem; margin-left:0.5rem; background:#10b981;">Execute</a>
+                </div>`);
+            }
+        }
+        const card = document.getElementById('action-items-card');
+        if (items.length > 0) {
+            card.style.display = 'block';
+            document.getElementById('action-items').innerHTML = items.join('');
+        }
+    }
+
+    // Extend loadBatches to also render action items and add new statuses
+    const _origLoadBatches = loadBatches;
+    async function loadBatchesExtended() {
+        try {
+            const res = await fetch('/ecri/api/batches', {headers: apiHeaders()});
+            const data = await res.json();
+            const tbody = document.getElementById('batches-tbody');
+
+            if (!data.batches || data.batches.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No batches yet.</td></tr>';
+                return;
+            }
+
+            renderActionItems(data.batches);
+
+            tbody.innerHTML = data.batches.map(b => {
+                const statusClass = {
+                    'draft': 'status-pending',
+                    'site_review': 'status-running',
+                    'rev_approved': 'status-running',
+                    'executing': 'status-running',
+                    'executed': 'status-completed',
+                    'cancelled': 'status-failed'
+                }[b.status] || '';
+
+                let actions = '';
+                if (['draft','site_review','rev_approved','executing'].includes(b.status)) {
+                    actions = `<a href="/ecri/batch/${b.batch_id}/review" class="btn btn-sm">Review</a>`;
+                } else if (b.status === 'executed') {
+                    actions = `<a href="/ecri/batch/${b.batch_id}/analytics" class="btn btn-sm btn-secondary">Analytics</a>`;
+                }
+
+                return `<tr>
+                    <td>${b.name || '-'}</td>
+                    <td><span class="status ${statusClass}">${b.status}</span></td>
+                    <td>${b.total_ledgers}</td>
+                    <td>${b.target_increase_pct ? b.target_increase_pct + '%' : (b.control_group_enabled ? 'Groups' : '-')}</td>
+                    <td>${formatDate(b.created_at)}</td>
+                    <td>${formatDate(b.executed_at)}</td>
+                    <td>${actions}</td>
+                </tr>`;
+            }).join('');
+        } catch (e) {
+            document.getElementById('batches-tbody').innerHTML = '<tr><td colspan="8" style="text-align: center; color: #C41230;">Failed to load batches</td></tr>';
+        }
+    }
+
+    async function loadYearImpact() {
+        try {
+            const year = new Date().getFullYear();
+            const res = await fetch(`/ecri/api/year-impact?year=${year}`, {headers: apiHeaders()});
+            const data = await res.json();
+            document.getElementById('year-impact-kpis').innerHTML = `
+                <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(data.ytd_actual_sgd)}</div><div class="label">YTD Actual (SGD)</div></div>
+                <div class="stat-card"><div class="value">${formatCurrency(data.eoy_projection_sgd)}</div><div class="label">EOY Projection (SGD)</div></div>
+                <div class="stat-card"><div class="value">${data.batches_covered}</div><div class="label">Batches</div></div>
+                <div class="stat-card"><div class="value">${data.ledgers_covered}</div><div class="label">Ledgers</div></div>
+            `;
+            document.getElementById('year-impact-tbody').innerHTML = (data.months || []).map(m => {
+                const badge = m.status === 'actual'
+                    ? '<span class="status status-completed">actual</span>'
+                    : m.status === 'partial'
+                        ? '<span class="status status-running">partial</span>'
+                        : '<span class="status status-pending">forecast</span>';
+                return `<tr>
+                    <td>${m.month}</td>
+                    <td>${badge}</td>
+                    <td style="text-align:right;">${formatCurrency(m.planned_sgd)}</td>
+                    <td style="text-align:right;">${m.actual_sgd != null ? formatCurrency(m.actual_sgd) : '—'}</td>
+                    <td style="text-align:right; ${m.churn_loss_sgd > 0 ? 'color:#C41230;' : ''}">${m.churn_loss_sgd != null ? formatCurrency(m.churn_loss_sgd) : '—'}</td>
+                    <td style="text-align:right;">${formatCurrency(m.forecast_sgd)}</td>
+                </tr>`;
+            }).join('');
+        } catch(e) { /* no-op */ }
     }
 
     // Initialize
     loadFreshness();
     loadKPIs();
-    loadBatches();
+    loadBatchesExtended();
+    loadYearImpact();
 </script>
 {% endblock %}
