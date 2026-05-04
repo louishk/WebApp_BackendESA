@@ -50,9 +50,12 @@ class EcriOutcomeTrackingPipeline(BasePipeline):
                 batches_processed += 1
 
                 # All pending (no outcome) ledgers + their current ccws state in ONE round-trip.
-                # LEFT JOIN against the eligible-ledger view: missing row = tenant moved out.
+                # LEFT JOIN against the eligible-ledger view; we select the view's LedgerID
+                # under an alias so a NULL value tells us the tenant is absent from the
+                # view (i.e. moved out) without a per-row fallback query.
                 rows = conn.execute(text("""
                     SELECT bl.site_id, bl.ledger_id, bl.notice_date,
+                           v."LedgerID" AS view_ledger_id,
                            v."dSchedOut" AS sched_out
                     FROM ecri_batch_ledgers bl
                     LEFT JOIN ecri_outcomes o
@@ -69,29 +72,15 @@ class EcriOutcomeTrackingPipeline(BasePipeline):
 
                 self.log.info(f"batch={batch_id} pending={len(rows)} window_end={window_end}")
 
-                for site_id, ledger_id, notice_date, sched_out in rows:
+                for site_id, ledger_id, notice_date, view_ledger_id, sched_out in rows:
                     outcome_type = None
                     outcome_date = None
 
-                    # vw_ecri_eligible_ledgers row missing → tenant has moved out.
-                    # The view uses the latest ccws_ledgers extract; if that snapshot
-                    # is stale the move-out is still valid (tenant left at some point
-                    # since last ECRI run).
-                    if sched_out is None:
-                        # Distinguish "absent from view" vs "in view with no sched-out date".
-                        # The LEFT JOIN can't tell us — re-check explicitly.
-                        present = conn.execute(text("""
-                            SELECT 1 FROM vw_ecri_eligible_ledgers
-                            WHERE "SiteID" = :s AND "LedgerID" = :l LIMIT 1
-                        """), {'s': site_id, 'l': ledger_id}).fetchone()
-
-                        if present is None:
-                            outcome_type = 'moved_out'
-                            outcome_date = today
-                        elif today > window_end:
-                            outcome_type = 'stayed'
-                            outcome_date = window_end
-                    else:
+                    if view_ledger_id is None:
+                        # Absent from eligible-ledger view → tenant has moved out.
+                        outcome_type = 'moved_out'
+                        outcome_date = today
+                    elif sched_out is not None:
                         sched_date = sched_out.date() if hasattr(sched_out, 'date') else sched_out
                         if sched_date <= window_end:
                             outcome_type = 'scheduled_out'
@@ -99,6 +88,9 @@ class EcriOutcomeTrackingPipeline(BasePipeline):
                         elif today > window_end:
                             outcome_type = 'stayed'
                             outcome_date = window_end
+                    elif today > window_end:
+                        outcome_type = 'stayed'
+                        outcome_date = window_end
 
                     if outcome_type is None:
                         continue

@@ -30,10 +30,10 @@ def main():
                 default_args
             ) VALUES (
                 :name, :display, :desc, :cls,
-                TRUE, 'cron', :sched::jsonb,
+                TRUE, 'cron', CAST(:sched AS jsonb),
                 'ecri_outcomes', 'created_at', NULL,
                 :ttl, 'pbi',
-                1, 'db_only', 2,
+                1, 'db_pool', 2,
                 900, 3, 300,
                 '{}'::jsonb
             )
