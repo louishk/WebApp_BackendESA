@@ -122,6 +122,9 @@ def _reserve(base: str, key: str, slot: dict, move_in_date: str,
         'source': 'chatbot',
         'source_name': 'SmokeHard',
         'plan_id': slot.get('plan_id'),
+        # Phase A — both fields required on /reserve
+        'session_id':  slot.get('__session_id'),
+        'customer_id': slot.get('__customer_id'),
     })
 
 
@@ -519,11 +522,13 @@ def test_6_idempotency(base: str, key: str) -> Result:
         r.skipped("No slot on LSETUP — cannot test idempotency")
         return r
 
-    idem_key = f"smoke-hard-idem-{uuid.uuid4().hex}"
-    st1, mi1, _ = _full_booking_flow(base, key, slot, move_in_date, "idem1", idem_key)
-
-    if st1 != 200 or not mi1.get('success'):
-        # Handle "already rented" via self-heal (see scenario 10)
+    # Reserve ONCE. Both move-in calls re-use the same waiting_id /
+    # tenant_id / payment so the request body is identical — that's
+    # required for idempotency replay (H4 body-hash check rejects
+    # same-key + different-body with HTTP 422).
+    st_r, res_body = _reserve(base, key, slot, move_in_date, "idem1")
+    if st_r != 200 or not res_body.get('success'):
+        # Self-heal on "already rented"
         body2 = _req_body(['LSETUP'], duration=6,
                           exclude_ids=[slot['unit_id']])
         st_r2, resp2 = _recommend(base, key, body2)
@@ -534,8 +539,51 @@ def test_6_idempotency(base: str, key: str) -> Result:
                     slot['__session_id'] = body2['context']['session_id']
                     slot['__customer_id'] = body2['context']['customer_id']
                     break
-        idem_key = f"smoke-hard-idem-{uuid.uuid4().hex}"
-        st1, mi1, _ = _full_booking_flow(base, key, slot, move_in_date, "idem1b", idem_key)
+        st_r, res_body = _reserve(base, key, slot, move_in_date, "idem1b")
+    if st_r != 200 or not res_body.get('success'):
+        r.failed(f"Reserve failed: HTTP {st_r} msg={res_body}")
+        return r
+
+    waiting_id = res_body['waiting_id']
+    tenant_id  = res_body['tenant_id']
+    payment    = float(slot['pricing'].get('total_due_at_movein')
+                       or slot['pricing'].get('first_month_total') or 0)
+    idem_key   = f"smoke-hard-idem-{uuid.uuid4().hex}"
+
+    # First /move-in. Self-heal on "Unit already rented" — pool can be
+    # thin on LSETUP after repeated smoke runs. Try up to 3 fresh slots.
+    excluded_ids: list[int] = [slot['unit_id']]
+    st1, mi1 = _move_in(base, key, slot, waiting_id, tenant_id,
+                        payment, move_in_date, idem_key)
+    for retry in range(3):
+        if st1 == 200 and mi1.get('success'):
+            break
+        msg = (mi1.get('message') or '').lower()
+        if 'rent' not in msg and 'available' not in msg:
+            break
+        # Re-recommend excluding the failed unit, fresh reserve+move-in
+        body_h = _req_body(['LSETUP'], duration=6, exclude_ids=excluded_ids)
+        st_h, resp_h = _recommend(base, key, body_h)
+        if st_h != 200:
+            break
+        new_slot = next((s for s in (resp_h.get('slots') or [])
+                         if s and s.get('facility') == 'LSETUP'), None)
+        if not new_slot:
+            break
+        new_slot['__session_id']  = body_h['context']['session_id']
+        new_slot['__customer_id'] = body_h['context']['customer_id']
+        excluded_ids.append(new_slot['unit_id'])
+        st_r, res_body = _reserve(base, key, new_slot, move_in_date, f"idem-h{retry}")
+        if st_r != 200 or not res_body.get('success'):
+            continue
+        slot = new_slot
+        waiting_id = res_body['waiting_id']
+        tenant_id  = res_body['tenant_id']
+        payment    = float(slot['pricing'].get('total_due_at_movein')
+                           or slot['pricing'].get('first_month_total') or 0)
+        idem_key   = f"smoke-hard-idem-{uuid.uuid4().hex}"
+        st1, mi1 = _move_in(base, key, slot, waiting_id, tenant_id,
+                            payment, move_in_date, idem_key)
 
     if st1 != 200 or not mi1.get('success'):
         r.failed(f"First move-in failed: HTTP {st1} msg={mi1.get('message', mi1)}")
@@ -544,8 +592,9 @@ def test_6_idempotency(base: str, key: str) -> Result:
     ledger1 = mi1.get('ledger_id')
     time.sleep(1)
 
-    # Second call with same Idempotency-Key
-    st2, mi2, _ = _full_booking_flow(base, key, slot, move_in_date, "idem2", idem_key)
+    # Second /move-in with SAME idem_key AND SAME body
+    st2, mi2 = _move_in(base, key, slot, waiting_id, tenant_id,
+                        payment, move_in_date, idem_key)
 
     if st2 != 200:
         r.failed(f"Replay returned HTTP {st2} (expected 200): {mi2}")
@@ -1039,7 +1088,9 @@ def test_13_relax_actions(base: str, key: str) -> Result:
     ]
 
     failures = []
-    for action, expected, picked in cases:
+    for i, (action, expected, picked) in enumerate(cases):
+        if i > 0:
+            time.sleep(0.6)  # avoid rate-limit on 16 back-to-back recommend calls
         sid = f"smoke-act-{action}-{picked or 0}-{uuid.uuid4().hex[:6]}"
         cid = f"smoke-act-{action}"
 
@@ -1143,6 +1194,11 @@ def main():
         # Polite pause to stay within move-in rate limit (5/min = 12s between)
         if num in (6, 7, 8) and num < scenarios_to_run[-1]:
             time.sleep(13)
+        # After the fuzz scenario the recommend rate limit (120/min) is
+        # near-exhausted — let it clear before scenarios that hammer
+        # /api/recommendations again (6, 13).
+        if num == 12 and num < scenarios_to_run[-1]:
+            time.sleep(30)
 
     # ── Summary ──────────────────────────────────────────────────────────────
     sep = '═' * 80
