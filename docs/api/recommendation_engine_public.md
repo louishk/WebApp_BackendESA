@@ -8,7 +8,7 @@
 
 **Format:** JSON in, JSON out. UTF-8. Decimals are JSON numbers (e.g. `91.01`), never strings. Dates are ISO `YYYY-MM-DD`.
 
-**Rate limits:** `/api/recommendations` 120/min · `/api/reservations/reserve` 10/min · `/api/reservations/move-in` 5/min · `/api/reservations/move-in/cost` 30/min. HTTP 429 on overage with `retry_after` seconds.
+**Rate limits:** `/api/recommendations` 120/min · `/api/reservations/reserve` 10/min · `/api/reservations/move-in/cost` 30/min. HTTP 429 on overage with `retry_after` seconds.
 
 ---
 
@@ -32,31 +32,27 @@
 │  GET  /api/reservations/move-in/cost                                  │
 │      → Authoritative price right before charging the customer.        │
 └───────────────────────────────────────────────────────────────────────┘
-                              ↓ customer pays through your channel
-┌───────────────────────────────────────────────────────────────────────┐
-│  POST /api/reservations/move-in                                       │
-│      → Converts reservation → lease. payment_amount must equal the    │
-│        cost-retrieve `total` (within $0.50). Returns ledger_id.       │
-└───────────────────────────────────────────────────────────────────────┘
 ```
 
-Optional but recommended endpoints between **reserve** and **move-in**:
+> **Note:** the move-in / lease-creation endpoint is documented separately and is not yet part of this integration scope. For now your integration ends at confirming the price via `/move-in/cost` — actual lease creation is handled by Extra Space Asia operations.
+
+Optional endpoints to manage a held reservation before it is moved in:
 
 - `GET  /api/reservations/<waiting_id>` — read state
 - `PUT  /api/reservations/<waiting_id>` — modify (move-in date, contact info)
-- `PUT  /api/reservations/<waiting_id>/cancel` — cancel before move-in
+- `PUT  /api/reservations/<waiting_id>/cancel` — cancel
 
 ---
 
 ## 2 · Identity model (REQUIRED on every recommend call)
 
-The recommender is **stateful per conversation**. Four context fields tie every step together — from first quote, through follow-up turns, to reserve and move-in. They are how the engine identifies which run / turn it is processing and how booking outcomes get reconciled to the recommendation that produced them.
+The recommender is **stateful per conversation**. Four context fields tie every step together — from first quote, through follow-up turns, to reserve and price confirmation. They are how the engine identifies which run / turn it is processing and how outcomes get reconciled to the recommendation that produced them.
 
 | Field | Required | Format | Lifetime | Who mints | Notes |
 |---|---|---|---|---|---|
 | `channel` | yes | `chatbot` \| `web` \| `api` \| `admin` | per call | bot — hardcoded for the channel | Some discount plans are gated by channel. |
 | `request_id` | yes | string, ≤ 64 chars (UUID v4 recommended) | unique per turn | bot, fresh per call | Other turns reference it via `previous_request_id`. |
-| `session_id` | yes | string, ≤ 64 chars (UUID v4 or opaque) | per **conversation** — same on every recommend turn AND on /reserve + /move-in | bot, once at chat start | The link that ties the booking back to the recommendation. If you change it mid-conversation, attribution breaks. |
+| `session_id` | yes | string, ≤ 64 chars (UUID v4 or opaque) | per **conversation** — same on every recommend turn AND on /reserve | bot, once at chat start | The link that ties downstream calls back to the originating recommendation. If you change it mid-conversation, attribution breaks. |
 | `customer_id` | yes | string, ≤ 64 chars | per **customer** lifetime | your channel-side stable ID (e.g. user id) | Used for outcome attribution and per-customer ranking. For anonymous flows, use a stable session-bound surrogate. |
 | `previous_request_id` | optional | string, ≤ 64 chars | set on follow-up turns | bot copies from the previous recommend response | Triggers continuation logic (see §4). |
 
@@ -209,7 +205,7 @@ Quote engine. Returns up to **3 priced slots** matching the customer's intent.
     "site_code": "L017", "unit_id": 107197, "concession_id": 11872, "plan_id": 10
   },
 
-  "pricing_note": "Calculator-quoted; re-fetch GET /api/reservations/move-in/cost at booking time for the authoritative amount."
+  "pricing_note": "Calculator-quoted; re-fetch GET /api/reservations/move-in/cost at booking time for the authoritative price."
 }
 ```
 
@@ -338,7 +334,7 @@ Holds the unit and creates a tenant + reservation in our backing system. **No pa
 }
 ```
 
-Hold on to `waiting_id` and `tenant_id` — both are required for the move-in step.
+Hold on to `waiting_id` and `tenant_id` — both identify the held reservation for any subsequent read / modify / cancel call.
 
 ---
 
@@ -376,90 +372,15 @@ For a chatbot booking flow, use `variant=reservation` and pass the `waiting_id` 
 }
 ```
 
-The `total` field is what your `payment_amount` on `/move-in` must equal (within $0.50 tolerance).
+The `total` field is the authoritative amount for the booking. Surface it to the customer right before confirming the booking.
 
 ---
 
-## 7 · `POST /api/reservations/move-in`
+## 7 · Reservation lifecycle (after reserve)
 
-Converts the held reservation into a live lease. **This is when payment is recorded.**
+For reading or modifying a held reservation.
 
-### 7.1 · Request
-
-```jsonc
-// Headers
-//   X-API-Key: esa_<...>
-//   Content-Type: application/json
-//   Idempotency-Key: <fresh UUID>     ← strongly recommended (see §7.4)
-
-{
-  "site_code":      "L017",         // required
-  "waiting_id":     848757,         // required · from /reserve
-  "tenant_id":      1109544,        // required · from /reserve
-  "unit_id":        107197,         // required
-  "payment_amount": 238.71,         // required · MUST equal /move-in/cost total within $0.50
-
-  "pay_method":     2,              // optional · 1=CC, 2=cash (default), 3=check, 4=ACH
-  "concession_id":  11872,          // optional · same as /reserve
-  "insurance_id":   1,              // optional · same as /move-in/cost call
-  "start_date":     "2026-05-15",   // optional · default tomorrow
-  "end_date":       "2027-05-15",   // optional · default start + 365 days
-  "test_mode":      false,          // optional · true = SOAP dry run, no lease created
-
-  "session_id":  "sess-conv-7",     // REQUIRED — match recommend + reserve
-  "customer_id": "user_xyz_123"     // REQUIRED — match recommend + reserve
-}
-```
-
-### 7.2 · Successful response
-
-```jsonc
-{
-  "success":   true,
-  "ledger_id": 593680,         // the lease's unique ID — store this
-  "lease_num": 1651,
-  "ret_code":  "593680",
-  "message":   "Move-in completed",
-  "test_mode": false,
-  "followups": {
-    "enqueued":         2,
-    "inline_ok":        2,
-    "pending_retry":    0,
-    "failed_permanent": 0
-  }
-}
-```
-
-The `followups` block reports any post-move-in administrative tasks the system handled automatically (these only appear for plans that need them — your bot doesn't need to do anything with them).
-
-### 7.3 · Error responses
-
-| HTTP | `error` | When | What to do |
-|---|---|---|---|
-| 400 | `payment_amount is less than the required move-in cost` | `payment_amount` is more than $0.50 below the cost-retrieve `total` | Re-fetch `/move-in/cost` and retry with the correct amount under a NEW `Idempotency-Key`. |
-| 409 | `unit_unavailable_for_movein` | Unit got rented or put on hold between recommend and move-in | Re-recommend with `constraints.exclude_unit_ids: [<that unit_id>]`. |
-| 422 | `idempotency_key_body_mismatch` | Same `Idempotency-Key` reused with a different body | Use a NEW key for a new booking; reuse the same key only when retrying the SAME body. |
-| 422 | `soap_cost_mismatch` | Backend price disagreed with what was paid | Body includes `soap_truth`, `payment_sent`, `delta_sent_vs_soap`. Re-quote and retry under a NEW `Idempotency-Key`. |
-| 200 + `success:false` | `Unit is already rented…` | Reservation is stale | Same handling as the 409 above. |
-| 502 | `SOAP API error` | Backing system temporarily unavailable | Retry after a few seconds with the SAME `Idempotency-Key`. |
-
-### 7.4 · `Idempotency-Key` — strongly recommended
-
-Pass `Idempotency-Key: <fresh UUID>` per booking attempt. Behaviour:
-
-- **First request with key K**: handler runs, response cached for 24 h.
-- **Replay of K with the SAME body** (e.g. network blip retry): returns the cached response with `idempotent_replay: true` and the same `ledger_id`. SOAP is **not** called again.
-- **Replay of K with a DIFFERENT body**: HTTP 422 `idempotency_key_body_mismatch`. Use a fresh key.
-
-**Rule of thumb**: mint a new key whenever the customer is making a new payment attempt. Reuse the same key only when retrying the *exact same* attempt.
-
----
-
-## 8 · Reservation lifecycle (between reserve and move-in)
-
-For modifying a held reservation before move-in.
-
-### 8.1 · Read
+### 7.1 · Read
 
 ```
 GET /api/reservations/<waiting_id>?site_code=L017
@@ -467,7 +388,7 @@ GET /api/reservations/<waiting_id>?site_code=L017
 
 Returns the reservation's current state.
 
-### 8.2 · Modify
+### 7.2 · Modify
 
 ```
 PUT /api/reservations/<waiting_id>
@@ -484,7 +405,7 @@ Content-Type: application/json
 
 Only fields you include in the body are written. Returns `{"success": true, "waiting_id": ..., "message": "Reservation updated"}`.
 
-### 8.3 · Cancel
+### 7.3 · Cancel
 
 ```
 PUT /api/reservations/<waiting_id>/cancel
@@ -493,13 +414,13 @@ Content-Type: application/json
 { "site_code": "L017" }
 ```
 
-Idempotent — cancelling an already-cancelled reservation returns success. After move-in, this is a no-op (cancel the lease through your usual channels instead).
+Idempotent — cancelling an already-cancelled reservation returns success.
 
 ---
 
-## 9 · End-to-end worked example
+## 8 · End-to-end worked example
 
-A 3-turn chat ending in a booking.
+A 3-turn chat ending in a held reservation with the authoritative price confirmed.
 
 ```jsonc
 // ─── Turn 1 — fresh recommend ───
@@ -547,36 +468,16 @@ POST /api/reservations/reserve
 }
 // → { tenant_id: 1109544, waiting_id: 848757 }
 
-// ─── At booking confirmation: re-quote then charge ───
+// ─── Confirm authoritative price right before showing total to customer ───
 GET /api/reservations/move-in/cost
     ?site_code=L017&unit_id=107298&concession_id=11872&insurance_id=1
     &move_in_date=2026-05-15&waiting_id=848757&variant=reservation
 // → { total: 238.71, charges: [...] }
-
-// Bot charges customer $238.71 through your payment provider, then:
-
-POST /api/reservations/move-in
-Idempotency-Key: 7e4f9c10-1234-4abc-9def-aabbccddeeff
-
-{
-  "site_code":      "L017",
-  "waiting_id":     848757,
-  "tenant_id":      1109544,
-  "unit_id":        107298,
-  "payment_amount": 238.71,
-  "pay_method":     2,
-  "concession_id":  11872,
-  "insurance_id":   1,
-  "start_date":     "2026-05-15",
-  "session_id":     "sess-conv-7",
-  "customer_id":    "user_xyz_123"
-}
-// → { success: true, ledger_id: 593680, lease_num: 1651 }
 ```
 
 ---
 
-## 10 · Field reference cheat sheet
+## 9 · Field reference cheat sheet
 
 ### Unit type codes (`filters.unit_type`)
 
@@ -607,31 +508,21 @@ Idempotency-Key: 7e4f9c10-1234-4abc-9def-aabbccddeeff
 | `api`     | Generic API caller |
 | `admin`   | Admin tooling |
 
-### Pay methods (`/move-in`)
-
-| Code | Meaning |
-|---|---|
-| `1` | Credit card |
-| `2` | Cash (default for chatbot flow — used in cash-bypass mode) |
-| `3` | Check |
-| `4` | ACH / bank transfer |
-
 ---
 
-## 11 · Best practices
+## 10 · Best practices
 
-1. **Always send the four context IDs** (`channel`, `request_id`, `session_id`, `customer_id`) on every recommend call. Keep `session_id` + `customer_id` consistent across recommend → reserve → move-in.
+1. **Always send the four context IDs** (`channel`, `request_id`, `session_id`, `customer_id`) on every recommend call. Keep `session_id` + `customer_id` consistent across recommend → reserve.
 2. **Mint a fresh `request_id` per turn**. Don't reuse it; it's the link key for `previous_request_id` on the next turn.
-3. **Re-fetch `/move-in/cost` immediately before charging**. Pricing can shift if a customer's session lasts longer than expected.
-4. **Pass `Idempotency-Key` on every `/move-in`**. Re-use it on retries of the SAME body (network blips); use a fresh key for a NEW attempt.
-5. **Treat HTTP 200 + `success: false` as a failure** (most often "unit no longer available"). Re-recommend and try again.
-6. **Stop chaining at level 3**. Watch `next_turn.next_level_allowed` — when `false`, the bot should encourage the customer to pick a slot or rephrase.
-7. **`concession_id=0` means standard rate**. Pass `0`, never `null`, when the picked slot has no discount.
-8. **Don't share API keys**. One key per integration; rotate via Extra Space Asia ops if compromised.
+3. **Re-fetch `/move-in/cost` immediately before showing the customer the total**. Pricing can shift if a customer's session lasts longer than expected.
+4. **Treat HTTP 200 + `success: false` as a failure** (most often "unit no longer available"). Re-recommend and try again.
+5. **Stop chaining at level 3**. Watch `next_turn.next_level_allowed` — when `false`, the bot should encourage the customer to pick a slot or rephrase.
+6. **`concession_id=0` means standard rate**. Pass `0`, never `null`, when the picked slot has no discount.
+7. **Don't share API keys**. One key per integration; rotate via Extra Space Asia ops if compromised.
 
 ---
 
-## 12 · Support
+## 11 · Support
 
 - Integration questions: contact your Extra Space Asia integration manager.
 - Live status: `GET /api/health` returns `{"status": "ok"}` when the API is up.
