@@ -66,7 +66,12 @@ def main():
             'cls': 'sync_service.pipelines.ccws_ledgers.CcwsLedgersPipeline',
             'sched': '{"cron": "0 7 * * *"}',
             'ttl': 23 * 3600,
-            'args': '{"mode": "incremental", "days_back": 7}',
+            'args': (
+                '{"mode": "incremental", "days_back": 7, "location_codes": ['
+                '"L001","L002","L003","L004","L005","L006","L007","L008","L009","L010",'
+                '"L011","L013","L015","L017","L018","L019","L020","L021","L022","L023",'
+                '"L024","L025","L026","L028","L029","L030","L031","LSETUP"]}'
+            ),
         })
     print('    done')
 
