@@ -488,6 +488,7 @@ const API_ENDPOINTS = {
             {
                 "method": "POST", "path": "/api/recommendations", "scope": "recommender:read",
                 "description": "Step 1 · Quote. Returns a 3-slot envelope (Best Match / Best Alternative / Best Price). Stateful: chain turns via context.previous_request_id + picked_slot.",
+                "identity_note": "Mint <code>request_id</code> fresh per turn. Mint <code>session_id</code> once at the START of a conversation and reuse it on every subsequent recommend turn AND on /reserve + /move-in — that is the only link that ties the booking to the recommendation. <code>customer_id</code> is your channel-side stable id (e.g. PandaAI user id); reuse across the customer's lifetime. <code>channel</code> drives plan distribution gating. On follow-up turns, also send <code>previous_request_id</code> + <code>picked_slot</code> + <code>action</code> so the engine inherits the prior turn's filters and excludes already-served unit_ids. Server returns <code>next_turn.session_id</code> so the bot can confirm the value it sent.",
                 "body": {
                     "mode":            {"type": "string",  "required": false, "description": "'recommendation' (default, 3-slot envelope) or 'quote' (single unit; requires filters.unit_id)"},
                     "level":           {"type": "string",  "required": false, "description": "'standard' (default; only level supported in v1)"},
@@ -495,6 +496,17 @@ const API_ENDPOINTS = {
                     "filters":         {"type": "object",  "required": true,  "description": "{location:[...], unit_type?:[...], climate_type?:[...], size_range?:[...], unit_id?:[...]} — arrays accepted everywhere; location is required."},
                     "context":         {"type": "object",  "required": true,  "description": "{channel, request_id, session_id, customer_id} ALL REQUIRED (≤64 chars each). Optional: previous_request_id (continuation), picked_slot+action (drives relax strategy on follow-up turns), move_in_date. See the 'Identity & Run Tracking' panel above for the full multi-turn worked example."},
                     "constraints":     {"type": "object",  "required": false, "description": "{max_distance_km?, exclude_unit_ids?:[]}"}
+                },
+                "example_request": {
+                    "mode": "recommendation",
+                    "duration_months": 6,
+                    "filters": {"location": ["L017"], "size_range": ["30-35"]},
+                    "context": {
+                        "channel": "chatbot",
+                        "request_id": "req-aaaa-1111",
+                        "session_id": "sess-conv-7",
+                        "customer_id": "pandai_xyz_123"
+                    }
                 },
                 "example_response": {
                     "mode": "recommendation", "level": "standard",
@@ -536,6 +548,7 @@ const API_ENDPOINTS = {
             {
                 "method": "POST", "path": "/api/reservations/reserve", "scope": "recommender:write",
                 "description": "Step 2 · Hold the unit (creates tenant + reservation in SiteLink). Pass session_id + customer_id from /recommendations so the move-in outcome can link back to the slot the customer picked.",
+                "identity_note": "Reuse the SAME <code>session_id</code> + <code>customer_id</code> the bot used on /api/recommendations — they are required (HTTP 400 if missing or empty). <code>previous_request_id</code> + <code>plan_id</code> are optional but strongly recommended: pass the <code>request_id</code> of the recommend turn that produced the picked slot, plus the slot's <code>plan_id</code>, for the strongest attribution signal in <code>mw_recommendations_served</code>. <code>concession_id=0</code> means standard rate (no discount); pass it as 0, do NOT collapse to null.",
                 "body": {
                     "site_code":    {"type": "string",  "required": true,  "description": "Location code (e.g. LSETUP)"},
                     "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID to reserve"},
@@ -558,11 +571,24 @@ const API_ENDPOINTS = {
                     "previous_request_id": {"type": "string", "required": false, "description": "request_id of the recommend turn that produced the picked slot — strongest attribution signal."},
                     "plan_id":             {"type": "integer","required": false, "description": "plan_id from the picked recommend slot — extra attribution signal."}
                 },
+                "example_request": {
+                    "site_code": "L017",
+                    "unit_id": 107197,
+                    "first_name": "Jane", "last_name": "Tan",
+                    "phone": "+6591234567", "email": "jane@example.com",
+                    "needed_date": "2026-05-15",
+                    "concession_id": 11872,
+                    "session_id":  "sess-conv-7",
+                    "customer_id": "pandai_xyz_123",
+                    "previous_request_id": "req-bbbb-2222",
+                    "plan_id": 10
+                },
                 "example_response": {"success": true, "site_code": "LSETUP", "unit_id": 106155, "tenant_id": "1109544", "waiting_id": "848757", "global_waiting_num": "809363726", "message": "Reservation created"}
             },
             {
                 "method": "GET", "path": "/api/reservations/move-in/cost", "scope": "recommender:read",
                 "description": "Step 3 · Confirm price (SOAP-truth). Bot calls this right before charging the customer. Authoritative number = `total`.",
+                "identity_note": "Read-only price confirmation; no identity fields required. Pass the same <code>concession_id</code> + <code>insurance_id</code> + <code>move_in_date</code> the bot will then use on /move-in so the totals match. The <code>total</code> here is what /move-in's <code>payment_amount</code> must equal (within $0.50; otherwise /move-in returns HTTP 400).",
                 "params": {
                     "site_code":     {"type": "string",  "required": true,  "description": "Location code"},
                     "unit_id":       {"type": "integer", "required": true,  "description": "Unit ID"},
@@ -586,6 +612,7 @@ const API_ENDPOINTS = {
             {
                 "method": "POST", "path": "/api/reservations/move-in", "scope": "recommender:write",
                 "description": "Step 4 · Convert reservation → move-in. Pass `Idempotency-Key` header (UUID per booking attempt) to safely retry. For perpetual+prepay plans the middleware orchestrates SOAP follow-ups (PaymentSimpleCash + ScheduleTenantRateChange) — bot just passes the single payment_amount from /move-in/cost.",
+                "identity_note": "<code>session_id</code> + <code>customer_id</code> are REQUIRED (HTTP 400 if missing). They MUST match the values the bot used on /api/recommendations and /reserve — that is the link that closes the loop in <code>mw_recommendations_served.booked_unit_id</code>. Send a fresh UUID in the <code>Idempotency-Key</code> header per booking attempt: replays within 24h return the cached response with <code>idempotent_replay: true</code> and the same <code>ledger_id</code>, never double-firing SOAP. <code>payment_amount</code> must match the SOAP <code>total</code> from Step 3 within $0.50.",
                 "body": {
                     "site_code":      {"type": "string",  "required": true,  "description": "Location code"},
                     "waiting_id":     {"type": "integer", "required": true,  "description": "WaitingID from /reserve"},
@@ -600,6 +627,19 @@ const API_ENDPOINTS = {
                     "session_id":     {"type": "string",  "required": true,  "description": "Same session_id used on /recommendations + /reserve. Required for outcome reconciliation back to mw_recommendations_served."},
                     "customer_id":    {"type": "string",  "required": true,  "description": "Same customer_id used on /recommendations + /reserve."},
                     "test_mode":      {"type": "boolean", "required": false, "description": "true = SOAP dry run (no orchestration follow-ups)"}
+                },
+                "example_request": {
+                    "site_code": "L017",
+                    "waiting_id": 848757,
+                    "tenant_id": 1109544,
+                    "unit_id": 107197,
+                    "payment_amount": 693.76,
+                    "pay_method": 2,
+                    "concession_id": 11872,
+                    "insurance_id": 1,
+                    "start_date": "2026-05-15",
+                    "session_id":  "sess-conv-7",
+                    "customer_id": "pandai_xyz_123"
                 },
                 "example_response": {
                     "success": true, "ledger_id": 593680, "lease_num": 1651,
@@ -1167,6 +1207,14 @@ function buildEndpointDetail(ep, detailId) {
 
     let html = `<div class="endpoint-detail" id="${detailId}">`;
 
+    // Per-endpoint identity / run-tracking guidance, when supplied.
+    if (ep.identity_note) {
+        html += `<div class="detail-section" style="background:#fffbeb; border:1px solid #fcd34d; border-radius:4px; padding:0.55rem 0.7rem; font-size:0.78rem; color:#78350f;">
+            <strong>🔑 Identity &amp; tracking</strong>
+            <div style="margin-top:0.25rem; line-height:1.5;">${ep.identity_note}</div>
+        </div>`;
+    }
+
     if (paramHtml) {
         html += `<div class="detail-section">
             <div class="detail-label">Query Parameters</div>
@@ -1187,6 +1235,13 @@ function buildEndpointDetail(ep, detailId) {
             <button class="curl-copy-btn" onclick="copyCurl('curl-${detailId}', this)">Copy</button>
         </div>
     </div>`;
+
+    if (ep.example_request) {
+        html += `<div class="detail-section">
+            <div class="detail-label">Example Request Body</div>
+            <pre>${esc(JSON.stringify(ep.example_request, null, 2))}</pre>
+        </div>`;
+    }
 
     html += `<div class="detail-section example-resp">
         <div class="detail-label">Example Response</div>
