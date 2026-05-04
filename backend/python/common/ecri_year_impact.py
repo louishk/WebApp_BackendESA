@@ -74,6 +74,7 @@ def compute_year_impact(session, year, batch_id=None, today=None):
             bl.ledger_id,
             bl.currency,
             bl.increase_amt,
+            bl.old_rent,
             bl.effective_date,
             (SELECT MIN(outcome_date) FROM ecri_outcomes o
               WHERE o.batch_id = bl.batch_id AND o.site_id = bl.site_id
@@ -126,28 +127,29 @@ def compute_year_impact(session, year, batch_id=None, today=None):
                 # Tenant's increase hadn't taken effect by end of this month
                 continue
 
-            amt_sgd = to_sgd(r.increase_amt, r.currency)
+            inc_sgd = to_sgd(r.increase_amt, r.currency)
+            old_rent_sgd = to_sgd(r.old_rent, r.currency)
             active_start = max(eff, m_start)
 
-            # Planned = day-prorated as if never churned (full month from effective_date)
+            # Planned (uplift) = day-prorated increase as if never churned
             if m_end >= active_start:
                 planned_days = (m_end - active_start).days + 1
-                planned_sgd += amt_sgd * planned_days / days_in_month
+                planned_sgd += inc_sgd * planned_days / days_in_month
 
             # Effective end for the tenant in this month, accounting for churn only
             effective_end = m_end
             if r.outcome_date and r.outcome_date <= m_end:
                 effective_end = r.outcome_date - timedelta(days=1)
 
-            # Churn loss = days lost in this month strictly because of an outcome.
-            # No phantom loss from "month not finished yet".
+            # Churn loss = full base rent (old_rent) day-prorated for days lost
+            # to an outcome. Carries forward through EOY to offset the upside.
             if r.outcome_date and r.outcome_date <= m_end:
                 lost_start = max(r.outcome_date, active_start)
                 if m_end >= lost_start:
                     lost_days = (m_end - lost_start).days + 1
-                    churn_loss_sgd += amt_sgd * lost_days / days_in_month
+                    churn_loss_sgd += old_rent_sgd * lost_days / days_in_month
 
-            # Actual = day-prorated, capped at today for partial months
+            # Actual = day-prorated increase, capped at today for partial months
             actual_end = effective_end
             if status == 'partial':
                 actual_end = min(actual_end, today)
@@ -155,7 +157,7 @@ def compute_year_impact(session, year, batch_id=None, today=None):
                 actual_end = None
             if actual_end and actual_end >= active_start:
                 actual_days = (actual_end - active_start).days + 1
-                actual_sgd += amt_sgd * actual_days / days_in_month
+                actual_sgd += inc_sgd * actual_days / days_in_month
 
             batches_covered.add(str(r.batch_id))
 
@@ -165,8 +167,10 @@ def compute_year_impact(session, year, batch_id=None, today=None):
             'month': f"{year}-{m:02d}",
             'planned_sgd': round(planned_sgd, 2),
             'actual_sgd': round(actual_sgd, 2) if status != 'forecast' else None,
-            'churn_loss_sgd': round(churn_loss_sgd, 2) if status != 'forecast' else None,
-            'forecast_sgd': round(planned_sgd, 2),  # current-active-persists assumption
+            # Churn loss carries forward: known outcomes reduce future months too,
+            # offsetting the EOY win on a per-month basis.
+            'churn_loss_sgd': round(churn_loss_sgd, 2),
+            'forecast_sgd': round(planned_sgd - churn_loss_sgd, 2),
             'status': status,
         })
 
@@ -174,7 +178,8 @@ def compute_year_impact(session, year, batch_id=None, today=None):
             ytd_actual += actual_sgd
         elif status == 'partial':
             ytd_actual += actual_sgd
-        eoy_projection += planned_sgd  # optimistic: no further churn
+        # EOY = planned net of already-realized churn loss carried forward
+        eoy_projection += (planned_sgd - churn_loss_sgd)
 
     return {
         'year': year,
