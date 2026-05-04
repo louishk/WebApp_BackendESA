@@ -1,0 +1,426 @@
+{% extends "base.html" %}
+
+{% block title %}Sync Orchestrator - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Orchestrator Status</h2>
+    <div class="stats-grid" id="status-grid">
+        <div class="stat-card">
+            <div class="value" id="orch-status">--</div>
+            <div class="label">Status</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="orch-pipelines">--</div>
+            <div class="label">Pipelines (enabled)</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="orch-in-flight">--</div>
+            <div class="label">In-Flight</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" id="orch-runs-24h">--</div>
+            <div class="label">Runs (24h)</div>
+        </div>
+    </div>
+</div>
+
+<div class="card" id="running-now-card" style="display:none; border-left: 4px solid #FFC107;">
+    <h2>Running Now</h2>
+    <div id="running-now-list"></div>
+</div>
+
+<div class="card">
+    <h2>Resource Usage</h2>
+    <div class="stats-grid" id="resources-grid">
+        <div class="stat-card">
+            <div class="value"><span id="db-pool-used">0</span>/<span id="db-pool-limit">—</span></div>
+            <div class="label">DB Connections</div>
+            <div class="resource-bar"><div class="fill" id="db-pool-bar" style="width: 0%"></div></div>
+        </div>
+        <div class="stat-card">
+            <div class="value"><span id="soap-api-used">0</span>/<span id="soap-api-limit">—</span></div>
+            <div class="label">SOAP API</div>
+            <div class="resource-bar"><div class="fill" id="soap-api-bar" style="width: 0%"></div></div>
+        </div>
+        <div class="stat-card">
+            <div class="value"><span id="http-api-used">0</span>/<span id="http-api-limit">—</span></div>
+            <div class="label">HTTP API</div>
+            <div class="resource-bar"><div class="fill" id="http-api-bar" style="width: 0%"></div></div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h2>Pipelines</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Enabled</th>
+                <th>Schedule</th>
+                <th>TTL</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="pipelines-tbody">
+            <tr><td colspan="5" style="text-align:center;color:#666;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2>Data Freshness</h2>
+    <div class="freshness-grid" id="freshness-grid">
+        <div style="text-align:center;color:#666;">Loading...</div>
+    </div>
+</div>
+
+<div class="execution-grid">
+    <div class="card">
+        <h2>Upcoming Executions</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Pipeline</th>
+                    <th>Schedule</th>
+                    <th>Next Run (SGT)</th>
+                    <th>Time Remaining</th>
+                </tr>
+            </thead>
+            <tbody id="upcoming-executions">
+                <tr><td colspan="4" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Recent Executions</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Pipeline</th>
+                    <th>Status</th>
+                    <th>Started (SGT)</th>
+                    <th>Duration</th>
+                    <th>Records</th>
+                </tr>
+            </thead>
+            <tbody id="recent-executions">
+                <tr><td colspan="5" style="text-align: center; color: #666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="refresh-notice" id="refresh-notice">Auto-refresh every 45 seconds</div>
+
+<style>
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+.stat-card { background: var(--esa-navy,#1A2E5A); padding: 1.5rem; border-radius: 8px; text-align: center; color: #fff; }
+.stat-card .value { font-size: 2rem; font-weight: bold; color: #fff; }
+.stat-card .label { color: rgba(255,255,255,0.7); margin-top: 0.5rem; font-size: 0.9rem; }
+.resource-bar { height: 8px; background: rgba(255,255,255,0.2); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+.resource-bar .fill { height: 100%; background: var(--esa-red,#C41230); transition: width 0.3s; }
+.refresh-notice { font-size: 0.8rem; color: #888; text-align: right; margin-top: 1rem; }
+.execution-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 1200px) { .execution-grid { grid-template-columns: 1fr; } }
+.freshness-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; }
+.freshness-card { background: #f8f9fa; border-radius: 8px; padding: 15px; text-align: center; border-left: 4px solid #28a745; }
+.freshness-card.stale { border-left-color: #ffc107; }
+.freshness-card.old { border-left-color: #dc3545; }
+.freshness-card .pipeline { font-weight: 600; color: #1A2E5A; margin-bottom: 8px; font-size: 14px; }
+.freshness-card .date { font-size: 16px; font-weight: 500; }
+.freshness-card .ago { font-size: 12px; color: #666; margin-top: 4px; }
+.countdown { font-family: monospace; font-weight: 600; }
+.countdown.soon { color: #C41230; }
+.countdown.near { color: #ffc107; }
+.countdown.far { color: #28a745; }
+.running-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 15px; background: #f8f9fa; border-radius: 6px; margin-bottom: 8px; }
+.running-item:last-child { margin-bottom: 0; }
+.running-item .pipeline-name { font-weight: 600; color: #1A2E5A; }
+.running-item .running-meta { color: #666; font-size: 13px; margin-top: 2px; }
+.running-item .right-side { display: flex; align-items: center; gap: 10px; }
+.pulse-dot { width: 10px; height: 10px; border-radius: 50%; background: #FFC107; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.status { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem; font-weight: 500; }
+.status-running { background: #FFC107; color: #000; }
+.status-completed { background: #28A745; color: #fff; }
+.status-failed { background: var(--esa-red,#C41230); color: #fff; }
+.status-queued, .status-pending { background: #6C757D; color: #fff; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #E0E0E0; }
+th { color: var(--esa-navy,#1A2E5A); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; background: #F5F5F5; }
+</style>
+
+<script>
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+const SGT_OPTS = { timeZone: 'Asia/Singapore', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+function formatSGT(dateStr) { if (!dateStr) return '-'; return new Date(dateStr).toLocaleString('en-SG', SGT_OPTS); }
+function formatDurationMs(ms) { if (ms === null || ms === undefined) return '-'; if (ms < 1000) return ms + 'ms'; if (ms < 60000) return (ms/1000).toFixed(1)+'s'; return Math.floor(ms/60000)+'m '+Math.floor((ms%60000)/1000)+'s'; }
+function formatAgeSec(sec) {
+    if (sec === null || sec === undefined) return 'No data';
+    if (sec < 60) return sec + 's ago';
+    if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+    if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+    return Math.floor(sec/86400) + 'd ago';
+}
+function formatCountdown(s) {
+    if (s <= 0) return '<span class="countdown soon">Now!</span>';
+    const d = Math.floor(s/86400), h = Math.floor((s%86400)/3600), m = Math.floor((s%3600)/60), sec = s%60;
+    let r = '';
+    if (d > 0) r += d+'d ';
+    if (h > 0 || d > 0) r += h+'h ';
+    if (m > 0 || h > 0 || d > 0) r += m+'m ';
+    r += sec+'s';
+    let cls = 'far';
+    if (s < 3600) cls = 'near';
+    if (s < 600) cls = 'soon';
+    return `<span class="countdown ${cls}">${r}</span>`;
+}
+function formatElapsed(t) { if (!t) return ''; const e = Math.floor((Date.now()-new Date(t).getTime())/1000); if (e < 0) return '0s'; const m = Math.floor(e/60), s = e%60; return m > 0 ? m+'m '+s+'s' : s+'s'; }
+
+let hasRunning = false;
+let intervals = [];
+
+function setPollingRate(running) {
+    if (running === hasRunning) return;
+    hasRunning = running;
+    intervals.forEach(clearInterval);
+    intervals = [];
+    const rate = running ? 5000 : 45000;
+    intervals.push(setInterval(updateStatusAndRuns, rate));
+    intervals.push(setInterval(updateFreshness, 45000));
+    intervals.push(setInterval(updateUpcoming, 60000));
+    document.getElementById('refresh-notice').textContent =
+        running ? 'Auto-refresh every 5 seconds (jobs running)' : 'Auto-refresh every 45 seconds';
+}
+
+async function updateStatusAndRuns() {
+    try {
+        const [statusRes, runsRes] = await Promise.all([
+            fetch('/api/orchestrator/status').then(r => r.json()),
+            fetch('/api/orchestrator/runs?limit=20&since_hours=24').then(r => r.json()),
+        ]);
+
+        // Status cards
+        const statusEl = document.getElementById('orch-status');
+        statusEl.textContent = (statusRes.status || 'unknown').toUpperCase();
+        statusEl.style.color = statusRes.status === 'running' ? '#28A745' : '#C41230';
+        document.getElementById('orch-pipelines').textContent =
+            (statusRes.pipelines_total ?? 0) + ' (' + (statusRes.pipelines_enabled ?? 0) + ')';
+        document.getElementById('orch-in-flight').textContent = statusRes.in_flight ?? 0;
+
+        // Resources — live in-use tracked by ResourcePool
+        const limits = (statusRes.resources || {}).global_limits || {};
+        const inUse = (statusRes.resources || {}).global_in_use || {};
+        const setBar = (key) => {
+            const limit = limits[key] ?? 0;
+            const used = inUse[key] ?? 0;
+            const u = Math.min(used, limit || used);
+            document.getElementById(key.replace('_', '-') + '-used').textContent = u;
+            document.getElementById(key.replace('_', '-') + '-limit').textContent = limit || '—';
+            document.getElementById(key.replace('_', '-') + '-bar').style.width =
+                limit ? (u / limit * 100) + '%' : '0%';
+        };
+        setBar('db_pool');
+        setBar('soap_api');
+        setBar('http_api');
+
+        // Recent + Running
+        const runs = runsRes.runs || [];
+        const running = runs.filter(r => r.status === 'running' || r.status === 'queued');
+
+        const rCard = document.getElementById('running-now-card');
+        if (running.length > 0) {
+            rCard.style.display = 'block';
+            document.getElementById('running-now-list').innerHTML = running.map(j => `
+                <div class="running-item">
+                    <div>
+                        <div class="pipeline-name">${escHtml(j.pipeline_name)}</div>
+                        <div class="running-meta">${escHtml(formatElapsed(j.started_at || j.queued_at))} elapsed | Triggered by: ${escHtml(j.triggered_by)}</div>
+                    </div>
+                    <div class="right-side">
+                        <span class="status status-running">Running</span>
+                        <div class="pulse-dot"></div>
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            rCard.style.display = 'none';
+        }
+
+        document.getElementById('orch-runs-24h').textContent = runs.length;
+
+        const tbody = document.getElementById('recent-executions');
+        if (runs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#666;">No recent executions</td></tr>';
+        } else {
+            tbody.innerHTML = runs.map(j => {
+                const cls = 'status-' + escHtml(j.status);
+                const started = formatSGT(j.started_at || j.queued_at);
+                const isRun = j.status === 'running';
+                const dur = isRun ? formatElapsed(j.started_at || j.queued_at) : formatDurationMs(j.duration_ms);
+                return `
+                    <tr>
+                        <td><code>${escHtml(j.pipeline_name)}</code></td>
+                        <td><span class="status ${cls}">${escHtml(j.status)}</span></td>
+                        <td>${started}</td>
+                        <td>${dur}</td>
+                        <td>${j.records_processed ?? '-'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        setPollingRate(running.length > 0);
+    } catch (err) {
+        console.error('Status/runs fetch error:', err);
+    }
+}
+
+async function updateFreshness() {
+    try {
+        const [pipesRes, freshRes] = await Promise.all([
+            fetch('/api/orchestrator/pipelines').then(r => r.json()),
+            fetch('/api/orchestrator/data-freshness').then(r => r.json()),
+        ]);
+        const grid = document.getElementById('freshness-grid');
+        const pipes = pipesRes.pipelines || [];
+        if (pipes.length === 0) {
+            grid.innerHTML = '<div style="text-align:center;color:#666;">No pipelines configured</div>';
+            return;
+        }
+        grid.innerHTML = pipes.map(p => {
+            const f = freshRes[p.pipeline_name] || {};
+            let cls = '';
+            if (f.status === 'stale') cls = 'stale';
+            else if (f.age_seconds && f.age_seconds > 604800) cls = 'old';
+
+            const dateDisplay = f.latest_date
+                ? new Date(f.latest_date).toLocaleDateString('en-SG', { timeZone: 'Asia/Singapore', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+                : '—';
+            const ago = formatAgeSec(f.age_seconds);
+            return `
+                <div class="freshness-card ${cls}">
+                    <div class="pipeline">${escHtml(p.display_name || p.pipeline_name)}</div>
+                    <div class="date">${dateDisplay}</div>
+                    <div class="ago">${ago}</div>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        console.error('Freshness error:', err);
+        document.getElementById('freshness-grid').innerHTML = '<div style="color:#dc3545;">Error loading data</div>';
+    }
+}
+
+async function updatePipelines() {
+    try {
+        const data = await fetch('/api/orchestrator/pipelines').then(r => r.json());
+        const tbody = document.getElementById('pipelines-tbody');
+        const pipes = data.pipelines || [];
+        if (pipes.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#666;">No pipelines registered</td></tr>';
+            return;
+        }
+        tbody.innerHTML = pipes.map(p => {
+            const sched = p.schedule_type === 'cron'
+                ? `<code>${escHtml(p.schedule_config?.cron || '?')}</code>`
+                : p.schedule_type === 'interval'
+                    ? `every ${p.schedule_config?.interval_seconds || '?'}s`
+                    : 'on_demand';
+            const enabled = p.enabled
+                ? '<span class="status status-completed" style="background:#28a745;color:#fff;">enabled</span>'
+                : '<span class="status" style="background:#6C757D;color:#fff;">disabled</span>';
+            return `
+                <tr>
+                    <td><code>${escHtml(p.pipeline_name)}</code><br><small style="color:#666;">${escHtml(p.display_name || '')}</small></td>
+                    <td>${enabled}</td>
+                    <td>${sched}</td>
+                    <td>${p.freshness?.ttl_seconds || '—'}s</td>
+                    <td>
+                        <button class="btn" style="padding:0.3rem 0.6rem;font-size:0.8rem;background:#C41230;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="runPipeline('${escHtml(p.pipeline_name)}')">Run Now</button>
+                        <a href="/orchestrator/pipelines/${encodeURIComponent(p.pipeline_name)}" style="padding:0.3rem 0.6rem;font-size:0.8rem;background:#1A2E5A;color:#fff;border-radius:4px;text-decoration:none;display:inline-block;">Edit</a>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    } catch (err) {
+        document.getElementById('pipelines-tbody').innerHTML =
+            `<tr><td colspan="5" style="color:#dc3545;text-align:center;">${escHtml(err.message)}</td></tr>`;
+    }
+}
+
+async function runPipeline(name) {
+    if (!confirm(`Run "${name}" now (full scope)?`)) return;
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    // Kick the run and refresh the table — success shows up in Recent Executions.
+    updateStatusAndRuns();
+    try {
+        const r = await fetch(`/api/orchestrator/pipelines/${encodeURIComponent(name)}/run`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            body: JSON.stringify({timeout: 300}),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+            alert('Run failed: ' + (data.error || ('HTTP ' + r.status)));
+            return;
+        }
+        if (data.status === 'failed' && data.error) {
+            alert(`${name} failed:\n${data.error}`);
+        }
+        updateStatusAndRuns();
+    } catch (err) {
+        alert('Request failed: ' + err.message);
+    }
+}
+
+let upcomingData = [];
+function renderUpcoming() {
+    const tbody = document.getElementById('upcoming-executions');
+    if (!upcomingData || upcomingData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#666;">No scheduled executions</td></tr>';
+        return;
+    }
+    tbody.innerHTML = upcomingData.map(j => `
+        <tr>
+            <td><strong>${escHtml(j.display_name)}</strong></td>
+            <td><code>${escHtml(j.schedule_human)}</code></td>
+            <td>${formatSGT(j.next_run)}</td>
+            <td data-seconds="${j.seconds_until}">${formatCountdown(j.seconds_until)}</td>
+        </tr>
+    `).join('');
+}
+async function updateUpcoming() {
+    try {
+        const data = await fetch('/api/orchestrator/upcoming').then(r => r.json());
+        upcomingData = data.upcoming || [];
+        renderUpcoming();
+    } catch (err) {
+        document.getElementById('upcoming-executions').innerHTML =
+            '<tr><td colspan="4" style="text-align:center;color:#dc3545;">Error loading</td></tr>';
+    }
+}
+function updateCountdowns() {
+    document.querySelectorAll('#upcoming-executions td[data-seconds]').forEach(c => {
+        let s = parseInt(c.dataset.seconds);
+        if (s > 0) { s--; c.dataset.seconds = s; c.innerHTML = formatCountdown(s); }
+    });
+}
+
+updateStatusAndRuns();
+updatePipelines();
+updateFreshness();
+updateUpcoming();
+intervals.push(setInterval(updateStatusAndRuns, 45000));
+intervals.push(setInterval(updatePipelines, 60000));
+intervals.push(setInterval(updateFreshness, 45000));
+intervals.push(setInterval(updateUpcoming, 60000));
+setInterval(updateCountdowns, 1000);
+</script>
+{% endblock %}
