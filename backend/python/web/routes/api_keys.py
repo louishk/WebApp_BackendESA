@@ -16,7 +16,8 @@ api_keys_bp = Blueprint('api_keys', __name__, url_prefix='/api-keys')
 # Path to the public integration guide (markdown). Repo-relative so it works
 # in dev and on the VM without env-specific config.
 _INTEGRATION_GUIDE_PATH = (
-    Path(__file__).resolve().parents[3]  # backend/python/web/routes/api_keys.py → repo root
+    # routes → web → python → backend → repo root  ⇒ parents[4]
+    Path(__file__).resolve().parents[4]
     / 'docs' / 'api' / 'recommendation_engine_public.md'
 )
 
