@@ -358,8 +358,14 @@
                     <li><code>POST /api/reservations/move-in</code> — pass the <code>total</code> as <code>payment_amount</code>. Send <code>Idempotency-Key: &lt;UUID&gt;</code> to make retries safe (24h cache; replays return <code>idempotent_replay: true</code>).</li>
                 </ol>
                 <div style="margin-top: 0.4rem; font-size: 0.78rem; color: #1e3a8a;">
-                    Perpetual+prepay plans: the middleware fans out the follow-up SOAP calls internally (PaymentSimpleCash for the prepay surplus, ScheduleTenantRateChange for the future ECRI). Bot's contract stays single-amount.
-                    See <a href="https://github.com/louishk/WebApp_BackendESA/blob/master/docs/api/chatbot_integration.md" target="_blank">chatbot_integration.md</a> for the full lifecycle.
+                    Perpetual+prepay plans: the middleware fans out the follow-up SOAP calls internally. Bot's contract stays single-amount (you pass <code>payment_amount</code>; we handle the rest).
+                </div>
+                <div style="margin-top: 0.55rem; padding-top: 0.45rem; border-top: 1px solid #bfdbfe; font-size: 0.83rem;">
+                    <strong>📘 Full integration guide:</strong>
+                    <a href="{{ url_for('api_keys.integration_guide') }}" target="_blank" style="margin-left: 0.35rem;">view</a>
+                    ·
+                    <a href="{{ url_for('api_keys.integration_guide', download=1) }}">download (.md)</a>
+                    <span style="color: #6b7280; margin-left: 0.5rem;">— covers identity model, multi-turn search (3 levels), reserve/move-in lifecycle, error semantics, idempotency, and a full worked example.</span>
                 </div>
             </div>
         </div>

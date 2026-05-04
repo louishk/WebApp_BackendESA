@@ -4,12 +4,21 @@ Each user can have one API key. Scopes are managed by admins under User Manageme
 Users can generate, view, and regenerate their key here.
 """
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, make_response
+from pathlib import Path
+
+from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, make_response, abort
 from flask_login import login_required, current_user
 
 from web.utils.audit import audit_log, AuditEvent
 
 api_keys_bp = Blueprint('api_keys', __name__, url_prefix='/api-keys')
+
+# Path to the public integration guide (markdown). Repo-relative so it works
+# in dev and on the VM without env-specific config.
+_INTEGRATION_GUIDE_PATH = (
+    Path(__file__).resolve().parents[3]  # backend/python/web/routes/api_keys.py → repo root
+    / 'docs' / 'api' / 'recommendation_engine_public.md'
+)
 
 
 def get_session():
@@ -125,3 +134,26 @@ def regenerate_key():
         return redirect(url_for('api_keys.my_key'))
     finally:
         db.close()
+
+
+@api_keys_bp.route('/integration-guide')
+@login_required
+def integration_guide():
+    """
+    Public integration guide for the recommend + booking API. Served as
+    text/markdown so any markdown viewer (or the browser's text rendering)
+    handles it. Add ?download=1 to force a Save-As prompt.
+    """
+    if not _INTEGRATION_GUIDE_PATH.is_file():
+        abort(404)
+    try:
+        content = _INTEGRATION_GUIDE_PATH.read_text(encoding='utf-8')
+    except OSError:
+        abort(500)
+    resp = make_response(content)
+    resp.headers['Content-Type'] = 'text/markdown; charset=utf-8'
+    if request.args.get('download'):
+        resp.headers['Content-Disposition'] = (
+            'attachment; filename="esa_recommendation_api_guide.md"'
+        )
+    return resp
