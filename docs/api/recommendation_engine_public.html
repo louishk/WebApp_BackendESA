@@ -596,11 +596,11 @@ Level 4   REJECTED with HTTP 400 ─── customer must accept a slot or pivot 
 </tr>
 <tr>
 <td><code>bigger_size</code></td>
-<td>Open <code>size_range</code> to every bucket STRICTLY bigger than the current one. The closest available bigger unit surfaces; engine never returns same-size or smaller.</td>
+<td>Open <code>size_range</code> to every bucket STRICTLY bigger than the current one. <strong>Slot 1 + Slot 2 honor the direction.</strong> Slot 3 (Best Price) may still relax size to surface a cheaper option (its <code>match_flags.relaxed_dims</code> reports it).</td>
 </tr>
 <tr>
 <td><code>smaller_size</code></td>
-<td>Open <code>size_range</code> to every bucket STRICTLY smaller than the current one.</td>
+<td>Open <code>size_range</code> to every bucket STRICTLY smaller than the current one. Same Slot-3 caveat.</td>
 </tr>
 <tr>
 <td><code>expand_locations</code></td>

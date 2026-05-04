@@ -357,8 +357,8 @@ All actions require `previous_request_id`.
 | `action` | What the engine does |
 |---|---|
 | `more_like_this` (paired with `picked_slot=1\|2\|3`) | Slot-specific tightening. Slots 1/3 → size_range ±1 bucket. Slot 2 → next-nearest site. |
-| `bigger_size` | Open `size_range` to every bucket STRICTLY bigger than the current one. The closest available bigger unit surfaces; engine never returns same-size or smaller. |
-| `smaller_size` | Open `size_range` to every bucket STRICTLY smaller than the current one. |
+| `bigger_size` | Open `size_range` to every bucket STRICTLY bigger than the current one. **Slot 1 + Slot 2 honor the direction.** Slot 3 (Best Price) may still relax size to surface a cheaper option (its `match_flags.relaxed_dims` reports it). |
+| `smaller_size` | Open `size_range` to every bucket STRICTLY smaller than the current one. Same Slot-3 caveat. |
 | `expand_locations` | Add nearest neighbour sites (within `max_distance_km`) to `filters.location` |
 | `different_type` | Drop the `unit_type` filter |
 | `different_duration` | Analytics signal — bot also changes `duration_months` so the engine re-quotes against the new length |
