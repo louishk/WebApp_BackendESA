@@ -525,18 +525,26 @@ const API_ENDPOINTS = {
                         "On success, the response includes <code>next_turn.request_id</code> + <code>next_turn.session_id</code> — copy <code>next_turn.request_id</code> into <code>previous_request_id</code> on the FOLLOWING turn."
                     ],
                     "decision_tree": {
-                        "intro": "After showing the 3 slots to the customer, the bot's NEXT call depends on the customer's reply. Supported <code>action</code> values: <code>more_like_this</code>, <code>expand_size</code>, <code>different_type</code>. (<code>different_options</code> is reserved but currently a no-op — use <code>previous_request_id</code> alone for that case; served unit_ids are already excluded automatically.)",
+                        "intro": "After showing the 3 slots, the bot's next call depends on the customer's reply. Action vocabulary is explicit and directional — no vague \"different_options\".",
                         "branches": [
                             {"customer_says": "\"I'll take the first one\" / \"I want slot 2\"",
                              "next_call": "<strong>Skip recommend</strong> → go to <code>POST /reserve</code>. Pass <code>session_id</code> + <code>customer_id</code> unchanged, plus <code>previous_request_id</code> = the recommend turn's <code>request_id</code> for attribution."},
-                            {"customer_says": "\"More like THAT one\" / \"Got anything similar to slot 2?\"",
-                             "next_call": "POST /api/recommendations with <code>previous_request_id</code> + <code>picked_slot</code> = 1|2|3 + <code>action: \"more_like_this\"</code>. Engine applies the slot-specific relax: slot 1 → size_plus_one, slot 2 → next_nearest_site, slot 3 → size_plus_one. Already-shown unit_ids are auto-excluded."},
+                            {"customer_says": "\"More like THAT one\" / \"Anything similar to slot 2?\"",
+                             "next_call": "POST /api/recommendations with <code>previous_request_id</code> + <code>picked_slot</code> = 1|2|3 + <code>action: \"more_like_this\"</code>. Engine applies the slot-specific relax: slot 1 → size_range ±1, slot 2 → next-nearest site, slot 3 → size_range ±1. Already-shown unit_ids are auto-excluded."},
                             {"customer_says": "\"Other options?\" / \"What else?\" (same intent, no specific slot)",
                              "next_call": "POST /api/recommendations with <code>previous_request_id</code> alone. Engine inherits prior filters and excludes already-shown unit_ids; the natural next pool surfaces 3 fresh slots. <strong>Skip <code>action</code></strong> — auto-exclusion is the mechanism."},
-                            {"customer_says": "\"Slightly bigger size?\" or \"Different unit type?\"",
-                             "next_call": "POST /api/recommendations with <code>previous_request_id</code> + <code>action: \"expand_size\"</code> (widens <code>size_range</code> ±2 buckets) or <code>action: \"different_type\"</code> (drops <code>unit_type</code> filter)."},
-                            {"customer_says": "\"Actually I want something completely different\" — different location / size / intent.",
-                             "next_call": "<strong>Treat as fresh Step 1.</strong> POST /api/recommendations with NEW filters, NEW <code>request_id</code>, KEEP <code>session_id</code> + <code>customer_id</code> (still same chat), and <strong>do NOT pass <code>previous_request_id</code> / <code>picked_slot</code> / <code>action</code></strong>. Session chain stays linked via <code>session_id</code> for analytics."}
+                            {"customer_says": "\"Something bigger\"",
+                             "next_call": "<code>action: \"bigger_size\"</code> — shifts <code>size_range</code> ONE bucket up (e.g. <code>30-35</code> → <code>35-40</code>)."},
+                            {"customer_says": "\"Something smaller / cheaper\"",
+                             "next_call": "<code>action: \"smaller_size\"</code> — shifts <code>size_range</code> ONE bucket down."},
+                            {"customer_says": "\"What about nearby locations?\"",
+                             "next_call": "<code>action: \"expand_locations\"</code> — engine adds the nearest neighbour sites (within <code>slot2_max_distance_km</code>, default 50 km) to <code>filters.location</code>. Bot doesn't need to know which sites are nearby."},
+                            {"customer_says": "\"Different unit type?\"",
+                             "next_call": "<code>action: \"different_type\"</code> — drops the <code>unit_type</code> filter. Engine returns whatever fits the other dims."},
+                            {"customer_says": "\"What if I lease for 12 months instead of 6?\"",
+                             "next_call": "Bot changes <code>duration_months</code> in the request body AND passes <code>action: \"different_duration\"</code> as an analytics signal. No filter mutation server-side; just a tracked re-quote."},
+                            {"customer_says": "\"Actually I want something completely different\" — different city, different size class, different climate-controlled vs not, different intent.",
+                             "next_call": "<strong>Treat as fresh Step 1.</strong> NEW <code>filters</code>, NEW <code>request_id</code>, KEEP <code>session_id</code> + <code>customer_id</code> (still same chat), and <strong>do NOT pass <code>previous_request_id</code> / <code>picked_slot</code> / <code>action</code></strong>. Session chain stays linked via <code>session_id</code> for analytics."}
                         ]
                     }
                 },
@@ -600,18 +608,54 @@ const API_ENDPOINTS = {
                         }
                     },
                     {
-                        "label": "Turn 2 alt — customer is flexible on size: \"What about a bit bigger?\"",
-                        "note": "<code>action=\"expand_size\"</code> widens <code>size_range</code> by ±2 buckets. <code>action=\"different_type\"</code> drops the <code>unit_type</code> filter. Combine with <code>previous_request_id</code> for served-unit exclusion.",
+                        "label": "Turn 2 alt — \"Something bigger\" (directional, ONE bucket up)",
+                        "note": "<code>action=\"bigger_size\"</code> shifts <code>size_range</code> +1 bucket (e.g. 30-35 → 35-40). <code>\"smaller_size\"</code> goes the other way. Always combine with <code>previous_request_id</code> so served unit_ids are excluded.",
                         "body": {
+                            "mode": "recommendation",
+                            "duration_months": 6,
+                            "filters": {"location": ["L017"], "size_range": ["30-35"], "climate_type": ["A", "AD"]},
                             "context": {
                                 "channel":             "chatbot",
                                 "request_id":          "req-bbbb-2224",
                                 "session_id":          "sess-conv-7",
                                 "customer_id":         "pandai_xyz_123",
                                 "previous_request_id": "req-aaaa-1111",
-                                "action":              "expand_size"
-                            },
-                            "_etc": "duration_months + filters as before"
+                                "action":              "bigger_size"
+                            }
+                        }
+                    },
+                    {
+                        "label": "Turn 2 alt — \"What about nearby locations?\"",
+                        "note": "<code>action=\"expand_locations\"</code> — engine reads <code>mw_site_distance</code> and adds the nearest sites within the configured radius to <code>filters.location</code>. Bot does not need to know which sites are nearby.",
+                        "body": {
+                            "mode": "recommendation",
+                            "duration_months": 6,
+                            "filters": {"location": ["L017"], "size_range": ["30-35"], "climate_type": ["A", "AD"]},
+                            "context": {
+                                "channel":             "chatbot",
+                                "request_id":          "req-bbbb-2225",
+                                "session_id":          "sess-conv-7",
+                                "customer_id":         "pandai_xyz_123",
+                                "previous_request_id": "req-aaaa-1111",
+                                "action":              "expand_locations"
+                            }
+                        }
+                    },
+                    {
+                        "label": "Turn 2 alt — \"Different unit type\" or \"different duration\"",
+                        "note": "<code>action=\"different_type\"</code> drops the <code>unit_type</code> filter. <code>action=\"different_duration\"</code> is an analytics-only signal — the bot ALSO changes <code>duration_months</code> in the body so the engine re-quotes against the new duration.",
+                        "body": {
+                            "mode": "recommendation",
+                            "duration_months": 12,
+                            "filters": {"location": ["L017"], "size_range": ["30-35"], "climate_type": ["A", "AD"]},
+                            "context": {
+                                "channel":             "chatbot",
+                                "request_id":          "req-bbbb-2226",
+                                "session_id":          "sess-conv-7",
+                                "customer_id":         "pandai_xyz_123",
+                                "previous_request_id": "req-aaaa-1111",
+                                "action":              "different_duration"
+                            }
                         }
                     },
                     {

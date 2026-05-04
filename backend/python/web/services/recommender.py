@@ -287,21 +287,35 @@ def relax_strategy(picked_slot: Optional[int], action: Optional[str]) -> str:
     """
     Map (picked_slot, action) to a strategy id.
 
-    Strategy ids:
+    Supported actions (canonical vocabulary):
+      'more_like_this'    — slot-specific tightening
+      'bigger_size'       — directional: shift size_range +1 bucket
+      'smaller_size'      — directional: shift size_range -1 bucket
+      'expand_locations'  — add nearest neighbour sites to filters.location
+      'different_type'    — drop the unit_type filter
+      'different_duration'— bot also changed duration_months in this request;
+                            no filter mutation, just an analytics signal
+
+    Strategy ids returned:
       'none'              — no relaxation (default)
-      'size_plus_one'     — expand size by ±1 bucket (slot 1 + more_like_this)
+      'size_plus_one'     — size_range ±1 bucket (slot 1/3 + more_like_this)
       'next_nearest_site' — try next nearest site (slot 2 + more_like_this)
-      'wider_size_band'   — ±2 buckets (any slot + expand_size)
-      'expand_unit_type'  — remove unit_type filter (any slot + different_type)
-      'different_options' — start fresh with same dims (different_options action)
+      'size_step_up'      — size_range +1 bucket only
+      'size_step_down'    — size_range -1 bucket only
+      'expand_locations'  — add nearest neighbour sites
+      'expand_unit_type'  — drop unit_type filter
+      'duration_change'   — analytics-only marker
+
+    Deprecated/removed:
+      'expand_size' / 'different_options' / 'wider_size_band' — replaced by
+      directional bigger_size / smaller_size. Server still accepts the old
+      strings as no-ops to keep older clients from breaking, but new docs
+      teach the directional vocabulary only.
     """
     if not picked_slot and not action:
         return 'none'
 
     action = (action or '').strip().lower()
-
-    if action == 'different_options':
-        return 'different_options'
 
     if action == 'more_like_this':
         if picked_slot == 1:
@@ -312,11 +326,20 @@ def relax_strategy(picked_slot: Optional[int], action: Optional[str]) -> str:
             return 'size_plus_one'
         return 'size_plus_one'
 
-    if action == 'expand_size':
-        return 'wider_size_band'
+    if action == 'bigger_size':
+        return 'size_step_up'
+
+    if action == 'smaller_size':
+        return 'size_step_down'
+
+    if action == 'expand_locations':
+        return 'expand_locations'
 
     if action == 'different_type':
         return 'expand_unit_type'
+
+    if action == 'different_duration':
+        return 'duration_change'
 
     # picked_slot without a recognised action — treat as "show me more like that one"
     if picked_slot is not None:
@@ -401,11 +424,18 @@ def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequ
     if strategy == 'size_plus_one':
         _apply_size_plus_one(req)
     elif strategy == 'wider_size_band':
+        # Legacy alias still callable for older clients sending action=expand_size
         _apply_wider_size_band(req)
+    elif strategy == 'size_step_up':
+        _apply_size_directional(req, direction=+1)
+    elif strategy == 'size_step_down':
+        _apply_size_directional(req, direction=-1)
+    elif strategy == 'expand_locations':
+        _apply_expand_locations(req, db_session)
     elif strategy == 'expand_unit_type':
         req.filters.pop('unit_type', None)
-    # 'next_nearest_site', 'different_options', 'none' — no filter change here;
-    # slot builders handle the site-hop for next_nearest_site.
+    # 'next_nearest_site' — no filter change here; slot builder handles site-hop.
+    # 'duration_change' / 'none' — analytics-only or default; no mutation.
 
     return req
 
@@ -428,6 +458,80 @@ def _apply_size_plus_one(req: RecommendationRequest) -> None:
             req.filters['size_range'] = expanded
     except Exception as exc:
         logger.warning("_apply_size_plus_one failed: %s", exc)
+
+
+def _apply_size_directional(req: RecommendationRequest, direction: int) -> None:
+    """
+    Shift size_range filter by ONE step up (+1) or down (-1).
+
+    For each currently-requested size bucket, replaces it with the bucket
+    one step up (or down) in the dim_size_range sort order. Falls back to
+    the original bucket when there is no neighbour in that direction
+    (e.g. asking for `bigger_size` from the largest bucket).
+    """
+    current_sizes = req.filters.get('size_range', [])
+    if not current_sizes:
+        return
+    try:
+        from common.size_range_window import size_range_neighbours_step
+        shifted: List[str] = []
+        seen: set[str] = set()
+        for s in current_sizes:
+            window = size_range_neighbours_step(s, n_steps=1)  # [-1, center, +1]
+            try:
+                idx = window.index(s)
+            except ValueError:
+                continue
+            target_idx = idx + direction
+            if 0 <= target_idx < len(window):
+                nb = window[target_idx]
+                if nb not in seen:
+                    shifted.append(nb)
+                    seen.add(nb)
+            elif s not in seen:
+                shifted.append(s)
+                seen.add(s)
+        if shifted:
+            req.filters['size_range'] = shifted
+    except Exception as exc:
+        logger.warning("_apply_size_directional failed: %s", exc)
+
+
+def _apply_expand_locations(req: RecommendationRequest, db_session) -> None:
+    """
+    Add the nearest 2 neighbour sites (per current location, deduped) to
+    filters.location. Uses mw_site_distance — falls back gracefully when
+    a location has no recorded distances.
+    """
+    current_locations = req.filters.get('location') or []
+    if not current_locations:
+        return
+    try:
+        from web.services import recommender_settings
+        max_dist = recommender_settings.get_setting('slot2_max_distance_km', db_session) or 50
+    except Exception:
+        max_dist = 50
+    try:
+        rows = db_session.execute(text("""
+            SELECT DISTINCT neighbour FROM (
+                SELECT to_site_code AS neighbour, distance_km, from_site_code AS origin
+                FROM mw_site_distance
+                WHERE from_site_code = ANY(:locs) AND distance_km <= :maxd
+                UNION
+                SELECT from_site_code AS neighbour, distance_km, to_site_code AS origin
+                FROM mw_site_distance
+                WHERE to_site_code = ANY(:locs) AND distance_km <= :maxd
+            ) t
+            WHERE neighbour <> ALL(:locs)
+            ORDER BY neighbour
+            LIMIT 10
+        """), {'locs': list(current_locations), 'maxd': float(max_dist)}).fetchall()
+        neighbours = [r[0] for r in rows if r[0]]
+        if neighbours:
+            merged = list(current_locations) + [n for n in neighbours if n not in current_locations]
+            req.filters['location'] = merged
+    except Exception as exc:
+        logger.warning("_apply_expand_locations failed: %s", exc)
 
 
 def _apply_wider_size_band(req: RecommendationRequest) -> None:
