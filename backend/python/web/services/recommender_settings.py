@@ -137,6 +137,12 @@ _SETTINGS_SPEC: list[SettingSpec] = [
         description='When ON, the /move-in/cost endpoint calls SOAP MoveInCostRetrieveWithDiscount_Reservation_v4 as the right-before-charging confirmation, then adds the prepayment add-on from our calculator. When OFF, answers entirely from the calculator (saves one SOAP round-trip per booking; only safe when calculator is fully validated).',
         group='perpetual',
     ),
+    SettingSpec(
+        key='movein_sanity_guard_use_calculator', type_='bool', default=False,
+        label='/move-in sanity guard — use internal calculator (instead of SOAP)',
+        description='When ON, /api/reservations/move-in checks payment_amount against our internal calculator (no SOAP round-trip on the happy path). On calculator failure, falls back to SOAP automatically. When OFF, every /move-in calls SOAP MoveInCostRetrieve as a sanity check before firing MoveInReservation_v6 (slower but belt-and-braces during early rollout). Flip ON only after verifying calculator parity with SOAP across your plan shapes — the post-mortem cost-retrieve still catches drift either way.',
+        group='perpetual',
+    ),
 ]
 
 # Lookup helper

@@ -1094,6 +1094,117 @@ def quote_slot(
     return quote
 
 
+def compute_first_month_cost_calculator(
+    *,
+    site_code: str,
+    unit_id: int,
+    concession_id: int,
+    move_in_date,
+    db_session,
+) -> Optional[Decimal]:
+    """
+    Internal-calculator equivalent of SOAP MoveInCostRetrieve, returning
+    the first-month all-in total (rent + tax + insurance + admin + deposit).
+
+    Used by /api/reservations/move-in's sanity guard when the admin flag
+    `movein_sanity_guard_use_calculator` is ON. Returns None if the
+    candidate row, billing config, or charge descriptions are unavailable —
+    caller falls back to SOAP.
+    """
+    from common.movein_cost_calculator import (
+        ChargeTypeTax, calculate_movein_cost,
+    )
+
+    try:
+        row = db_session.execute(text("""
+            SELECT site_id, site_code, unit_id, plan_id, concession_id,
+                   std_rate, std_sec_dep, effective_rate,
+                   amt_type, pct_discount, fixed_discount, max_amount_off,
+                   in_month, prepaid_months, prepayment_months,
+                   discount_perpetual
+            FROM mw_unit_discount_candidates
+            WHERE unit_id = :uid
+              AND concession_id = :cid
+              AND site_code = :sc
+            LIMIT 1
+        """), {'uid': unit_id, 'cid': concession_id, 'sc': site_code}).mappings().first()
+    except Exception as exc:
+        logger.warning(
+            "compute_first_month_cost_calculator: candidate fetch failed for "
+            "site=%s unit=%s concession=%s: %s",
+            site_code, unit_id, concession_id, exc,
+        )
+        return None
+
+    if not row:
+        return None
+
+    site_id = row['site_id']
+    std_rate = row['std_rate']
+    std_sec_dep = row['std_sec_dep']
+
+    try:
+        billing_config = _load_billing_config(site_code, db_session)
+        charge_info = _load_charge_descriptions(site_id, db_session)
+        insurance_premium: Decimal = _load_insurance_premium(site_id, db_session)
+    except Exception as exc:
+        logger.warning(
+            "compute_first_month_cost_calculator: helper load failed site=%s: %s",
+            site_code, exc,
+        )
+        return None
+
+    anniversary_billing: bool = billing_config.get('anniversary_billing', False)
+    day_start_prorate_plus_next: int = billing_config.get('day_start_prorate_plus_next', 17)
+    admin_fee: Decimal = charge_info.get('admin_fee', Decimal('0'))
+    security_deposit: Decimal = charge_info.get('security_deposit', Decimal('0'))
+    if security_deposit <= 0:
+        if std_sec_dep and std_sec_dep > 0:
+            security_deposit = Decimal(str(std_sec_dep))
+        elif std_rate is not None:
+            security_deposit = Decimal(str(std_rate))
+
+    rent_tax = charge_info.get('rent_tax', ChargeTypeTax('Rent'))
+    admin_tax = charge_info.get('admin_tax', rent_tax)
+    deposit_tax = charge_info.get('deposit_tax', ChargeTypeTax('SecDep'))
+    insurance_tax = charge_info.get('insurance_tax', rent_tax)
+
+    if concession_id == 0:
+        pc_discount = 0
+        fixed_discount = 0
+    else:
+        pc_discount = float(row['pct_discount'] or 0)
+        fixed_discount = float(row['fixed_discount'] or 0)
+
+    try:
+        lines, _err = calculate_movein_cost(
+            std_rate=std_rate,
+            security_deposit=security_deposit,
+            admin_fee=admin_fee,
+            move_in_date=move_in_date,
+            rent_tax=rent_tax,
+            admin_tax=admin_tax,
+            deposit_tax=deposit_tax,
+            insurance_tax=insurance_tax,
+            pc_discount=pc_discount,
+            fixed_discount=fixed_discount,
+            insurance_premium=insurance_premium,
+            anniversary_billing=anniversary_billing,
+            day_start_prorate_plus_next=day_start_prorate_plus_next,
+        )
+    except Exception as exc:
+        logger.warning(
+            "compute_first_month_cost_calculator: calc failed unit=%s: %s",
+            unit_id, exc,
+        )
+        return None
+
+    total = Decimal('0')
+    for line in lines or []:
+        total += Decimal(str(line.amount or 0)) + Decimal(str(line.tax or 0))
+    return total
+
+
 def _load_billing_config(site_code: str, db_session) -> Dict[str, Any]:
     """Load billing config from ccws_site_billing_config via an existing session."""
     try:

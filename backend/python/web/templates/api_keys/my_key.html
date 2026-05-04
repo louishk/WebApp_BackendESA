@@ -698,7 +698,7 @@ const API_ENDPOINTS = {
                     "rules": [
                         "<code>payment_amount</code> must equal the SOAP <code>total</code> from Step 3 within $0.50 — otherwise HTTP 400 <code>{error: \"payment_amount is less than the required move-in cost\", required_minimum, hint}</code>.",
                         "Unit unavailable (already rented / on hold) → HTTP 409 <code>{error: \"unit_unavailable_for_movein\"}</code>. Re-quote via /api/recommendations.",
-                        "Cost-mismatch detected by SOAP after MoveIn fired → HTTP 422 <code>{error: \"soap_cost_mismatch\", payment_sent, calculator_quote, soap_truth, delta_sent_vs_soap, hint}</code>. The SOAP MoveIn never created a lease; bot should re-quote via /move-in/cost and retry with a NEW Idempotency-Key.",
+                        "Cost-mismatch detected by SOAP after MoveIn fired → HTTP 422 <code>{error: \"soap_cost_mismatch\", payment_sent, sanity_source: \"calculator\"|\"soap\", sanity_quote, soap_truth, delta_sent_vs_soap, hint}</code>. The SOAP MoveIn never created a lease; bot should re-quote via /move-in/cost and retry with a NEW Idempotency-Key. <code>sanity_source</code> tells the bot whether the pre-flight check used our internal calculator or SOAP (admin-tunable in <code>/recommendation-engine/settings</code>).",
                         "For perpetual+prepay plans, <code>payment_amount</code> is the multi-month total; the middleware fans out follow-up SOAP calls (PaymentSimpleCash + ScheduleTenantRateChange) automatically — bot does not orchestrate."
                     ]
                 },

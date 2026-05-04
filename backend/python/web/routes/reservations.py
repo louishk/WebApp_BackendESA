@@ -2548,31 +2548,76 @@ def move_in_reservation():
     _start_for_sanity_str = _parse_date(data.get('start_date'), 1)
     soap_cost_estimate = None
     sanity_skipped_reason = None
+    cost_source: Optional[str] = None  # 'calculator' | 'soap' | None
+    move_in_date_for_sanity = _coerce_to_date(_start_for_sanity_str)
+
+    # Source toggle: admin flag movein_sanity_guard_use_calculator (default OFF)
+    use_calculator_first = False
     try:
-        soap_cost_estimate = float(_compute_soap_movein_cost(
-            site_code=site_code, unit_id=unit_id,
-            concession_id=cid_int,
-            move_in_date=_coerce_to_date(_start_for_sanity_str),
-        ))
+        from web.services import recommender_settings
+        _settings_db = current_app.get_middleware_session()
+        try:
+            use_calculator_first = bool(
+                recommender_settings.get_setting(
+                    'movein_sanity_guard_use_calculator', _settings_db,
+                )
+            )
+        finally:
+            _settings_db.close()
     except Exception as exc:
-        # SOAP unreachable / config error — let the call proceed; SOAP MoveIn
-        # itself will fail with the real diagnostic. Logged for ops.
-        logger.warning(
-            "Sanity guard skipped (SOAP cost retrieve failed) site=%s unit=%s: %s",
-            site_code, unit_id, exc,
-        )
-        sanity_skipped_reason = 'soap_cost_unavailable'
+        logger.warning("sanity guard: setting lookup failed (using SOAP): %s", exc)
+
+    if use_calculator_first:
+        try:
+            from web.services.recommender import compute_first_month_cost_calculator
+            _calc_db = current_app.get_middleware_session()
+            try:
+                calc_total = compute_first_month_cost_calculator(
+                    site_code=site_code, unit_id=unit_id,
+                    concession_id=cid_int,
+                    move_in_date=move_in_date_for_sanity,
+                    db_session=_calc_db,
+                )
+            finally:
+                _calc_db.close()
+            if calc_total is not None and calc_total > 0:
+                soap_cost_estimate = float(calc_total)
+                cost_source = 'calculator'
+        except Exception as exc:
+            logger.warning(
+                "sanity guard: calculator path failed (will fallback to SOAP): %s",
+                exc,
+            )
+
+    if soap_cost_estimate is None:
+        try:
+            soap_cost_estimate = float(_compute_soap_movein_cost(
+                site_code=site_code, unit_id=unit_id,
+                concession_id=cid_int,
+                move_in_date=move_in_date_for_sanity,
+            ))
+            cost_source = 'soap'
+        except Exception as exc:
+            # SOAP unreachable / config error — let the call proceed; SOAP MoveIn
+            # itself will fail with the real diagnostic. Logged for ops.
+            logger.warning(
+                "Sanity guard skipped (SOAP cost retrieve failed) site=%s unit=%s: %s",
+                site_code, unit_id, exc,
+            )
+            sanity_skipped_reason = 'soap_cost_unavailable'
 
     if soap_cost_estimate is not None:
-        if soap_cost_estimate <= 0:
-            # Cost retrieve returned 0 — almost always means the unit is
+        if soap_cost_estimate <= 0 and cost_source == 'soap':
+            # SOAP cost retrieve returned 0 — almost always means the unit is
             # unavailable (already rented, on hold, etc.). Refuse before
-            # firing SOAP MoveIn; it would 500 anyway.
+            # firing SOAP MoveIn; it would 500 anyway. Calculator returning
+            # 0 means missing data, not unit-rented — fall through and let
+            # SOAP MoveIn surface the real diagnostic.
             return jsonify({
                 'error': 'unit_unavailable_for_movein',
                 'hint': 'Unit may already be rented or on hold. Re-quote via /api/recommendations.',
             }), 409
-        if payment_amount < soap_cost_estimate - 0.50:
+        if soap_cost_estimate > 0 and payment_amount < soap_cost_estimate - 0.50:
             return jsonify({
                 'error': 'payment_amount is less than the required move-in cost',
                 'payment_amount': payment_amount,
@@ -2690,9 +2735,10 @@ def move_in_reservation():
 
                 logger.error(
                     "MoveIn cost mismatch site=%s unit=%s plan=%s "
-                    "payment_sent=%.2f calc_quote=%s soap_truth=%s",
+                    "payment_sent=%.2f sanity_source=%s sanity_quote=%s soap_truth=%s",
                     site_code, unit_id, concession_id,
                     payment_amount,
+                    cost_source or 'unavailable',
                     soap_cost_estimate if soap_cost_estimate is not None else 'unavailable',
                     soap_truth if soap_truth is not None else 'unavailable',
                 )
@@ -2700,7 +2746,8 @@ def move_in_reservation():
                     'success': False,
                     'error': 'soap_cost_mismatch',
                     'payment_sent': round(payment_amount, 2),
-                    'calculator_quote': (
+                    'sanity_source': cost_source,
+                    'sanity_quote': (
                         round(soap_cost_estimate, 2) if soap_cost_estimate is not None else None
                     ),
                     'soap_truth': round(soap_truth, 2) if soap_truth is not None else None,
