@@ -488,14 +488,49 @@ const API_ENDPOINTS = {
             {
                 "method": "POST", "path": "/api/recommendations", "scope": "recommender:read",
                 "description": "Step 1 · Quote. Returns a 3-slot envelope (Best Match / Best Alternative / Best Price). Stateful: chain turns via context.previous_request_id + picked_slot.",
-                "identity_note": "Mint <code>request_id</code> fresh per turn. Mint <code>session_id</code> once at the START of a conversation and reuse it on every subsequent recommend turn AND on /reserve + /move-in — that is the only link that ties the booking to the recommendation. <code>customer_id</code> is your channel-side stable id (e.g. PandaAI user id); reuse across the customer's lifetime. <code>channel</code> drives plan distribution gating. On follow-up turns, also send <code>previous_request_id</code> + <code>picked_slot</code> + <code>action</code> so the engine inherits the prior turn's filters and excludes already-served unit_ids. Server returns <code>next_turn.session_id</code> so the bot can confirm the value it sent.",
+                "identity_spec": {
+                    "intro": "Five identity fields tie a recommend turn to its conversation, its customer, and the eventual booking. Send all four required fields on every call. Send <code>previous_request_id</code> only on follow-up turns.",
+                    "fields": [
+                        {"name": "channel", "required": true,
+                         "format": "string · enum: <code>chatbot</code> | <code>web</code> | <code>api</code> | <code>admin</code>",
+                         "lifetime": "Per call",
+                         "source": "Bot — hardcoded for the channel",
+                         "notes": "Plans whose <code>distribution_channel</code> excludes this value are dropped from the pool."},
+                        {"name": "request_id", "required": true,
+                         "format": "string · 1–64 chars · UUID v4 recommended (e.g. <code>550e8400-e29b-41d4-a716-446655440000</code>)",
+                         "lifetime": "Unique per turn (one recommend call = one fresh value)",
+                         "source": "Bot mints with <code>uuid.uuid4()</code> per turn",
+                         "notes": "Logged in <code>mw_recommendations_served.request_id</code>. Other turns reference it via <code>previous_request_id</code>."},
+                        {"name": "session_id", "required": true,
+                         "format": "string · 1–64 chars · UUID v4 or any opaque token (e.g. <code>sess-conv-7</code>, <code>5e1c8a-...</code>)",
+                         "lifetime": "Stable for the WHOLE conversation. Same value on every recommend turn AND on /reserve + /move-in.",
+                         "source": "Bot mints once when the chat starts; reuses it.",
+                         "notes": "<strong>This is the link that ties the booking to the recommendation.</strong> If you change it mid-conversation, attribution breaks."},
+                        {"name": "customer_id", "required": true,
+                         "format": "string · 1–64 chars · stable identifier from your channel (e.g. PandaAI user id <code>pandai_xyz_123</code>)",
+                         "lifetime": "Stable for the WHOLE customer lifetime — not per chat.",
+                         "source": "Channel-side identity (e.g. PandaAI user id, your CRM contact id, or a stable session-bound surrogate for anonymous flows)",
+                         "notes": "Used for outcome attribution + per-customer ranking."},
+                        {"name": "previous_request_id", "required": false,
+                         "format": "string · 1–64 chars · the <code>request_id</code> of the prior turn",
+                         "lifetime": "Set on follow-up turns only; absent on turn 1",
+                         "source": "Bot copies from the prior recommend response",
+                         "notes": "Triggers <code>resume_session()</code>: server inherits prior filters as the BASE, layers current filters on top, and excludes already-served unit_ids. Pair with <code>picked_slot</code> (1|2|3) and <code>action</code> (<code>more_like_this</code> | <code>different_options</code>) to drive the relax strategy."}
+                    ],
+                    "rules": [
+                        "All values are case-sensitive.",
+                        "Whitespace-only is rejected (server <code>.strip()</code>s before checking).",
+                        "Any field exceeding 64 chars → HTTP 400.",
+                        "On success, the response includes <code>next_turn.session_id</code> + <code>next_turn.previous_request_id</code> — confirm the values match what you sent."
+                    ]
+                },
                 "body": {
                     "mode":            {"type": "string",  "required": false, "description": "'recommendation' (default, 3-slot envelope) or 'quote' (single unit; requires filters.unit_id)"},
                     "level":           {"type": "string",  "required": false, "description": "'standard' (default; only level supported in v1)"},
                     "duration_months": {"type": "integer", "required": true,  "description": "Lease length in months. Drives the breakdown + total_contract."},
-                    "filters":         {"type": "object",  "required": true,  "description": "{location:[...], unit_type?:[...], climate_type?:[...], size_range?:[...], unit_id?:[...]} — arrays accepted everywhere; location is required."},
-                    "context":         {"type": "object",  "required": true,  "description": "{channel, request_id, session_id, customer_id} ALL REQUIRED (≤64 chars each). Optional: previous_request_id (continuation), picked_slot+action (drives relax strategy on follow-up turns), move_in_date. See the 'Identity & Run Tracking' panel above for the full multi-turn worked example."},
-                    "constraints":     {"type": "object",  "required": false, "description": "{max_distance_km?, exclude_unit_ids?:[]}"}
+                    "filters":         {"type": "object",  "required": true,  "description": "Object. Required key: location (array of site codes). Optional keys (all arrays of strings): unit_type, climate_type, size_range, unit_id. All keys accept arrays — pass multiple values when the customer is flexible."},
+                    "context":         {"type": "object",  "required": true,  "description": "Object. Required keys: channel, request_id, session_id, customer_id (see 'Identity & tracking' callout above for format spec). Optional keys: previous_request_id (string, set on follow-up turns), picked_slot (integer 1|2|3, paired with previous_request_id), action (string: 'more_like_this' | 'different_options'), move_in_date (ISO date YYYY-MM-DD)."},
+                    "constraints":     {"type": "object",  "required": false, "description": "Object. All optional keys: max_distance_km (number, overrides slot-2 default radius), exclude_unit_ids (array of integers, max 200 items)."}
                 },
                 "example_request": {
                     "mode": "recommendation",
@@ -548,7 +583,36 @@ const API_ENDPOINTS = {
             {
                 "method": "POST", "path": "/api/reservations/reserve", "scope": "recommender:write",
                 "description": "Step 2 · Hold the unit (creates tenant + reservation in SiteLink). Pass session_id + customer_id from /recommendations so the move-in outcome can link back to the slot the customer picked.",
-                "identity_note": "Reuse the SAME <code>session_id</code> + <code>customer_id</code> the bot used on /api/recommendations — they are required (HTTP 400 if missing or empty). <code>previous_request_id</code> + <code>plan_id</code> are optional but strongly recommended: pass the <code>request_id</code> of the recommend turn that produced the picked slot, plus the slot's <code>plan_id</code>, for the strongest attribution signal in <code>mw_recommendations_served</code>. <code>concession_id=0</code> means standard rate (no discount); pass it as 0, do NOT collapse to null.",
+                "identity_spec": {
+                    "intro": "Reuse the SAME <code>session_id</code> + <code>customer_id</code> the bot used on <code>/api/recommendations</code>. Optional attribution fields strengthen the link to the recommendation in <code>mw_recommendations_served</code>.",
+                    "fields": [
+                        {"name": "session_id", "required": true,
+                         "format": "string · 1–64 chars",
+                         "lifetime": "Same value as on /api/recommendations",
+                         "source": "Copy from the recommend turn",
+                         "notes": "HTTP 400 if missing, empty, or > 64 chars."},
+                        {"name": "customer_id", "required": true,
+                         "format": "string · 1–64 chars",
+                         "lifetime": "Same value as on /api/recommendations",
+                         "source": "Copy from the recommend turn",
+                         "notes": "HTTP 400 if missing, empty, or > 64 chars."},
+                        {"name": "previous_request_id", "required": false,
+                         "format": "string · 1–64 chars · UUID-format recommended",
+                         "lifetime": "Per booking — the recommend turn that produced the picked slot",
+                         "source": "Copy from the picked slot's recommend response <code>request_id</code>",
+                         "notes": "Strongest attribution signal. Recommended."},
+                        {"name": "plan_id", "required": false,
+                         "format": "integer",
+                         "lifetime": "Per booking",
+                         "source": "Copy from the picked slot's <code>plan_id</code> field",
+                         "notes": "Extra attribution signal."},
+                        {"name": "concession_id", "required": false,
+                         "format": "integer · 0 = standard rate, &gt;0 = discount plan ID",
+                         "lifetime": "Per booking",
+                         "source": "Copy from the picked slot's <code>concession_id</code>",
+                         "notes": "<strong>Pass 0, not null</strong>, when there is no discount. Null collapses the standard-rate path."}
+                    ]
+                },
                 "body": {
                     "site_code":    {"type": "string",  "required": true,  "description": "Location code (e.g. LSETUP)"},
                     "unit_id":      {"type": "integer", "required": true,  "description": "Unit ID to reserve"},
@@ -612,7 +676,30 @@ const API_ENDPOINTS = {
             {
                 "method": "POST", "path": "/api/reservations/move-in", "scope": "recommender:write",
                 "description": "Step 4 · Convert reservation → move-in. Pass `Idempotency-Key` header (UUID per booking attempt) to safely retry. For perpetual+prepay plans the middleware orchestrates SOAP follow-ups (PaymentSimpleCash + ScheduleTenantRateChange) — bot just passes the single payment_amount from /move-in/cost.",
-                "identity_note": "<code>session_id</code> + <code>customer_id</code> are REQUIRED (HTTP 400 if missing). They MUST match the values the bot used on /api/recommendations and /reserve — that is the link that closes the loop in <code>mw_recommendations_served.booked_unit_id</code>. Send a fresh UUID in the <code>Idempotency-Key</code> header per booking attempt: replays within 24h return the cached response with <code>idempotent_replay: true</code> and the same <code>ledger_id</code>, never double-firing SOAP. <code>payment_amount</code> must match the SOAP <code>total</code> from Step 3 within $0.50.",
+                "identity_spec": {
+                    "intro": "Final step. <code>session_id</code> + <code>customer_id</code> MUST match the values the bot used on <code>/api/recommendations</code> and <code>/reserve</code>. The <code>Idempotency-Key</code> header makes retries safe.",
+                    "fields": [
+                        {"name": "session_id", "required": true,
+                         "format": "string · 1–64 chars",
+                         "lifetime": "Same value as on /api/recommendations + /reserve",
+                         "source": "Copy from the recommend turn",
+                         "notes": "HTTP 400 if missing, empty, or > 64 chars. This is the field that populates <code>mw_recommendations_served.booked_unit_id</code> on success."},
+                        {"name": "customer_id", "required": true,
+                         "format": "string · 1–64 chars",
+                         "lifetime": "Same value as on /api/recommendations + /reserve",
+                         "source": "Copy from the recommend turn",
+                         "notes": "HTTP 400 if missing, empty, or > 64 chars."},
+                        {"name": "Idempotency-Key (header)", "required": false,
+                         "format": "string · 1–120 chars · UUID v4 recommended",
+                         "lifetime": "One per booking attempt; cached for 24h server-side",
+                         "source": "Bot mints <code>uuid.uuid4()</code> per booking attempt",
+                         "notes": "Replays within 24h return the cached response with <code>idempotent_replay: true</code> + the same <code>ledger_id</code>, never double-firing SOAP. <strong>Use a NEW key for a new booking; reuse the same key only when retrying the SAME booking.</strong>"}
+                    ],
+                    "rules": [
+                        "<code>payment_amount</code> must equal the SOAP <code>total</code> from Step 3 within $0.50 — otherwise HTTP 400.",
+                        "For perpetual+prepay plans, <code>payment_amount</code> is the multi-month total; the middleware fans out the follow-up SOAP calls (PaymentSimpleCash + ScheduleTenantRateChange) automatically — bot does not orchestrate."
+                    ]
+                },
                 "body": {
                     "site_code":      {"type": "string",  "required": true,  "description": "Location code"},
                     "waiting_id":     {"type": "integer", "required": true,  "description": "WaitingID from /reserve"},
@@ -1208,7 +1295,44 @@ function buildEndpointDetail(ep, detailId) {
     let html = `<div class="endpoint-detail" id="${detailId}">`;
 
     // Per-endpoint identity / run-tracking guidance, when supplied.
-    if (ep.identity_note) {
+    // Two shapes accepted:
+    //   - identity_note: "<html string>"   → rendered as a single paragraph
+    //   - identity_spec: { intro?, fields: [{name, format, lifetime, source, required, notes}], rules?: [...] }
+    if (ep.identity_spec) {
+        const spec = ep.identity_spec;
+        let specHtml = '<strong>🔑 Identity &amp; tracking</strong>';
+        if (spec.intro) {
+            specHtml += `<div style="margin-top:0.3rem; line-height:1.5;">${spec.intro}</div>`;
+        }
+        if (spec.fields && spec.fields.length) {
+            specHtml += `<table style="width:100%; border-collapse:collapse; margin-top:0.5rem; font-size:0.75rem; background:white;">
+                <thead><tr style="background:#fef3c7;">
+                    <th style="padding:0.3rem 0.45rem; text-align:left; border:1px solid #fcd34d;">Field</th>
+                    <th style="padding:0.3rem 0.45rem; text-align:left; border:1px solid #fcd34d;">Required</th>
+                    <th style="padding:0.3rem 0.45rem; text-align:left; border:1px solid #fcd34d;">Format</th>
+                    <th style="padding:0.3rem 0.45rem; text-align:left; border:1px solid #fcd34d;">Lifetime</th>
+                    <th style="padding:0.3rem 0.45rem; text-align:left; border:1px solid #fcd34d;">Who mints / source</th>
+                    <th style="padding:0.3rem 0.45rem; text-align:left; border:1px solid #fcd34d;">Notes</th>
+                </tr></thead><tbody>`;
+            spec.fields.forEach(f => {
+                specHtml += `<tr>
+                    <td style="padding:0.28rem 0.45rem; border:1px solid #fcd34d;"><code>${esc(f.name)}</code></td>
+                    <td style="padding:0.28rem 0.45rem; border:1px solid #fcd34d;">${f.required ? '<strong style="color:#b91c1c;">required</strong>' : 'optional'}</td>
+                    <td style="padding:0.28rem 0.45rem; border:1px solid #fcd34d;">${esc(f.format || '')}</td>
+                    <td style="padding:0.28rem 0.45rem; border:1px solid #fcd34d;">${esc(f.lifetime || '')}</td>
+                    <td style="padding:0.28rem 0.45rem; border:1px solid #fcd34d;">${esc(f.source || '')}</td>
+                    <td style="padding:0.28rem 0.45rem; border:1px solid #fcd34d;">${f.notes || ''}</td>
+                </tr>`;
+            });
+            specHtml += '</tbody></table>';
+        }
+        if (spec.rules && spec.rules.length) {
+            specHtml += '<ul style="margin:0.5rem 0 0 1.1rem; padding:0; line-height:1.5;">';
+            spec.rules.forEach(r => { specHtml += `<li>${r}</li>`; });
+            specHtml += '</ul>';
+        }
+        html += `<div class="detail-section" style="background:#fffbeb; border:1px solid #fcd34d; border-radius:4px; padding:0.6rem 0.75rem; font-size:0.78rem; color:#78350f;">${specHtml}</div>`;
+    } else if (ep.identity_note) {
         html += `<div class="detail-section" style="background:#fffbeb; border:1px solid #fcd34d; border-radius:4px; padding:0.55rem 0.7rem; font-size:0.78rem; color:#78350f;">
             <strong>🔑 Identity &amp; tracking</strong>
             <div style="margin-top:0.25rem; line-height:1.5;">${ep.identity_note}</div>
