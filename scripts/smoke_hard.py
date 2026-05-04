@@ -1006,6 +1006,85 @@ def test_12_random_fuzz(base: str, key: str, n: int = 50) -> Result:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Scenario 13 — Relax-action vocabulary (regression guard)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_13_relax_actions(base: str, key: str) -> Result:
+    """
+    Verifies each supported `context.action` value reaches its expected
+    `relax_strategy_used` strategy id end-to-end. This is a regression
+    guard: a future refactor that drops a branch in relax_strategy() or
+    _apply_relax_strategy() will fail this test.
+
+    For each (action, expected_strategy) pair:
+      - Fresh session_id (no served-id pollution from prior tests).
+      - Turn 1 with size_range=["30-35"] at L017 to seed a recommend row.
+      - Turn 2 with previous_request_id + the action under test.
+      - Assert response.stats.relax_strategy_used == expected.
+      - Assert ≥1 slot still returned.
+    """
+    r = Result("13. Relax-action vocabulary regression guard")
+    print("\n[13] Relax-action vocabulary regression guard")
+
+    cases = [
+        # (action, expected_strategy, picked_slot)
+        ('more_like_this',     'size_plus_one',      1),
+        ('more_like_this',     'next_nearest_site',  2),
+        ('more_like_this',     'size_plus_one',      3),
+        ('bigger_size',        'size_step_up',       None),
+        ('smaller_size',       'size_step_down',     None),
+        ('expand_locations',   'expand_locations',   None),
+        ('different_type',     'expand_unit_type',   None),
+        ('different_duration', 'duration_change',    None),
+    ]
+
+    failures = []
+    for action, expected, picked in cases:
+        sid = f"smoke-act-{action}-{picked or 0}-{uuid.uuid4().hex[:6]}"
+        cid = f"smoke-act-{action}"
+
+        # Turn 1 — seed
+        body1 = _req_body(['L017'], duration=6, size_range=['30-35'],
+                          session_id=sid, customer_id=cid)
+        st1, resp1 = _recommend(base, key, body1)
+        if st1 != 200:
+            failures.append(f"{action}/slot={picked}: T1 HTTP {st1}")
+            continue
+        prev_rid = resp1.get('request_id') or resp1.get('next_turn', {}).get('previous_request_id')
+        if not prev_rid:
+            failures.append(f"{action}/slot={picked}: T1 missing request_id in response")
+            continue
+
+        # Turn 2 — apply action
+        body2 = _req_body(['L017'], duration=6, size_range=['30-35'],
+                          session_id=sid, customer_id=cid)
+        body2['context']['previous_request_id'] = prev_rid
+        body2['context']['action'] = action
+        if picked is not None:
+            body2['context']['picked_slot'] = picked
+        st2, resp2 = _recommend(base, key, body2)
+        if st2 != 200:
+            failures.append(f"{action}/slot={picked}: T2 HTTP {st2}: {resp2.get('error', resp2)}")
+            continue
+
+        got_strategy = (resp2.get('stats') or {}).get('relax_strategy_used')
+        slots = [s for s in (resp2.get('slots') or []) if s]
+        if got_strategy != expected:
+            failures.append(f"{action}/slot={picked}: expected strategy={expected!r}, got {got_strategy!r}")
+            continue
+        if len(slots) < 1:
+            failures.append(f"{action}/slot={picked}: 0 slots returned (strategy was correct)")
+            continue
+        print(f"  ✓ action={action!r:20s} picked={picked!s:4s} → strategy={got_strategy!r:22s} slots={len(slots)}")
+
+    if failures:
+        r.failed(f"{len(failures)}/{len(cases)} action(s) misrouted: " + " | ".join(failures))
+    else:
+        r.passed(notes=f"All {len(cases)} action→strategy mappings verified end-to-end")
+    return r
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1022,6 +1101,7 @@ SCENARIOS = {
     10: test_10_exclude_selfheal,
     11: test_11_insurance_requote,
     12: test_12_random_fuzz,
+    13: test_13_relax_actions,
 }
 
 
