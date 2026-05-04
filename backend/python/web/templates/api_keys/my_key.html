@@ -696,8 +696,10 @@ const API_ENDPOINTS = {
                          "notes": "Replays within 24h return the cached response with <code>idempotent_replay: true</code> + the same <code>ledger_id</code>, never double-firing SOAP. <strong>Use a NEW key for a new booking; reuse the same key only when retrying the SAME booking.</strong>"}
                     ],
                     "rules": [
-                        "<code>payment_amount</code> must equal the SOAP <code>total</code> from Step 3 within $0.50 — otherwise HTTP 400.",
-                        "For perpetual+prepay plans, <code>payment_amount</code> is the multi-month total; the middleware fans out the follow-up SOAP calls (PaymentSimpleCash + ScheduleTenantRateChange) automatically — bot does not orchestrate."
+                        "<code>payment_amount</code> must equal the SOAP <code>total</code> from Step 3 within $0.50 — otherwise HTTP 400 <code>{error: \"payment_amount is less than the required move-in cost\", required_minimum, hint}</code>.",
+                        "Unit unavailable (already rented / on hold) → HTTP 409 <code>{error: \"unit_unavailable_for_movein\"}</code>. Re-quote via /api/recommendations.",
+                        "Cost-mismatch detected by SOAP after MoveIn fired → HTTP 422 <code>{error: \"soap_cost_mismatch\", payment_sent, calculator_quote, soap_truth, delta_sent_vs_soap, hint}</code>. The SOAP MoveIn never created a lease; bot should re-quote via /move-in/cost and retry with a NEW Idempotency-Key.",
+                        "For perpetual+prepay plans, <code>payment_amount</code> is the multi-month total; the middleware fans out follow-up SOAP calls (PaymentSimpleCash + ScheduleTenantRateChange) automatically — bot does not orchestrate."
                     ]
                 },
                 "body": {
@@ -733,6 +735,47 @@ const API_ENDPOINTS = {
                     "ret_code": "593680", "message": "Move-in completed", "test_mode": false,
                     "followups": {"enqueued": 2, "job_ids": [2, 3], "inline_ok": 2, "pending_retry": 0, "failed_permanent": 0}
                 }
+            },
+            {
+                "method": "GET", "path": "/api/reservations/<waiting_id>", "scope": "recommender:read",
+                "description": "Read a reservation by WaitingID. Use after /reserve to confirm state, or before /update to read-modify-write.",
+                "params": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code (query string param ?site_code=...)"}
+                },
+                "example_response": {"site_code": "L017", "reservation": {"WaitingID": "848757", "TenantID": "1109544", "sUnitName": "4120", "iWaitingStatus": "0"}}
+            },
+            {
+                "method": "PUT", "path": "/api/reservations/<waiting_id>", "scope": "recommender:write",
+                "description": "Modify an existing reservation BEFORE move-in (e.g. customer changes needed_date, contact info, comment). After move-in this is a no-op — modify the lease instead.",
+                "identity_spec": {
+                    "intro": "Read the reservation first via GET, mutate the fields you need to change, send the full body back. Only fields included in the body are written; omitted fields keep their current value.",
+                    "fields": [
+                        {"name": "site_code", "required": true, "format": "string", "lifetime": "Same as /reserve", "source": "Same as /reserve", "notes": ""},
+                        {"name": "session_id", "required": false, "format": "string · 1–64 chars", "lifetime": "Same value as on /api/recommendations + /reserve", "source": "Copy from the recommend turn", "notes": "Recommended for audit linkage."},
+                        {"name": "customer_id", "required": false, "format": "string · 1–64 chars", "lifetime": "Same value as on /api/recommendations + /reserve", "source": "Copy from the recommend turn", "notes": "Recommended for audit linkage."}
+                    ]
+                },
+                "body": {
+                    "site_code":     {"type": "string", "required": true,  "description": "Location code"},
+                    "needed_date":   {"type": "string", "required": false, "description": "New move-in date YYYY-MM-DD"},
+                    "first_name":    {"type": "string", "required": false, "description": "Tenant first name"},
+                    "last_name":     {"type": "string", "required": false, "description": "Tenant last name"},
+                    "phone":         {"type": "string", "required": false, "description": "Contact phone"},
+                    "email":         {"type": "string", "required": false, "description": "Contact email"},
+                    "mobile":        {"type": "string", "required": false, "description": "Mobile phone"},
+                    "comment":       {"type": "string", "required": false, "description": "Reservation comment"},
+                    "quoted_rate":   {"type": "number", "required": false, "description": "Updated quoted rate"},
+                    "concession_id": {"type": "integer","required": false, "description": "Update discount concession (rare; usually keep the original from /reserve)"}
+                },
+                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "848757", "message": "Reservation updated"}
+            },
+            {
+                "method": "PUT", "path": "/api/reservations/<waiting_id>/cancel", "scope": "recommender:write",
+                "description": "Cancel a reservation BEFORE move-in. Sets iWaitingStatus=2 in SiteLink. After move-in, this is a no-op — cancel the lease instead. Idempotent: cancelling an already-cancelled reservation returns success.",
+                "body": {
+                    "site_code": {"type": "string", "required": true, "description": "Location code"}
+                },
+                "example_response": {"success": true, "waiting_id": 848757, "ret_code": "848757", "message": "Reservation cancelled"}
             }
         ]
     },

@@ -284,6 +284,39 @@ def _ecri_only_path(*, mw, ledger_id, site_code, tenant_id, unit_id,
     }
 
 
+_COST_FAULT_MARKERS = (
+    'payment',
+    'amount',
+    'insufficient',
+    'rate mismatch', 'rate change', 'tenant rate', 'std rate',
+    'cost',
+    'discount',
+    'concession',
+    'tax',
+)
+_COST_FAULT_EXCLUSIONS = (
+    'rate limit', 'rate-limit',
+    'unauthorized', 'unauthorised', 'forbidden', 'invalid token',
+)
+
+
+def _is_cost_related_movein_failure(ret_msg) -> bool:
+    """
+    True when a MoveIn Ret_Msg points at a cost/payment mismatch — the
+    cases where a post-mortem SOAP cost-retrieve helps the caller diagnose.
+    Excludes unit-rented / auth / rate-limit / unknown-tenant which the
+    cost-retrieve cannot illuminate.
+    """
+    if not ret_msg:
+        return False
+    msg = str(ret_msg).lower()
+    if any(e in msg for e in _COST_FAULT_EXCLUSIONS):
+        return False
+    if 'unit' in msg and ('rented' in msg or 'available' in msg or 'occupied' in msg):
+        return False
+    return any(m in msg for m in _COST_FAULT_MARKERS)
+
+
 def _compute_soap_movein_cost(*, site_code, unit_id, concession_id, move_in_date) -> Decimal:
     """Lightweight SOAP cost retrieve. Returns total of all charges + tax."""
     from common.soap_client import SOAPFaultError
@@ -1048,7 +1081,7 @@ def reservation_list():
 
 @reservations_bp.route('/<int:waiting_id>')
 @require_auth
-@require_api_scope('reservations:read')
+@require_api_scope(('recommender:read', 'reservations:read'))
 @rate_limit_api(max_requests=30, window_seconds=60)
 def reservation_get(waiting_id):
     """
@@ -1115,7 +1148,7 @@ def reservation_get(waiting_id):
 
 @reservations_bp.route('/<int:waiting_id>', methods=['PUT'])
 @require_auth
-@require_api_scope('reservations:write')
+@require_api_scope(('recommender:write', 'reservations:write'))
 @rate_limit_api(max_requests=10, window_seconds=60)
 def reservation_update(waiting_id):
     """
@@ -1273,7 +1306,7 @@ def reservation_update(waiting_id):
 
 @reservations_bp.route('/<int:waiting_id>/cancel', methods=['PUT'])
 @require_auth
-@require_api_scope('reservations:write')
+@require_api_scope(('recommender:write', 'reservations:write'))
 @rate_limit_api(max_requests=10, window_seconds=60)
 def reservation_cancel(waiting_id):
     """
@@ -2502,31 +2535,50 @@ def move_in_reservation():
     if not _validate_site_code(site_code):
         return jsonify({'error': 'Invalid site_code'}), 400
 
-    # Phase 4 Part 2 — payment_amount sanity check.
+    # payment_amount sanity check.
     # Bot must charge at least the SOAP move-in cost. If less, reject with 400
-    # before we hit SOAP and create a half-funded lease. 50¢ tolerance for
-    # rounding differences between calculator and SOAP.
+    # before SOAP creates a half-funded lease. 50¢ tolerance for rounding.
+    # Distinguish "exception (SOAP unreachable)" from "0 returned" — the latter
+    # never legitimately happens, so treat it as guard-failure not guard-skip.
     concession_id_for_sanity = data.get('concession_id')
     try:
         cid_int = int(concession_id_for_sanity) if concession_id_for_sanity else 0
     except (ValueError, TypeError):
         cid_int = 0
     _start_for_sanity_str = _parse_date(data.get('start_date'), 1)
+    soap_cost_estimate = None
+    sanity_skipped_reason = None
     try:
         soap_cost_estimate = float(_compute_soap_movein_cost(
             site_code=site_code, unit_id=unit_id,
             concession_id=cid_int,
             move_in_date=_coerce_to_date(_start_for_sanity_str),
         ))
-    except Exception:
-        soap_cost_estimate = 0.0
-    if soap_cost_estimate > 0 and payment_amount < soap_cost_estimate - 0.50:
-        return jsonify({
-            'error': 'payment_amount is less than the required move-in cost',
-            'payment_amount': payment_amount,
-            'required_minimum': soap_cost_estimate,
-            'hint': 'Call GET /api/reservations/move-in/cost for the authoritative amount.',
-        }), 400
+    except Exception as exc:
+        # SOAP unreachable / config error — let the call proceed; SOAP MoveIn
+        # itself will fail with the real diagnostic. Logged for ops.
+        logger.warning(
+            "Sanity guard skipped (SOAP cost retrieve failed) site=%s unit=%s: %s",
+            site_code, unit_id, exc,
+        )
+        sanity_skipped_reason = 'soap_cost_unavailable'
+
+    if soap_cost_estimate is not None:
+        if soap_cost_estimate <= 0:
+            # Cost retrieve returned 0 — almost always means the unit is
+            # unavailable (already rented, on hold, etc.). Refuse before
+            # firing SOAP MoveIn; it would 500 anyway.
+            return jsonify({
+                'error': 'unit_unavailable_for_movein',
+                'hint': 'Unit may already be rented or on hold. Re-quote via /api/recommendations.',
+            }), 409
+        if payment_amount < soap_cost_estimate - 0.50:
+            return jsonify({
+                'error': 'payment_amount is less than the required move-in cost',
+                'payment_amount': payment_amount,
+                'required_minimum': soap_cost_estimate,
+                'hint': 'Call GET /api/reservations/move-in/cost for the authoritative amount.',
+            }), 400
 
     # Optional fields
     start_date = _parse_date(data.get('start_date'), 1)
@@ -2619,6 +2671,44 @@ def move_in_reservation():
                 f"MoveInReservation_v6 failed: site={site_code} unit={unit_id} "
                 f"ret_code={ret_code} ret_msg={ret_msg}"
             )
+
+            # Post-mortem cost-retrieve: when MoveIn fails with a cost-related
+            # message (amount mismatch / insufficient funds), call SOAP
+            # MoveInCostRetrieve to surface the calc/SOAP/sent delta. The bot
+            # can then decide to re-quote and retry (with a fresh
+            # Idempotency-Key — the failed attempt is not cached).
+            if _is_cost_related_movein_failure(ret_msg):
+                try:
+                    soap_truth = float(_compute_soap_movein_cost(
+                        site_code=site_code, unit_id=unit_id,
+                        concession_id=concession_id,
+                        move_in_date=_coerce_to_date(start_date),
+                    ))
+                except Exception as exc:
+                    logger.warning("Post-mortem cost retrieve failed: %s", exc)
+                    soap_truth = None
+
+                logger.error(
+                    "MoveIn cost mismatch site=%s unit=%s plan=%s "
+                    "payment_sent=%.2f calc_quote=%s soap_truth=%s",
+                    site_code, unit_id, concession_id,
+                    payment_amount,
+                    soap_cost_estimate if soap_cost_estimate is not None else 'unavailable',
+                    soap_truth if soap_truth is not None else 'unavailable',
+                )
+                return jsonify({
+                    'success': False,
+                    'error': 'soap_cost_mismatch',
+                    'payment_sent': round(payment_amount, 2),
+                    'calculator_quote': (
+                        round(soap_cost_estimate, 2) if soap_cost_estimate is not None else None
+                    ),
+                    'soap_truth': round(soap_truth, 2) if soap_truth is not None else None,
+                    'delta_sent_vs_soap': (
+                        round(payment_amount - soap_truth, 2) if soap_truth is not None else None
+                    ),
+                    'hint': 'Re-quote via GET /api/reservations/move-in/cost and retry /move-in with a NEW Idempotency-Key.',
+                }), 422
 
         # ── Phase 4 Part 2 — perpetual+prepay orchestration ─────────────
         # After a successful MoveIn, enqueue follow-up SOAP calls
