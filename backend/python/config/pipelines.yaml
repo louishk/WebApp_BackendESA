@@ -114,6 +114,33 @@ pipelines:
     data_freshness:
       table: mimo
       date_column: extract_date
+  ccws_ledgers:
+    display_name: CCWS Tenant Ledgers & Charges
+    description: Sync tenants, ledgers and charges from CallCenterWs (LedgersByTenantID_v3 + ChargesAllByLedgerID). Incremental mode refreshes recent ledgers; required for fresh ECRI eligibility.
+    module_path: datalayer.tenant_ledger_charges_to_sql
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 7 * * *
+    default_args:
+      mode: incremental
+      days-back: 7
+    priority: 2
+    conflicts_with:
+    - rentroll
+    - discount
+    - mimo
+    resource_group: soap_api
+    max_db_connections: 3
+    estimated_duration_seconds: 1800
+    retry:
+      max_attempts: 3
+      delay_seconds: 300
+      backoff_multiplier: 2
+    timeout_seconds: 7200
+    data_freshness:
+      table: ccws_ledgers
+      date_column: extract_date
   ccws_charge_descriptions:
     display_name: CCWS Charge Descriptions
     description: Fetch per-site charge type config (tax rates, prices) from ChargeDescriptionsRetrieve
@@ -245,10 +272,10 @@ pipelines:
       table: gads_campaign_daily
       date_column: segments_date
   ecri_outcome_tracking:
-    display_name: ECRI Outcome Tracking
-    description: Track churn/stay outcomes for executed ECRI batches within attribution window
+    display_name: ECRI Outcome Tracking (legacy)
+    description: MIGRATED to sync_service orchestrator (sync_service.pipelines.ecri_outcome_tracking.EcriOutcomeTrackingPipeline). Disabled here to avoid double-runs.
     module_path: datalayer.ecri_outcome_tracking
-    enabled: true
+    enabled: false
     schedule:
       type: cron
       cron: 0 8 * * *
