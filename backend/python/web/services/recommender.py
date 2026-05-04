@@ -141,10 +141,10 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
         raise ValidationError("duration_months must be an integer")
     if duration_months < 1:
         raise ValidationError("duration_months must be >= 1")
-    if duration_months > 120:
-        # Caps the per-period iteration in mode=quote (perpetual+prepay).
-        # 10 years is well beyond any real lease scenario.
-        raise ValidationError("duration_months must be <= 120")
+    if duration_months > 12:
+        # SiteLink's technical limit on lease duration. Going higher is
+        # not a real scenario — leases beyond 12 months are renewals.
+        raise ValidationError("duration_months must be <= 12")
 
     # --- filters ---
     raw_filters = raw.get('filters') or {}
@@ -526,37 +526,48 @@ def _apply_size_plus_one(req: RecommendationRequest) -> None:
 
 def _apply_size_directional(req: RecommendationRequest, direction: int) -> None:
     """
-    Shift size_range filter by ONE step up (+1) or down (-1).
+    Shift size_range filter directionally — UP (+1) or DOWN (-1).
 
-    For each currently-requested size bucket, replaces it with the bucket
-    one step up (or down) in the dim_size_range sort order. Falls back to
-    the original bucket when there is no neighbour in that direction
-    (e.g. asking for `bigger_size` from the largest bucket).
+    Replaces each requested size bucket with the OPEN-ENDED range in
+    that direction so the candidate pool naturally surfaces the closest
+    available match. Example: from `30-35` with bigger_size, the filter
+    becomes `[35-40, 40-45, 45-50, ...]` (every bucket strictly bigger).
+    The pool then orders by effective_rate and slot 1 is the cheapest
+    bigger unit; if no bigger inventory exists, generic pool rescue
+    takes over and surfaces the closest fallback.
+
+    Excludes the original bucket — if the customer asked for
+    `bigger_size`, returning the same size again would be a contract
+    violation (same applies to `smaller_size`).
     """
     current_sizes = req.filters.get('size_range', [])
     if not current_sizes:
         return
     try:
-        from common.size_range_window import size_range_neighbours_step
-        shifted: List[str] = []
+        from common.size_range_window import _DIM_CACHE, _load_cache  # noqa: WPS437
+        _load_cache()
+
+        target: List[str] = []
         seen: set[str] = set()
         for s in current_sizes:
-            window = size_range_neighbours_step(s, n_steps=1)  # [-1, center, +1]
-            try:
-                idx = window.index(s)
-            except ValueError:
+            if s not in _DIM_CACHE:
                 continue
-            target_idx = idx + direction
-            if 0 <= target_idx < len(window):
-                nb = window[target_idx]
-                if nb not in seen:
-                    shifted.append(nb)
-                    seen.add(nb)
-            elif s not in seen:
-                shifted.append(s)
-                seen.add(s)
-        if shifted:
-            req.filters['size_range'] = shifted
+            anchor_sort, _ = _DIM_CACHE[s]
+            for code, (sort_order, _mid) in _DIM_CACHE.items():
+                strictly_in_dir = (
+                    (direction > 0 and sort_order > anchor_sort)
+                    or (direction < 0 and sort_order < anchor_sort)
+                )
+                if strictly_in_dir and code not in seen:
+                    target.append(code)
+                    seen.add(code)
+
+        if target:
+            # Sort closer-to-anchor first so the cheapest in that
+            # direction tends to also be the closest size.
+            target.sort(key=lambda c: abs(_DIM_CACHE[c][0] - _DIM_CACHE[current_sizes[0]][0])
+                        if c in _DIM_CACHE and current_sizes[0] in _DIM_CACHE else 999)
+            req.filters['size_range'] = target
     except Exception as exc:
         logger.warning("_apply_size_directional failed: %s", exc)
 

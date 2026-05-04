@@ -353,7 +353,7 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 <tr>
 <td><code>duration_months</code></td>
 <td><strong>yes</strong></td>
-<td>integer 1–120</td>
+<td>integer 1–12 (SiteLink's technical limit; longer leases are renewals)</td>
 </tr>
 <tr>
 <td><code>filters.location</code></td>
@@ -552,8 +552,14 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 </tr>
 </tbody>
 </table>
-<p>When the strict-filter pool is empty, the engine runs <strong>pool rescue</strong> — it relaxes dimensions until candidates appear. Surfaced as <code>stats.saturation_signal: true</code> + <code>stats.pool_rescue_step</code>. Each slot's <code>match_flags.relaxed_dims</code> shows what was relaxed for that specific slot.</p>
-<p>The response is guaranteed to contain <strong>≥ 2 slots in normal operation</strong>. Slot 3 is best-effort; <code>null</code> if no strictly-cheaper unit exists.</p>
+<p>When the strict-filter pool is empty, the engine runs <strong>pool rescue</strong> — it auto-relaxes dimensions until candidates appear. The bot doesn't need to retry; the recommend response surfaces this via:</p>
+<ul>
+<li><code>stats.saturation_signal: true</code></li>
+<li><code>stats.pool_rescue_step</code> — which dim got relaxed first</li>
+<li>per-slot <code>match_flags.relaxed_dims</code> — what each slot's match dropped</li>
+</ul>
+<p>Combined with directional actions (<code>bigger_size</code> / <code>smaller_size</code> open the range fully in that direction), this means an action that lands on an empty bucket still returns the closest available match — never zero slots in normal operation.</p>
+<p>The response is guaranteed to contain <strong>≥ 2 slots in normal operation</strong>. Slot 3 is best-effort; <code>null</code> if no strictly-cheaper unit exists at the site.</p>
 <h3 id="modequote-single-unit-pricing"><code>mode=quote</code> — single-unit pricing</h3>
 <p>For "what does unit X cost?" — pass <code>mode: "quote"</code> plus <code>filters.unit_id: [N]</code>. Returns one slot keyed to that unit. Pricing is <strong>cent-identical</strong> to what <code>mode=recommendation</code> returned for the same unit.</p>
 <div class="codehilite"><pre><span></span><code><span class="p">{</span>
@@ -590,11 +596,11 @@ Level 4   REJECTED with HTTP 400 ─── customer must accept a slot or pivot 
 </tr>
 <tr>
 <td><code>bigger_size</code></td>
-<td>Shift <code>size_range</code> ONE bucket up (e.g. <code>30-35</code> → <code>35-40</code>)</td>
+<td>Open <code>size_range</code> to every bucket STRICTLY bigger than the current one. The closest available bigger unit surfaces; engine never returns same-size or smaller.</td>
 </tr>
 <tr>
 <td><code>smaller_size</code></td>
-<td>Shift <code>size_range</code> ONE bucket down</td>
+<td>Open <code>size_range</code> to every bucket STRICTLY smaller than the current one.</td>
 </tr>
 <tr>
 <td><code>expand_locations</code></td>

@@ -180,7 +180,7 @@ curl -X POST https://backend.extraspace.com.sg/api/recommendations \
 | Field | Required | Notes |
 |---|---|---|
 | `mode` | optional | `recommendation` (default) or `quote` (single unit; requires `filters.unit_id`) |
-| `duration_months` | **yes** | integer 1–120 |
+| `duration_months` | **yes** | integer 1–12 (SiteLink's technical limit; longer leases are renewals) |
 | `filters.location` | **yes** | array of site codes |
 | `filters.unit_type` | optional | `W`/`WN`/`L`/`U`/`M`/`LL` (see §10) |
 | `filters.climate_type` | optional | `A`/`AD`/`NC`/`RF` (see §10) |
@@ -312,9 +312,15 @@ curl -X POST https://backend.extraspace.com.sg/api/recommendations \
 | 2 | Best Alternative | Most convenient alternative | `alternative_strategy`: `same_site_2nd` / `neighbour_close` / `neighbour_far` |
 | 3 | Best Price | Strictly cheaper unit at the same site | `relaxed_dims`: which dim was dropped; `savings_pct` |
 
-When the strict-filter pool is empty, the engine runs **pool rescue** — it relaxes dimensions until candidates appear. Surfaced as `stats.saturation_signal: true` + `stats.pool_rescue_step`. Each slot's `match_flags.relaxed_dims` shows what was relaxed for that specific slot.
+When the strict-filter pool is empty, the engine runs **pool rescue** — it auto-relaxes dimensions until candidates appear. The bot doesn't need to retry; the recommend response surfaces this via:
 
-The response is guaranteed to contain **≥ 2 slots in normal operation**. Slot 3 is best-effort; `null` if no strictly-cheaper unit exists.
+- `stats.saturation_signal: true`
+- `stats.pool_rescue_step` — which dim got relaxed first
+- per-slot `match_flags.relaxed_dims` — what each slot's match dropped
+
+Combined with directional actions (`bigger_size` / `smaller_size` open the range fully in that direction), this means an action that lands on an empty bucket still returns the closest available match — never zero slots in normal operation.
+
+The response is guaranteed to contain **≥ 2 slots in normal operation**. Slot 3 is best-effort; `null` if no strictly-cheaper unit exists at the site.
 
 ### `mode=quote` — single-unit pricing
 
@@ -351,8 +357,8 @@ All actions require `previous_request_id`.
 | `action` | What the engine does |
 |---|---|
 | `more_like_this` (paired with `picked_slot=1\|2\|3`) | Slot-specific tightening. Slots 1/3 → size_range ±1 bucket. Slot 2 → next-nearest site. |
-| `bigger_size` | Shift `size_range` ONE bucket up (e.g. `30-35` → `35-40`) |
-| `smaller_size` | Shift `size_range` ONE bucket down |
+| `bigger_size` | Open `size_range` to every bucket STRICTLY bigger than the current one. The closest available bigger unit surfaces; engine never returns same-size or smaller. |
+| `smaller_size` | Open `size_range` to every bucket STRICTLY smaller than the current one. |
 | `expand_locations` | Add nearest neighbour sites (within `max_distance_km`) to `filters.location` |
 | `different_type` | Drop the `unit_type` filter |
 | `different_duration` | Analytics signal — bot also changes `duration_months` so the engine re-quotes against the new length |
