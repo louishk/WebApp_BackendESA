@@ -18,6 +18,39 @@
 <div class="card">
     <h2>Revenue Impact</h2>
     <div class="stats-grid" id="revenue-stats"></div>
+    <div id="pending-share-bar"></div>
+</div>
+
+<!-- Year-to-end-of-year revenue impact (this batch) -->
+<div class="card">
+    <h2>2026 Revenue Contribution (This Batch)</h2>
+    <p style="color:#666; font-size:0.85rem; margin-bottom:1rem;">
+        Day-prorated monthly contribution in SGD from this batch's effective dates through end of year. Past months = actual (verified from churn). Current month = partial. Future months = forecast assuming current active tenants persist.
+    </p>
+    <div class="stats-grid" id="year-impact-kpis" style="margin-bottom:1rem;"></div>
+    <div style="overflow-x:auto;">
+        <table id="year-impact-table">
+            <thead><tr>
+                <th>Month</th><th>Status</th>
+                <th style="text-align:right;">Planned (SGD)</th>
+                <th style="text-align:right;">Actual (SGD)</th>
+                <th style="text-align:right;">Churn Loss</th>
+                <th style="text-align:right;">Forecast (SGD)</th>
+            </tr></thead>
+            <tbody id="year-impact-tbody"></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Plan vs Delivered (objection impact) -->
+<div class="card">
+    <h2>Plan vs Delivered</h2>
+    <p style="color:#666; font-size:0.85rem; margin-bottom:1rem;">
+        Compares what ECRI proposed at batch creation against what was actually delivered after objections. Leakage = plan − delivered.
+    </p>
+    <div class="stats-grid" id="plan-vs-delivered-stats"></div>
+    <div id="leakage-by-reason" style="margin-top:1.5rem;"></div>
+    <div id="leakage-by-staff" style="margin-top:1.5rem;"></div>
 </div>
 
 <!-- Control Group Comparison -->
@@ -43,11 +76,6 @@
         </table>
     </div>
 
-    <!-- Visual Comparison -->
-    <div class="card">
-        <h2>Churn Rate by Group</h2>
-        <div id="churn-chart" style="display: flex; gap: 2rem; align-items: end; min-height: 200px; padding: 1rem 0;"></div>
-    </div>
 </div>
 
 <!-- Outcome Details -->
@@ -175,27 +203,51 @@
 
             // Revenue impact
             const groups = outcomes.groups || [];
-            let totalGain = 0, totalLoss = 0, totalNet = 0;
-            let totalStayed = 0, totalChurned = 0, totalPending = 0;
+            let totalGain = 0, totalLossChurn = 0, totalLossScheduled = 0, totalNet = 0;
+            let totalStayed = 0, totalChurned = 0, totalScheduled = 0, totalPending = 0, totalCount = 0;
 
             groups.forEach(g => {
                 totalGain += g.monthly_gain_stayed;
-                totalLoss += g.monthly_loss_churn;
+                totalLossChurn += g.monthly_loss_churn;
+                totalLossScheduled += (g.monthly_loss_scheduled || 0);
                 totalNet += g.net_monthly_impact;
                 totalStayed += g.stayed;
                 totalChurned += g.moved_out;
+                totalScheduled += (g.scheduled_out || 0);
                 totalPending += g.pending;
+                totalCount += g.count;
             });
+
+            const totalLoss = totalLossChurn + totalLossScheduled;
+            const pendingPct = totalCount > 0 ? (totalPending / totalCount * 100) : 0;
+            const resolvedPct = 100 - pendingPct;
 
             document.getElementById('revenue-stats').innerHTML = `
                 <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(totalGain)}</div><div class="label">Monthly Gain (Stayed)</div></div>
-                <div class="stat-card" style="background: #C41230;"><div class="value">${formatCurrency(totalLoss)}</div><div class="label">Monthly Loss (Churn)</div></div>
-                <div class="stat-card"><div class="value">${formatCurrency(totalNet)}</div><div class="label">Net Monthly</div></div>
-                <div class="stat-card"><div class="value">${formatCurrency(totalNet * 12)}</div><div class="label">Net Annual</div></div>
+                <div class="stat-card" style="background: #C41230;"><div class="value">${formatCurrency(totalLoss)}</div><div class="label">Monthly Loss (Churn + Sched)</div></div>
+                <div class="stat-card"><div class="value">${formatCurrency(totalNet)}</div><div class="label">Net Monthly (Realized)</div></div>
+                <div class="stat-card" id="planned-monthly-card"><div class="value">—</div><div class="label">Planned Monthly Uplift (SGD)</div></div>
                 <div class="stat-card"><div class="value">${totalStayed}</div><div class="label">Stayed</div></div>
-                <div class="stat-card" style="background: #C41230;"><div class="value">${totalChurned}</div><div class="label">Churned</div></div>
+                <div class="stat-card" style="background: #C41230;"><div class="value">${totalChurned}</div><div class="label">Moved Out</div></div>
+                <div class="stat-card" style="background: #E08A2E;"><div class="value">${totalScheduled}</div><div class="label">Scheduled Out</div></div>
                 <div class="stat-card"><div class="value">${totalPending}</div><div class="label">Pending</div></div>
             `;
+
+            // Pending share bar
+            document.getElementById('pending-share-bar').innerHTML = `
+                <div style="margin: 0.75rem 0 0.25rem; font-size: 0.85rem; color: #555;">
+                    Outcome Resolution: ${resolvedPct.toFixed(1)}% resolved · ${pendingPct.toFixed(1)}% pending (${totalPending}/${totalCount})
+                </div>
+                <div style="display:flex; height:14px; border-radius:6px; overflow:hidden; background:#f0f0f0;">
+                    <div style="background:#28A745; width:${(totalStayed/Math.max(totalCount,1)*100)}%;" title="Stayed: ${totalStayed}"></div>
+                    <div style="background:#C41230; width:${(totalChurned/Math.max(totalCount,1)*100)}%;" title="Moved Out: ${totalChurned}"></div>
+                    <div style="background:#E08A2E; width:${(totalScheduled/Math.max(totalCount,1)*100)}%;" title="Scheduled Out: ${totalScheduled}"></div>
+                    <div style="background:#cccccc; width:${pendingPct}%;" title="Pending: ${totalPending}"></div>
+                </div>
+            `;
+
+            renderPlanVsDelivered(batch);
+            loadYearImpact();
 
             // Control group comparison
             if (groups.length > 1) {
@@ -216,16 +268,6 @@
                     </tr>
                 `).join('');
 
-                // Simple bar chart
-                const maxChurn = Math.max(...groups.map(g => g.churn_rate || 0), 1);
-                document.getElementById('churn-chart').innerHTML = groups.map(g => {
-                    const height = Math.max((g.churn_rate || 0) / maxChurn * 150, 20);
-                    const color = g.increase_pct === 0 ? '#6C757D' : (g.churn_rate > 10 ? '#C41230' : 'var(--esa-navy)');
-                    return `<div class="bar-container">
-                        <div class="bar" style="height: ${height}px; background: ${color};">${g.churn_rate !== null ? g.churn_rate + '%' : '-'}</div>
-                        <div class="bar-label">Group ${g.group}<br>${g.increase_pct}% increase</div>
-                    </div>`;
-                }).join('');
             }
 
             // Render outcome details
@@ -276,6 +318,116 @@
 
     function filterOutcomes() {
         renderOutcomes();
+    }
+
+    function renderPlanVsDelivered(batch) {
+        const ledgers = batch.ledgers || [];
+        const fx = (batch.fx && batch.fx.rates) ? batch.fx.rates : {SGD: 1};
+        const toSgd = (amt, cur) => {
+            if (amt == null) return 0;
+            const rate = fx[cur || 'SGD'] || 1;
+            return Number(amt) / rate;
+        };
+
+        // Only include ledgers that were actually pushed (success rows).
+        // Planned vs delivered only makes sense for rows that reached SMD.
+        const pushed = ledgers.filter(l => l.api_status === 'success');
+        let plannedSgd = 0, deliveredSgd = 0, modifiedCount = 0;
+        for (const l of pushed) {
+            const cur = l.currency || 'SGD';
+            const planned = toSgd(l.planned_increase_amt != null ? l.planned_increase_amt : l.increase_amt, cur);
+            const delivered = toSgd(l.increase_amt, cur);
+            plannedSgd += planned;
+            deliveredSgd += delivered;
+            if (l.planned_increase_amt != null && Math.abs(planned - delivered) > 0.005) modifiedCount++;
+        }
+        const leakage = plannedSgd - deliveredSgd;
+        const rate = pushed.length ? (modifiedCount / pushed.length * 100) : 0;
+
+        document.getElementById('plan-vs-delivered-stats').innerHTML = `
+            <div class="stat-card"><div class="value">${formatCurrency(plannedSgd)}</div><div class="label">Planned Monthly (SGD)</div></div>
+            <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(deliveredSgd)}</div><div class="label">Delivered Monthly (SGD)</div></div>
+            <div class="stat-card" style="background: ${leakage > 0 ? '#C41230' : 'var(--esa-navy)'};"><div class="value">${formatCurrency(leakage)}</div><div class="label">Revenue Leakage</div></div>
+            <div class="stat-card"><div class="value">${rate.toFixed(1)}%</div><div class="label">Modification Rate</div></div>
+            <div class="stat-card"><div class="value">${modifiedCount}</div><div class="label">Rows Modified</div></div>
+        `;
+
+        // Fetch objections for this batch to show reason/staff breakdown
+        fetch(`/ecri/api/objections?batch_id=${BATCH_ID}`, {headers: apiHeaders()})
+            .then(r => r.json())
+            .then(data => {
+                const objs = (data.objections || []).filter(o => o.status === 'applied');
+                if (objs.length === 0) {
+                    document.getElementById('leakage-by-reason').innerHTML = '<p style="color:#666; font-size:0.85rem;">No applied objections on this batch yet.</p>';
+                    document.getElementById('leakage-by-staff').innerHTML = '';
+                    return;
+                }
+                const byReason = {};
+                const byStaff = {};
+                for (const o of objs) {
+                    const cur = o.currency || 'SGD';
+                    const leak = toSgd(
+                        (Number(o.original_new_rent) - Number(o.new_new_rent || o.original_new_rent)),
+                        cur
+                    );
+                    const reason = o.reason_code || 'unspecified';
+                    const staff = o.raised_by_username || 'unknown';
+                    byReason[reason] = (byReason[reason] || {count:0, leak:0});
+                    byReason[reason].count++;
+                    byReason[reason].leak += leak;
+                    byStaff[staff] = (byStaff[staff] || {count:0, leak:0});
+                    byStaff[staff].count++;
+                    byStaff[staff].leak += leak;
+                }
+                const renderTable = (title, map) => {
+                    const rows = Object.entries(map).sort((a,b) => b[1].leak - a[1].leak);
+                    return `<h3 style="color:var(--esa-navy); font-size:1rem; margin-bottom:0.5rem;">${title}</h3>
+                        <table><thead><tr><th>${title.includes('Reason')?'Reason':'Staff'}</th><th>Count</th><th>Leakage (SGD/mo)</th></tr></thead>
+                        <tbody>${rows.map(([k,v]) => `<tr><td>${k}</td><td>${v.count}</td><td>${formatCurrency(v.leak)}</td></tr>`).join('')}</tbody></table>`;
+                };
+                document.getElementById('leakage-by-reason').innerHTML = renderTable('Leakage by Reason', byReason);
+                document.getElementById('leakage-by-staff').innerHTML = renderTable('Leakage by Staff', byStaff);
+            })
+            .catch(() => {
+                document.getElementById('leakage-by-reason').innerHTML = '';
+            });
+    }
+
+    async function loadYearImpact() {
+        try {
+            const year = new Date().getFullYear();
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/year-impact?year=${year}`, {headers: apiHeaders()});
+            const data = await res.json();
+
+            // Pick the first full-month forecast (or partial) as the "planned monthly uplift" baseline
+            const baseMonth = (data.months || []).find(m => m.status === 'forecast' && m.planned_sgd > 0)
+                           || (data.months || []).find(m => m.planned_sgd > 0);
+            const plannedCard = document.getElementById('planned-monthly-card');
+            if (plannedCard && baseMonth) {
+                plannedCard.querySelector('.value').textContent = formatCurrency(baseMonth.planned_sgd);
+            }
+
+            document.getElementById('year-impact-kpis').innerHTML = `
+                <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(data.ytd_actual_sgd)}</div><div class="label">YTD Actual (SGD)</div></div>
+                <div class="stat-card"><div class="value">${formatCurrency(data.eoy_projection_sgd)}</div><div class="label">EOY Projection (SGD)</div></div>
+                <div class="stat-card"><div class="value">${data.ledgers_covered}</div><div class="label">Ledgers</div></div>
+            `;
+            document.getElementById('year-impact-tbody').innerHTML = (data.months || []).map(m => {
+                const statusBadge = m.status === 'actual'
+                    ? '<span class="status status-completed">actual</span>'
+                    : m.status === 'partial'
+                        ? '<span class="status status-running">partial</span>'
+                        : '<span class="status status-pending">forecast</span>';
+                return `<tr>
+                    <td>${m.month}</td>
+                    <td>${statusBadge}</td>
+                    <td style="text-align:right;">${formatCurrency(m.planned_sgd)}</td>
+                    <td style="text-align:right;">${m.actual_sgd != null ? formatCurrency(m.actual_sgd) : '—'}</td>
+                    <td style="text-align:right; ${m.churn_loss_sgd > 0 ? 'color:#C41230;' : ''}">${m.churn_loss_sgd != null ? formatCurrency(m.churn_loss_sgd) : '—'}</td>
+                    <td style="text-align:right;">${formatCurrency(m.forecast_sgd)}</td>
+                </tr>`;
+            }).join('');
+        } catch(e) { /* no-op */ }
     }
 
     loadAnalytics();
