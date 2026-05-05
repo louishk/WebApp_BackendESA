@@ -29,6 +29,20 @@ pbi:
     size: 10
     max_overflow: 5
 
+# Middleware database (recommender, discount plans, reservation fees,
+# idempotency cache, DLQ, mw_recommendations_served, mw_unit_discount_
+# candidates, mw_recommender_settings — anything mw_*).
+middleware:
+  host: "esapbi.postgres.database.azure.com"
+  port: 5432
+  name: "esa_middleware"
+  username: "esa_pbi_admin"
+  password_vault: "DB_PASSWORD"  # shared admin creds with `backend`
+  sslmode: "require"
+  pool:
+    size: 10
+    max_overflow: 10
+
 # Redis cache (optional)
 redis:
   enabled: true
