@@ -93,6 +93,15 @@ def scheduler_access_required(f):
     return require_permission('can_access_scheduler')(f)
 
 
+def sync_access_required(f):
+    """Decorator to require sync orchestrator access permission.
+
+    Currently aliased to scheduler access — change to a dedicated
+    'can_access_sync' role permission once piloted in production.
+    """
+    return require_permission('can_access_scheduler')(f)
+
+
 def billing_tools_access_required(f):
     """Decorator to require billing tools access permission."""
     return require_permission('can_access_billing_tools')(f)
@@ -145,4 +154,43 @@ def smart_lock_access_required(f):
 
 def revenue_tools_access_required(f):
     """Decorator to require revenue management tools access permission."""
+    return require_permission('can_access_revenue_tools')(f)
+
+
+def ecri_exclusion_required(f):
+    """Decorator to require ECRI exclusion-request permission (ops site-review)."""
+    return require_permission('can_request_ecri_exclusion')(f)
+
+
+def ecri_objection_required(f):
+    """Decorator to require ECRI objection-create permission."""
+    return require_permission('can_create_ecri_objection')(f)
+
+
+def ecri_objection_approve_required(f):
+    """Decorator to require ECRI objection-approve permission."""
+    return require_permission('can_approve_ecri_objection')(f)
+
+
+def ecri_finalize_required(f):
+    """Decorator to require ECRI batch-finalize permission (Revenue)."""
+    return require_permission('can_finalize_ecri_batch')(f)
+
+
+def ecri_execute_required(f):
+    """Decorator to require ECRI batch-execute permission (Revenue)."""
+    return require_permission('can_execute_ecri_batch')(f)
+
+
+def ecri_reasons_manage_required(f):
+    """Decorator to require ECRI reasons admin permission."""
+    return require_permission('can_manage_ecri_reasons')(f)
+
+
+def risk_admin_access_required(f):
+    """Decorator to require risk-factor administration permission.
+
+    Aliased to revenue tools access — risk overrides drive pricing decisions
+    and live alongside revenue-management features.
+    """
     return require_permission('can_access_revenue_tools')(f)

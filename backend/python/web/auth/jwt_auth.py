@@ -65,9 +65,10 @@ KNOWN_API_SCOPES = [
     'reservations:read',
     'reservations:write',
     'reservations:track',
-    'recommender',           # legacy: alias of recommender:read
     'recommender:read',      # POST /api/recommendations + GET /reservations/move-in/cost
     'recommender:write',     # POST /reservations/reserve + POST /reservations/move-in
+    'risk:read',             # GET /api/risk/* — read-only risk lookup
+    'risk:admin',            # PUT/POST /api/risk/* — override + recompute
 ]
 
 
