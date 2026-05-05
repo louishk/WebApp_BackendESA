@@ -270,6 +270,7 @@ def create_app(config=None, db_url=None):
     from web.routes.orchestrator_ui import orchestrator_ui_bp
     from web.routes.recommendation_engine import recommendation_engine_bp
     from web.routes.recommendations import recommendations_bp
+    from web.routes.risk import bp as risk_bp
     from sync_service.api import sync_service_bp
 
     app.register_blueprint(main_bp)
@@ -296,6 +297,7 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(orchestrator_ui_bp)
     app.register_blueprint(recommendation_engine_bp)
     app.register_blueprint(recommendations_bp)
+    app.register_blueprint(risk_bp)
     app.register_blueprint(sync_service_bp)
 
     # Exempt API routes from CSRF (they use JWT authentication, not session cookies)
@@ -306,6 +308,7 @@ def create_app(config=None, db_url=None):
     csrf.exempt(billing_bp)
     csrf.exempt(sync_service_bp)
     csrf.exempt(recommendations_bp)
+    csrf.exempt(risk_bp)
     # stripe_bp uses Stripe signature verification on webhook; other routes use JWT
     csrf.exempt(stripe_bp)
     # crm_bp and visits_bp use session auth — CSRF protection stays enabled
