@@ -29,6 +29,21 @@
   </div>
 
   <div id="factorMatrix"></div>
+
+  <div class="card my-3">
+    <div class="card-header">Inventory preview (max 1000 units)</div>
+    <div class="card-body">
+      <input type="text" id="invFilter" class="form-control mb-2"
+             placeholder="Filter by site / unit / sType…">
+      <table class="table table-sm">
+        <thead><tr>
+          <th>Site</th><th>Unit</th><th>sTypeName</th>
+          <th>Risk %</th><th>vs baseline</th><th>Band</th><th>Breakdown</th>
+        </tr></thead>
+        <tbody id="invBody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -128,6 +143,38 @@ document.querySelectorAll("#countryTabs .nav-link").forEach(btn => {
       .forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
     loadCountry(btn.dataset.country);
+  });
+});
+
+async function loadInventory(code) {
+  const r = await fetch(`/admin/risk-factors/inventory?country=${code}`);
+  if (!r.ok) return;
+  const { data } = await r.json();
+  const body = document.getElementById("invBody");
+  body.innerHTML = data.units.map(u => {
+    if (!u.parsed_ok) {
+      return `<tr class="text-muted">
+        <td>${u.site_code}</td><td>${u.unit}</td><td>${u.s_type}</td>
+        <td colspan="4">unparseable</td></tr>`;
+    }
+    const breakdown = u.factor_breakdown
+      .map(f => `${f.dim}=${f.value} (${f.factor})`).join(" × ");
+    return `<tr style="background:${u.color}22">
+      <td>${u.site_code}</td><td>${u.unit}</td><td>${u.s_type}</td>
+      <td><strong>${u.risk_pct.toFixed(2)}%</strong></td>
+      <td>${u.delta_pct > 0 ? "+" : ""}${u.delta_pct}%</td>
+      <td>${u.band}</td>
+      <td><small>${breakdown}</small></td></tr>`;
+  }).join("");
+}
+
+const _origLoad = loadCountry;
+loadCountry = async (code) => { await _origLoad(code); await loadInventory(code); };
+
+document.getElementById("invFilter").addEventListener("input", (e) => {
+  const q = e.target.value.toLowerCase();
+  document.querySelectorAll("#invBody tr").forEach(tr => {
+    tr.style.display = tr.textContent.toLowerCase().includes(q) ? "" : "none";
   });
 });
 
