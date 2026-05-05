@@ -253,7 +253,18 @@ def create_app(config=None, db_url=None):
     from web.routes.scheduler import scheduler_bp
     from web.routes.api import api_bp
     from web.routes.tools import tools_bp
-    from web.routes.ecri import ecri_bp
+    # ECRI blueprint depends on common.ecri_dates which was never
+    # committed to the repo. Lazy-import + register only if available
+    # so the rest of the app boots cleanly. Restore both files
+    # together when the ECRI feature ships.
+    try:
+        from web.routes.ecri import ecri_bp
+    except ModuleNotFoundError as _ecri_exc:
+        ecri_bp = None
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "ECRI blueprint unavailable (missing common.ecri_dates): %s", _ecri_exc,
+        )
     from web.routes.statistics import statistics_bp
     from web.routes.discount_plans import discount_plans_bp
     from web.routes.api_keys import api_keys_bp
@@ -280,7 +291,8 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(scheduler_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(tools_bp)
-    app.register_blueprint(ecri_bp)
+    if ecri_bp is not None:
+        app.register_blueprint(ecri_bp)
     app.register_blueprint(statistics_bp)
     app.register_blueprint(discount_plans_bp)
     app.register_blueprint(api_keys_bp)
