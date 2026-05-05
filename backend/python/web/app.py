@@ -272,7 +272,17 @@ def create_app(config=None, db_url=None):
     from web.routes.admin_risk import bp as admin_risk_bp
     from web.routes.reservations import reservations_bp
     from web.routes.crm import crm_bp
-    from web.routes.stripe_payments import stripe_bp
+    # Stripe blueprint — file may not be in this repo's deployed copy
+    # (stripe_payments.py was historically a VM-only addition). Make
+    # registration optional so the app boots without it.
+    try:
+        from web.routes.stripe_payments import stripe_bp
+    except ModuleNotFoundError as _stripe_exc:
+        stripe_bp = None
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "Stripe blueprint unavailable: %s", _stripe_exc,
+        )
     from web.routes.visits import visits_bp
     from web.routes.revenue import revenue_bp
     from web.routes.tenants import tenants_bp
@@ -283,7 +293,15 @@ def create_app(config=None, db_url=None):
     from web.routes.recommendation_engine import recommendation_engine_bp
     from web.routes.recommendations import recommendations_bp
     from web.routes.risk import bp as risk_bp
-    from sync_service.api import sync_service_bp
+    # sync_service.api blueprint — same VM-only pattern as ecri/stripe.
+    try:
+        from sync_service.api import sync_service_bp
+    except (ModuleNotFoundError, ImportError) as _sync_exc:
+        sync_service_bp = None
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "sync_service blueprint unavailable: %s", _sync_exc,
+        )
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
@@ -300,7 +318,8 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(admin_risk_bp)
     app.register_blueprint(reservations_bp)
     app.register_blueprint(crm_bp)
-    app.register_blueprint(stripe_bp)
+    if stripe_bp is not None:
+        app.register_blueprint(stripe_bp)
     app.register_blueprint(visits_bp)
     app.register_blueprint(revenue_bp)
     app.register_blueprint(tenants_bp)
@@ -312,7 +331,8 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(recommendation_engine_bp)
     app.register_blueprint(recommendations_bp)
     app.register_blueprint(risk_bp)
-    app.register_blueprint(sync_service_bp)
+    if sync_service_bp is not None:
+        app.register_blueprint(sync_service_bp)
 
     # Exempt API routes from CSRF (they use JWT authentication, not session cookies)
     csrf.exempt(api_bp)
@@ -320,11 +340,13 @@ def create_app(config=None, db_url=None):
     csrf.exempt(tenants_bp)
     csrf.exempt(reservation_fees_api_bp)
     csrf.exempt(billing_bp)
-    csrf.exempt(sync_service_bp)
+    if sync_service_bp is not None:
+        csrf.exempt(sync_service_bp)
     csrf.exempt(recommendations_bp)
     csrf.exempt(risk_bp)
     # stripe_bp uses Stripe signature verification on webhook; other routes use JWT
-    csrf.exempt(stripe_bp)
+    if stripe_bp is not None:
+        csrf.exempt(stripe_bp)
     # crm_bp and visits_bp use session auth — CSRF protection stays enabled
     # (the frontend sends X-CSRFToken header via apiHeaders())
 
