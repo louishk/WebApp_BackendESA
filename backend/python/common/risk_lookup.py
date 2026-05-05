@@ -49,3 +49,14 @@ def compute_risk(baseline_rate: float,
         band=bucket_band(composite, bands),
         factors=factors,
     )
+
+
+def resolve_effective_factor(empirical: Optional[float],
+                             override: Optional[float],
+                             is_thin: bool) -> tuple[float, str]:
+    """Spec §5.4: override > thin-neutral > empirical."""
+    if override is not None:
+        return float(override), "override"
+    if is_thin or empirical is None:
+        return 1.0, "thin_neutral"
+    return float(empirical), "empirical"

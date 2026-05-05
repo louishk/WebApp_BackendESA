@@ -48,3 +48,36 @@ def test_compute_risk_multiple_dims():
     result = compute_risk(0.025, factors, BANDS)
     expected = 0.80 * 0.92 * 1.05
     assert result.composite_factor == pytest.approx(expected)
+
+
+from common.risk_lookup import resolve_effective_factor
+
+
+def test_resolve_override_wins():
+    eff, source = resolve_effective_factor(
+        empirical=1.20, override=0.95, is_thin=False)
+    assert eff == 0.95 and source == "override"
+
+
+def test_resolve_thin_data_pinned_to_one():
+    eff, source = resolve_effective_factor(
+        empirical=1.40, override=None, is_thin=True)
+    assert eff == 1.0 and source == "thin_neutral"
+
+
+def test_resolve_empirical_normal():
+    eff, source = resolve_effective_factor(
+        empirical=0.85, override=None, is_thin=False)
+    assert eff == 0.85 and source == "empirical"
+
+
+def test_resolve_no_data_neutral():
+    eff, source = resolve_effective_factor(
+        empirical=None, override=None, is_thin=True)
+    assert eff == 1.0 and source == "thin_neutral"
+
+
+def test_resolve_override_overrides_thin():
+    eff, source = resolve_effective_factor(
+        empirical=None, override=1.10, is_thin=True)
+    assert eff == 1.10 and source == "override"
