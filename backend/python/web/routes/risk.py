@@ -150,3 +150,96 @@ def get_factors():
         return jsonify({"error": "lookup failed"}), 500
     finally:
         session.close()
+
+
+@bp.route("/factors/<int:factor_id>", methods=["PUT"])
+@require_auth
+@require_api_scope("risk:admin")
+@rate_limit_api(max_requests=20, window_seconds=60)
+def put_factor_override(factor_id: int):
+    from web.utils.audit import audit_log, AuditEvent
+    from flask_login import current_user
+
+    body = request.get_json(silent=True) or {}
+    reason = (body.get("reason") or "").strip()
+    if "override_factor" not in body:
+        return jsonify({"error": "override_factor is required"}), 400
+    raw = body["override_factor"]
+
+    if raw is None:
+        new_override = None
+    else:
+        try:
+            new_override = float(raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "override_factor must be a number or null"}), 400
+        if not (0.1 <= new_override <= 5.0):
+            return jsonify({"error": "override_factor must be between 0.1 and 5.0"}), 400
+        if not reason:
+            return jsonify({"error": "reason is required when setting override"}), 400
+
+    session = _pbi_session()
+    try:
+        existing = session.execute(text("""
+            SELECT country_code, dimension, value, empirical_factor,
+                   is_thin_data, override_factor
+              FROM unit_category_risk_factor WHERE id = :id
+        """), {"id": factor_id}).fetchone()
+        if not existing:
+            return jsonify({"error": "factor not found"}), 404
+        emp = float(existing[3]) if existing[3] is not None else None
+        is_thin = bool(existing[4])
+        eff, _ = resolve_effective_factor(emp, new_override, is_thin)
+
+        username = getattr(current_user, "username", None) or "system"
+        old_override = float(existing[5]) if existing[5] is not None else None
+
+        session.execute(text("""
+            UPDATE unit_category_risk_factor
+               SET override_factor = :ovr,
+                   override_reason = :rsn,
+                   override_by = :usr,
+                   override_at = CURRENT_TIMESTAMP,
+                   effective_factor = :eff
+             WHERE id = :id
+        """), {"ovr": new_override,
+               "rsn": reason if new_override is not None else None,
+               "usr": username if new_override is not None else None,
+               "eff": eff, "id": factor_id})
+        session.commit()
+
+        event = (AuditEvent.RISK_OVERRIDE_SET if new_override is not None
+                 else AuditEvent.RISK_OVERRIDE_CLEARED)
+        audit_log(
+            event,
+            f"factor_id={factor_id} country={existing[0]} "
+            f"dimension={existing[1]} value={existing[2]} "
+            f"old={old_override} new={new_override} reason={reason!r}",
+        )
+        return jsonify({"status": "success", "data": {
+            "id": factor_id, "override_factor": new_override,
+            "effective_factor": eff,
+        }})
+    except Exception:
+        logger.exception("override update failed")
+        return jsonify({"error": "update failed"}), 500
+    finally:
+        session.close()
+
+
+@bp.route("/recompute", methods=["POST"])
+@require_auth
+@require_api_scope("risk:admin")
+@rate_limit_api(max_requests=4, window_seconds=60)
+def post_recompute():
+    body = request.get_json(silent=True) or {}
+    country = body.get("country")
+    if country and not isinstance(country, str):
+        return jsonify({"error": "country must be a string"}), 400
+    try:
+        from datalayer.unit_category_risk import run as run_pipeline
+        summary = run_pipeline(country_code=country.upper() if country else None)
+        return jsonify({"status": "success", "data": summary})
+    except Exception:
+        logger.exception("recompute failed")
+        return jsonify({"error": "recompute failed"}), 500
