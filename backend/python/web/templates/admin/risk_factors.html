@@ -1,0 +1,136 @@
+{# backend/python/web/templates/admin/risk_factors.html #}
+{% extends "base.html" %}
+{% block title %}Risk Factors{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+  <h1>Unit-Category Risk Factors</h1>
+
+  <ul class="nav nav-tabs" id="countryTabs">
+    {% for code, name in countries.items() %}
+    <li class="nav-item">
+      <button class="nav-link {% if loop.first %}active{% endif %}"
+              data-country="{{ code }}">{{ code }} — {{ name }}</button>
+    </li>
+    {% endfor %}
+  </ul>
+
+  <div id="baselinePanel" class="card my-3 p-3">
+    <div class="d-flex justify-content-between align-items-start">
+      <div>
+        <h4>Country baseline</h4>
+        <p>Move-out rate: <strong id="baselineRate">—</strong></p>
+        <p>Window: <span id="baselineWindow">—</span></p>
+        <p>Move-outs: <span id="baselineMoveouts">—</span> · Unit-months: <span id="baselineUM">—</span></p>
+        <p>Computed: <span id="baselineComputed">—</span></p>
+      </div>
+      <button id="btnRecompute" class="btn btn-warning">Recompute this country</button>
+    </div>
+  </div>
+
+  <div id="factorMatrix"></div>
+</div>
+
+<script>
+const BANDS = {{ bands | tojson }};
+const DIMENSIONS = ["size","range","type","climate","shape","pillar"];
+
+function bandFor(composite) {
+  for (const b of BANDS) {
+    if (b.max_composite === null || composite <= b.max_composite) return b;
+  }
+  return BANDS[BANDS.length - 1];
+}
+
+let currentCountry = "{{ countries.keys()|list|first }}";
+
+async function loadCountry(code) {
+  currentCountry = code;
+  const r = await fetch(`/api/risk/factors?country=${code}`);
+  if (!r.ok) { alert("Load failed"); return; }
+  const { data } = await r.json();
+  document.getElementById("baselineRate").textContent =
+    (data.baseline_rate * 100).toFixed(2) + "%";
+  document.getElementById("baselineComputed").textContent = data.computed_at || "—";
+  renderMatrix(data.factors);
+}
+
+function renderMatrix(factors) {
+  const root = document.getElementById("factorMatrix");
+  root.innerHTML = "";
+  for (const dim of DIMENSIONS) {
+    const rows = factors.filter(f => f.dimension === dim);
+    if (!rows.length) continue;
+    const card = document.createElement("div");
+    card.className = "card my-2";
+    card.innerHTML = `
+      <div class="card-header"><strong>${dim.toUpperCase()}</strong></div>
+      <table class="table table-sm mb-0">
+        <thead><tr>
+          <th>Value</th><th>Sample</th><th>Empirical</th>
+          <th>Override</th><th>Effective</th><th>Thin?</th><th></th>
+        </tr></thead>
+        <tbody>${rows.map(rowHtml).join("")}</tbody>
+      </table>`;
+    root.appendChild(card);
+  }
+}
+
+function rowHtml(f) {
+  const band = bandFor(f.effective_factor);
+  const bg = `style="background:${band.color}22"`;
+  const emp = f.empirical_factor !== null ? f.empirical_factor.toFixed(3) : "—";
+  const ovr = f.override_factor !== null ? f.override_factor.toFixed(3) : "—";
+  return `
+    <tr ${bg}>
+      <td>${f.value}</td>
+      <td>${f.sample_size}</td>
+      <td>${emp}</td>
+      <td>${ovr}</td>
+      <td><strong>${f.effective_factor.toFixed(3)}</strong></td>
+      <td>${f.is_thin_data ? "✓" : ""}</td>
+      <td><button class="btn btn-sm btn-outline-secondary"
+                  onclick="editOverride(${f.id}, ${f.override_factor})">Edit</button></td>
+    </tr>`;
+}
+
+async function editOverride(id, current) {
+  const raw = prompt("Override factor (0.1–5.0), blank to clear:",
+                     current ?? "");
+  if (raw === null) return;
+  const reason = raw.trim() === "" ? "cleared via UI" :
+                 prompt("Reason for override:") || "";
+  if (raw.trim() !== "" && !reason) { alert("Reason required."); return; }
+  const body = raw.trim() === ""
+    ? { override_factor: null, reason }
+    : { override_factor: parseFloat(raw), reason };
+  const r = await fetch(`/api/risk/factors/${id}`, {
+    method: "PUT", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) { alert((await r.json()).error || "Save failed"); return; }
+  loadCountry(currentCountry);
+}
+
+document.getElementById("btnRecompute").addEventListener("click", async () => {
+  if (!confirm(`Recompute risk factors for ${currentCountry}?`)) return;
+  const r = await fetch("/api/risk/recompute", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ country: currentCountry }),
+  });
+  alert(r.ok ? "Recompute complete" : "Recompute failed");
+  loadCountry(currentCountry);
+});
+
+document.querySelectorAll("#countryTabs .nav-link").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#countryTabs .nav-link")
+      .forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    loadCountry(btn.dataset.country);
+  });
+});
+
+loadCountry(currentCountry);
+</script>
+{% endblock %}
