@@ -258,6 +258,7 @@ def create_app(config=None, db_url=None):
     from web.routes.discount_plans import discount_plans_bp
     from web.routes.api_keys import api_keys_bp
     from web.routes.admin_siteinfo import admin_siteinfo_bp
+    from web.routes.admin_risk import bp as admin_risk_bp
     from web.routes.reservations import reservations_bp
     from web.routes.crm import crm_bp
     from web.routes.stripe_payments import stripe_bp
@@ -284,6 +285,7 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(discount_plans_bp)
     app.register_blueprint(api_keys_bp)
     app.register_blueprint(admin_siteinfo_bp)
+    app.register_blueprint(admin_risk_bp)
     app.register_blueprint(reservations_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(stripe_bp)
