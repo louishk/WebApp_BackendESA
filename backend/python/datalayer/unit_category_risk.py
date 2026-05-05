@@ -246,3 +246,72 @@ def snapshot_history(session: Session, country_code: str,
                "emp": float(c.empirical_factor) if c.empirical_factor is not None else None,
                "ss": c.sample_size, "rate": float(baseline.baseline_rate)})
     session.commit()
+
+
+def run(country_code: Optional[str] = None) -> dict:
+    """Pipeline entry point. Called by APScheduler and by /api/risk/recompute.
+
+    If country_code is given, only that country is recomputed; otherwise all
+    countries listed in risk.yaml are processed.
+    """
+    from common.config_loader import get_config, get_database_url
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from web.utils.audit import audit_log, AuditEvent
+
+    cfg = get_config().get_section('risk').to_dict()
+    countries: dict[str, str] = cfg['countries']
+    threshold = int(cfg['sample_size_threshold'])
+    window_years = int(cfg['window_years'])
+
+    engine = create_engine(get_database_url('pbi'))
+    Session = sessionmaker(bind=engine)
+    session = Session()
+
+    targets = ({country_code: countries[country_code]}
+               if country_code else countries)
+
+    today = dt.date.today()
+    window_end = today
+    window_start = today.replace(year=today.year - window_years)
+    snapshot_month = today.replace(day=1)
+    summary = {"countries": [], "errors": []}
+
+    try:
+        for code, name in targets.items():
+            try:
+                baseline = compute_country_baseline(session, name, window_start, window_end)
+                upsert_baseline(session, code, baseline)
+                if baseline.moveout_count < 100:
+                    logger.warning(
+                        "Country %s has only %d moveouts in window — factors will be thin",
+                        code, baseline.moveout_count)
+                cells = compute_cell_factors(
+                    session, name, window_start, window_end,
+                    float(baseline.baseline_rate), threshold)
+                upsert_factors(session, code, cells)
+                snapshot_history(session, code, baseline, cells, snapshot_month)
+                audit_log(
+                    AuditEvent.RISK_RECOMPUTE,
+                    f"country={code} factors={len(cells)} "
+                    f"baseline_rate={float(baseline.baseline_rate):.6f} "
+                    f"moveouts={baseline.moveout_count}",
+                )
+                summary["countries"].append({
+                    "country_code": code,
+                    "moveout_count": baseline.moveout_count,
+                    "factors_written": len(cells),
+                    "baseline_rate": float(baseline.baseline_rate),
+                })
+            except Exception as exc:
+                logger.exception("Risk recompute failed for %s", code)
+                summary["errors"].append({"country_code": code, "error": str(exc)})
+    finally:
+        session.close()
+
+    return summary
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    print(run())

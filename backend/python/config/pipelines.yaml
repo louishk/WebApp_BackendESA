@@ -19,6 +19,26 @@ pipelines:
     data_freshness:
       table: units_info
       date_column: updated_at
+  unit_category_risk:
+    display_name: Unit-Category Risk
+    description: Compute country-scoped move-out risk factors per dimension/value
+    module_path: datalayer.unit_category_risk
+    enabled: true
+    schedule:
+      type: cron
+      cron: 0 3 1 * *
+    priority: 8
+    resource_group: db_only
+    max_db_connections: 2
+    estimated_duration_seconds: 600
+    retry:
+      max_attempts: 2
+      delay_seconds: 600
+      backoff_multiplier: 2
+    timeout_seconds: 1800
+    data_freshness:
+      table: unit_category_risk_baseline
+      date_column: computed_at
   fxrate:
     display_name: FX Rates
     description: Fetch foreign exchange rates from Yahoo Finance
