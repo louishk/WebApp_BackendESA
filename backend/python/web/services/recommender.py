@@ -321,6 +321,9 @@ def relax_strategy(picked_slot: Optional[int], action: Optional[str]) -> str:
       'different_type'    — drop the unit_type filter
       'different_duration'— bot also changed duration_months in this request;
                             no filter mutation, just an analytics signal
+      'cheaper_only'      — keep all filters intact; engine surfaces the
+                            cheapest available units in the same pool
+                            (slot 1 = absolute cheapest match).
 
     Strategy ids returned:
       'none'              — no relaxation (default)
@@ -366,6 +369,9 @@ def relax_strategy(picked_slot: Optional[int], action: Optional[str]) -> str:
 
     if action == 'different_duration':
         return 'duration_change'
+
+    if action == 'cheaper_only':
+        return 'cheaper_only'
 
     # picked_slot without a recognised action — treat as "show me more like that one"
     if picked_slot is not None:
@@ -542,7 +548,13 @@ def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequ
     elif strategy == 'expand_unit_type':
         req.filters.pop('unit_type', None)
     # 'next_nearest_site' — no filter change here; slot builder handles site-hop.
-    # 'duration_change' / 'none' — analytics-only or default; no mutation.
+    # 'duration_change' / 'cheaper_only' / 'none' — no filter mutation:
+    #   - duration_change: bot already updated duration_months in the body
+    #   - cheaper_only:    pool is already ordered by effective_rate ASC, so
+    #                      slot 1 = cheapest available; auto-exclusion of
+    #                      served unit_ids via previous_request_id surfaces
+    #                      3 fresh cheap candidates without changing filters
+    #   - none:            default path
 
     return req
 

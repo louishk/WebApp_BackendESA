@@ -1085,6 +1085,7 @@ def test_13_relax_actions(base: str, key: str) -> Result:
         ('expand_locations',   'expand_locations',   None),
         ('different_type',     'expand_unit_type',   None),
         ('different_duration', 'duration_change',    None),
+        ('cheaper_only',       'cheaper_only',       None),
     ]
 
     failures = []

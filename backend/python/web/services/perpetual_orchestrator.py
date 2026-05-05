@@ -128,6 +128,20 @@ def determine_followups(ctx: OrchestrationContext) -> List[Dict[str, Any]]:
             "ecri_auto_schedule_enabled=OFF — would have scheduled rate change "
             "for ledger %s. Skipping.", ctx.ledger_id,
         )
+    elif ctx.effective_rate is None or ctx.effective_rate <= Decimal('0'):
+        # S1 guardrail: refuse to enqueue a rate-change job with a zero
+        # base rate. Without this guard, _compute_effective_rate's
+        # silent-zero fallback (DB exception, missing ccws_units row,
+        # stale dcStdRate=0) would propagate to ScheduleTenantRateChange_v2
+        # and SiteLink would dutifully accept "schedule rate change to
+        # $0.00 effective on <date>" — silently breaking the lease.
+        logger.error(
+            "Refusing $0 rate-change enqueue: ledger=%s effective_rate=%s. "
+            "Likely cause: ccws_units.dcStdRate is 0 or missing for unit_id=%s "
+            "site=%s, or _compute_effective_rate hit a DB exception. Ops "
+            "should investigate; rate-change job NOT scheduled for this lease.",
+            ctx.ledger_id, ctx.effective_rate, ctx.unit_id, ctx.site_code,
+        )
     else:
         offset_months = _resolve_offset_months(ctx, is_native_prepay)
         ecri_pct = _resolve_ecri_pct(ctx)

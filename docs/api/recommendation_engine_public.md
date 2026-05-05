@@ -378,6 +378,7 @@ All actions require `previous_request_id`.
 | `expand_locations` | Add nearest neighbour sites (within `max_distance_km`) to `filters.location` |
 | `different_type` | Drop the `unit_type` filter |
 | `different_duration` | Analytics signal — bot also changes `duration_months` so the engine re-quotes against the new length |
+| `cheaper_only` | Keeps every filter intact and surfaces the cheapest available units in the same pool. Pair with `previous_request_id` so already-shown unit_ids are auto-excluded — slot 1 becomes the next-cheapest match the customer hasn't seen yet. Use when the customer says "anything cheaper but same size/type/etc.?" |
 
 ### Decision tree
 
@@ -390,6 +391,7 @@ All actions require `previous_request_id`.
 | "What about nearby locations?" | recommend with `previous_request_id` + `action: "expand_locations"` |
 | "Different unit type?" | recommend with `previous_request_id` + `action: "different_type"` |
 | "What if I lease for 12 months?" | recommend with new `duration_months` + `action: "different_duration"` |
+| "Anything cheaper at the same size/type?" | recommend with `previous_request_id` + `action: "cheaper_only"`. No filter mutation; the auto-exclusion of shown units surfaces the next-cheapest match. |
 | "Actually I want something completely different" | **Fresh L1**: new filters, new `request_id`, **keep** `session_id` + `customer_id`, **drop** `previous_request_id`/`picked_slot`/`action` |
 
 ---

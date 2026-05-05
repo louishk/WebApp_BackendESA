@@ -100,9 +100,28 @@ def execute_pending_for_ledger(ledger_id: int, db_session) -> Dict[str, int]:
         {'lid': ledger_id},
     ).fetchall()
     counts = {'ok': 0, 'failed': 0, 'pending_retry': 0}
-    for (job_id,) in rows:
-        outcome = _run_single(job_id, db_session)
-        counts[outcome] = counts.get(outcome, 0) + 1
+
+    if not rows:
+        return counts
+
+    # P5: shared SOAP client across the inline batch (typically 1-2 jobs
+    # per lease, but the pattern is consistent with the worker's batch
+    # path).
+    shared_client: Optional[SOAPClient] = None
+    try:
+        shared_client = _build_cc_soap_client()
+    except Exception as exc:
+        logger.warning("inline followups: SOAP client init failed: %s", exc)
+    try:
+        for (job_id,) in rows:
+            outcome = _run_single(job_id, db_session, soap_client=shared_client)
+            counts[outcome] = counts.get(outcome, 0) + 1
+    finally:
+        if shared_client is not None:
+            try:
+                shared_client.close()
+            except Exception:
+                pass
     return counts
 
 
@@ -137,14 +156,29 @@ def recover_stuck_running(db_session, stale_after_minutes: int = 5) -> int:
     return recovered
 
 
+# P7: watchdog cadence — runs once every Nth tick instead of every tick.
+# Worker tick is 10s; the stale threshold is 5min, so a 6-tick cadence
+# (≈ 60s detection latency) is well within the recovery SLA and cuts
+# the no-op UPDATE rate from 360/h to 60/h. Module-level counter is
+# safe because the worker is single-instance per process and the
+# scheduler runs with max_instances=1.
+_WATCHDOG_TICK_INTERVAL = 6
+_watchdog_tick_counter = 0
+
+
 def execute_pending_batch(db_session, batch_size: int = 10) -> Dict[str, int]:
     """Worker entry point — drain N pending jobs across all leases."""
-    # Watchdog runs first so a stuck-running row gets re-enqueued and
-    # picked up in the same tick.
-    try:
-        recover_stuck_running(db_session)
-    except Exception as exc:
-        logger.warning("lease_followup watchdog query failed: %s", exc)
+    # P7: throttled watchdog. Runs every Nth tick (default 6 ≈ 60s).
+    # A stuck-running row gets re-enqueued within ~60s, well inside the
+    # 5-minute stale threshold, while the no-op UPDATE per tick is
+    # eliminated on the common (zero stuck rows) path.
+    global _watchdog_tick_counter
+    _watchdog_tick_counter = (_watchdog_tick_counter + 1) % _WATCHDOG_TICK_INTERVAL
+    if _watchdog_tick_counter == 0:
+        try:
+            recover_stuck_running(db_session)
+        except Exception as exc:
+            logger.warning("lease_followup watchdog query failed: %s", exc)
 
     rows = db_session.execute(
         text(f"""
@@ -157,9 +191,30 @@ def execute_pending_batch(db_session, batch_size: int = 10) -> Dict[str, int]:
         """),
     ).fetchall()
     counts = {'ok': 0, 'failed': 0, 'pending_retry': 0, 'failed_permanent': 0}
-    for (job_id,) in rows:
-        outcome = _run_single(job_id, db_session)
-        counts[outcome] = counts.get(outcome, 0) + 1
+
+    if not rows:
+        return counts
+
+    # P5: one SOAP client for the whole batch. With ~10 jobs, this saves
+    # ~9 TLS handshakes when there's a backlog.
+    shared_client: Optional[SOAPClient] = None
+    try:
+        shared_client = _build_cc_soap_client()
+    except Exception as exc:
+        logger.warning(
+            "lease_followup batch: could not pre-build SOAP client; falling "
+            "back to per-job clients: %s", exc,
+        )
+    try:
+        for (job_id,) in rows:
+            outcome = _run_single(job_id, db_session, soap_client=shared_client)
+            counts[outcome] = counts.get(outcome, 0) + 1
+    finally:
+        if shared_client is not None:
+            try:
+                shared_client.close()
+            except Exception:
+                pass
     return counts
 
 
@@ -184,9 +239,17 @@ def retry_job(job_id: int, db_session) -> str:
 # Internal — run one job, update its row
 # ---------------------------------------------------------------------------
 
-def _run_single(job_id: int, db_session) -> str:
+def _run_single(
+    job_id: int,
+    db_session,
+    soap_client: Optional[SOAPClient] = None,
+) -> str:
     """Run one job; update its status/attempts/error in-place. Returns
     'ok' | 'pending_retry' | 'failed_permanent' | 'failed'.
+
+    P5: callers can pass a shared `soap_client` to amortise TLS handshake
+    cost across a batch. When None, _execute_action builds a one-shot
+    client.
     """
     row = db_session.execute(
         text("""
@@ -205,7 +268,7 @@ def _run_single(job_id: int, db_session) -> str:
         payload = json.loads(payload)
 
     try:
-        soap_response = _execute_action(action_type, payload)
+        soap_response = _execute_action(action_type, payload, client=soap_client)
         # M6: empty SOAP response list = no RT element returned. For these
         # action types (PaymentSimpleCash, ScheduleTenantRateChange_v2) every
         # success path returns at least one RT row; treat empty as a
@@ -275,16 +338,46 @@ class SoapBusinessFault(Exception):
     """SOAP returned a negative Ret_Code — semantic error, not transport."""
 
 
-def _execute_action(action_type: str, payload: Dict[str, Any]) -> Any:
-    """Dispatch to the right SOAP op."""
+def _build_cc_soap_client() -> SOAPClient:
+    """Construct a fresh CallCenterWs SOAP client. Caller closes."""
     cfg = DataLayerConfig.from_env()
     cc_url = cfg.soap.base_url.replace('ReportingWs.asmx', 'CallCenterWs.asmx')
-    client = SOAPClient(
+    return SOAPClient(
         base_url=cc_url, corp_code=cfg.soap.corp_code,
         corp_user=cfg.soap.corp_user, api_key=cfg.soap.api_key,
         corp_password=cfg.soap.corp_password, timeout=60, retries=1,
     )
 
+
+def _execute_action(
+    action_type: str,
+    payload: Dict[str, Any],
+    client: Optional[SOAPClient] = None,
+) -> Any:
+    """
+    Dispatch to the right SOAP op.
+
+    P5: when `client` is provided, reuse it (saves the TLS handshake
+    cost across a batch). When None, build a one-shot client and close
+    it before returning. Batch entry-points (execute_pending_batch,
+    execute_pending_for_ledger) build one client and pass it down.
+    """
+    owns_client = client is None
+    if owns_client:
+        client = _build_cc_soap_client()
+
+    try:
+        return _dispatch_soap_call(action_type, payload, client)
+    finally:
+        if owns_client:
+            try:
+                client.close()
+            except Exception:
+                pass
+
+
+def _dispatch_soap_call(action_type: str, payload: Dict[str, Any], client: SOAPClient) -> Any:
+    """Inner dispatch — single op call, no client-lifecycle concerns."""
     if action_type == 'prepayment':
         return client.call(
             operation='PaymentSimpleCash',

@@ -630,6 +630,10 @@ Level 4   REJECTED with HTTP 400 ─── customer must accept a slot or pivot 
 <td><code>different_duration</code></td>
 <td>Analytics signal — bot also changes <code>duration_months</code> so the engine re-quotes against the new length</td>
 </tr>
+<tr>
+<td><code>cheaper_only</code></td>
+<td>Keeps every filter intact and surfaces the cheapest available units in the same pool. Pair with <code>previous_request_id</code> so already-shown unit_ids are auto-excluded — slot 1 becomes the next-cheapest match the customer hasn't seen yet. Use when the customer says "anything cheaper but same size/type/etc.?"</td>
+</tr>
 </tbody>
 </table>
 <h3 id="decision-tree">Decision tree</h3>
@@ -668,6 +672,10 @@ Level 4   REJECTED with HTTP 400 ─── customer must accept a slot or pivot 
 <tr>
 <td>"What if I lease for 12 months?"</td>
 <td>recommend with new <code>duration_months</code> + <code>action: "different_duration"</code></td>
+</tr>
+<tr>
+<td>"Anything cheaper at the same size/type?"</td>
+<td>recommend with <code>previous_request_id</code> + <code>action: "cheaper_only"</code>. No filter mutation; the auto-exclusion of shown units surfaces the next-cheapest match.</td>
 </tr>
 <tr>
 <td>"Actually I want something completely different"</td>

@@ -700,6 +700,7 @@ def recommend():
                     'bigger_size', 'smaller_size',
                     'expand_locations', 'different_type',
                     'different_duration',
+                    'cheaper_only',
                 ],
                 # Bot must not chain another call off the current request_id
                 # once the configured max depth has been reached. Drop
