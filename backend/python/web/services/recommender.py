@@ -816,11 +816,13 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
     # filters.unit_name — customer-friendly handle. Resolve to unit_id
     # via ccws_units, scoped to filters.location to disambiguate names
     # that collide across sites (e.g. "1001" exists at multiple sites).
+    # The site identifier on ccws_units is `sLocationCode` (varchar),
+    # not `SiteCode` — verified against the live schema.
     if 'unit_name' in req.filters and req.filters['unit_name']:
         where_parts.append("""
             unit_id IN (
                 SELECT "UnitID" FROM ccws_units
-                WHERE "SiteCode" = ANY(:unit_name_locs)
+                WHERE "sLocationCode" = ANY(:unit_name_locs)
                   AND "sUnitName" = ANY(:unit_names)
             )
         """)
