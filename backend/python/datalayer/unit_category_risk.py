@@ -36,27 +36,40 @@ def compute_country_baseline(session: Session,
                              country_name: str,
                              window_start: dt.date,
                              window_end: dt.date) -> BaselineResult:
-    """Compute monthly move-out rate for a country over the given window."""
-    occupied_days = session.execute(text("""
-        SELECT COUNT(*) FROM rentroll r
-        JOIN siteinfo s ON s.SiteID = r.SiteID
-        WHERE r.bRented = :rented
-          AND r.extract_date BETWEEN :ws AND :we
-          AND s.Country = :country
+    """Compute monthly move-out rate for a country over the given window.
+
+    Note: rentroll is a sparse snapshot (not daily). We estimate unit-months
+    as (occupied_rows / distinct_snapshot_dates) * window_months — i.e.
+    average occupied units per snapshot times window length in months.
+    """
+    occ = session.execute(text("""
+        SELECT COUNT(*) AS occupied_rows,
+               COUNT(DISTINCT r.extract_date) AS distinct_days
+          FROM rentroll r
+          JOIN siteinfo s ON s."SiteID" = r."SiteID"
+         WHERE r."bRented" = :rented
+           AND r.extract_date BETWEEN :ws AND :we
+           AND s."Country" = :country
     """), {"rented": True, "ws": window_start, "we": window_end,
-           "country": country_name}).scalar() or 0
+           "country": country_name}).fetchone()
+    occupied_rows = int(occ[0] or 0)
+    distinct_days = int(occ[1] or 0)
 
     moveout_count = session.execute(text("""
         SELECT COUNT(*) FROM mimo m
-        JOIN siteinfo s ON s.SiteID = m.SiteID
-        WHERE m.MoveOut = 1
-          AND m.MoveDate >= :ws AND m.MoveDate < :we_next
-          AND s.Country = :country
+        JOIN siteinfo s ON s."SiteID" = m."SiteID"
+        WHERE m."MoveOut" = 1
+          AND m."MoveDate" >= :ws AND m."MoveDate" < :we_next
+          AND s."Country" = :country
     """), {"ws": window_start,
            "we_next": dt.datetime.combine(window_end + dt.timedelta(days=1), dt.time.min),
            "country": country_name}).scalar() or 0
 
-    unit_months = (Decimal(occupied_days) / DAYS_PER_MONTH) if occupied_days else Decimal(0)
+    window_months = Decimal((window_end - window_start).days) / DAYS_PER_MONTH
+    unit_months = (
+        (Decimal(occupied_rows) / Decimal(distinct_days)) * window_months
+        if occupied_rows and distinct_days else Decimal(0)
+    )
     rate = (Decimal(moveout_count) / unit_months) if unit_months > 0 else Decimal(0)
     return BaselineResult(
         country_name=country_name,
@@ -106,37 +119,47 @@ def compute_cell_factors(session: Session,
                          baseline_rate: float,
                          sample_size_threshold: int) -> list[CellFactor]:
     """Aggregate occupancy + moveouts per (dimension, value) for one country."""
+    distinct_days = session.execute(text("""
+        SELECT COUNT(DISTINCT r.extract_date)
+          FROM rentroll r
+          JOIN siteinfo s ON s."SiteID" = r."SiteID"
+         WHERE r.extract_date BETWEEN :ws AND :we
+           AND s."Country" = :country
+    """), {"ws": window_start, "we": window_end,
+           "country": country_name}).scalar() or 1
+    window_months = Decimal((window_end - window_start).days) / DAYS_PER_MONTH
+
     occ_rows = session.execute(text("""
-        SELECT r.sTypeName, COUNT(*) AS days
+        SELECT r."sTypeName", COUNT(*) AS rows
         FROM rentroll r
-        JOIN siteinfo s ON s.SiteID = r.SiteID
-        WHERE r.bRented = :rented
+        JOIN siteinfo s ON s."SiteID" = r."SiteID"
+        WHERE r."bRented" = :rented
           AND r.extract_date BETWEEN :ws AND :we
-          AND s.Country = :country
-        GROUP BY r.sTypeName
+          AND s."Country" = :country
+        GROUP BY r."sTypeName"
     """), {"rented": True, "ws": window_start, "we": window_end,
            "country": country_name}).fetchall()
 
     mo_rows = session.execute(text("""
-        SELECT m.sUnitType, COUNT(*) AS n
+        SELECT m."sUnitType", COUNT(*) AS n
         FROM mimo m
-        JOIN siteinfo s ON s.SiteID = m.SiteID
-        WHERE m.MoveOut = 1
-          AND m.MoveDate >= :ws AND m.MoveDate < :we_next
-          AND s.Country = :country
-        GROUP BY m.sUnitType
+        JOIN siteinfo s ON s."SiteID" = m."SiteID"
+        WHERE m."MoveOut" = 1
+          AND m."MoveDate" >= :ws AND m."MoveDate" < :we_next
+          AND s."Country" = :country
+        GROUP BY m."sUnitType"
     """), {"ws": window_start,
            "we_next": dt.datetime.combine(window_end + dt.timedelta(days=1), dt.time.min),
            "country": country_name}).fetchall()
 
     occ_by_cell: dict[tuple[str, str], Decimal] = {}
-    for stype, days in occ_rows:
+    for stype, rows in occ_rows:
         dims = _explode_dims(stype or "")
         for dim, val in dims.items():
             if not val:
                 continue
             key = (dim, val)
-            occ_by_cell[key] = occ_by_cell.get(key, Decimal(0)) + Decimal(days)
+            occ_by_cell[key] = occ_by_cell.get(key, Decimal(0)) + Decimal(rows)
 
     mo_by_cell: dict[tuple[str, str], int] = {}
     for stype, n in mo_rows:
@@ -148,9 +171,12 @@ def compute_cell_factors(session: Session,
             mo_by_cell[key] = mo_by_cell.get(key, 0) + int(n)
 
     cells: list[CellFactor] = []
-    for key, days in occ_by_cell.items():
+    for key, rows in occ_by_cell.items():
         dim, val = key
-        unit_months = (days / DAYS_PER_MONTH) if days else Decimal(0)
+        unit_months = (
+            (rows / Decimal(distinct_days)) * window_months
+            if rows and distinct_days else Decimal(0)
+        )
         sample = mo_by_cell.get(key, 0)
         if unit_months > 0 and baseline_rate > 0:
             cell_rate = Decimal(sample) / unit_months
@@ -291,12 +317,20 @@ def run(country_code: Optional[str] = None) -> dict:
                     float(baseline.baseline_rate), threshold)
                 upsert_factors(session, code, cells)
                 snapshot_history(session, code, baseline, cells, snapshot_month)
-                audit_log(
-                    AuditEvent.RISK_RECOMPUTE,
-                    f"country={code} factors={len(cells)} "
-                    f"baseline_rate={float(baseline.baseline_rate):.6f} "
-                    f"moveouts={baseline.moveout_count}",
-                )
+                try:
+                    audit_log(
+                        AuditEvent.RISK_RECOMPUTE,
+                        f"country={code} factors={len(cells)} "
+                        f"baseline_rate={float(baseline.baseline_rate):.6f} "
+                        f"moveouts={baseline.moveout_count}",
+                    )
+                except RuntimeError:
+                    # Outside Flask request context (cron/CLI run); log to module logger instead
+                    logger.info(
+                        "RISK_RECOMPUTE country=%s factors=%d baseline_rate=%.6f moveouts=%d",
+                        code, len(cells), float(baseline.baseline_rate),
+                        baseline.moveout_count,
+                    )
                 summary["countries"].append({
                     "country_code": code,
                     "moveout_count": baseline.moveout_count,
@@ -305,6 +339,7 @@ def run(country_code: Optional[str] = None) -> dict:
                 })
             except Exception as exc:
                 logger.exception("Risk recompute failed for %s", code)
+                session.rollback()
                 summary["errors"].append({"country_code": code, "error": str(exc)})
     finally:
         session.close()

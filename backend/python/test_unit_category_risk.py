@@ -66,9 +66,13 @@ def test_baseline_rate_korea(session):
     result = compute_country_baseline(
         session, country_name="Korea",
         window_start=window_start, window_end=window_end)
-    assert float(result.unit_months_occupied) == pytest.approx(36500 / 30.4375, rel=1e-3)
+    # Sparse-snapshot extrapolation: avg_occupied_per_snapshot * window_months.
+    # Fixture: 365 snapshots × 100 occupied units, window = 730 days ≈ 23.98 months.
+    # Expected unit-months = (36500 / 365) * (730 / 30.4375) = 100 * 23.98 = 2398.36
+    expected_um = (36500 / 365) * (730 / 30.4375)
+    assert float(result.unit_months_occupied) == pytest.approx(expected_um, rel=1e-3)
     assert result.moveout_count == 12
-    assert float(result.baseline_rate) == pytest.approx(12 / (36500 / 30.4375), rel=1e-3)
+    assert float(result.baseline_rate) == pytest.approx(12 / expected_um, rel=1e-3)
 
 
 from datalayer.unit_category_risk import compute_cell_factors

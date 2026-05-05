@@ -5,7 +5,7 @@ recompute_cron: "0 3 1 * *"
 
 # 2-letter code → siteinfo.Country full name match
 countries:
-  KR: Korea
+  KR: South Korea
   SG: Singapore
   JP: Japan
   MY: Malaysia

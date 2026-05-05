@@ -69,13 +69,13 @@ def risk_inventory_json():
                                             sample_size=int(r[5]))
 
         units = session.execute(text("""
-            SELECT DISTINCT r.SiteID, r.UnitID, r.sUnit, r.sTypeName, s.SiteCode
+            SELECT DISTINCT r."SiteID", r."UnitID", r."sUnit", r."sTypeName", s."SiteCode"
               FROM rentroll r
-              JOIN siteinfo s ON s.SiteID = r.SiteID
-             WHERE s.Country = :country
-               AND r.extract_date = (SELECT MAX(extract_date) FROM rentroll
-                                      WHERE SiteID = r.SiteID)
-          ORDER BY s.SiteCode, r.sUnit
+              JOIN siteinfo s ON s."SiteID" = r."SiteID"
+             WHERE s."Country" = :country
+               AND r.extract_date = (SELECT MAX(extract_date) FROM rentroll r2
+                                      WHERE r2."SiteID" = r."SiteID")
+          ORDER BY s."SiteCode", r."sUnit"
              LIMIT 1000
         """), {"country": name}).fetchall()
 
