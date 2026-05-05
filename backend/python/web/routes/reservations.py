@@ -57,6 +57,7 @@ def _link_recommendation(
     concession_id,
     customer_id=None,
     session_id=None,
+    api_key_id=None,
 ):
     """
     Best-effort: stamp the matching mw_recommendations_served row with booking
@@ -67,6 +68,10 @@ def _link_recommendation(
     (unit_id, concession_id) against slot1/2/3 of recent recommendations and
     pulls the slot's plan_id automatically. session_id and customer_id are
     optional bonuses that tighten the match window when provided.
+
+    S6: pass `api_key_id` so the matcher refuses cross-key attribution
+    (a competing key spoofing another's session_id). Legacy NULL-key
+    rows still match for back-compat.
     """
     from datetime import timezone as _tz
     from web.services.booking_outcomes import link_booking_to_recommendation
@@ -86,6 +91,7 @@ def _link_recommendation(
             session_id=session_id,
             booked_at=booked_at,
             db_session=mw_session,
+            api_key_id=api_key_id,
         )
         # Result is logged inside the helper — no extra log needed here.
     finally:
@@ -828,6 +834,7 @@ def reservation_reserve():
             concession_id=concession_id,  # 0 = Standard Rate sentinel; do NOT collapse to None
             customer_id=_clamp(data.get('customer_id', ''), 120) or None,
             session_id=_clamp(data.get('session_id', ''), 64) or None,
+            api_key_id=getattr(g, 'api_key_id', None),
         )
 
         response_body = {
@@ -1021,6 +1028,7 @@ def reservation_create():
             concession_id=concession_id,  # 0 = Standard Rate sentinel; do NOT collapse to None
             customer_id=_clamp(data.get('customer_id', ''), 120) or None,
             session_id=_clamp(data.get('session_id', ''), 64) or None,
+            api_key_id=getattr(g, 'api_key_id', None),
         )
 
         return jsonify({

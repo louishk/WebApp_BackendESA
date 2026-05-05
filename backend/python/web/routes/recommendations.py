@@ -22,7 +22,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 from sqlalchemy.exc import IntegrityError
 
 from web.auth.jwt_auth import require_auth, require_api_scope
@@ -456,10 +456,12 @@ def recommend():
             'mode': req.mode,
         }), 501
 
-    # `quote` mode requires filters.unit_id and skips slot 2/3 entirely.
-    if req.mode == 'quote' and not req.filters.get('unit_id'):
+    # `quote` mode requires unit identification — accept EITHER
+    # filters.unit_id (internal id) OR filters.unit_name (customer-
+    # friendly name resolved against ccws_units).
+    if req.mode == 'quote' and not (req.filters.get('unit_id') or req.filters.get('unit_name')):
         return jsonify({
-            'error': 'mode=quote requires filters.unit_id',
+            'error': 'mode=quote requires filters.unit_id or filters.unit_name',
             'field': 'filters.unit_id',
         }), 400
 
@@ -735,27 +737,36 @@ def recommend():
             'tracking_id': None,  # filled after log_served
         }
 
-        # 12. Log to mw_recommendations_served
-        try:
-            tracking_id = recommender.log_served(
-                req=req,
-                slots_with_quotes=slots_with_quotes,
-                pool_size=candidates_pool_size,
-                total_matches=total_matches_before_slotting,
-                relax_strategy_used=relax_used,
-                response=envelope,
-                db_session=db,
-            )
-            db.commit()
-            envelope['tracking_id'] = tracking_id
-        except IntegrityError:
-            db.rollback()
-            # Unique constraint on request_id — replay attack or bot bug
-            logger.warning("Duplicate request_id rejected: %s", request_id)
-            return jsonify({
-                'error': 'Duplicate request_id — each turn must use a unique request_id',
-                'request_id': request_id,
-            }), 409
+        # 12. Log to mw_recommendations_served — SKIP for mode=quote.
+        # A3: mode=quote is a stateless re-price ("what does unit X cost?")
+        # that should NOT consume a recommend log row, NOT enforce
+        # request_id uniqueness, and NOT participate in the chain-depth
+        # cap. The bot uses it freely mid-conversation without burning
+        # state. Only mode=recommendation logs.
+        if req.mode == 'quote':
+            envelope['tracking_id'] = None
+        else:
+            try:
+                tracking_id = recommender.log_served(
+                    req=req,
+                    slots_with_quotes=slots_with_quotes,
+                    pool_size=candidates_pool_size,
+                    total_matches=total_matches_before_slotting,
+                    relax_strategy_used=relax_used,
+                    response=envelope,
+                    db_session=db,
+                    api_key_id=getattr(g, 'api_key_id', None),
+                )
+                db.commit()
+                envelope['tracking_id'] = tracking_id
+            except IntegrityError:
+                db.rollback()
+                # Unique constraint on request_id — replay attack or bot bug
+                logger.warning("Duplicate request_id rejected: %s", request_id)
+                return jsonify({
+                    'error': 'Duplicate request_id — each turn must use a unique request_id',
+                    'request_id': request_id,
+                }), 409
 
         return jsonify(envelope), 200
 

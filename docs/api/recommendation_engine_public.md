@@ -186,6 +186,7 @@ curl -X POST https://backend.extraspace.com.sg/api/recommendations \
 | `filters.climate_type` | optional | `A`/`AD`/`NC`/`RF` (see §10) |
 | `filters.size_range` | optional | sqft buckets like `"30-35"` |
 | `filters.unit_id` | optional | array of integers — pin to specific unit(s) |
+| `filters.unit_name` | optional | array of strings — customer-friendly unit number/name (e.g. `["4120"]`, `["Locker A1"]`). Resolved to `unit_id` via the `(filters.location, sUnitName)` join. Useful when the customer says "unit 4120" and the bot doesn't know the internal id. Names may collide across sites — always paired with `filters.location`. |
 | `filters.plan_id` | optional | array of integers — cross-site brand filter (one plan covers multiple per-site concessions) |
 | `filters.concession_id` | optional | single integer — pins a specific (unit, plan, concession) tuple |
 | `filters.coupon_code` | optional | string — gates coupon-only plans |
@@ -324,13 +325,28 @@ The response is guaranteed to contain **≥ 2 slots in normal operation**. Slot 
 
 ### `mode=quote` — single-unit pricing
 
-For "what does unit X cost?" — pass `mode: "quote"` plus `filters.unit_id: [N]`. Returns one slot keyed to that unit. Pricing is **cent-identical** to what `mode=recommendation` returned for the same unit.
+For "what does unit X cost?" — pass `mode: "quote"` plus EITHER `filters.unit_id: [N]` (when you have the internal id) OR `filters.unit_name: ["4120"]` (when the customer named the unit by its printed number). Returns one slot keyed to that unit. Pricing is **cent-identical** to what `mode=recommendation` returned for the same unit.
+
+`mode=quote` is **stateless** — it does not consume a recommendation log row, does not enforce `request_id` uniqueness, and does not participate in the multi-turn chain-depth cap (§5). The bot can re-price freely mid-conversation without affecting the L1/L2/L3 chain.
+
+By `unit_id`:
 
 ```json
 {
   "mode": "quote",
   "duration_months": 6,
   "filters": { "location": ["L017"], "unit_id": [107197] },
+  "context": { "channel": "chatbot", "request_id": "...", "session_id": "...", "customer_id": "..." }
+}
+```
+
+By `unit_name` (customer-friendly):
+
+```json
+{
+  "mode": "quote",
+  "duration_months": 6,
+  "filters": { "location": ["L017"], "unit_name": ["4120"] },
   "context": { "channel": "chatbot", "request_id": "...", "session_id": "...", "customer_id": "..." }
 }
 ```
@@ -612,6 +628,18 @@ GET /api/reservations/move-in/cost
 | `AD` | Air-conditioned + dehumidified |
 | `NC` | Non-climate |
 | `RF` | Refrigerated (specialised) |
+
+### Plan vs. concession — what to display
+
+Each slot exposes both:
+
+| Field | Audience | Example | Rule |
+|---|---|---|---|
+| `plan_name` | **Customer-facing** | `"Moving Season SG"` | Display this to the end customer. It's the operator-curated brand. |
+| `concession_name` | **Internal** | `"SS-TAC-Move-R-30%"` | This is the SiteLink operator code. **Do not show to customers.** |
+| `discount_summary` | Customer-facing | `"30% off every month"` | Pre-rendered human-readable summary; safe to display verbatim. |
+
+Pass `concession_id` (the integer) verbatim through `/reserve`. Use `plan_name` + `discount_summary` for any UI copy the customer sees.
 
 ### Channel codes
 

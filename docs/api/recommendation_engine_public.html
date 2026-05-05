@@ -381,6 +381,11 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 <td>array of integers — pin to specific unit(s)</td>
 </tr>
 <tr>
+<td><code>filters.unit_name</code></td>
+<td>optional</td>
+<td>array of strings — customer-friendly unit number/name (e.g. <code>["4120"]</code>, <code>["Locker A1"]</code>). Resolved to <code>unit_id</code> via the <code>(filters.location, sUnitName)</code> join. Useful when the customer says "unit 4120" and the bot doesn't know the internal id. Names may collide across sites — always paired with <code>filters.location</code>.</td>
+</tr>
+<tr>
 <td><code>filters.plan_id</code></td>
 <td>optional</td>
 <td>array of integers — cross-site brand filter (one plan covers multiple per-site concessions)</td>
@@ -561,11 +566,22 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 <p>Combined with directional actions (<code>bigger_size</code> / <code>smaller_size</code> open the range fully in that direction), this means an action that lands on an empty bucket still returns the closest available match — never zero slots in normal operation.</p>
 <p>The response is guaranteed to contain <strong>≥ 2 slots in normal operation</strong>. Slot 3 is best-effort; <code>null</code> if no strictly-cheaper unit exists at the site.</p>
 <h3 id="modequote-single-unit-pricing"><code>mode=quote</code> — single-unit pricing</h3>
-<p>For "what does unit X cost?" — pass <code>mode: "quote"</code> plus <code>filters.unit_id: [N]</code>. Returns one slot keyed to that unit. Pricing is <strong>cent-identical</strong> to what <code>mode=recommendation</code> returned for the same unit.</p>
+<p>For "what does unit X cost?" — pass <code>mode: "quote"</code> plus EITHER <code>filters.unit_id: [N]</code> (when you have the internal id) OR <code>filters.unit_name: ["4120"]</code> (when the customer named the unit by its printed number). Returns one slot keyed to that unit. Pricing is <strong>cent-identical</strong> to what <code>mode=recommendation</code> returned for the same unit.</p>
+<p><code>mode=quote</code> is <strong>stateless</strong> — it does not consume a recommendation log row, does not enforce <code>request_id</code> uniqueness, and does not participate in the multi-turn chain-depth cap (§5). The bot can re-price freely mid-conversation without affecting the L1/L2/L3 chain.</p>
+<p>By <code>unit_id</code>:</p>
 <div class="codehilite"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;quote&quot;</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;duration_months&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;filters&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;location&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;L017&quot;</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">107197</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;context&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chatbot&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;session_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;customer_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>By <code>unit_name</code> (customer-friendly):</p>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;quote&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;duration_months&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;filters&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;location&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;L017&quot;</span><span class="p">],</span><span class="w"> </span><span class="nt">&quot;unit_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;4120&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">&quot;context&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;chatbot&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;session_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;customer_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w"> </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -990,6 +1006,39 @@ GET /api/reservations/move-in/cost
 </tr>
 </tbody>
 </table>
+<h3 id="plan-vs-concession-what-to-display">Plan vs. concession — what to display</h3>
+<p>Each slot exposes both:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Audience</th>
+<th>Example</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plan_name</code></td>
+<td><strong>Customer-facing</strong></td>
+<td><code>"Moving Season SG"</code></td>
+<td>Display this to the end customer. It's the operator-curated brand.</td>
+</tr>
+<tr>
+<td><code>concession_name</code></td>
+<td><strong>Internal</strong></td>
+<td><code>"SS-TAC-Move-R-30%"</code></td>
+<td>This is the SiteLink operator code. <strong>Do not show to customers.</strong></td>
+</tr>
+<tr>
+<td><code>discount_summary</code></td>
+<td>Customer-facing</td>
+<td><code>"30% off every month"</code></td>
+<td>Pre-rendered human-readable summary; safe to display verbatim.</td>
+</tr>
+</tbody>
+</table>
+<p>Pass <code>concession_id</code> (the integer) verbatim through <code>/reserve</code>. Use <code>plan_name</code> + <code>discount_summary</code> for any UI copy the customer sees.</p>
 <h3 id="channel-codes">Channel codes</h3>
 <table>
 <thead>

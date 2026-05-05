@@ -17,7 +17,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 
@@ -243,15 +243,23 @@ def clear_cache() -> None:
 # Write API (admin only)
 # ---------------------------------------------------------------------------
 
-def update_settings(updates: Dict[str, str], updated_by: str, db_session) -> int:
+def update_settings(
+    updates: Dict[str, str],
+    updated_by: str,
+    db_session,
+) -> Tuple[int, List[Dict[str, Any]]]:
     """
     Upsert each (key, value) pair. Values are stored as TEXT — coercion
     happens on read.
-    Returns the number of rows changed (insert + update).
+
+    Returns (changed_count, change_log) where `change_log` is a list of
+    `{key, old, new}` dicts — one per actually-changed setting. Caller
+    can audit-log each entry individually for incident reconstruction
+    of master-switch flips (S10).
     """
     if not updates:
-        return 0
-    changed = 0
+        return 0, []
+    change_log: List[Dict[str, Any]] = []
     for key, value in updates.items():
         if key not in _SPEC_BY_KEY:
             logger.warning("update_settings: ignoring unknown key %r", key)
@@ -263,6 +271,13 @@ def update_settings(updates: Dict[str, str], updated_by: str, db_session) -> int
             stored = '1' if coerced else '0'
         else:
             stored = str(coerced)
+
+        # Read prior value first so the audit log can record the diff.
+        prior = db_session.execute(
+            text("SELECT value FROM mw_recommender_settings WHERE key = :k"),
+            {'k': key},
+        ).scalar()
+
         result = db_session.execute(text("""
             INSERT INTO mw_recommender_settings (key, value, updated_at, updated_by)
             VALUES (:key, :value, now(), :updated_by)
@@ -273,7 +288,7 @@ def update_settings(updates: Dict[str, str], updated_by: str, db_session) -> int
             WHERE mw_recommender_settings.value IS DISTINCT FROM EXCLUDED.value
         """), {'key': key, 'value': stored, 'updated_by': updated_by})
         if result.rowcount:
-            changed += 1
+            change_log.append({'key': key, 'old': prior, 'new': stored})
     db_session.commit()
     clear_cache()
-    return changed
+    return len(change_log), change_log

@@ -612,7 +612,7 @@ def save_settings():
 
     session = _get_session()
     try:
-        changed = recommender_settings.update_settings(
+        changed, change_log = recommender_settings.update_settings(
             updates, updated_by=getattr(current_user, 'username', 'admin'),
             db_session=session,
         )
@@ -620,10 +620,14 @@ def save_settings():
         session.close()
 
     if changed:
-        audit_log(
-            AuditEvent.CONFIG_UPDATED,
-            f"Updated {changed} recommender setting(s)",
-        )
+        # S10: audit each change individually with from→to so incident
+        # response can reconstruct who flipped which master switch when.
+        for entry in change_log:
+            audit_log(
+                AuditEvent.CONFIG_UPDATED,
+                f"recommender setting {entry['key']!r}: "
+                f"{entry['old']!r} → {entry['new']!r}",
+            )
         flash(f'Saved {changed} setting change(s).', 'success')
     else:
         flash('No changes to save.', 'info')

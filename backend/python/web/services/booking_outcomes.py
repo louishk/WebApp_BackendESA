@@ -59,6 +59,7 @@ def link_booking_to_recommendation(
     plan_id_override: Optional[int] = None,
     booked_at: datetime,
     db_session,
+    api_key_id: Optional[int] = None,
 ) -> Optional[int]:
     """Best-effort match a fresh booking to a recent recommendation.
 
@@ -112,6 +113,7 @@ def link_booking_to_recommendation(
             plan_id_override=plan_id_override,
             booked_at=booked_at,
             db_session=db_session,
+            api_key_id=api_key_id,
         )
     except Exception as exc:
         logger.warning(
@@ -169,6 +171,7 @@ def _find_and_update(
     plan_id_override: Optional[int],
     booked_at: datetime,
     db_session,
+    api_key_id: Optional[int] = None,
 ) -> Optional[int]:
     """Find the best-matching recommendation row and stamp it."""
     candidate = _find_candidate(
@@ -177,6 +180,7 @@ def _find_and_update(
         customer_id=customer_id,
         session_id=session_id,
         db_session=db_session,
+        api_key_id=api_key_id,
     )
     if candidate is None:
         return None
@@ -238,6 +242,7 @@ def _find_candidate(
     customer_id: Optional[str],
     session_id: Optional[str],
     db_session,
+    api_key_id: Optional[int] = None,
 ) -> Optional[tuple]:
     """
     Return (rec_id, booked_slot, slot_plan_id, slot_concession_id, concession_match)
@@ -246,27 +251,42 @@ def _find_candidate(
     Within each priority level, ORDER BY concession_match DESC, served_at DESC
     so a row whose slot's concession_id matches the booking's exactly wins
     over a row that only matches the unit.
+
+    S6: when `api_key_id` is provided, restrict each priority's match to
+    rows owned by the SAME key OR rows with NULL api_key_id (legacy
+    pre-S6). This stops a competing key from claiming attribution by
+    spoofing another key's session_id.
     """
     now_utc = datetime.now(timezone.utc)
     # When concession_id is unknown, NULL won't equal anything so concession_match
     # will always be 0 — that's fine, we just skip the exact-attribution logic.
     cid = concession_id if concession_id is not None else -1
 
+    # S6: api_key_id scope clause (NULL legacy rows still match for back-compat)
+    akid_clause = (
+        " AND (api_key_id = :akid OR api_key_id IS NULL)"
+        if api_key_id is not None else ""
+    )
+
     # Priority 1 — session_id match (no time window; session scopes it)
     if session_id:
+        params = {"uid": unit_id, "cid": cid, "session_id": session_id}
+        if api_key_id is not None:
+            params["akid"] = api_key_id
         row = db_session.execute(
             text(f"""
                 {_SLOT_PROJECTION}
                 FROM mw_recommendations_served
                 WHERE session_id = :session_id
                   AND booked_unit_id IS NULL
+                  {akid_clause}
                   AND (slot1_unit_id = :uid
                        OR slot2_unit_id = :uid
                        OR slot3_unit_id = :uid)
                 ORDER BY concession_match DESC, served_at DESC
                 LIMIT 1
             """),
-            {"uid": unit_id, "cid": cid, "session_id": session_id},
+            params,
         ).fetchone()
         if row:
             return tuple(row)
@@ -274,6 +294,9 @@ def _find_candidate(
     # Priority 2 — customer_id within 24h
     if customer_id:
         cutoff = now_utc - timedelta(hours=_CUSTOMER_WINDOW_HOURS)
+        params = {"uid": unit_id, "cid": cid, "customer_id": customer_id, "cutoff": cutoff}
+        if api_key_id is not None:
+            params["akid"] = api_key_id
         row = db_session.execute(
             text(f"""
                 {_SLOT_PROJECTION}
@@ -281,32 +304,37 @@ def _find_candidate(
                 WHERE customer_id = :customer_id
                   AND booked_unit_id IS NULL
                   AND served_at >= :cutoff
+                  {akid_clause}
                   AND (slot1_unit_id = :uid
                        OR slot2_unit_id = :uid
                        OR slot3_unit_id = :uid)
                 ORDER BY concession_match DESC, served_at DESC
                 LIMIT 1
             """),
-            {"uid": unit_id, "cid": cid, "customer_id": customer_id, "cutoff": cutoff},
+            params,
         ).fetchone()
         if row:
             return tuple(row)
 
     # Priority 3 — unit_id alone within 4h
     cutoff = now_utc - timedelta(hours=_UNIT_WINDOW_HOURS)
+    params = {"uid": unit_id, "cid": cid, "cutoff": cutoff}
+    if api_key_id is not None:
+        params["akid"] = api_key_id
     row = db_session.execute(
         text(f"""
             {_SLOT_PROJECTION}
             FROM mw_recommendations_served
             WHERE booked_unit_id IS NULL
               AND served_at >= :cutoff
+              {akid_clause}
               AND (slot1_unit_id = :uid
                    OR slot2_unit_id = :uid
                    OR slot3_unit_id = :uid)
             ORDER BY concession_match DESC, served_at DESC
             LIMIT 1
         """),
-        {"uid": unit_id, "cid": cid, "cutoff": cutoff},
+        params,
     ).fetchone()
     if row:
         return tuple(row)

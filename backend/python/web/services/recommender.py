@@ -176,6 +176,19 @@ def normalise_request(raw: Dict[str, Any]) -> RecommendationRequest:
                 filters['unit_id'] = uid_list
         except (TypeError, ValueError):
             raise ValidationError("filters.unit_id must be integer(s)")
+
+    # filters.unit_name — customer-friendly handle. Customers know the
+    # printed unit number ("4120", "Locker A1") but never the internal
+    # unit_id. Accept the human name and resolve to unit_id(s) via a
+    # join on `ccws_units` keyed by (site_code, sUnitName). Names may
+    # collide across sites, so resolution is always scoped to the
+    # current `filters.location`. Merged into `filters.unit_id` if
+    # both are supplied (intersection behaviour falls out of ANY()).
+    unit_name_raw = raw_filters.get('unit_name')
+    if unit_name_raw is not None:
+        names = [str(v).strip() for v in _coerce_list(unit_name_raw) if str(v).strip()]
+        if names:
+            filters['unit_name'] = names
     concession_id_raw = raw_filters.get('concession_id')
     if concession_id_raw is not None:
         try:
@@ -410,39 +423,52 @@ def resume_session(req: RecommendationRequest, db_session) -> RecommendationRequ
     max_level = max(1, min(configured_max, _HARD_MAX_RECOMMENDATION_LEVEL))
     req.context['_max_recommendation_level'] = max_level
 
-    # Walk the chain to compute level. Bounded to MAX+1 hops to defend
-    # against accidental cycles.
-    chain_depth = 0
-    walk_id = prev_id
-    chain_filters: Optional[Any] = None
-    chain_slot_ids: Optional[Tuple[Any, Any, Any]] = None
-    chain_session_id: Optional[str] = None
-    for _ in range(max_level + 1):
-        try:
-            walk = db_session.execute(text("""
-                SELECT filters_applied,
+    # P3: walk the chain in ONE recursive CTE instead of N sequential
+    # SELECTs. The CTE is depth-bounded by max_level+1 to defend
+    # against accidental cycles in the data. Returns the chain rows
+    # ordered nearest-first so row[0] is the immediate parent (used
+    # for filter merge + exclusion) and len(rows) is the chain depth.
+    try:
+        rows = db_session.execute(text("""
+            WITH RECURSIVE chain(rid, prev_rid, filters_applied,
+                                 slot1, slot2, slot3, session_id, depth) AS (
+                SELECT request_id, previous_request_id, filters_applied,
                        slot1_unit_id, slot2_unit_id, slot3_unit_id,
-                       session_id, previous_request_id
+                       session_id, 1
                 FROM mw_recommendations_served
-                WHERE request_id = :rid
-                LIMIT 1
-            """), {'rid': walk_id}).mappings().first()
-        except Exception as exc:
-            logger.warning("resume_session: chain walk failed at %s: %s", walk_id, exc)
-            return req
-        if not walk:
-            logger.warning("resume_session: chain reference %s not found", walk_id)
-            return req
-        if chain_depth == 0:
-            # Capture the IMMEDIATE prior row's data for filter merge / exclusion
-            chain_filters = walk['filters_applied']
-            chain_slot_ids = (walk['slot1_unit_id'], walk['slot2_unit_id'], walk['slot3_unit_id'])
-            chain_session_id = walk['session_id']
-        chain_depth += 1
-        next_id = walk['previous_request_id']
-        if not next_id:
-            break
-        walk_id = next_id
+                WHERE request_id = :start_rid
+
+                UNION ALL
+
+                SELECT r.request_id, r.previous_request_id, r.filters_applied,
+                       r.slot1_unit_id, r.slot2_unit_id, r.slot3_unit_id,
+                       r.session_id, c.depth + 1
+                FROM mw_recommendations_served r
+                JOIN chain c ON r.request_id = c.prev_rid
+                WHERE c.depth < :max_walk
+            )
+            SELECT filters_applied, slot1, slot2, slot3, session_id, depth, prev_rid
+            FROM chain
+            ORDER BY depth
+        """), {'start_rid': prev_id, 'max_walk': max_level + 1}).mappings().all()
+    except Exception as exc:
+        logger.warning("resume_session: chain walk CTE failed at %s: %s", prev_id, exc)
+        return req
+
+    if not rows:
+        logger.warning("resume_session: chain reference %s not found", prev_id)
+        return req
+
+    chain_depth = len(rows)
+    head = rows[0]
+    chain_filters = head['filters_applied']
+    chain_slot_ids = (head['slot1'], head['slot2'], head['slot3'])
+    chain_session_id = head['session_id']
+    # If the deepest row still has a parent we didn't follow, the chain
+    # extends further than max_walk allowed — treat as over-cap below.
+    last = rows[-1]
+    if last['prev_rid'] and chain_depth >= max_level + 1:
+        chain_depth = max_level + 1  # forces the over-cap branch
 
     # Current request's level = chain_depth (turns walked) + 1
     current_level = chain_depth + 1
@@ -787,6 +813,19 @@ def fetch_candidate_pool(req: RecommendationRequest, db_session) -> List[Candida
     if 'unit_id' in req.filters and req.filters['unit_id']:
         where_parts.append("unit_id = ANY(:unit_ids)")
         params['unit_ids'] = req.filters['unit_id']
+    # filters.unit_name — customer-friendly handle. Resolve to unit_id
+    # via ccws_units, scoped to filters.location to disambiguate names
+    # that collide across sites (e.g. "1001" exists at multiple sites).
+    if 'unit_name' in req.filters and req.filters['unit_name']:
+        where_parts.append("""
+            unit_id IN (
+                SELECT "UnitID" FROM ccws_units
+                WHERE "SiteCode" = ANY(:unit_name_locs)
+                  AND "sUnitName" = ANY(:unit_names)
+            )
+        """)
+        params['unit_name_locs'] = locations
+        params['unit_names'] = req.filters['unit_name']
     if 'concession_id' in req.filters and req.filters['concession_id']:
         where_parts.append("concession_id = :one_concession")
         params['one_concession'] = int(req.filters['concession_id'][0])
@@ -1053,31 +1092,40 @@ def build_slot2(
     if not dist_rows:
         return None
 
+    # P4: fetch the candidate pool across ALL neighbour sites in ONE
+    # query instead of N sequential per-site fetches. Pick the cheapest
+    # row from the union, then resolve its distance + close/far tag from
+    # the dist_rows dict by site_code.
     from copy import copy
-    for neighbour, dist in dist_rows:
-        neighbour_req = copy(req)
-        neighbour_req.filters = dict(req.filters, location=[neighbour])
-        try:
-            neighbour_pool = fetch_candidate_pool(neighbour_req, db_session)
-        except Exception as exc:
-            logger.warning("build_slot2: neighbour %s pool failed: %s", neighbour, exc)
-            continue
-        if neighbour_pool:
-            best = min(
-                neighbour_pool,
-                key=lambda r: (r.effective_rate is None, r.effective_rate or Decimal('0'))
-            )
-            try:
-                d_km = float(dist) if dist is not None else None
-                far = bool(d_km is not None and d_km > float(max_dist))
-                best._slot2_strategy = 'neighbour_far' if far else 'neighbour_close'  # type: ignore[attr-defined]
-                best._slot2_distance_km = d_km                                         # type: ignore[attr-defined]
-                best._slot2_travel_warning = far                                       # type: ignore[attr-defined]
-            except Exception:
-                pass
-            return best
+    dist_by_site: Dict[str, float] = {
+        n: float(d) for (n, d) in dist_rows if n is not None and d is not None
+    }
+    if not dist_by_site:
+        return None
 
-    return None
+    union_req = copy(req)
+    union_req.filters = dict(req.filters, location=list(dist_by_site.keys()))
+    try:
+        union_pool = fetch_candidate_pool(union_req, db_session)
+    except Exception as exc:
+        logger.warning("build_slot2: neighbour union pool failed: %s", exc)
+        return None
+    if not union_pool:
+        return None
+
+    best = min(
+        union_pool,
+        key=lambda r: (r.effective_rate is None, r.effective_rate or Decimal('0')),
+    )
+    d_km = dist_by_site.get(best.site_code)
+    far = bool(d_km is not None and d_km > float(max_dist))
+    try:
+        best._slot2_strategy = 'neighbour_far' if far else 'neighbour_close'  # type: ignore[attr-defined]
+        best._slot2_distance_km = d_km                                         # type: ignore[attr-defined]
+        best._slot2_travel_warning = far                                       # type: ignore[attr-defined]
+    except Exception:
+        pass
+    return best
 
 
 def build_slot3(
@@ -1709,6 +1757,7 @@ def log_served(
     relax_strategy_used: str,
     response: Dict[str, Any],
     db_session,
+    api_key_id: Optional[int] = None,
 ) -> int:
     """
     INSERT a row into mw_recommendations_served and return the new id
@@ -1754,6 +1803,7 @@ def log_served(
         'candidates_pool_size': pool_size,
         'total_matches': total_matches,
         'full_response': json.dumps(response),
+        'api_key_id': api_key_id,
     }
     params.update(_slot_vals(0))
     params.update(_slot_vals(1))
@@ -1771,7 +1821,7 @@ def log_served(
             slot2_first_month, slot2_total_contract,
             slot3_unit_id, slot3_plan_id, slot3_concession_id,
             slot3_first_month, slot3_total_contract,
-            full_response
+            full_response, api_key_id
         ) VALUES (
             :request_id, :session_id, :customer_id, :channel, :mode, :level,
             :previous_request_id, :picked_slot, :action,
@@ -1785,7 +1835,7 @@ def log_served(
             :slot2_first_month, :slot2_total_contract,
             :slot3_unit_id, :slot3_plan_id, :slot3_concession_id,
             :slot3_first_month, :slot3_total_contract,
-            CAST(:full_response AS jsonb)
+            CAST(:full_response AS jsonb), :api_key_id
         )
         RETURNING id
     """), params)
