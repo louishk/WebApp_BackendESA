@@ -1210,6 +1210,7 @@ def quote_slot(
     req: RecommendationRequest,
     db_session,
     move_in_date: Optional[date] = None,
+    site_cache: Optional[Dict[Any, Dict[str, Any]]] = None,
 ) -> 'DurationQuote':
     """
     Look up site billing config, tax rates, admin fee, deposit, and insurance
@@ -1218,6 +1219,12 @@ def quote_slot(
 
     For stdrate-override rows (concession_id=0): pc_discount=0, fixed_discount=0.
     move_in_date defaults to today when not provided.
+
+    P1: When all 3 slots share the same site (the common case), the billing /
+    charge-descriptions / insurance lookups would otherwise fire 3× each.
+    Pass `site_cache` (a dict scoped to the current recommend request) to
+    memoise per-site results — first slot does the DB work, slots 2 + 3 hit
+    the cache. Caller owns the dict; pass `None` for ad-hoc calls.
     """
     from common.movein_cost_calculator import (
         ChargeTypeTax, calculate_duration_breakdown, DurationQuote,
@@ -1226,19 +1233,22 @@ def quote_slot(
     if move_in_date is None:
         move_in_date = date.today()
 
-    # ---- Billing config ----
-    billing_config = _load_billing_config(row.site_code, db_session)
+    # ---- Per-site lookups (memoised per request) ----
+    site_data = _load_site_data(
+        site_code=row.site_code, site_id=row.site_id,
+        db_session=db_session, cache=site_cache,
+    )
+    billing_config: Dict[str, Any] = site_data['billing_config']
+    charge_info:    Dict[str, Any] = site_data['charge_info']
+    insurance_premium: Decimal     = site_data['insurance_premium']
+
     anniversary_billing: bool = billing_config.get('anniversary_billing', False)
     day_start_prorate_plus_next: int = billing_config.get('day_start_prorate_plus_next', 17)
 
-    # ---- Charge descriptions (admin fee, deposit, tax rates) ----
-    charge_info = _load_charge_descriptions(row.site_id, db_session)
     admin_fee: Decimal = charge_info.get('admin_fee', Decimal('0'))
     security_deposit: Decimal = charge_info.get('security_deposit', Decimal('0'))
     # SiteLink convention: when SecDep.dcPrice is 0, the deposit is the
     # unit's per-row dcStdSecDep (or its dcStdRate if dcStdSecDep is also 0).
-    # Some sites have units with deposit != std_rate (premium 2x, no-deposit 0).
-    # Falling back this way matches what SOAP MoveInCostRetrieve would charge.
     if security_deposit <= 0:
         if row.std_sec_dep and row.std_sec_dep > 0:
             security_deposit = Decimal(str(row.std_sec_dep))
@@ -1248,9 +1258,6 @@ def quote_slot(
     admin_tax = charge_info.get('admin_tax', rent_tax)
     deposit_tax = charge_info.get('deposit_tax', ChargeTypeTax('SecDep'))
     insurance_tax = charge_info.get('insurance_tax', rent_tax)
-
-    # ---- Insurance premium ----
-    insurance_premium: Decimal = _load_insurance_premium(row.site_id, db_session)
 
     # ---- Concession params ----
     if row.concession_id == 0:
@@ -1410,6 +1417,61 @@ def compute_first_month_cost_calculator(
     for line in lines or []:
         total += Decimal(str(line.amount or 0)) + Decimal(str(line.tax or 0))
     return total
+
+
+def _load_site_data(
+    *,
+    site_code: str,
+    site_id: int,
+    db_session,
+    cache: Optional[Dict[Any, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Bundle the per-site lookups (billing config + charge descriptions +
+    insurance options) into one memoised call. Returns:
+      {
+        'billing_config':    {...},
+        'charge_info':       {...},
+        'insurance_options': [...],
+        'insurance_premium': Decimal,    # min(option.premium); derived
+      }
+
+    `insurance_premium` is derived from `insurance_options` rather than
+    a second independent query — saves one round-trip even on the cache-
+    miss path.
+
+    Pass `cache` (a request-scoped dict) so that a 3-slot recommend
+    response sharing the same site does the DB work once. Cache miss
+    keys on (site_id) — site_code is just the surface identifier.
+    """
+    if cache is not None and site_id in cache:
+        return cache[site_id]
+
+    billing  = _load_billing_config(site_code, db_session)
+    charges  = _load_charge_descriptions(site_id, db_session)
+    options  = _load_insurance_options(site_id, db_session)
+    # Derive premium: cheapest available option (matches what the
+    # calculator picks today). 0 when no options available.
+    if options:
+        try:
+            premium = min(
+                Decimal(str(opt.get('premium') or 0))
+                for opt in options
+            )
+        except (ValueError, TypeError):
+            premium = Decimal('0')
+    else:
+        premium = Decimal('0')
+
+    bundle = {
+        'billing_config':    billing,
+        'charge_info':       charges,
+        'insurance_options': options,
+        'insurance_premium': premium,
+    }
+    if cache is not None:
+        cache[site_id] = bundle
+    return bundle
 
 
 def _load_billing_config(site_code: str, db_session) -> Dict[str, Any]:

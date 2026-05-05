@@ -525,7 +525,7 @@ def simulator_run():
             'diagnostic': diagnostic,
             'slots': [
                 _row_to_json(slot1, 1, 'Best Match', q1),
-                _row_to_json(slot2, 2, 'Nearest Available', q2),
+                _row_to_json(slot2, 2, 'Best Alternative', q2),
                 _row_to_json(slot3, 3, 'Best Price', q3),
             ],
         })

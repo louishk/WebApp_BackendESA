@@ -47,7 +47,7 @@ _ALLOWED_CHANNELS = {'web', 'chatbot', 'api', 'admin'}
 _PUBLIC_CHANNELS = {'web', 'chatbot'}
 
 # Slot labels (1-indexed)
-_SLOT_LABELS = {1: 'Best Match', 2: 'Nearest Available', 3: 'Best Price'}
+_SLOT_LABELS = {1: 'Best Match', 2: 'Best Alternative', 3: 'Best Price'}
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +98,23 @@ def _serialise_quote(quote) -> Dict[str, Any]:
     }
 
 
+def _build_pricing_block(quote, perpetual_extras: Dict[str, Any]) -> Dict[str, Any]:
+    """Assemble the slot's pricing block with a canonical `payment_amount`.
+
+    `payment_amount` is the dollar value the bot must pass to /move-in.
+    For perpetual+prepay plans it's the multi-month `total_due_at_movein`.
+    Otherwise it's `first_month_total`. Always present, never null on a
+    successful quote.
+    """
+    base = _serialise_quote(quote)
+    merged = {**base, **perpetual_extras}
+    payment = merged.get('total_due_at_movein')
+    if payment is None:
+        payment = merged.get('first_month_total')
+    merged['payment_amount'] = payment
+    return merged
+
+
 def _build_headlines(quote) -> Dict[str, Any]:
     """Pull the headline numbers out of breakdown[0] + post-promo month
     so the bot can answer common customer questions ("what's the deposit?",
@@ -135,6 +152,7 @@ def _serialise_slot(
     quote,
     db_session=None,
     match_flags: Optional[Dict] = None,
+    site_cache: Optional[Dict[Any, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     # Parse distribution_channel CSV → list (empty/null → null = "all channels")
     dc_raw = (row.distribution_channel or '').strip()
@@ -156,8 +174,14 @@ def _serialise_slot(
 
     insurance_block: Optional[Dict[str, Any]] = None
     if db_session is not None:
+        # P1: read insurance options from the per-site cache when available
+        # (populated by quote_slot via _load_site_data) — eliminates a
+        # second DB hit per slot.
         try:
-            options = recommender._load_insurance_options(row.site_id, db_session)
+            if site_cache is not None and row.site_id in site_cache:
+                options = site_cache[row.site_id].get('insurance_options') or []
+            else:
+                options = recommender._load_insurance_options(row.site_id, db_session)
         except Exception:
             options = []
         # Selected = the option whose premium matches the quote's
@@ -359,7 +383,11 @@ def _serialise_slot(
         'headlines': _build_headlines(quote),
         'terms': terms_block,
         'insurance': insurance_block,
-        'pricing': {**_serialise_quote(quote), **perpetual_extras},
+        # `payment_amount` is the canonical "what to charge" field — equals
+        # `total_due_at_movein` for perpetual+prepay shapes (multi-month
+        # total), else `first_month_total`. Doc tells partners to use this
+        # one and only this one for /move-in's payment_amount.
+        'pricing': _build_pricing_block(quote, perpetual_extras),
         'customer_disclosure': customer_disclosure,
     }
 
@@ -560,11 +588,21 @@ def recommend():
         except Exception:
             drop_low_conf = False
 
+        # P1: per-site memo dict — keeps a 3-slot single-site response at
+        # ~7 DB queries instead of ~16 by re-using billing_config /
+        # charge_descriptions / insurance_options across slots that share
+        # a site_id. Threaded through quote_slot AND the slot serialiser.
+        site_cache: Dict[Any, Dict[str, Any]] = {}
+
         def _quote(row: Optional[CandidateRow]):
             if row is None:
                 return None
             try:
-                q = recommender.quote_slot(row, req, db, move_in_date=move_in_date)
+                q = recommender.quote_slot(
+                    row, req, db,
+                    move_in_date=move_in_date,
+                    site_cache=site_cache,
+                )
                 if drop_low_conf and q is not None and getattr(q, 'confidence', 'high') != 'high':
                     logger.info(
                         "dropping slot — low-confidence quote unit_id=%s reason=%s",
@@ -606,7 +644,8 @@ def recommend():
                 mf['alternative_strategy'] = strat
                 mf['distance_km'] = getattr(row, '_slot2_distance_km', None)
                 mf['travel_warning'] = bool(getattr(row, '_slot2_travel_warning', False))
-            return _serialise_slot(num, row, quote, db_session=db, match_flags=mf)
+            return _serialise_slot(num, row, quote, db_session=db,
+                                   match_flags=mf, site_cache=site_cache)
 
         slots_payload = [
             _build_slot_obj(1, slot1_row, slot1_quote),
@@ -676,12 +715,22 @@ def recommend():
             ),
             'reserve_template': {
                 'endpoint': 'POST /api/reservations/reserve',
-                'required': [
+                'required_fields': [
                     'site_code', 'unit_id', 'concession_id',
                     'first_name', 'last_name', 'phone', 'email',
-                    'needed_date',
+                    'needed_date', 'session_id', 'customer_id',
                 ],
-                'recommended': ['plan_id', 'session_id', 'customer_id'],
+                'recommended_fields': ['plan_id', 'previous_request_id'],
+                # Pre-filled from slot 1 (Best Match) so the bot can ship
+                # the reserve call with these values verbatim. Override
+                # if the customer picked a different slot.
+                'site_code':           slot1_row.site_code if slot1_row else None,
+                'unit_id':             slot1_row.unit_id if slot1_row else None,
+                'concession_id':       slot1_row.concession_id if slot1_row else None,
+                'plan_id':             slot1_row.plan_id if slot1_row else None,
+                'session_id':          req.context.get('session_id'),
+                'customer_id':         req.context.get('customer_id'),
+                'previous_request_id': request_id,
             },
             'tracking_id': None,  # filled after log_served
         }

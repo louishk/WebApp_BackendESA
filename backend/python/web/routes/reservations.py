@@ -590,10 +590,41 @@ def reservation_reserve():
         source_name  — lead source                     [optional, default: "ESA Backend"]
     """
     from common.soap_client import SOAPFaultError
+    from web.utils import idempotency as _idem
 
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
+
+    # S5 — Idempotency-Key replay protection on /reserve. Without this, a
+    # network blip after TenantNewDetailed_v3 succeeds but before
+    # ReservationNewWithSource_v6 returns leaves an orphan tenant in
+    # SiteLink, and the bot's retry creates a duplicate. Same semantics
+    # as /move-in: cache successful response 24h; replay returns
+    # `idempotent_replay: true` with the original tenant_id/waiting_id.
+    # Same body required (body_hash check) — different body → HTTP 422.
+    idem_key = (request.headers.get('Idempotency-Key') or '').strip()[:120]
+    api_key_id = getattr(g, 'api_key_id', None)
+    idem_db = current_app.get_middleware_session() if idem_key else None
+    if idem_key and idem_db is not None:
+        try:
+            cached = _idem.lookup(
+                idem_key, '/api/reservations/reserve',
+                api_key_id, idem_db, request_body=data,
+            )
+            if cached:
+                if cached and cached[0] == _idem.BODY_MISMATCH:
+                    return jsonify({
+                        'error': 'idempotency_key_body_mismatch',
+                        'hint': 'This Idempotency-Key was previously used with a different request body. Use a NEW key for a new reservation; reuse only when retrying the SAME body.',
+                    }), 422
+                cached_status, cached_body = cached
+                cached_body = dict(cached_body)
+                cached_body['idempotent_replay'] = True
+                return jsonify(cached_body), cached_status
+        finally:
+            try: idem_db.close()
+            except Exception: pass
 
     # Validate required fields
     site_code = data.get('site_code', '').strip()
@@ -799,7 +830,7 @@ def reservation_reserve():
             session_id=_clamp(data.get('session_id', ''), 64) or None,
         )
 
-        return jsonify({
+        response_body = {
             'success': True,
             'site_code': site_code,
             'unit_id': unit_id,
@@ -807,7 +838,24 @@ def reservation_reserve():
             'waiting_id': waiting_id,
             'global_waiting_num': global_waiting_num,
             'message': 'Reservation created',
-        })
+        }
+
+        # S5 — cache the success under the Idempotency-Key for 24h replay.
+        # Only successful responses are cached; a 4xx with corrected input
+        # under the SAME key is allowed (will be matched by body hash).
+        if idem_key:
+            _store_db = current_app.get_middleware_session()
+            try:
+                _idem.store(idem_key, '/api/reservations/reserve',
+                            api_key_id, 200, response_body, _store_db,
+                            request_body=data)
+            except Exception as exc:
+                logger.warning("idempotency store failed on /reserve: %s", exc)
+            finally:
+                try: _store_db.close()
+                except Exception: pass
+
+        return jsonify(response_body)
 
     except SOAPFaultError as e:
         logger.error(f"SOAP fault in reserve flow: {e}")
@@ -2567,21 +2615,25 @@ def move_in_reservation():
     #   ON  → guard cross-checks payment_amount against SOAP MoveInCostRetrieve.
     #   OFF → guard uses the internal calculator (no SOAP on the happy path),
     #         falling back to SOAP only if the calculator can't compute.
+    # P2: read both flags in ONE session open at the top of the handler.
+    # The settings module has its own 60s in-process cache, so this is
+    # rarely a real DB hit — but it removes a redundant pool checkout +
+    # a fragile inner try/finally that used to live in the post-mortem
+    # branch.
     soap_check_enabled = True
+    postmortem_enabled = True
     try:
         from web.services import recommender_settings
-        _settings_db = current_app.get_middleware_session()
+        _flags_db = current_app.get_middleware_session()
         try:
-            soap_check_enabled = bool(
-                recommender_settings.get_setting(
-                    'movein_soap_cost_check_enabled', _settings_db,
-                )
-            )
+            all_flags = recommender_settings.get_all_settings(_flags_db)
         finally:
-            _settings_db.close()
+            _flags_db.close()
+        soap_check_enabled = bool(all_flags.get('movein_soap_cost_check_enabled', True))
+        postmortem_enabled = bool(all_flags.get('movein_failure_postmortem_enabled', True))
     except Exception as exc:
         logger.warning(
-            "sanity guard: setting lookup failed (defaulting to SOAP check ON): %s",
+            "sanity guard: settings lookup failed (defaulting both flags ON): %s",
             exc,
         )
 
@@ -2742,22 +2794,8 @@ def move_in_reservation():
             # MoveInCostRetrieve to surface the calc/SOAP/sent delta. The bot
             # can then decide to re-quote and retry (with a fresh
             # Idempotency-Key — the failed attempt is not cached).
-            # Gated by toggle B: movein_failure_postmortem_enabled (default ON).
-            postmortem_enabled = True
-            try:
-                from web.services import recommender_settings as _rs
-                _pm_db = current_app.get_middleware_session()
-                try:
-                    postmortem_enabled = bool(_rs.get_setting(
-                        'movein_failure_postmortem_enabled', _pm_db,
-                    ))
-                finally:
-                    _pm_db.close()
-            except Exception as exc:
-                logger.warning(
-                    "post-mortem: setting lookup failed (defaulting ON): %s", exc,
-                )
-
+            # Gated by toggle B: movein_failure_postmortem_enabled
+            # (read at the top of the handler — see P2 comment).
             if postmortem_enabled and _is_cost_related_movein_failure(ret_msg):
                 try:
                     soap_truth = float(_compute_soap_movein_cost(

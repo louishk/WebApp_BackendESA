@@ -348,7 +348,7 @@ Level 3   Continuation off L2                         ─── previous_request
 Level 4   REJECTED with HTTP 400 ─── customer must accept a slot or pivot to a fresh L1
 ```
 
-`stats.recommendation_level` (1, 2, or 3) tells you where you are. `next_turn.next_level_allowed` flips to `false` on level-3 — that's your signal to stop chaining.
+`stats.recommendation_level` (diagnostic, 1/2/3 today) tells you where you are. `next_turn.next_level_allowed` flips to `false` once the configured cap is reached — **that is the only safe signal to stop chaining**. The depth cap is admin-tunable (1–6); **do not hard-code on `recommendation_level == 3`** or your bot will break the moment ops widens or tightens it.
 
 ### Action vocabulary
 
