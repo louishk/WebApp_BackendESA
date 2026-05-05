@@ -165,3 +165,84 @@ def compute_cell_factors(session: Session,
             is_thin_data=sample < sample_size_threshold,
         ))
     return cells
+
+
+from common.risk_lookup import resolve_effective_factor
+
+
+def upsert_baseline(session: Session, country_code: str, baseline: BaselineResult) -> None:
+    session.execute(text("""
+        INSERT INTO unit_category_risk_baseline
+            (country_code, window_start, window_end, moveout_count,
+             unit_months_occupied, baseline_rate, computed_at)
+        VALUES (:cc, :ws, :we, :mo, :um, :rate, CURRENT_TIMESTAMP)
+        ON CONFLICT (country_code) DO UPDATE SET
+            window_start = EXCLUDED.window_start,
+            window_end = EXCLUDED.window_end,
+            moveout_count = EXCLUDED.moveout_count,
+            unit_months_occupied = EXCLUDED.unit_months_occupied,
+            baseline_rate = EXCLUDED.baseline_rate,
+            computed_at = EXCLUDED.computed_at
+    """), {"cc": country_code,
+           "ws": baseline.window_start, "we": baseline.window_end,
+           "mo": baseline.moveout_count,
+           "um": float(baseline.unit_months_occupied),
+           "rate": float(baseline.baseline_rate)})
+    session.commit()
+
+
+def upsert_factors(session: Session, country_code: str, cells: list[CellFactor]) -> None:
+    """UPSERT cells; preserve override_*; recompute effective_factor.
+
+    Reads existing override (if any) per cell, computes effective via
+    resolve_effective_factor, and writes that. Override columns themselves
+    are not touched in the UPDATE branch.
+    """
+    for c in cells:
+        existing = session.execute(text("""
+            SELECT override_factor FROM unit_category_risk_factor
+             WHERE country_code=:cc AND dimension=:d AND value=:v
+        """), {"cc": country_code, "d": c.dimension, "v": c.value}).fetchone()
+        existing_override = float(existing[0]) if existing and existing[0] is not None else None
+        empirical = float(c.empirical_factor) if c.empirical_factor is not None else None
+        effective, _src = resolve_effective_factor(
+            empirical=empirical, override=existing_override, is_thin=c.is_thin_data)
+
+        session.execute(text("""
+            INSERT INTO unit_category_risk_factor
+                (country_code, dimension, value, sample_size,
+                 unit_months_occupied, empirical_factor,
+                 effective_factor, is_thin_data, computed_at)
+            VALUES (:cc, :d, :v, :ss, :um, :emp, :eff, :thin, CURRENT_TIMESTAMP)
+            ON CONFLICT (country_code, dimension, value) DO UPDATE SET
+                sample_size = EXCLUDED.sample_size,
+                unit_months_occupied = EXCLUDED.unit_months_occupied,
+                empirical_factor = EXCLUDED.empirical_factor,
+                effective_factor = EXCLUDED.effective_factor,
+                is_thin_data = EXCLUDED.is_thin_data,
+                computed_at = EXCLUDED.computed_at
+        """), {"cc": country_code, "d": c.dimension, "v": c.value,
+               "ss": c.sample_size, "um": float(c.unit_months_occupied),
+               "emp": empirical, "eff": effective, "thin": c.is_thin_data})
+    session.commit()
+
+
+def snapshot_history(session: Session, country_code: str,
+                     baseline: BaselineResult,
+                     cells: list[CellFactor],
+                     month: dt.date) -> None:
+    for c in cells:
+        session.execute(text("""
+            INSERT INTO unit_category_risk_history
+                (snapshot_month, country_code, dimension, value,
+                 empirical_factor, sample_size, baseline_rate)
+            VALUES (:m, :cc, :d, :v, :emp, :ss, :rate)
+            ON CONFLICT (country_code, dimension, value, snapshot_month)
+            DO UPDATE SET
+                empirical_factor = EXCLUDED.empirical_factor,
+                sample_size = EXCLUDED.sample_size,
+                baseline_rate = EXCLUDED.baseline_rate
+        """), {"m": month, "cc": country_code, "d": c.dimension, "v": c.value,
+               "emp": float(c.empirical_factor) if c.empirical_factor is not None else None,
+               "ss": c.sample_size, "rate": float(baseline.baseline_rate)})
+    session.commit()

@@ -92,3 +92,65 @@ def test_cell_factors_size_S(session):
 
     # No units of size M → cell shouldn't appear
     assert not any(c for c in cells if c.dimension == "size" and c.value == "M")
+
+
+from datalayer.unit_category_risk import upsert_factors, upsert_baseline
+from sqlalchemy import text
+
+
+def _ensure_risk_tables(session):
+    """SQLite-friendly create of the 3 risk tables for tests."""
+    session.execute(text("""
+        CREATE TABLE IF NOT EXISTS unit_category_risk_baseline (
+            country_code VARCHAR(2) PRIMARY KEY,
+            window_start DATE, window_end DATE,
+            moveout_count INTEGER, unit_months_occupied NUMERIC,
+            baseline_rate NUMERIC, computed_at DATETIME)"""))
+    session.execute(text("""
+        CREATE TABLE IF NOT EXISTS unit_category_risk_factor (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            country_code VARCHAR(2), dimension VARCHAR(16), value VARCHAR(16),
+            sample_size INTEGER, unit_months_occupied NUMERIC,
+            empirical_factor NUMERIC, override_factor NUMERIC,
+            effective_factor NUMERIC, is_thin_data BOOLEAN,
+            override_reason TEXT, override_by VARCHAR(64),
+            override_at DATETIME, computed_at DATETIME,
+            UNIQUE (country_code, dimension, value))"""))
+    session.execute(text("""
+        CREATE TABLE IF NOT EXISTS unit_category_risk_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_month DATE, country_code VARCHAR(2),
+            dimension VARCHAR(16), value VARCHAR(16),
+            empirical_factor NUMERIC, sample_size INTEGER,
+            baseline_rate NUMERIC,
+            UNIQUE (country_code, dimension, value, snapshot_month))"""))
+    session.commit()
+
+
+def test_override_preserved_across_recompute(session):
+    _ensure_risk_tables(session)
+    we = dt.date(2026, 5, 5)
+    ws = we - dt.timedelta(days=365 * 2)
+    baseline = compute_country_baseline(session, "Korea", ws, we)
+    upsert_baseline(session, country_code="KR", baseline=baseline)
+    cells = compute_cell_factors(
+        session, "Korea", ws, we, float(baseline.baseline_rate), 5)
+    upsert_factors(session, country_code="KR", cells=cells)
+
+    # Set an admin override on size=S
+    session.execute(text("""
+        UPDATE unit_category_risk_factor
+           SET override_factor = 1.25, override_by = 'tester',
+               override_reason = 'manual', override_at = CURRENT_TIMESTAMP,
+               effective_factor = 1.25
+         WHERE country_code='KR' AND dimension='size' AND value='S'"""))
+    session.commit()
+
+    # Re-run upsert (simulated recompute)
+    upsert_factors(session, country_code="KR", cells=cells)
+    row = session.execute(text("""
+        SELECT override_factor, effective_factor FROM unit_category_risk_factor
+         WHERE country_code='KR' AND dimension='size' AND value='S'""")).fetchone()
+    assert float(row[0]) == 1.25
+    # Effective should still be the override
+    assert float(row[1]) == 1.25
