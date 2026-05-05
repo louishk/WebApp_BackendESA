@@ -4338,3 +4338,58 @@ class LeaseFollowupJob(Base, BaseModel):
     related_request_id  = Column(String(64))
     related_session_id  = Column(String(64))
     related_customer_id = Column(String(120))
+
+
+# === Unit-Category Risk Scoring ===
+
+class UnitCategoryRiskBaseline(Base, BaseModel):
+    __tablename__ = 'unit_category_risk_baseline'
+
+    country_code = Column(String(2), primary_key=True)
+    window_start = Column(Date, nullable=False)
+    window_end = Column(Date, nullable=False)
+    moveout_count = Column(Integer, nullable=False, default=0)
+    unit_months_occupied = Column(Numeric(14, 2), nullable=False, default=0)
+    baseline_rate = Column(Numeric(8, 6), nullable=False, default=0)
+    computed_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class UnitCategoryRiskFactor(Base, BaseModel):
+    __tablename__ = 'unit_category_risk_factor'
+
+    id = Column(Integer, primary_key=True)
+    country_code = Column(String(2), nullable=False, index=True)
+    dimension = Column(String(16), nullable=False)
+    value = Column(String(16), nullable=False)
+    sample_size = Column(Integer, nullable=False, default=0)
+    unit_months_occupied = Column(Numeric(14, 2), nullable=False, default=0)
+    empirical_factor = Column(Numeric(8, 6), nullable=True)
+    override_factor = Column(Numeric(8, 6), nullable=True)
+    effective_factor = Column(Numeric(8, 6), nullable=False, default=1.0)
+    is_thin_data = Column(Boolean, nullable=False, default=True)
+    override_reason = Column(Text, nullable=True)
+    override_by = Column(String(64), nullable=True)
+    override_at = Column(DateTime(timezone=True), nullable=True)
+    computed_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('country_code', 'dimension', 'value', name='uq_risk_factor'),
+    )
+
+
+class UnitCategoryRiskHistory(Base, BaseModel):
+    __tablename__ = 'unit_category_risk_history'
+
+    id = Column(Integer, primary_key=True)
+    snapshot_month = Column(Date, nullable=False)
+    country_code = Column(String(2), nullable=False)
+    dimension = Column(String(16), nullable=False)
+    value = Column(String(16), nullable=False)
+    empirical_factor = Column(Numeric(8, 6), nullable=True)
+    sample_size = Column(Integer, nullable=False, default=0)
+    baseline_rate = Column(Numeric(8, 6), nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint('country_code', 'dimension', 'value', 'snapshot_month',
+                         name='uq_risk_history'),
+    )
