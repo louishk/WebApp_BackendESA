@@ -69,3 +69,26 @@ def test_baseline_rate_korea(session):
     assert float(result.unit_months_occupied) == pytest.approx(36500 / 30.4375, rel=1e-3)
     assert result.moveout_count == 12
     assert float(result.baseline_rate) == pytest.approx(12 / (36500 / 30.4375), rel=1e-3)
+
+
+from datalayer.unit_category_risk import compute_cell_factors
+
+
+def test_cell_factors_size_S(session):
+    we = dt.date(2026, 5, 5)
+    ws = we - dt.timedelta(days=365 * 2)
+    baseline = compute_country_baseline(session, "Korea", ws, we)
+    cells = compute_cell_factors(
+        session, country_name="Korea",
+        window_start=ws, window_end=we,
+        baseline_rate=float(baseline.baseline_rate),
+        sample_size_threshold=5,
+    )
+    # All units are S/8-10/W/A/SS/NP, so size=S cell rate == baseline → factor 1.0
+    size_s = next(c for c in cells if c.dimension == "size" and c.value == "S")
+    assert float(size_s.empirical_factor) == pytest.approx(1.0, rel=1e-3)
+    assert size_s.sample_size == 12
+    assert size_s.is_thin_data is False  # 12 >= 5
+
+    # No units of size M → cell shouldn't appear
+    assert not any(c for c in cells if c.dimension == "size" and c.value == "M")
