@@ -102,8 +102,10 @@ from .soap_reports import SOAPReportClient, ReportConfig, REPORT_REGISTRY
 # SugarCRM client
 from .sugarcrm_client import SugarCRMClient
 
-# Zoom Phone client
-from .zoom_client import ZoomClient, ZoomAPIError
+# Zoom Phone client — zoom_client.py was never committed (existed only
+# on the VM via some out-of-band copy). Disabled here to keep startup
+# clean; restore the import when zoom_client.py lands in the repo.
+# from .zoom_client import ZoomClient, ZoomAPIError
 
 # Pipeline DB helper
 from .pipeline_db import PipelineDB
