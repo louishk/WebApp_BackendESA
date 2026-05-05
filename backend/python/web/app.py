@@ -285,11 +285,28 @@ def create_app(config=None, db_url=None):
         )
     from web.routes.visits import visits_bp
     from web.routes.revenue import revenue_bp
-    from web.routes.tenants import tenants_bp
+    # tenants, reservation_fees, orchestrator_ui — same VM-only pattern.
+    try:
+        from web.routes.tenants import tenants_bp
+    except ModuleNotFoundError as _exc:
+        tenants_bp = None
+        import logging as _logging
+        _logging.getLogger(__name__).warning("tenants blueprint unavailable: %s", _exc)
     from web.routes.billing import billing_bp
     from web.routes.units import units_bp
-    from web.routes.reservation_fees import reservation_fees_bp, reservation_fees_api_bp
-    from web.routes.orchestrator_ui import orchestrator_ui_bp
+    try:
+        from web.routes.reservation_fees import reservation_fees_bp, reservation_fees_api_bp
+    except ModuleNotFoundError as _exc:
+        reservation_fees_bp = None
+        reservation_fees_api_bp = None
+        import logging as _logging
+        _logging.getLogger(__name__).warning("reservation_fees blueprint unavailable: %s", _exc)
+    try:
+        from web.routes.orchestrator_ui import orchestrator_ui_bp
+    except ModuleNotFoundError as _exc:
+        orchestrator_ui_bp = None
+        import logging as _logging
+        _logging.getLogger(__name__).warning("orchestrator_ui blueprint unavailable: %s", _exc)
     from web.routes.recommendation_engine import recommendation_engine_bp
     from web.routes.recommendations import recommendations_bp
     from web.routes.risk import bp as risk_bp
@@ -322,12 +339,16 @@ def create_app(config=None, db_url=None):
         app.register_blueprint(stripe_bp)
     app.register_blueprint(visits_bp)
     app.register_blueprint(revenue_bp)
-    app.register_blueprint(tenants_bp)
+    if tenants_bp is not None:
+        app.register_blueprint(tenants_bp)
     app.register_blueprint(billing_bp)
     app.register_blueprint(units_bp)
-    app.register_blueprint(reservation_fees_bp)
-    app.register_blueprint(reservation_fees_api_bp)
-    app.register_blueprint(orchestrator_ui_bp)
+    if reservation_fees_bp is not None:
+        app.register_blueprint(reservation_fees_bp)
+    if reservation_fees_api_bp is not None:
+        app.register_blueprint(reservation_fees_api_bp)
+    if orchestrator_ui_bp is not None:
+        app.register_blueprint(orchestrator_ui_bp)
     app.register_blueprint(recommendation_engine_bp)
     app.register_blueprint(recommendations_bp)
     app.register_blueprint(risk_bp)
@@ -337,8 +358,10 @@ def create_app(config=None, db_url=None):
     # Exempt API routes from CSRF (they use JWT authentication, not session cookies)
     csrf.exempt(api_bp)
     csrf.exempt(reservations_bp)
-    csrf.exempt(tenants_bp)
-    csrf.exempt(reservation_fees_api_bp)
+    if tenants_bp is not None:
+        csrf.exempt(tenants_bp)
+    if reservation_fees_api_bp is not None:
+        csrf.exempt(reservation_fees_api_bp)
     csrf.exempt(billing_bp)
     if sync_service_bp is not None:
         csrf.exempt(sync_service_bp)
