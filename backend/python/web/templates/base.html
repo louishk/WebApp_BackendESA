@@ -290,7 +290,7 @@
                 {% if current_user.can_access_statistics() %}
                     <a href="{{ url_for('statistics.dashboard') }}" class="{{ 'active' if request.endpoint and 'statistics' in request.endpoint else '' }}">Statistics</a>
                 {% endif %}
-                {% set has_revenue = current_user.can_access_revenue_tools() or current_user.can_access_ecri() %}
+                {% set has_revenue = current_user.can_access_revenue_tools() or (current_user.can_access_ecri() and has_endpoint('ecri.dashboard')) %}
                 {% if has_revenue %}
                     <a href="{{ url_for('revenue.dashboard') if current_user.can_access_revenue_tools() else url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint) else '' }}">Revenue</a>
                 {% endif %}
@@ -324,7 +324,7 @@
         {% if current_user.can_access_revenue_tools() %}
         <a href="{{ url_for('revenue.dashboard') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('revenue.') else '' }}">Revenue Analysis</a>
         {% endif %}
-        {% if current_user.can_access_ecri() %}
+        {% if current_user.can_access_ecri() and has_endpoint('ecri.dashboard') %}
         <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
         {% endif %}
     </div>
@@ -338,13 +338,13 @@
         <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint and 'discount_plans' in request.endpoint else '' }}">Discount Plans</a>
         <a href="{{ url_for('recommendation_engine.index') }}" class="{{ 'active' if request.endpoint and 'recommendation_engine' in request.endpoint else '' }}">Recommendation Engine</a>
         {% endif %}
-        {% if current_user.can_access_revenue_tools() %}
+        {% if current_user.can_access_revenue_tools() and has_endpoint('reservation_fees.page') %}
         <a href="{{ url_for('reservation_fees.page') }}" class="{{ 'active' if request.endpoint and 'reservation_fees' in request.endpoint else '' }}">Reservation Fees</a>
         {% endif %}
         {% if current_user.can_access_smart_lock() %}
         <a href="{{ url_for('tools.smart_lock_bridges') }}" class="{{ 'active' if request.endpoint and 'smart_lock' in request.endpoint else '' }}">Smart Lock</a>
         {% endif %}
-        {% if current_user.can_access_scheduler() %}
+        {% if current_user.can_access_scheduler() and has_endpoint('orchestrator_ui.dashboard') %}
         <a href="{{ url_for('orchestrator_ui.dashboard') }}" class="{{ 'active' if request.endpoint and 'orchestrator_ui' in request.endpoint else '' }}">Orchestrator</a>
         {% endif %}
     </div>

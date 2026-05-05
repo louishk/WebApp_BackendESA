@@ -246,6 +246,20 @@ def create_app(config=None, db_url=None):
         from flask_login import current_user
         return dict(current_user=current_user)
 
+    # Defensive helper for templates that link to optional blueprints.
+    # Some routes (ecri, stripe, reservation_fees, orchestrator_ui,
+    # tenants) ship as optional — they may not be registered in this
+    # deploy. Templates use {% if has_endpoint('ecri.dashboard') %} to
+    # gate links instead of crashing the navbar with BuildError.
+    @app.context_processor
+    def inject_endpoint_helpers():
+        def has_endpoint(name: str) -> bool:
+            try:
+                return name in app.view_functions
+            except Exception:
+                return False
+        return dict(has_endpoint=has_endpoint)
+
     # Register blueprints
     from web.routes.main import main_bp
     from web.routes.auth import auth_bp
