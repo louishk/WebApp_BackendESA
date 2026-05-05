@@ -17,6 +17,20 @@ backend:
     timeout: 60
     recycle: 1800
 
+# Middleware database (discount plans, reservation fees, and other middleware-tier tables)
+middleware:
+  host: "esapbi.postgres.database.azure.com"
+  port: 5432
+  name: "esa_middleware"
+  username: "esa_pbi_admin"
+  password_vault: "DB_PASSWORD"
+  sslmode: "require"
+  pool:
+    size: 5
+    max_overflow: 10
+    timeout: 60
+    recycle: 1800
+
 # PBI database (Power BI data warehouse)
 pbi:
   host: "esapbi.postgres.database.azure.com"
