@@ -1,0 +1,15 @@
+# =============================================================================
+# ESA Backend - ECRI Tool Configuration
+# =============================================================================
+
+# LSETUP (test site) allowlist — site_ids (as stored in SiteInfo.SiteID) that
+# are considered safe for live SOAP pushes without confirm_live=true.
+#
+# When calling POST /ecri/api/batch/<id>/execute with dry_run=false:
+#   - If every selected ledger's site_id is in this list, the call proceeds
+#     without confirm_live (LSETUP test site only).
+#   - If ANY selected ledger's site_id is NOT in this list, the request MUST
+#     include confirm_live=true, otherwise returns 409.
+#
+# Leave empty to force confirm_live=true for every non-dry-run execute.
+lsetup_allowlist_site_ids: [27525]  # SiteCode LSETUP — Extra Space Setup/Test Site

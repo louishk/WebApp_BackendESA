@@ -196,6 +196,8 @@ def api_eligible_tenants():
         # Build the eligibility SQL (Steps 2-4 from the spec).
         # vw_ecri_eligible_ledgers = ccws_ledgers (active tenants, live pipeline)
         # joined to latest rentroll_enriched. See migration 030.
+        # LEFT JOIN units_info_enriched for normalized size/climate labels and sqft —
+        # used downstream for cross-site (country / top-N) benchmarks.
         eligibility_sql = text("""
             SELECT
                 l."SiteID",
@@ -213,8 +215,12 @@ def api_eligible_tenants():
                 l."TenantID",
                 l."sUnit" AS unit_name,
                 l."sTypeName" AS unit_type,
-                l."dcStdRate" AS std_rate
+                l."dcStdRate" AS std_rate,
+                u.label_size_range AS size_range,
+                u.label_climate_code AS climate_code,
+                u.dcarea_fixed AS sqft
             FROM vw_ecri_eligible_ledgers l
+            LEFT JOIN units_info_enriched u ON u."UnitID" = l."UnitID"
             WHERE l."SiteID" = ANY(:site_ids)
               -- Step 2: Active only (ccws_ledgers is active-only by design;
               --         dMovedIn check kept as a safety net)
@@ -239,19 +245,21 @@ def api_eligible_tenants():
 
         # Build eligible tenants list with benchmarking
         eligible = []
-        # Group by site+unit_type for in-place median calculation
+        # Group by site+unit_type for in-place median calculation (rent and $/sqft)
         site_type_rents = {}
+        site_type_psfs = {}
 
         for row in rows:
             r = dict(zip(columns, row))
             current_rent = float(r['current_rent']) if r['current_rent'] else 0
             site_id = r['SiteID']
             unit_type = r['unit_type'] or 'Unknown'
+            sqft_v = float(r['sqft']) if r.get('sqft') else None
 
             key = (site_id, unit_type)
-            if key not in site_type_rents:
-                site_type_rents[key] = []
-            site_type_rents[key].append(current_rent)
+            site_type_rents.setdefault(key, []).append(current_rent)
+            if sqft_v and sqft_v > 0 and current_rent:
+                site_type_psfs.setdefault(key, []).append(current_rent / sqft_v)
 
         # Calculate medians
         def median(values):
@@ -264,6 +272,77 @@ def api_eligible_tenants():
             return s[n // 2]
 
         site_type_medians = {k: median(v) for k, v in site_type_rents.items()}
+        site_type_psf_medians = {k: median(v) for k, v in site_type_psfs.items()}
+
+        # Cross-site (country) benchmarks per (size_range, climate_code) cell.
+        # Country derived from the most common country across the requested sites.
+        country_row = session.execute(text("""
+            SELECT "Country", COUNT(*) AS n
+            FROM siteinfo
+            WHERE "SiteID" = ANY(:site_ids) AND "Country" IS NOT NULL
+            GROUP BY "Country"
+            ORDER BY n DESC
+            LIMIT 1
+        """), {'site_ids': site_ids}).fetchone()
+        country = country_row[0] if country_row else None
+
+        country_benchmarks = {}
+        if country:
+            bench_sql = text("""
+                WITH base AS (
+                    SELECT l."SiteID", l."dcRent", u.dcarea_fixed AS sqft,
+                           u.label_size_range AS sz, u.label_climate_code AS cc,
+                           CASE WHEN u.dcarea_fixed > 0 THEN l."dcRent" / u.dcarea_fixed END AS psf
+                    FROM vw_ecri_eligible_ledgers l
+                    JOIN units_info_enriched u ON u."UnitID" = l."UnitID"
+                    JOIN siteinfo s ON s."SiteID" = l."SiteID"
+                    WHERE s."Country" = :country
+                      AND s."SiteCode" <> 'LSETUP'
+                      AND l."dcRent" > 0
+                      AND u.label_size_range IS NOT NULL
+                      AND u.label_climate_code IS NOT NULL
+                ),
+                sm AS (
+                    SELECT "SiteID", sz, cc,
+                           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "dcRent") AS rent_med,
+                           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY psf)
+                               FILTER (WHERE psf IS NOT NULL) AS psf_med,
+                           COUNT(*) AS n
+                    FROM base GROUP BY "SiteID", sz, cc HAVING COUNT(*) >= 5
+                ),
+                rk AS (
+                    SELECT sz, cc, "SiteID", rent_med, psf_med,
+                           ROW_NUMBER() OVER (PARTITION BY sz, cc ORDER BY rent_med DESC) AS rent_rk,
+                           ROW_NUMBER() OVER (PARTITION BY sz, cc ORDER BY psf_med DESC NULLS LAST) AS psf_rk
+                    FROM sm
+                )
+                SELECT b.sz, b.cc,
+                       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b."dcRent") AS country_rent_med,
+                       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b.psf)
+                           FILTER (WHERE b.psf IS NOT NULL) AS country_psf_med,
+                       (SELECT rent_med FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.rent_rk=1) AS top1_rent,
+                       (SELECT AVG(rent_med) FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.rent_rk<=3) AS top3_rent,
+                       (SELECT psf_med FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.psf_rk=1) AS top1_psf,
+                       (SELECT AVG(psf_med) FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.psf_rk<=3) AS top3_psf,
+                       COUNT(DISTINCT b."SiteID") AS n_sites
+                FROM base b
+                GROUP BY b.sz, b.cc
+            """)
+            for br in session.execute(bench_sql, {'country': country}).fetchall():
+                country_benchmarks[(br[0], br[1])] = {
+                    'country_rent_med': float(br[2]) if br[2] is not None else None,
+                    'country_psf_med': float(br[3]) if br[3] is not None else None,
+                    'top1_rent': float(br[4]) if br[4] is not None else None,
+                    'top3_rent': float(br[5]) if br[5] is not None else None,
+                    'top1_psf': float(br[6]) if br[6] is not None else None,
+                    'top3_psf': float(br[7]) if br[7] is not None else None,
+                    'n_sites': int(br[8]) if br[8] is not None else 0,
+                }
+
+        def variance_pct(actual, ref):
+            if actual is None or ref is None or ref <= 0:
+                return None
+            return round((actual - ref) / ref * 100, 1)
 
         # Build final list
         for row in rows:
@@ -273,20 +352,37 @@ def api_eligible_tenants():
             site_id = r['SiteID']
             unit_type = r['unit_type'] or 'Unknown'
             moved_in = r['dMovedIn']
+            sz = r.get('size_range')
+            cc = r.get('climate_code')
+            sqft = float(r['sqft']) if r.get('sqft') else None
+            current_psf = round(current_rent / sqft, 3) if sqft and sqft > 0 and current_rent else None
 
-            # In-place benchmark
+            # In-place benchmark (rent + $/sqft)
             in_place_median = site_type_medians.get((site_id, unit_type))
-            variance_vs_site = None
-            if in_place_median and current_rent and in_place_median > 0:
-                variance_vs_site = round((current_rent - in_place_median) / in_place_median * 100, 1)
+            in_place_psf_median = site_type_psf_medians.get((site_id, unit_type))
+            variance_vs_site = variance_pct(current_rent, in_place_median)
+            variance_psf_vs_site = variance_pct(current_psf, in_place_psf_median)
 
-            # Market rate benchmark
+            # Market rate benchmark (rent + $/sqft)
             market_rate = None
             variance_vs_market = None
+            market_psf = None
+            variance_psf_vs_market = None
             if std_rate and std_rate > 0:
                 market_rate = round(float(std_rate) * (1 - discount_ref_pct / 100), 2)
-                if current_rent and market_rate > 0:
-                    variance_vs_market = round((current_rent - market_rate) / market_rate * 100, 1)
+                variance_vs_market = variance_pct(current_rent, market_rate)
+                if sqft and sqft > 0:
+                    market_psf = round(market_rate / sqft, 3)
+                    variance_psf_vs_market = variance_pct(current_psf, market_psf)
+
+            # Country / Top-N benchmarks
+            bench = country_benchmarks.get((sz, cc)) if sz and cc else None
+            country_rent_med = bench['country_rent_med'] if bench else None
+            top1_rent = bench['top1_rent'] if bench else None
+            top3_rent = bench['top3_rent'] if bench else None
+            country_psf_med = bench['country_psf_med'] if bench else None
+            top1_psf = bench['top1_psf'] if bench else None
+            top3_psf = bench['top3_psf'] if bench else None
 
             # Tenure calculation
             tenure_months = None
@@ -307,9 +403,30 @@ def api_eligible_tenants():
                 'last_increase_date': r['dRentLastChanged'].isoformat() if r['dRentLastChanged'] else None,
                 'tenure_months': tenure_months,
                 'in_place_median_site': round(in_place_median, 2) if in_place_median else None,
+                'in_place_psf_site': round(in_place_psf_median, 3) if in_place_psf_median else None,
+                'variance_psf_vs_site': variance_psf_vs_site,
                 'market_rate': market_rate,
+                'market_psf': market_psf,
+                'variance_psf_vs_market': variance_psf_vs_market,
                 'variance_vs_site': variance_vs_site,
                 'variance_vs_market': variance_vs_market,
+                # Cross-site benchmarks
+                'size_range': sz,
+                'climate_code': cc,
+                'sqft': sqft,
+                'current_psf': current_psf,
+                'country_rent_med': round(country_rent_med, 2) if country_rent_med else None,
+                'top3_rent': round(top3_rent, 2) if top3_rent else None,
+                'top1_rent': round(top1_rent, 2) if top1_rent else None,
+                'variance_vs_country': variance_pct(current_rent, country_rent_med),
+                'variance_vs_top3': variance_pct(current_rent, top3_rent),
+                'variance_vs_top1': variance_pct(current_rent, top1_rent),
+                'country_psf_med': round(country_psf_med, 3) if country_psf_med else None,
+                'top3_psf': round(top3_psf, 3) if top3_psf else None,
+                'top1_psf': round(top1_psf, 3) if top1_psf else None,
+                'variance_psf_vs_country': variance_pct(current_psf, country_psf_med),
+                'variance_psf_vs_top3': variance_pct(current_psf, top3_psf),
+                'variance_psf_vs_top1': variance_pct(current_psf, top1_psf),
             })
 
         # Exclusion summary (run a separate query for counts).
@@ -355,6 +472,8 @@ def api_eligible_tenants():
                 'min_tenure_months': min_tenure,
                 'sched_out_exclusion_days': sched_out_days,
                 'discount_reference_pct': discount_ref_pct,
+                'benchmark_country': country,
+                'benchmark_cells': len(country_benchmarks),
             }
         })
 
@@ -382,6 +501,162 @@ def api_list_batches():
         return jsonify({
             'batches': [b.to_dict() for b in batches]
         })
+    finally:
+        session.close()
+
+
+@ecri_bp.route('/api/batches/draft')
+@login_required
+@ecri_access_required
+def api_list_draft_batches():
+    """List draft / un-executed batches that can still accept appended ledgers."""
+    from common.models import ECRIBatch
+    APPENDABLE = ('draft', 'site_review', 'rev_approved', 'review')
+    session = get_pbi_session()
+    try:
+        batches = (session.query(ECRIBatch)
+                   .filter(ECRIBatch.status.in_(APPENDABLE))
+                   .order_by(desc(ECRIBatch.created_at))
+                   .all())
+        return jsonify({
+            'batches': [{
+                'batch_id': str(b.batch_id),
+                'name': b.name,
+                'status': b.status,
+                'site_ids': b.site_ids or [],
+                'total_ledgers': b.total_ledgers or 0,
+                'target_increase_pct': float(b.target_increase_pct) if b.target_increase_pct is not None else None,
+                'created_at': b.created_at.isoformat() if b.created_at else None,
+            } for b in batches]
+        })
+    finally:
+        session.close()
+
+
+@ecri_bp.route('/api/batch/<batch_id>/append', methods=['POST'])
+@login_required
+@ecri_manage_required
+def api_append_to_batch(batch_id):
+    """Append eligible ledgers to an existing draft (un-executed) batch."""
+    from common.models import ECRIBatch, ECRIBatchLedger
+    from decimal import Decimal
+
+    APPENDABLE = ('draft', 'site_review', 'rev_approved', 'review')
+    data = request.get_json() or {}
+    new_ledgers = data.get('ledgers', [])
+    if not new_ledgers:
+        return jsonify({'error': 'ledgers list required'}), 400
+
+    session = get_pbi_session()
+    try:
+        batch = session.query(ECRIBatch).filter_by(batch_id=batch_id).first()
+        if not batch:
+            return jsonify({'error': 'Batch not found'}), 404
+        if batch.status not in APPENDABLE:
+            return jsonify({'error': f'Batch is {batch.status}, cannot append'}), 400
+
+        target_pct = data.get('target_increase_pct', batch.target_increase_pct)
+        if target_pct is None:
+            return jsonify({'error': 'target_increase_pct required'}), 400
+        target_pct = float(target_pct)
+        notice_days = batch.notice_period_days or 14
+        today = date.today()
+
+        # Skip ledgers already in this batch
+        existing = {
+            (int(l.site_id), int(l.ledger_id))
+            for l in session.query(ECRIBatchLedger).filter_by(batch_id=batch_id).all()
+        }
+
+        # Pre-fetch anniv/paid_thru for new ledgers
+        site_ledger_pairs = [(int(l['site_id']), int(l['ledger_id'])) for l in new_ledgers]
+        anniv_map = {}
+        if site_ledger_pairs:
+            all_site_ids = list({p[0] for p in site_ledger_pairs})
+            rows = session.execute(text(
+                'SELECT "SiteID", "LedgerID", "dPaidThru", "dAnniv" '
+                'FROM vw_ecri_eligible_ledgers '
+                'WHERE "SiteID" = ANY(:site_ids)'
+            ), {'site_ids': all_site_ids}).fetchall()
+            wanted = set(site_ledger_pairs)
+            for r in rows:
+                key = (int(r[0]), int(r[1]))
+                if key in wanted:
+                    pt = r[2].date() if r[2] is not None else None
+                    an = r[3].date() if r[3] is not None else None
+                    anniv_map[key] = (pt, an)
+
+        appended = 0
+        skipped = 0
+        new_site_ids = set(batch.site_ids or [])
+
+        for led in new_ledgers:
+            key = (int(led['site_id']), int(led['ledger_id']))
+            if key in existing:
+                skipped += 1
+                continue
+            old_rent = float(led['current_rent'])
+            currency = led.get('currency', 'SGD') or 'SGD'
+            raw_new = old_rent * (1 + target_pct / 100)
+            new_rent = float(round_new_rent(Decimal(str(raw_new)), currency))
+            increase_amt = round(new_rent - old_rent, 2)
+
+            paid_thru, anniv = anniv_map.get(key, (None, None))
+            effective_date, notice_date, bucket = compute_effective_date(
+                anniv, paid_thru, today, notice_days
+            )
+
+            session.add(ECRIBatchLedger(
+                batch_id=batch.batch_id,
+                site_id=led['site_id'],
+                ledger_id=led['ledger_id'],
+                tenant_id=led['tenant_id'],
+                unit_id=led.get('unit_id'),
+                unit_name=led.get('unit_name'),
+                tenant_name=led.get('tenant_name'),
+                control_group=0,
+                old_rent=old_rent,
+                new_rent=new_rent,
+                increase_pct=target_pct,
+                increase_amt=increase_amt,
+                planned_new_rent=new_rent,
+                planned_increase_pct=target_pct,
+                planned_increase_amt=increase_amt,
+                notice_date=notice_date,
+                effective_date=effective_date,
+                paid_thru_date=paid_thru,
+                next_lad=next_lease_anniversary(anniv, today) if anniv else None,
+                bucket=bucket,
+                in_place_median_site=led.get('in_place_median_site'),
+                market_rate=led.get('market_rate'),
+                std_rate=led.get('std_rate'),
+                variance_vs_site=led.get('variance_vs_site'),
+                variance_vs_market=led.get('variance_vs_market'),
+                moved_in_date=led.get('moved_in_date'),
+                last_increase_date=led.get('last_increase_date'),
+                tenure_months=led.get('tenure_months'),
+                api_status='pending',
+            ))
+            existing.add(key)
+            new_site_ids.add(int(led['site_id']))
+            appended += 1
+
+        batch.total_ledgers = (batch.total_ledgers or 0) + appended
+        batch.site_ids = sorted(new_site_ids)
+        session.commit()
+
+        return jsonify({
+            'success': True,
+            'batch_id': str(batch.batch_id),
+            'appended': appended,
+            'skipped_duplicates': skipped,
+            'total_ledgers': batch.total_ledgers,
+        })
+
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"ECRI append-to-batch error: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
     finally:
         session.close()
 
@@ -1440,6 +1715,22 @@ def api_batch_outcomes(batch_id):
         ledgers = session.query(ECRIBatchLedger).filter_by(batch_id=batch_id).all()
         outcomes = session.query(ECRIOutcome).filter_by(batch_id=batch_id).all()
 
+        # FX rates — normalise multi-currency rents to SGD so cross-country
+        # batches don't double/decuple-count raw KRW/MYR figures.
+        from sqlalchemy import text as _text
+        fx_rows = session.execute(_text(
+            "SELECT target_currency, rate FROM fx_rates "
+            "WHERE rate_date = (SELECT MAX(rate_date) FROM fx_rates)"
+        )).fetchall()
+        fx = {r[0]: float(r[1]) for r in fx_rows}
+        fx['SGD'] = 1.0
+
+        def _to_sgd(amt, cur):
+            if amt is None:
+                return 0.0
+            rate = fx.get(cur or 'SGD', 1.0)
+            return float(amt) / rate
+
         # Build outcome map
         outcome_map = {}
         for o in outcomes:
@@ -1466,16 +1757,17 @@ def api_batch_outcomes(batch_id):
             groups[g]['count'] += 1
             outcome = outcome_map.get(led.ledger_id)
             otype = outcome['outcome_type'] if outcome else None
+            cur = led.currency or 'SGD'
 
             if otype == 'moved_out':
                 groups[g]['moved_out'] += 1
-                groups[g]['monthly_loss_churn'] += float(led.new_rent)
+                groups[g]['monthly_loss_churn'] += _to_sgd(led.new_rent, cur)
             elif otype == 'scheduled_out':
                 groups[g]['scheduled_out'] += 1
-                groups[g]['monthly_loss_scheduled'] += float(led.new_rent)
+                groups[g]['monthly_loss_scheduled'] += _to_sgd(led.new_rent, cur)
             else:
                 # stayed or pending → presumed staying, contributes upside
-                groups[g]['monthly_gain_stayed'] += float(led.increase_amt)
+                groups[g]['monthly_gain_stayed'] += _to_sgd(led.increase_amt, cur)
                 if otype == 'stayed':
                     groups[g]['stayed'] += 1
                 else:

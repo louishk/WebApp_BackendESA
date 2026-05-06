@@ -83,10 +83,11 @@ def run(mode='auto', **kwargs):
                 ledger_id = led_row[1]
                 notice_date = led_row[2]
 
-                # Check current ledger status in cc_ledgers
+                # Check current ledger status via vw_ecri_eligible_ledgers
+                # (ccws_ledgers is active-only: absence = tenant has moved out).
                 status_sql = text("""
-                    SELECT "dMovedOut", "dSchedOut"
-                    FROM cc_ledgers
+                    SELECT "dSchedOut"
+                    FROM vw_ecri_eligible_ledgers
                     WHERE "SiteID" = :site_id AND "LedgerID" = :ledger_id
                     LIMIT 1
                 """)
@@ -95,23 +96,20 @@ def run(mode='auto', **kwargs):
                     'ledger_id': ledger_id
                 }).fetchone()
 
-                if not status:
-                    continue
-
-                moved_out = status[0]
-                sched_out = status[1]
-
                 outcome_type = None
                 outcome_date = None
                 days_after = None
 
-                if moved_out is not None:
-                    # Tenant has moved out
+                if status is None:
+                    # Absent from live pipeline → tenant has moved out.
+                    # We don't know the exact move-out date from ccws; use today
+                    # as a best-effort. Attribution-window math still works.
                     outcome_type = 'moved_out'
-                    outcome_date = moved_out.date() if hasattr(moved_out, 'date') else moved_out
+                    outcome_date = today
                     if notice_date:
                         days_after = (outcome_date - notice_date).days
-                elif sched_out is not None and sched_out.date() <= window_end:
+                elif status[0] is not None and status[0].date() <= window_end:
+                    sched_out = status[0]
                     # Tenant has scheduled move-out within window
                     outcome_type = 'scheduled_out'
                     outcome_date = sched_out.date() if hasattr(sched_out, 'date') else sched_out

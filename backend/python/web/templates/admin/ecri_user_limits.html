@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block title %}ECRI User Limits - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>ECRI User Settings</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Configure per-user ECRI approval limits and site restrictions.</p>
+</div>
+
+<div class="card">
+    <p style="color:#555; font-size:0.9rem; margin-bottom:1rem;">
+        <strong>Approval limits:</strong> Users can auto-approve objections within their own limits. Approvers can only approve what they themselves could have auto-approved (rank chain). 0/0 = everything requires approval.
+        <br><strong>Allowed sites:</strong> Empty = unrestricted (Revenue). Non-empty = ops restricted to those site IDs.
+        <br><strong>ECRI access</strong> is gated by role permissions — grant the matching role to entitle a user.
+    </p>
+    <table>
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Email</th>
+                <th>Roles</th>
+                <th>Max Pct %</th>
+                <th>Max Abs</th>
+                <th>Allowed Sites</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="users-tbody">
+            <tr><td colspan="7" style="text-align:center; color:#666;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Edit modal -->
+<div id="edit-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:480px;">
+        <h3>Edit ECRI Settings</h3>
+        <input type="hidden" id="edit-user-id">
+        <p id="edit-user-info" style="color:#555;"></p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-bottom:0.75rem;">
+            <div>
+                <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Max Pct Reduction (%)</label>
+                <input type="number" id="edit-max-pct" min="0" step="0.5" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+            </div>
+            <div>
+                <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Max Abs Reduction (currency)</label>
+                <input type="number" id="edit-max-abs" min="0" step="10" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+            </div>
+        </div>
+        <div style="margin-bottom:1.5rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Allowed Site IDs (comma-separated, blank = all)</label>
+            <input type="text" id="edit-sites" placeholder="e.g. 1,3,7" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+        </div>
+        <div style="display:flex; gap:1rem; justify-content:flex-end;">
+            <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+            <button class="btn" onclick="saveUserSettings()">Save</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.modal-content { background:#fff; padding:2rem; border-radius:8px; width:90%; box-shadow:0 4px 20px rgba(0,0,0,0.2); }
+.modal-content h3 { color:var(--esa-navy); margin-bottom:1.5rem; text-align:center; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function getCSRFToken() { const m = document.querySelector('meta[name="csrf-token"]'); return m ? m.getAttribute('content') : ''; }
+    function apiHeaders() { return {'Content-Type':'application/json','X-CSRFToken':getCSRFToken()}; }
+
+    let ALL_USERS = [];
+
+    async function loadUsers() {
+        const tbody = document.getElementById('users-tbody');
+        try {
+            const res = await fetch('/admin/api/users', {headers: apiHeaders()});
+            const data = await res.json();
+            ALL_USERS = data.users || [];
+            renderUsers();
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="7" style="color:#C41230;text-align:center;">Failed to load users — please refresh.</td></tr>`;
+        }
+    }
+
+    function roleNames(u) {
+        if (u.roles && u.roles.length) return u.roles.map(r => r.name).join(', ');
+        return (u.role_names || []).join(', ');
+    }
+
+    function renderUsers() {
+        const tbody = document.getElementById('users-tbody');
+        tbody.innerHTML = ALL_USERS.map(u => `<tr>
+            <td>${u.username}</td>
+            <td style="font-size:0.85rem;">${u.email||'-'}</td>
+            <td style="font-size:0.8rem;">${roleNames(u)||'-'}</td>
+            <td>${(u.ecri_max_pct_reduction||0).toFixed(1)}%</td>
+            <td>${(u.ecri_max_abs_reduction||0).toFixed(2)}</td>
+            <td style="font-size:0.8rem;">${(u.allowed_site_ids&&u.allowed_site_ids.length>0) ? u.allowed_site_ids.join(', ') : '<span style="color:#888;">All</span>'}</td>
+            <td><button class="btn btn-secondary" style="padding:2px 8px;font-size:0.78rem;" onclick="openEdit(${u.id})">Edit</button></td>
+        </tr>`).join('');
+    }
+
+    function openEdit(userId) {
+        const u = ALL_USERS.find(x => x.id === userId);
+        if (!u) return;
+        document.getElementById('edit-user-id').value = userId;
+        document.getElementById('edit-user-info').textContent = `${u.username} (${u.email||'no email'})`;
+        document.getElementById('edit-max-pct').value = u.ecri_max_pct_reduction||0;
+        document.getElementById('edit-max-abs').value = u.ecri_max_abs_reduction||0;
+        document.getElementById('edit-sites').value = (u.allowed_site_ids&&u.allowed_site_ids.length>0) ? u.allowed_site_ids.join(',') : '';
+        document.getElementById('edit-modal').style.display = 'flex';
+    }
+
+    function closeEditModal() { document.getElementById('edit-modal').style.display = 'none'; }
+
+    async function saveUserSettings() {
+        const userId = document.getElementById('edit-user-id').value;
+        const maxPct = parseFloat(document.getElementById('edit-max-pct').value)||0;
+        const maxAbs = parseFloat(document.getElementById('edit-max-abs').value)||0;
+        const sitesRaw = document.getElementById('edit-sites').value.trim();
+        const siteIds = sitesRaw ? sitesRaw.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)) : [];
+        try {
+            const res = await fetch(`/ecri/admin/api/users/${userId}/ecri-settings`, {
+                method:'PUT', headers:apiHeaders(),
+                body: JSON.stringify({ecri_max_pct_reduction:maxPct, ecri_max_abs_reduction:maxAbs, allowed_site_ids:siteIds}),
+            });
+            const d = await res.json();
+            if (d.success) {
+                closeEditModal();
+                const idx = ALL_USERS.findIndex(u=>u.id===parseInt(userId));
+                if (idx >= 0) ALL_USERS[idx] = d.user;
+                renderUsers();
+            } else alert('Error: ' + (d.error||'Unknown'));
+        } catch(e) { alert('Save failed — please try again.'); }
+    }
+
+    loadUsers();
+</script>
+{% endblock %}

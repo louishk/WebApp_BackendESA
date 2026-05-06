@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}ECRI Batches - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>ECRI Batches</h1>
+    <p style="color: #666; margin-top: 0.5rem;">All batches across all stages — filter, review, and track progress.</p>
+</div>
+
+<div class="card">
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center; margin-bottom:0.75rem;">
+        <select id="filter-status" style="padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+            <option value="">All statuses</option>
+            <option value="draft">draft</option>
+            <option value="site_review">site_review</option>
+            <option value="rev_review">rev_review</option>
+            <option value="rev_approved">rev_approved</option>
+            <option value="executing">executing</option>
+            <option value="executed">executed</option>
+            <option value="cancelled">cancelled</option>
+        </select>
+        <input type="text" id="filter-search" placeholder="Search name / ID…"
+               style="flex:1 1 220px; padding:0.5rem 0.75rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;">
+        <span id="batch-count" style="color:#666; font-size:0.85rem;"></span>
+        {% if current_user.can_manage_ecri() %}
+        <a href="{{ url_for('ecri.eligibility') }}" class="btn" style="margin-left:auto;">+ Start New Batch</a>
+        {% endif %}
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Sites</th>
+                <th style="text-align:right;">Ledgers</th>
+                <th>Target %</th>
+                <th>Created</th>
+                <th>Executed</th>
+                <th>Needs Action</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="batches-tbody">
+            <tr><td colspan="9" style="text-align:center; color:#666;">Loading batches…</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<style>
+.status-draft { background:#6C757D; color:#fff; }
+.status-site_review { background:#FFC107; color:#000; }
+.status-rev_review { background:#1e40af; color:#fff; }
+.status-rev_approved { background:#28A745; color:#fff; }
+.status-executing { background:#FFC107; color:#000; }
+.status-executed { background:#065f46; color:#fff; }
+.status-cancelled { background:#C41230; color:#fff; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const USER_CAN_MANAGE = {{ 'true' if current_user.can_manage_ecri() else 'false' }};
+    const USER_CAN_FINALIZE = {{ 'true' if current_user.can_finalize_ecri_batch() else 'false' }};
+    const USER_CAN_EXECUTE = {{ 'true' if current_user.can_execute_ecri_batch() else 'false' }};
+    let ALL_BATCHES = [];
+
+    function getCSRFToken() { const m=document.querySelector('meta[name="csrf-token"]'); return m ? m.getAttribute('content') : ''; }
+    function apiHeaders() { return {'Content-Type':'application/json','X-CSRFToken':getCSRFToken()}; }
+    function formatDate(iso) { return iso ? new Date(iso).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}) : '-'; }
+
+    async function loadBatches() {
+        try {
+            const res = await fetch('/ecri/api/batches', {headers: apiHeaders()});
+            const data = await res.json();
+            ALL_BATCHES = data.batches || [];
+            render();
+        } catch(e) {
+            document.getElementById('batches-tbody').innerHTML = '<tr><td colspan="9" style="text-align:center;color:#C41230;">Failed to load batches.</td></tr>';
+        }
+    }
+
+    function render() {
+        const status = document.getElementById('filter-status').value;
+        const search = document.getElementById('filter-search').value.toLowerCase().trim();
+        const filtered = ALL_BATCHES.filter(b => {
+            if (status && b.status !== status) return false;
+            if (search) {
+                const hay = (`${b.name||''} ${b.batch_id||''}`).toLowerCase();
+                if (!hay.includes(search)) return false;
+            }
+            return true;
+        });
+        document.getElementById('batch-count').textContent = `${filtered.length} of ${ALL_BATCHES.length}`;
+        const tbody = document.getElementById('batches-tbody');
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#666;">No batches match the filters.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = filtered.map(b => {
+            const statusClass = 'status-' + b.status;
+            let actions = `<a href="/ecri/batch/${b.batch_id}/review" class="btn btn-sm">Review</a>`;
+            if (b.status === 'executed') {
+                actions += ` <a href="/ecri/batch/${b.batch_id}/analytics" class="btn btn-sm btn-secondary">Analytics</a>`;
+            }
+            let needs = '—';
+            if (b.status === 'draft' && USER_CAN_MANAGE) needs = '<span style="color:#92400e;">submit for site review</span>';
+            else if (b.status === 'site_review' && USER_CAN_FINALIZE) needs = '<span style="color:#92400e;">close site review</span>';
+            else if (b.status === 'rev_review' && USER_CAN_FINALIZE) needs = '<span style="color:#1e40af;">approve/reject + finalize</span>';
+            else if (b.status === 'rev_approved' && USER_CAN_EXECUTE) needs = '<span style="color:#065f46;">ready to push</span>';
+            return `<tr>
+                <td>${b.name || '(unnamed)'}<br><span style="color:#888;font-size:0.75rem;">${b.batch_id.slice(0,8)}…</span></td>
+                <td><span class="status ${statusClass}">${b.status}</span></td>
+                <td style="font-size:0.8rem;">${(b.site_ids||[]).join(', ')}</td>
+                <td style="text-align:right;">${b.total_ledgers}</td>
+                <td>${b.control_group_enabled ? 'Control groups' : (b.target_increase_pct + '%')}</td>
+                <td>${formatDate(b.created_at)}</td>
+                <td>${formatDate(b.executed_at)}</td>
+                <td style="font-size:0.85rem;">${needs}</td>
+                <td style="white-space:nowrap;">${actions}</td>
+            </tr>`;
+        }).join('');
+    }
+
+    document.getElementById('filter-status').addEventListener('change', render);
+    document.getElementById('filter-search').addEventListener('input', render);
+    loadBatches();
+</script>
+{% endblock %}

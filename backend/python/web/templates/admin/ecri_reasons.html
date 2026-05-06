@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}ECRI Reasons Admin - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>ECRI Reason Codes</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Manage exclusion and objection reason codes used in the ECRI workflow.</p>
+</div>
+
+<!-- Tab bar -->
+<div style="display:flex; gap:0; border-bottom: 2px solid var(--esa-gray-dark); margin-bottom:1.5rem;">
+    <button id="tab-excl" class="tab-btn active" onclick="switchTab('exclusion')">Exclusion Reasons</button>
+    <button id="tab-obj" class="tab-btn" onclick="switchTab('objection')">Objection Reasons</button>
+</div>
+
+<!-- Exclusion Reasons -->
+<div id="panel-exclusion">
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+            <h2 style="margin:0;">Exclusion Reasons</h2>
+            <button class="btn" onclick="openAddModal('exclusion')">+ Add Reason</button>
+        </div>
+        <table>
+            <thead>
+                <tr><th>Code</th><th>Label</th><th>Sort</th><th>Active</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="excl-tbody">
+                <tr><td colspan="5" style="text-align:center; color:#666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Objection Reasons -->
+<div id="panel-objection" style="display:none;">
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+            <h2 style="margin:0;">Objection Reasons</h2>
+            <button class="btn" onclick="openAddModal('objection')">+ Add Reason</button>
+        </div>
+        <table>
+            <thead>
+                <tr><th>Code</th><th>Label</th><th>Sort</th><th>Active</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="obj-tbody">
+                <tr><td colspan="5" style="text-align:center; color:#666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="reason-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:460px;">
+        <h3 id="modal-title">Add Reason</h3>
+        <input type="hidden" id="modal-type">
+        <input type="hidden" id="modal-reason-id">
+        <div style="margin-bottom:0.75rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Code *</label>
+            <input type="text" id="modal-code" placeholder="e.g. scheduled_moveout" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+        </div>
+        <div style="margin-bottom:0.75rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Label *</label>
+            <input type="text" id="modal-label" placeholder="Display label" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+        </div>
+        <div style="margin-bottom:1.5rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Sort Order</label>
+            <input type="number" id="modal-sort" value="100" style="width:120px; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+        </div>
+        <div style="display:flex; gap:1rem; justify-content:flex-end;">
+            <button class="btn btn-secondary" onclick="closeReasonModal()">Cancel</button>
+            <button class="btn" onclick="saveReason()">Save</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.modal-content { background:#fff; padding:2rem; border-radius:8px; width:90%; box-shadow:0 4px 20px rgba(0,0,0,0.2); }
+.modal-content h3 { color:var(--esa-navy); margin-bottom:1.5rem; text-align:center; }
+.tab-btn { padding:0.6rem 1.5rem; border:none; background:transparent; cursor:pointer; font-size:0.95rem; border-bottom:3px solid transparent; margin-bottom:-2px; }
+.tab-btn.active { border-bottom-color: var(--esa-red); font-weight:600; color: var(--esa-navy); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function getCSRFToken() { const m = document.querySelector('meta[name="csrf-token"]'); return m ? m.getAttribute('content') : ''; }
+    function apiHeaders() { return {'Content-Type':'application/json','X-CSRFToken':getCSRFToken()}; }
+
+    let _currentTab = 'exclusion';
+
+    function switchTab(tab) {
+        _currentTab = tab;
+        document.getElementById('panel-exclusion').style.display = tab === 'exclusion' ? 'block' : 'none';
+        document.getElementById('panel-objection').style.display = tab === 'objection' ? 'block' : 'none';
+        document.getElementById('tab-excl').classList.toggle('active', tab === 'exclusion');
+        document.getElementById('tab-obj').classList.toggle('active', tab === 'objection');
+        loadReasons(tab);
+    }
+
+    async function loadReasons(type) {
+        const tbody = document.getElementById(type === 'exclusion' ? 'excl-tbody' : 'obj-tbody');
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#666;">Loading...</td></tr>';
+        try {
+            const res = await fetch(`/ecri/admin/api/ecri-reasons/${type}`, {headers: apiHeaders()});
+            const data = await res.json();
+            const reasons = data.reasons || [];
+            if (!reasons.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#666;">No reasons configured.</td></tr>'; return; }
+            tbody.innerHTML = reasons.map(r => `<tr>
+                <td><code>${r.code}</code></td>
+                <td>${r.label}</td>
+                <td>${r.sort_order}</td>
+                <td>${r.active ? '<span style="color:#10b981;">Yes</span>' : '<span style="color:#ef4444;">No</span>'}</td>
+                <td>
+                    <button class="btn btn-secondary" style="padding:2px 8px;font-size:0.78rem;" onclick="openEditModal('${type}',${r.id},'${r.code.replace(/'/g,"\\'")}','${r.label.replace(/'/g,"\\'")}',${r.sort_order})">Edit</button>
+                    ${r.active ? `<button class="btn btn-secondary" style="padding:2px 8px;font-size:0.78rem;background:#f87171;margin-left:4px;" onclick="deactivate('${type}',${r.id})">Deactivate</button>` : ''}
+                </td>
+            </tr>`).join('');
+        } catch(e) { tbody.innerHTML = `<tr><td colspan="5" style="color:#C41230;">Error: ${e.message}</td></tr>`; }
+    }
+
+    function openAddModal(type) {
+        document.getElementById('modal-title').textContent = `Add ${type === 'exclusion' ? 'Exclusion' : 'Objection'} Reason`;
+        document.getElementById('modal-type').value = type;
+        document.getElementById('modal-reason-id').value = '';
+        document.getElementById('modal-code').value = '';
+        document.getElementById('modal-label').value = '';
+        document.getElementById('modal-sort').value = '100';
+        document.getElementById('modal-code').disabled = false;
+        document.getElementById('reason-modal').style.display = 'flex';
+    }
+
+    function openEditModal(type, id, code, label, sort) {
+        document.getElementById('modal-title').textContent = `Edit ${type === 'exclusion' ? 'Exclusion' : 'Objection'} Reason`;
+        document.getElementById('modal-type').value = type;
+        document.getElementById('modal-reason-id').value = id;
+        document.getElementById('modal-code').value = code;
+        document.getElementById('modal-label').value = label;
+        document.getElementById('modal-sort').value = sort;
+        document.getElementById('modal-code').disabled = true; // code is immutable
+        document.getElementById('reason-modal').style.display = 'flex';
+    }
+
+    function closeReasonModal() { document.getElementById('reason-modal').style.display = 'none'; }
+
+    async function saveReason() {
+        const type = document.getElementById('modal-type').value;
+        const id = document.getElementById('modal-reason-id').value;
+        const code = document.getElementById('modal-code').value.trim();
+        const label = document.getElementById('modal-label').value.trim();
+        const sort = parseInt(document.getElementById('modal-sort').value) || 100;
+        if (!label) { alert('Label is required.'); return; }
+        try {
+            let res;
+            if (id) {
+                res = await fetch(`/ecri/admin/api/ecri-reasons/${type}/${id}`, {
+                    method:'PATCH', headers:apiHeaders(), body:JSON.stringify({label, sort_order: sort}),
+                });
+            } else {
+                if (!code) { alert('Code is required.'); return; }
+                res = await fetch(`/ecri/admin/api/ecri-reasons/${type}`, {
+                    method:'POST', headers:apiHeaders(), body:JSON.stringify({code, label, sort_order: sort}),
+                });
+            }
+            const d = await res.json();
+            if (d.success) { closeReasonModal(); loadReasons(type); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    async function deactivate(type, id) {
+        if (!confirm('Deactivate this reason code?')) return;
+        try {
+            const res = await fetch(`/ecri/admin/api/ecri-reasons/${type}/${id}`, {method:'DELETE', headers:apiHeaders()});
+            const d = await res.json();
+            if (d.success) loadReasons(type);
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    // Load initial tab
+    loadReasons('exclusion');
+</script>
+{% endblock %}

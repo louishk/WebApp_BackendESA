@@ -3,9 +3,24 @@
 {% block title %}ECRI Batch Review - ESA Backend{% endblock %}
 
 {% block content %}
+
+<style>
+/* Wider viewport + compact table for the batch review page */
+body .container { max-width: 1800px; }
+#ledger-table-wrap { overflow-x: auto; overflow-y: auto; max-height: 65vh; }
+#ledger-table-wrap table { font-size: 0.82rem; }
+#ledger-table-wrap th, #ledger-table-wrap td { padding: 0.35rem 0.5rem; white-space: nowrap; }
+#ledger-table-wrap td:nth-child(6) { max-width: 180px; white-space: normal; overflow: hidden; text-overflow: ellipsis; }
+</style>
+
+<!-- Mode Banner -->
+<div id="mode-banner" class="card" style="display:none; padding: 0.75rem 1rem; margin-bottom: 1rem;">
+    <div id="banner-content"></div>
+</div>
+
 <div class="page-header">
     <h1>Batch Review</h1>
-    <p style="color: #666; margin-top: 0.5rem;">Review and approve before pushing to SiteLink</p>
+    <p style="color: #666; margin-top: 0.5rem;">Review and manage ECRI batch</p>
 </div>
 
 <!-- Batch Summary -->
@@ -39,23 +54,59 @@
 <!-- Ledger Details -->
 <div class="card">
     <h2>Ledger Details</h2>
-    <div style="max-height: 500px; overflow-y: auto;">
+    <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap; margin-bottom:0.75rem;">
+        <input type="text" id="filter-search" placeholder="Search ledger / tenant / unit…"
+               style="flex:1 1 260px; padding:0.5rem 0.75rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;">
+        <select id="filter-site" style="padding:0.5rem 0.75rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;">
+            <option value="">All sites</option>
+        </select>
+        <select id="filter-status" style="padding:0.5rem 0.75rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;">
+            <option value="">All statuses</option>
+            <option value="pending">pending</option>
+            <option value="success">success</option>
+            <option value="failed">failed</option>
+            <option value="skipped">skipped</option>
+        </select>
+        <select id="filter-exclusion" style="padding:0.5rem 0.75rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;">
+            <option value="">All exclusion</option>
+            <option value="none">none</option>
+            <option value="requested">requested</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+        </select>
+        <select id="filter-bucket" style="padding:0.5rem 0.75rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;">
+            <option value="">All buckets</option>
+            <option value="green">green</option>
+            <option value="amber">amber</option>
+            <option value="red">red</option>
+            <option value="unknown">unknown</option>
+        </select>
+        <span id="filter-count" style="color:#666; font-size:0.85rem;"></span>
+    </div>
+    <div id="ledger-table-wrap">
         <table>
             <thead style="position: sticky; top: 0; background: var(--esa-gray); z-index: 10;">
                 <tr>
+                    <th style="width: 32px;"><input type="checkbox" id="select-all-ledgers" title="Select all visible pending rows"></th>
                     <th>Site</th>
+                    <th>Ledger ID</th>
+                    <th>Tenant ID</th>
                     <th>Unit</th>
                     <th>Tenant</th>
                     <th>Group</th>
-                    <th>Old Rent</th>
-                    <th>New Rent</th>
+                    <th>Old Rent (SGD)</th>
+                    <th>New Rent (SGD)</th>
                     <th>Increase</th>
+                    <th>Notice Date</th>
                     <th>Effective Date</th>
                     <th>API Status</th>
+                    <th>Excl.</th>
+                    <th>Bucket</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody id="ledgers-tbody">
-                <tr><td colspan="9" style="text-align: center; color: #666;">Loading...</td></tr>
+                <tr><td colspan="16" style="text-align: center; color: #666;">Loading...</td></tr>
             </tbody>
         </table>
     </div>
@@ -63,21 +114,38 @@
 
 <!-- Actions -->
 <div class="card" id="actions-section" style="display: none;">
-    <div style="display: flex; gap: 1rem; align-items: center;">
-        <button type="button" class="btn" id="execute-btn" onclick="confirmExecute()">Execute - Push to SiteLink</button>
+    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap:wrap;">
+        <!-- draft actions -->
+        <button type="button" class="btn" id="submit-review-btn" onclick="submitForReview()" style="display:none;">Submit for Site Review</button>
+        <!-- site_review (Revenue) actions -->
+        <button type="button" class="btn" id="close-review-btn" onclick="closeSiteReview()" style="display:none;">Close Site Review</button>
+        <!-- rev_review (Revenue) actions -->
+        <button type="button" class="btn" id="finalize-btn" onclick="finalizeBatch()" style="display:none;">Finalize Batch</button>
+        <!-- rev_approved actions -->
+        <button type="button" class="btn" id="execute-btn" onclick="confirmExecute()" style="display:none;">Execute - Push to SiteLink</button>
+        <button type="button" class="btn btn-secondary" id="reopen-btn" onclick="reopenReview()" style="display:none;">Reopen Revenue Review</button>
+        <!-- common -->
         <button type="button" class="btn btn-secondary" id="cancel-btn" onclick="confirmCancel()">Cancel Batch</button>
         <a href="{{ url_for('ecri.dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
     </div>
-    <p style="color: #666; font-size: 0.85rem; margin-top: 0.75rem;">
-        Executing will push rent increases to SiteLink. This action cannot be undone from this app.
-    </p>
+    <p id="actions-help" style="color: #666; font-size: 0.85rem; margin-top: 0.75rem;"></p>
+</div>
+
+<!-- Sticky selection bar (appears when >=1 pending rows selected) -->
+<div id="selection-bar" style="display:none; position: sticky; bottom: 0; background: #fff; border-top: 2px solid var(--esa-navy); padding: 0.75rem 1rem; box-shadow: 0 -2px 10px rgba(0,0,0,0.08); z-index: 50;">
+    <div style="display:flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+        <div><strong id="selection-count">0</strong> ledger(s) selected</div>
+        <button type="button" class="btn" style="background:#C41230;" id="push-selection-btn" onclick="runSelection()">Push Live</button>
+        <button type="button" class="btn btn-secondary" onclick="clearSelection()">Clear</button>
+    </div>
 </div>
 
 <!-- Executed Status -->
 <div class="card" id="executed-section" style="display: none; background: #d1fae5; border-color: #a7f3d0;">
     <p style="margin: 0; color: #065f46;">
         <strong>Batch Executed.</strong> Rate increases have been pushed to SiteLink.
-        <a href="" id="analytics-link">View Analytics</a>
+        <a href="" id="analytics-link">View Analytics</a> |
+        <a href="{{ url_for('ecri.objections_dashboard') }}">View Objections</a>
     </p>
 </div>
 
@@ -88,8 +156,94 @@
         <div class="progress-info">
             <p id="progress-status" style="color: #666;">Pushing rate increases to SiteLink...</p>
             <div class="progress-bar" style="height: 20px; background: var(--esa-gray-dark); border-radius: 10px; overflow: hidden; margin-top: 1rem;">
-                <div id="progress-fill" style="height: 100%; background: var(--esa-red); width: 100%; animation: pulse 1.5s infinite;"></div>
+                <div id="progress-fill" style="height: 100%; background: var(--esa-red); width: 0%; transition: width 0.5s;"></div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Exclusion Request Modal -->
+<div id="exclusion-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width: 500px;">
+        <h3>Request Exclusion</h3>
+        <input type="hidden" id="excl-row-id">
+        <div style="margin-bottom: 1rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Tenant</label>
+            <div id="excl-tenant-info" style="color:#555;"></div>
+        </div>
+        <div style="margin-bottom: 1rem;">
+            <label for="excl-reason" style="display:block; font-weight:600; margin-bottom:0.25rem;">Reason *</label>
+            <select id="excl-reason" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+                <option value="">Select a reason...</option>
+            </select>
+        </div>
+        <div style="margin-bottom: 1.5rem;">
+            <label for="excl-notes" style="display:block; font-weight:600; margin-bottom:0.25rem;">Notes</label>
+            <textarea id="excl-notes" rows="3" placeholder="Additional context..." style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;"></textarea>
+        </div>
+        <div style="display:flex; gap:1rem; justify-content:flex-end;">
+            <button type="button" class="btn btn-secondary" onclick="closeExclusionModal()">Cancel</button>
+            <button type="button" class="btn" onclick="submitExclusion()">Request Exclusion</button>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Exclusion Modal -->
+<div id="reject-excl-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width: 460px;">
+        <h3>Reject Exclusion Request</h3>
+        <input type="hidden" id="reject-row-id">
+        <p style="color:#555;" id="reject-tenant-info"></p>
+        <div style="margin-bottom: 1rem;">
+            <label for="reject-notes" style="display:block; font-weight:600; margin-bottom:0.25rem;">Rejection notes (optional)</label>
+            <textarea id="reject-notes" rows="2" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;"></textarea>
+        </div>
+        <div style="display:flex; gap:1rem; justify-content:flex-end;">
+            <button type="button" class="btn btn-secondary" onclick="closeRejectExclModal()">Cancel</button>
+            <button type="button" class="btn" style="background:#C41230;" onclick="submitRejectExcl()">Reject Exclusion</button>
+        </div>
+    </div>
+</div>
+
+<!-- Objection Modal -->
+<div id="objection-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width: 520px;">
+        <h3>Raise Objection</h3>
+        <input type="hidden" id="obj-ledger-row-id">
+        <input type="hidden" id="obj-orig-pct">
+        <input type="hidden" id="obj-orig-rent">
+        <div style="margin-bottom:0.75rem;">
+            <div id="obj-tenant-info" style="color:#555; margin-bottom:0.5rem;"></div>
+            <div id="obj-orig-info" style="color:#888; font-size:0.85rem;"></div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-bottom:0.75rem;">
+            <div>
+                <label style="display:block; font-weight:600; margin-bottom:0.25rem;">New Increase %</label>
+                <input type="number" id="obj-new-pct" step="0.01" min="0"
+                       style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;"
+                       oninput="objCalcFromPct()">
+            </div>
+            <div>
+                <label style="display:block; font-weight:600; margin-bottom:0.25rem;">New Rent</label>
+                <input type="number" id="obj-new-rent" step="0.01" min="0"
+                       style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;"
+                       oninput="objCalcFromRent()">
+            </div>
+        </div>
+        <div id="obj-approval-indicator" style="margin-bottom:0.75rem; padding:0.5rem; border-radius:4px; font-size:0.85rem;"></div>
+        <div style="margin-bottom:0.75rem;">
+            <label for="obj-reason" style="display:block; font-weight:600; margin-bottom:0.25rem;">Reason *</label>
+            <select id="obj-reason" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+                <option value="">Select a reason...</option>
+            </select>
+        </div>
+        <div style="margin-bottom:1.5rem;">
+            <label for="obj-notes" style="display:block; font-weight:600; margin-bottom:0.25rem;">Notes</label>
+            <textarea id="obj-notes" rows="2" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;"></textarea>
+        </div>
+        <div style="display:flex; gap:1rem; justify-content:flex-end;">
+            <button type="button" class="btn btn-secondary" onclick="closeObjModal()">Cancel</button>
+            <button type="button" class="btn" onclick="submitObjection()">Submit Objection</button>
         </div>
     </div>
 </div>
@@ -105,14 +259,32 @@
     max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.2);
 }
 .modal-content h3 { color: var(--esa-navy); margin-bottom: 1.5rem; text-align: center; }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+.excl-badge-none { background:#e5e7eb; color:#374151; }
+.excl-badge-requested { background:#fef3c7; color:#92400e; }
+.excl-badge-approved { background:#d1fae5; color:#065f46; }
+.excl-badge-rejected { background:#fee2e2; color:#991b1b; }
+.excl-badge { padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:600; }
 </style>
 {% endblock %}
 
 {% block scripts %}
 <script>
-
     const BATCH_ID = '{{ batch_id }}';
+
+    // Permissions injected from Flask session — determined server-side
+    const USER_PERMS = {
+        can_manage_ecri: {{ 'true' if current_user.can_manage_ecri() else 'false' }},
+        can_request_ecri_exclusion: {{ 'true' if current_user.can_request_ecri_exclusion() else 'false' }},
+        can_finalize_ecri_batch: {{ 'true' if current_user.can_finalize_ecri_batch() else 'false' }},
+        can_execute_ecri_batch: {{ 'true' if current_user.can_execute_ecri_batch() else 'false' }},
+        can_create_ecri_objection: {{ 'true' if current_user.can_create_ecri_objection() else 'false' }},
+        can_approve_ecri_objection: {{ 'true' if current_user.can_approve_ecri_objection() else 'false' }},
+        allowed_site_ids: {{ current_user.allowed_site_ids | tojson if current_user.allowed_site_ids else 'null' }},
+        user_id: {{ current_user.id }},
+        username: {{ current_user.username | tojson }},
+        ecri_max_pct: {{ (current_user.ecri_max_pct_reduction | float) if current_user.ecri_max_pct_reduction else 0 }},
+        ecri_max_abs: {{ (current_user.ecri_max_abs_reduction | float) if current_user.ecri_max_abs_reduction else 0 }},
+    };
 
     function getCSRFToken() {
         const meta = document.querySelector('meta[name="csrf-token"]');
@@ -133,79 +305,115 @@
         return new Date(iso).toLocaleDateString('en-SG', {day: '2-digit', month: 'short', year: 'numeric'});
     }
 
+    function exclusionBadge(status) {
+        const cls = `excl-badge excl-badge-${status || 'none'}`;
+        return `<span class="${cls}">${status || 'none'}</span>`;
+    }
+
+    let ALL_LEDGERS = [];
+    let BATCH_DATA = null;
+    let EXCL_REASONS = [];
+    let OBJ_REASONS = [];
+
+    async function loadReasons() {
+        try {
+            const [er, or_] = await Promise.all([
+                fetch('/ecri/admin/api/ecri-reasons/exclusion', {headers: apiHeaders()}),
+                fetch('/ecri/admin/api/ecri-reasons/objection', {headers: apiHeaders()}),
+            ]);
+            if (er.ok) {
+                const d = await er.json();
+                EXCL_REASONS = (d.reasons || []).filter(r => r.active);
+            }
+            if (or_.ok) {
+                const d = await or_.json();
+                OBJ_REASONS = (d.reasons || []).filter(r => r.active);
+            }
+        } catch (e) { /* non-fatal */ }
+    }
+
+    function populateReasonSelect(selectId, reasons) {
+        const sel = document.getElementById(selectId);
+        sel.innerHTML = '<option value="">Select a reason...</option>' +
+            reasons.map(r => `<option value="${r.code}">${r.label}</option>`).join('');
+    }
+
     async function loadBatch() {
         try {
             const res = await fetch(`/ecri/api/batch/${BATCH_ID}`, {headers: apiHeaders()});
             const data = await res.json();
-
             if (data.error) {
                 document.getElementById('batch-info').innerHTML = `<p style="color: #C41230;">${data.error}</p>`;
                 return;
             }
+            BATCH_DATA = data;
 
-            // Batch info
             document.getElementById('batch-info').innerHTML = `
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; max-width: 600px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; max-width: 700px;">
                     <div><strong>Name:</strong> ${data.name || '-'}</div>
-                    <div><strong>Status:</strong> <span class="status ${data.status === 'executed' ? 'status-completed' : data.status === 'draft' ? 'status-pending' : 'status-failed'}">${data.status}</span></div>
+                    <div><strong>Status:</strong> <span class="status status-pending">${data.status}</span></div>
                     <div><strong>Sites:</strong> ${data.site_ids.join(', ')}</div>
                     <div><strong>Target:</strong> ${data.control_group_enabled ? 'Control Groups' : (data.target_increase_pct + '%')}</div>
                     <div><strong>Created:</strong> ${formatDate(data.created_at)}</div>
                     <div><strong>Notice Period:</strong> ${data.notice_period_days} days</div>
+                    ${data.site_review_deadline ? `<div><strong>Site Review Deadline:</strong> ${formatDate(data.site_review_deadline)}</div>` : ''}
+                    ${data.submitted_for_review_by ? `<div><strong>Submitted by:</strong> ${data.submitted_for_review_by} on ${formatDate(data.submitted_for_review_at)}</div>` : ''}
                     ${data.notes ? `<div style="grid-column: 1/-1;"><strong>Notes:</strong> ${data.notes}</div>` : ''}
                 </div>
             `;
 
-            // Impact stats
             const s = data.summary;
+            const bc = s.bucket_counts || {};
+            const ec = s.exclusion_counts || {};
             document.getElementById('impact-stats').innerHTML = `
                 <div class="stat-card"><div class="value">${data.total_ledgers}</div><div class="label">Total Ledgers</div></div>
                 <div class="stat-card" style="background: #28A745;"><div class="value">${formatCurrency(s.total_monthly_increase)}</div><div class="label">Monthly Increase</div></div>
                 <div class="stat-card"><div class="value">${formatCurrency(s.total_annual_increase)}</div><div class="label">Annual Increase</div></div>
                 <div class="stat-card"><div class="value">${s.api_status_counts.success}</div><div class="label">API Success</div></div>
-                <div class="stat-card" style="background: ${s.api_status_counts.failed > 0 ? '#C41230' : 'var(--esa-navy)'};">
+                <div class="stat-card" style="background:${s.api_status_counts.failed > 0 ? '#C41230' : 'var(--esa-navy)'};">
                     <div class="value">${s.api_status_counts.failed}</div><div class="label">API Failed</div></div>
+                ${ec.requested > 0 ? `<div class="stat-card" style="background:#f59e0b;"><div class="value">${ec.requested}</div><div class="label">Excl. Pending</div></div>` : ''}
+                ${ec.approved > 0 ? `<div class="stat-card" style="background:#10b981;"><div class="value">${ec.approved}</div><div class="label">Excl. Approved</div></div>` : ''}
             `;
 
-            // Control groups
             if (data.control_group_enabled && Object.keys(s.groups).length > 1) {
                 document.getElementById('groups-section').style.display = 'block';
                 document.getElementById('groups-tbody').innerHTML = Object.entries(s.groups).map(([g, info]) => `
-                    <tr>
-                        <td>Group ${g}</td>
-                        <td>${info.avg_pct}%</td>
-                        <td>${info.count}</td>
-                        <td>${formatCurrency(info.total_increase)}</td>
-                    </tr>
+                    <tr><td>Group ${g}</td><td>${info.avg_pct}%</td><td>${info.count}</td><td>${formatCurrency(info.total_increase)}</td></tr>
                 `).join('');
             }
 
-            // Ledgers
-            const tbody = document.getElementById('ledgers-tbody');
-            tbody.innerHTML = data.ledgers.map(l => {
-                const statusClass = {
-                    'pending': 'status-pending',
-                    'success': 'status-completed',
-                    'failed': 'status-failed',
-                    'skipped': 'status-running'
-                }[l.api_status] || '';
+            if (data.fx && data.fx.rate_date) {
+                let note = document.getElementById('fx-note');
+                if (!note) {
+                    note = document.createElement('p');
+                    note.id = 'fx-note';
+                    note.style.cssText = 'color:#666; font-size:0.8rem; margin-top:0.5rem;';
+                    document.getElementById('impact-stats').parentElement.appendChild(note);
+                }
+                note.textContent = `SGD values via fx_rates @ ${data.fx.rate_date}`;
+            }
 
-                return `<tr>
-                    <td>${l.site_id}</td>
-                    <td>${l.unit_name || '-'}</td>
-                    <td>${l.tenant_name || '-'}</td>
-                    <td>${l.control_group}</td>
-                    <td>${formatCurrency(l.old_rent)}</td>
-                    <td>${formatCurrency(l.new_rent)}</td>
-                    <td>${l.increase_pct}% (${formatCurrency(l.increase_amt)})</td>
-                    <td>${formatDate(l.effective_date)}</td>
-                    <td><span class="status ${statusClass}">${l.api_status}</span></td>
-                </tr>`;
-            }).join('');
+            // Site-scope filter for ops
+            let visibleLedgers = data.ledgers;
+            if (USER_PERMS.allowed_site_ids && USER_PERMS.allowed_site_ids.length > 0) {
+                visibleLedgers = data.ledgers.filter(l => USER_PERMS.allowed_site_ids.includes(l.site_id));
+            }
+            ALL_LEDGERS = visibleLedgers;
 
-            // Show appropriate actions
-            if (data.status === 'draft' || data.status === 'review') {
-                document.getElementById('actions-section').style.display = 'block';
+            const siteSet = Array.from(new Set(ALL_LEDGERS.map(l => l.site_id))).sort((a,b)=>a-b);
+            const siteSel = document.getElementById('filter-site');
+            siteSel.innerHTML = '<option value="">All sites</option>' +
+                siteSet.map(s => `<option value="${s}">${s}</option>`).join('');
+
+            renderLedgers();
+            renderModeBanner(data);
+            renderActions(data);
+
+            if (data.status === 'executing') {
+                document.getElementById('progress-status').textContent = 'Execution in progress…';
+                document.getElementById('progress-modal').style.display = 'flex';
+                pollProgress();
             } else if (data.status === 'executed') {
                 document.getElementById('executed-section').style.display = 'block';
                 document.getElementById('analytics-link').href = `/ecri/batch/${BATCH_ID}/analytics`;
@@ -216,56 +424,505 @@
         }
     }
 
-    function confirmExecute() {
-        if (confirm('Are you sure you want to execute this batch?\n\nThis will push rent increases to SiteLink for all pending ledgers. This action cannot be undone from this app.')) {
-            executeBatch();
+    function renderModeBanner(data) {
+        const banner = document.getElementById('mode-banner');
+        const content = document.getElementById('banner-content');
+        const status = data.status;
+        let html = '';
+        let color = 'var(--esa-navy)';
+
+        if (status === 'draft' && USER_PERMS.can_manage_ecri) {
+            color = '#1e40af';
+            html = `<strong>Stage 1 — Draft.</strong> Review ledgers, then submit for site review when ready.`;
+        } else if (status === 'site_review' && USER_PERMS.can_request_ecri_exclusion && !USER_PERMS.can_finalize_ecri_batch) {
+            color = '#92400e';
+            const deadline = data.site_review_deadline ? ` Deadline: <strong>${formatDate(data.site_review_deadline)}</strong>.` : '';
+            html = `<strong>Stage 2 — Site Review.</strong> Review your site's rows and request exclusions where needed.${deadline} Use the "Request Excl." button on each row.`;
+        } else if (status === 'site_review' && USER_PERMS.can_finalize_ecri_batch) {
+            color = '#92400e';
+            const req = (data.summary.exclusion_counts || {}).requested || 0;
+            const deadline = data.site_review_deadline ? ` Deadline: <strong>${formatDate(data.site_review_deadline)}</strong>.` : '';
+            html = `<strong>Stage 2 — Site Review.</strong> Ops is flagging exclusions (${req} pending so far).${deadline} Click "Close Site Review" when ready to start Revenue Review.`;
+        } else if (status === 'rev_review' && USER_PERMS.can_finalize_ecri_batch) {
+            color = '#1e40af';
+            const pending = (data.summary.exclusion_counts || {}).requested || 0;
+            html = `<strong>Stage 3 — Revenue Review.</strong> ${pending} exclusion request(s) pending your decision. Approve or reject each, then Finalize Batch.`;
+        } else if (status === 'rev_review') {
+            color = '#1e40af';
+            html = `<strong>Stage 3 — Revenue Review.</strong> Ops phase closed; Revenue is reviewing exclusion decisions.`;
+        } else if (status === 'rev_approved' && USER_PERMS.can_execute_ecri_batch) {
+            color = '#065f46';
+            html = `<strong>Stage 4 — Approved.</strong> Batch is ready to push. Review exclusions, then click Execute. You can also reopen Revenue Review if changes are needed.`;
+        } else if (status === 'executed') {
+            color = '#065f46';
+            html = `<strong>Executed.</strong> All pushes complete. Objections can be raised on successful rows.`;
         }
+
+        if (html) {
+            banner.style.display = 'block';
+            banner.style.borderLeft = `4px solid ${color}`;
+            content.innerHTML = html;
+        }
+    }
+
+    function renderActions(data) {
+        const status = data.status;
+        const section = document.getElementById('actions-section');
+        section.style.display = 'block';
+
+        // Reset all buttons before enabling the right ones for the current stage.
+        ['submit-review-btn','close-review-btn','finalize-btn','execute-btn','reopen-btn'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { el.style.display = 'none'; el.disabled = false; el.title = ''; }
+        });
+        document.getElementById('actions-help').textContent = '';
+
+        if (status === 'draft' && USER_PERMS.can_manage_ecri) {
+            document.getElementById('submit-review-btn').style.display = 'inline-block';
+            document.getElementById('actions-help').textContent = 'Submit for site review when ready. Ops will see only their site rows.';
+        } else if (status === 'site_review' && USER_PERMS.can_finalize_ecri_batch) {
+            document.getElementById('close-review-btn').style.display = 'inline-block';
+            const req = (data.summary.exclusion_counts || {}).requested || 0;
+            document.getElementById('actions-help').textContent = `Ops is flagging exclusions (${req} so far). Close Site Review when ops is done to start Revenue Review.`;
+        } else if (status === 'rev_review' && USER_PERMS.can_finalize_ecri_batch) {
+            const btn = document.getElementById('finalize-btn');
+            btn.style.display = 'inline-block';
+            const pending = (data.summary.exclusion_counts || {}).requested || 0;
+            if (pending > 0) {
+                btn.disabled = true;
+                btn.title = `${pending} exclusion request(s) still pending`;
+                document.getElementById('actions-help').textContent = `${pending} exclusion request(s) must be approved or rejected before finalization.`;
+            } else {
+                btn.disabled = false;
+                document.getElementById('actions-help').textContent = 'All exclusions decided. You can now finalize the batch.';
+            }
+            const reopen = document.getElementById('reopen-btn');
+            reopen.style.display = 'inline-block';
+            reopen.textContent = 'Reopen Site Review';
+        } else if (status === 'rev_approved' && USER_PERMS.can_execute_ecri_batch) {
+            document.getElementById('execute-btn').style.display = 'inline-block';
+            const reopen = document.getElementById('reopen-btn');
+            reopen.style.display = 'inline-block';
+            reopen.textContent = 'Reopen Revenue Review';
+            document.getElementById('actions-help').textContent = '"Execute" pushes ALL pending ledgers (excluded rows are skipped).';
+        }
+    }
+
+    function renderLedgers() {
+        const search = (document.getElementById('filter-search').value || '').toLowerCase().trim();
+        const site = document.getElementById('filter-site').value;
+        const status = document.getElementById('filter-status').value;
+        const bucket = document.getElementById('filter-bucket').value;
+        const exclFilter = document.getElementById('filter-exclusion').value;
+
+        const filtered = ALL_LEDGERS.filter(l => {
+            if (site && String(l.site_id) !== site) return false;
+            if (status && l.api_status !== status) return false;
+            if (bucket && (l.bucket || 'unknown') !== bucket) return false;
+            if (exclFilter && (l.exclusion_status || 'none') !== exclFilter) return false;
+            if (search) {
+                const hay = [l.ledger_id, l.tenant_id, l.tenant_name, l.unit_name]
+                    .map(v => String(v || '').toLowerCase()).join(' ');
+                if (!hay.includes(search)) return false;
+            }
+            return true;
+        });
+
+        document.getElementById('filter-count').textContent = `${filtered.length} of ${ALL_LEDGERS.length}`;
+        const batchStatus = BATCH_DATA ? BATCH_DATA.status : '';
+
+        const tbody = document.getElementById('ledgers-tbody');
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="16" style="text-align:center; color:#666;">No rows match.</td></tr>';
+            updateSelectionBar();
+            return;
+        }
+        tbody.innerHTML = filtered.map(l => {
+            const statusClass = {pending:'status-pending',success:'status-completed',failed:'status-failed',skipped:'status-running'}[l.api_status] || '';
+            const cur = l.currency || 'SGD';
+            const nativeOld = cur !== 'SGD' ? `<div style="font-size:0.75rem;color:#888;">${formatCurrency(l.old_rent)} ${cur}</div>` : '';
+            const nativeNew = cur !== 'SGD' ? `<div style="font-size:0.75rem;color:#888;">${formatCurrency(l.new_rent)} ${cur}</div>` : '';
+            const bucketClass = {green:'status-completed',amber:'status-running',red:'status-failed',unknown:'status-pending'}[l.bucket] || 'status-pending';
+            const effectiveSub = (l.paid_thru_date || l.next_lad)
+                ? `<div style="font-size:0.72rem;color:#888;">${l.paid_thru_date?'Paid:'+formatDate(l.paid_thru_date):''}${l.paid_thru_date&&l.next_lad?' · ':''}${l.next_lad?'LAD:'+formatDate(l.next_lad):''}</div>` : '';
+            const excStatus = l.exclusion_status || 'none';
+            const exclBadgeHtml = exclusionBadge(excStatus);
+
+            // Checkbox: only on pending rows for execute flow
+            const cb = (l.api_status === 'pending' && batchStatus === 'rev_approved' && USER_PERMS.can_execute_ecri_batch)
+                ? `<input type="checkbox" class="ledger-select" data-ledger-row-id="${l.id}">`
+                : '';
+
+            // Action buttons — accumulate all applicable actions (users may hold multiple perms).
+            const actions = [];
+            const tenEsc = (l.tenant_name||'').replace(/'/g,"\'");
+            if (batchStatus === 'site_review' && USER_PERMS.can_request_ecri_exclusion && excStatus === 'none') {
+                actions.push(`<button class="btn btn-secondary" style="padding:2px 8px;font-size:0.78rem;" onclick="openExclusionModal(${l.id},'${tenEsc}')">Request Excl.</button>`);
+            }
+            if (batchStatus === 'site_review' && excStatus === 'requested' && l.exclusion_requested_by === USER_PERMS.user_id) {
+                actions.push(`<button class="btn btn-secondary" style="padding:2px 6px;font-size:0.78rem;background:#f87171;" onclick="withdrawExclusion(${l.id})">Withdraw</button>`);
+            }
+            if (batchStatus === 'rev_review' && USER_PERMS.can_finalize_ecri_batch && excStatus === 'requested') {
+                actions.push(`<button class="btn" style="padding:2px 6px;font-size:0.78rem;background:#10b981;" onclick="approveExclusion(${l.id})">Approve</button>`);
+                actions.push(`<button class="btn" style="padding:2px 6px;font-size:0.78rem;background:#ef4444;" onclick="openRejectExclModal(${l.id},'${tenEsc}')">Reject</button>`);
+            }
+            if (batchStatus === 'executed' && l.api_status === 'success' && USER_PERMS.can_create_ecri_objection) {
+                actions.push(`<button class="btn btn-secondary" style="padding:2px 8px;font-size:0.78rem;" onclick="openObjectionModal(${l.id},${l.increase_pct||0},${l.new_rent||0},'${tenEsc}',${l.old_rent||0},'${l.currency||'SGD'}')">Objection</button>`);
+            }
+            const actionHtml = actions.join(' ');
+
+            return `<tr>
+                <td>${cb}</td>
+                <td>${l.site_id}</td>
+                <td>${l.ledger_id}</td>
+                <td>${l.tenant_id||'-'}</td>
+                <td>${l.unit_name||'-'}</td>
+                <td>${l.tenant_name||'-'}</td>
+                <td>${l.control_group}</td>
+                <td>${formatCurrency(l.old_rent_sgd)}${nativeOld}</td>
+                <td>${formatCurrency(l.new_rent_sgd)}${nativeNew}</td>
+                <td>${l.increase_pct}% (${formatCurrency(l.increase_amt_sgd)})</td>
+                <td>${formatDate(l.notice_date)}</td>
+                <td>${formatDate(l.effective_date)}${effectiveSub}</td>
+                <td><span class="status ${statusClass}">${l.api_status}</span></td>
+                <td>${exclBadgeHtml}</td>
+                <td><span class="status ${bucketClass}">${l.bucket||'unknown'}</span></td>
+                <td style="white-space:nowrap;">${actionHtml}</td>
+            </tr>`;
+        }).join('');
+
+        wireSelection();
+    }
+
+    ['filter-search','filter-site','filter-status','filter-bucket','filter-exclusion'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', renderLedgers);
+        if (el.tagName === 'SELECT') el.addEventListener('change', renderLedgers);
+    });
+
+    function getSelectedLedgerRowIds() {
+        return Array.from(document.querySelectorAll('.ledger-select:checked'))
+            .map(cb => parseInt(cb.dataset.ledgerRowId, 10));
+    }
+
+    function updateSelectionBar() {
+        const ids = getSelectedLedgerRowIds();
+        const bar = document.getElementById('selection-bar');
+        document.getElementById('selection-count').textContent = ids.length;
+        bar.style.display = ids.length > 0 ? 'block' : 'none';
+    }
+
+    function clearSelection() {
+        document.querySelectorAll('.ledger-select').forEach(cb => cb.checked = false);
+        const hdr = document.getElementById('select-all-ledgers');
+        if (hdr) hdr.checked = false;
+        updateSelectionBar();
+    }
+
+    function wireSelection() {
+        document.querySelectorAll('.ledger-select').forEach(cb => {
+            cb.addEventListener('change', updateSelectionBar);
+        });
+        const hdr = document.getElementById('select-all-ledgers');
+        if (hdr) {
+            hdr.onchange = () => {
+                document.querySelectorAll('.ledger-select').forEach(cb => cb.checked = hdr.checked);
+                updateSelectionBar();
+            };
+        }
+        updateSelectionBar();
+    }
+
+    // ---- Stage 1 ----
+    async function submitForReview() {
+        if (!confirm('Submit this batch for site review? Ops will be able to request exclusions.')) return;
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/submit-review`, {method:'POST', headers: apiHeaders()});
+            const d = await res.json();
+            if (d.success) { alert('Batch submitted for site review.'); loadBatch(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    // ---- Stage 2 — Exclusion modals ----
+    function openExclusionModal(rowId, tenantName) {
+        document.getElementById('excl-row-id').value = rowId;
+        document.getElementById('excl-tenant-info').textContent = `Tenant: ${tenantName} (row ID: ${rowId})`;
+        document.getElementById('excl-notes').value = '';
+        populateReasonSelect('excl-reason', EXCL_REASONS);
+        document.getElementById('exclusion-modal').style.display = 'flex';
+    }
+
+    function closeExclusionModal() {
+        document.getElementById('exclusion-modal').style.display = 'none';
+    }
+
+    async function submitExclusion() {
+        const rowId = parseInt(document.getElementById('excl-row-id').value);
+        const reasonCode = document.getElementById('excl-reason').value;
+        const notes = document.getElementById('excl-notes').value.trim();
+        if (!reasonCode) { alert('Please select a reason.'); return; }
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/exclusion`, {
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({ledger_row_id: rowId, reason_code: reasonCode, notes}),
+            });
+            const d = await res.json();
+            if (d.success) { closeExclusionModal(); loadBatch(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    async function withdrawExclusion(rowId) {
+        if (!confirm('Withdraw your exclusion request?')) return;
+        try {
+            const res = await fetch(`/ecri/api/exclusion/${rowId}`, {method:'DELETE', headers: apiHeaders()});
+            const d = await res.json();
+            if (d.success) loadBatch();
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    async function approveExclusion(rowId) {
+        if (!confirm('Approve this exclusion request?')) return;
+        try {
+            const res = await fetch(`/ecri/api/exclusion/${rowId}/approve`, {method:'POST', headers: apiHeaders(), body: JSON.stringify({})});
+            const d = await res.json();
+            if (d.success) loadBatch();
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    function openRejectExclModal(rowId, tenantName) {
+        document.getElementById('reject-row-id').value = rowId;
+        document.getElementById('reject-tenant-info').textContent = `Reject exclusion for: ${tenantName} (row ${rowId})`;
+        document.getElementById('reject-notes').value = '';
+        document.getElementById('reject-excl-modal').style.display = 'flex';
+    }
+
+    function closeRejectExclModal() {
+        document.getElementById('reject-excl-modal').style.display = 'none';
+    }
+
+    async function submitRejectExcl() {
+        const rowId = parseInt(document.getElementById('reject-row-id').value);
+        const notes = document.getElementById('reject-notes').value.trim();
+        try {
+            const res = await fetch(`/ecri/api/exclusion/${rowId}/reject`, {
+                method: 'POST', headers: apiHeaders(), body: JSON.stringify({notes}),
+            });
+            const d = await res.json();
+            if (d.success) { closeRejectExclModal(); loadBatch(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    // ---- Stage 2 → Stage 3 transition ----
+    async function closeSiteReview() {
+        if (!confirm('Close Site Review and start Revenue Review? Ops will no longer be able to request new exclusions.')) return;
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/close-site-review`, {method:'POST', headers: apiHeaders()});
+            const d = await res.json();
+            if (d.success) { loadBatch(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    // ---- Stage 3 — Finalize ----
+    async function finalizeBatch() {
+        if (!confirm('Finalize batch? This moves it to rev_approved status and prepares it for execution.')) return;
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/finalize`, {method:'POST', headers: apiHeaders()});
+            const d = await res.json();
+            if (d.success) { alert('Batch finalized.' + (d.force_finalized ? ' (Force-finalized past deadline)' : '')); loadBatch(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    async function reopenReview() {
+        if (!confirm('Reopen the previous stage? (rev_approved → Revenue Review, or Revenue Review → Site Review)')) return;
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/reopen-review`, {method:'POST', headers: apiHeaders()});
+            const d = await res.json();
+            if (d.success) { loadBatch(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    // ---- Stage 4 — Execute ----
+    async function runSelection() {
+        const ids = getSelectedLedgerRowIds();
+        if (ids.length === 0) return;
+        const phrase = `PUSH ${ids.length} LIVE`;
+        const typed = prompt(`Push ${ids.length} selected ledger(s) to SiteLink.\n\nType: ${phrase}`);
+        if (typed !== phrase) { alert('Aborted.'); return; }
+        document.getElementById('progress-status').textContent = 'Starting execution…';
+        document.getElementById('progress-modal').style.display = 'flex';
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/execute`, {
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({ledger_ids: ids, confirm_live: true}),
+            });
+            const d = await res.json();
+            if (!d.success && res.status !== 202) {
+                document.getElementById('progress-modal').style.display = 'none';
+                alert('Error: ' + (d.error || 'Unknown'));
+                return;
+            }
+            pollProgress();
+        } catch(e) {
+            document.getElementById('progress-modal').style.display = 'none';
+            alert('Error: ' + e.message);
+        }
+    }
+
+    function confirmExecute() {
+        const pendingCount = ALL_LEDGERS.filter(l => l.api_status === 'pending').length;
+        const phrase = `PUSH ${pendingCount} LIVE`;
+        const typed = prompt(`Push ALL ${pendingCount} pending ledger(s) to SiteLink.\n\nType: ${phrase}`);
+        if (typed !== phrase) { alert('Aborted.'); return; }
+        executeBatch();
     }
 
     async function executeBatch() {
+        document.getElementById('progress-status').textContent = 'Starting execution…';
         document.getElementById('progress-modal').style.display = 'flex';
-
         try {
             const res = await fetch(`/ecri/api/batch/${BATCH_ID}/execute`, {
-                method: 'POST',
-                headers: apiHeaders()
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({confirm_live: true}),
             });
-            const data = await res.json();
-
-            document.getElementById('progress-modal').style.display = 'none';
-
-            if (data.success) {
-                alert(`Batch executed.\nSuccess: ${data.results.success}\nFailed: ${data.results.failed}\nSkipped: ${data.results.skipped}`);
-                loadBatch(); // Refresh
-            } else {
-                alert('Execution failed: ' + (data.error || 'Unknown error'));
+            const d = await res.json();
+            if (!d.success && res.status !== 202) {
+                document.getElementById('progress-modal').style.display = 'none';
+                alert('Error: ' + (d.error || 'Unknown'));
+                return;
             }
-        } catch (e) {
+            pollProgress();
+        } catch(e) {
             document.getElementById('progress-modal').style.display = 'none';
-            alert('Execution error: ' + e.message);
+            alert('Error: ' + e.message);
         }
+    }
+
+    let _pollTimer = null;
+    async function pollProgress() {
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/progress`, {headers: apiHeaders()});
+            const p = await res.json();
+            const pct = p.pct || 0;
+            document.getElementById('progress-fill').style.width = pct + '%';
+            document.getElementById('progress-status').textContent =
+                `Processing: ${p.processed}/${p.total} (${pct}%) — ${p.success} success, ${p.failed} failed, ${p.skipped} skipped`;
+            if (p.finished) {
+                clearTimeout(_pollTimer);
+                document.getElementById('progress-fill').style.width = '100%';
+                document.getElementById('progress-status').textContent = `Done: ${p.success} success, ${p.failed} failed, ${p.skipped} skipped`;
+                setTimeout(() => { document.getElementById('progress-modal').style.display = 'none'; loadBatch(); }, 2000);
+                return;
+            }
+            _pollTimer = setTimeout(pollProgress, 2000);
+        } catch(e) { _pollTimer = setTimeout(pollProgress, 3000); }
     }
 
     async function confirmCancel() {
-        if (confirm('Are you sure you want to cancel this batch?')) {
+        if (confirm('Cancel this batch?')) {
             try {
-                const res = await fetch(`/ecri/api/batch/${BATCH_ID}/cancel`, {
-                    method: 'POST',
-                    headers: apiHeaders()
-                });
-                const data = await res.json();
-                if (data.success) {
-                    alert('Batch cancelled.');
-                    window.location.href = '/ecri/';
-                } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
-                }
-            } catch (e) {
-                alert('Error: ' + e.message);
-            }
+                const res = await fetch(`/ecri/api/batch/${BATCH_ID}/cancel`, {method:'POST', headers: apiHeaders()});
+                const d = await res.json();
+                if (d.success) { alert('Batch cancelled.'); window.location.href = '/ecri/'; }
+                else alert('Error: ' + (d.error || 'Unknown'));
+            } catch(e) { alert('Error: ' + e.message); }
         }
     }
 
-    loadBatch();
+    // ---- Stage 5 — Objection Modal ----
+    let _objOldRent = 0;
+
+    function openObjectionModal(rowId, origPct, origRent, tenantName, oldRent, currency) {
+        document.getElementById('obj-ledger-row-id').value = rowId;
+        document.getElementById('obj-orig-pct').value = origPct;
+        document.getElementById('obj-orig-rent').value = origRent;
+        _objOldRent = oldRent;
+        document.getElementById('obj-tenant-info').textContent = `Tenant: ${tenantName} (row ${rowId})`;
+        document.getElementById('obj-orig-info').textContent = `Original: ${origPct}% increase → ${formatCurrency(origRent)} ${currency}`;
+        document.getElementById('obj-new-pct').value = origPct;
+        document.getElementById('obj-new-rent').value = origRent;
+        document.getElementById('obj-notes').value = '';
+        document.getElementById('obj-approval-indicator').textContent = '';
+        populateReasonSelect('obj-reason', OBJ_REASONS);
+        document.getElementById('objection-modal').style.display = 'flex';
+        updateApprovalIndicator();
+    }
+
+    function closeObjModal() {
+        document.getElementById('objection-modal').style.display = 'none';
+    }
+
+    function objCalcFromPct() {
+        const pct = parseFloat(document.getElementById('obj-new-pct').value) || 0;
+        if (_objOldRent > 0) {
+            const newRent = _objOldRent * (1 + pct/100);
+            document.getElementById('obj-new-rent').value = newRent.toFixed(2);
+        }
+        updateApprovalIndicator();
+    }
+
+    function objCalcFromRent() {
+        const newRent = parseFloat(document.getElementById('obj-new-rent').value) || 0;
+        if (_objOldRent > 0) {
+            const pct = (newRent - _objOldRent) / _objOldRent * 100;
+            document.getElementById('obj-new-pct').value = pct.toFixed(2);
+        }
+        updateApprovalIndicator();
+    }
+
+    function updateApprovalIndicator() {
+        const origPct = parseFloat(document.getElementById('obj-orig-pct').value) || 0;
+        const origRent = parseFloat(document.getElementById('obj-orig-rent').value) || 0;
+        const newPct = parseFloat(document.getElementById('obj-new-pct').value) || 0;
+        const newRent = parseFloat(document.getElementById('obj-new-rent').value) || 0;
+        const reductionPct = origPct - newPct;
+        const reductionAbs = origRent - newRent;
+        const indicator = document.getElementById('obj-approval-indicator');
+        let text, color;
+        if (reductionPct < 0 || reductionAbs < 0) {
+            text = 'Increase beyond original — requires approver.';
+            color = '#fef3c7'; indicator.style.color = '#92400e';
+        } else if (reductionPct <= USER_PERMS.ecri_max_pct && reductionAbs <= USER_PERMS.ecri_max_abs) {
+            text = 'Within your limits — will be auto-approved.';
+            color = '#d1fae5'; indicator.style.color = '#065f46';
+        } else {
+            text = `Exceeds your limits (max: ${USER_PERMS.ecri_max_pct}% / ${formatCurrency(USER_PERMS.ecri_max_abs)}) — requires approver.`;
+            color = '#fef3c7'; indicator.style.color = '#92400e';
+        }
+        indicator.style.background = color;
+        indicator.textContent = text;
+    }
+
+    async function submitObjection() {
+        const rowId = parseInt(document.getElementById('obj-ledger-row-id').value);
+        const newPct = parseFloat(document.getElementById('obj-new-pct').value);
+        const newRent = parseFloat(document.getElementById('obj-new-rent').value);
+        const reasonCode = document.getElementById('obj-reason').value;
+        const notes = document.getElementById('obj-notes').value.trim();
+        if (!reasonCode) { alert('Please select a reason.'); return; }
+        try {
+            const res = await fetch('/ecri/api/objection', {
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({batch_ledger_id: rowId, new_increase_pct: newPct, new_new_rent: newRent, reason_code: reasonCode, reason_notes: notes}),
+            });
+            const d = await res.json();
+            if (d.success) {
+                closeObjModal();
+                const status = d.objection.status;
+                alert(`Objection created (${status === 'approved' ? 'auto-approved' : 'pending approval'}).`);
+            } else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    // Initialise
+    loadReasons().then(loadBatch);
 </script>
 {% endblock %}

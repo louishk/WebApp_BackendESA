@@ -1,0 +1,413 @@
+{% extends "base.html" %}
+
+{% block title %}ECRI Objections - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>ECRI Objections</h1>
+    <p style="color: #666; margin-top: 0.5rem;">Post-push rate modification requests across all batches</p>
+</div>
+
+<!-- Tenant-first search -->
+<div class="card">
+    <h2>Find Tenant / Raise Objection</h2>
+    <p style="color:#666; font-size:0.85rem; margin-bottom:0.75rem;">Search across all executed batches. Enter tenant name, unit, ledger ID, or tenant ID.</p>
+    <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem;">
+        <input type="text" id="tenant-search" placeholder="e.g. Tan Cindy / A8222 / 565680"
+               style="flex:1 1 300px; padding:0.6rem 0.9rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.95rem;">
+        <span id="search-count" style="align-self:center; color:#666; font-size:0.85rem;"></span>
+    </div>
+    <div id="search-results"></div>
+</div>
+
+<div class="card">
+    <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.75rem; align-items:center;">
+        <select id="filter-status" style="padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+            <option value="">All statuses</option>
+            <option value="pending_approval">pending_approval</option>
+            <option value="approved">approved</option>
+            <option value="rejected">rejected</option>
+            <option value="applied">applied</option>
+            <option value="cancelled">cancelled</option>
+        </select>
+        <input type="text" id="filter-site" placeholder="Site ID..."
+               style="width:100px; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+        <span id="obj-count" style="color:#666; font-size:0.85rem;"></span>
+        <button class="btn btn-secondary" onclick="loadObjections()" style="margin-left:auto;">Refresh</button>
+    </div>
+
+    <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Batch</th>
+                    <th>Site</th>
+                    <th>Ledger</th>
+                    <th>Orig %</th>
+                    <th>New %</th>
+                    <th>Orig Rent</th>
+                    <th>New Rent</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                    <th>Raised By</th>
+                    <th>Raised At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="obj-tbody">
+                <tr><td colspan="13" style="text-align:center; color:#666;">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Raise Objection modal -->
+<div id="raise-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:520px;">
+        <h3>Raise Objection</h3>
+        <input type="hidden" id="raise-row-id">
+        <p id="raise-tenant-info" style="color:#555; font-size:0.9rem; margin-bottom:0.75rem;"></p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-bottom:0.75rem;">
+            <div>
+                <label style="display:block; font-weight:600; margin-bottom:0.25rem;">New Increase %</label>
+                <input type="number" id="raise-new-pct" step="0.5" min="0" max="50" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;" oninput="recomputeRent(); updateApprovalHint();">
+            </div>
+            <div>
+                <label style="display:block; font-weight:600; margin-bottom:0.25rem;">New Rent (native)</label>
+                <input type="number" id="raise-new-rent" step="0.01" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;" oninput="recomputePct(); updateApprovalHint();">
+            </div>
+        </div>
+        <div style="margin-bottom:0.75rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Reason *</label>
+            <select id="raise-reason" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;">
+                <option value="">Select a reason…</option>
+            </select>
+        </div>
+        <div style="margin-bottom:0.75rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Notes</label>
+            <textarea id="raise-notes" rows="2" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;"></textarea>
+        </div>
+        <p id="raise-approval-hint" style="padding:0.5rem; border-radius:4px; font-size:0.85rem; margin-bottom:1rem;"></p>
+        <div style="display:flex; gap:1rem; justify-content:flex-end;">
+            <button class="btn btn-secondary" onclick="closeRaiseModal()">Cancel</button>
+            <button class="btn" onclick="submitRaise()">Submit</button>
+        </div>
+    </div>
+</div>
+
+<!-- Approve modal -->
+<div id="approve-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:420px;">
+        <h3>Approve Objection</h3>
+        <input type="hidden" id="approve-obj-id">
+        <p id="approve-obj-info" style="color:#555;"></p>
+        <div style="margin-bottom:1rem;">
+            <label for="approve-notes" style="display:block; font-weight:600; margin-bottom:0.25rem;">Notes (optional)</label>
+            <textarea id="approve-notes" rows="2" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;"></textarea>
+        </div>
+        <div style="display:flex; gap:1rem; justify-content:flex-end;">
+            <button class="btn btn-secondary" onclick="closeApproveModal()">Cancel</button>
+            <button class="btn" style="background:#10b981;" onclick="submitApprove()">Approve</button>
+        </div>
+    </div>
+</div>
+
+<!-- Reject modal -->
+<div id="reject-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:420px;">
+        <h3>Reject Objection</h3>
+        <input type="hidden" id="reject-obj-id">
+        <p id="reject-obj-info" style="color:#555;"></p>
+        <div style="margin-bottom:1rem;">
+            <label for="reject-notes" style="display:block; font-weight:600; margin-bottom:0.25rem;">Rejection notes</label>
+            <textarea id="reject-notes" rows="2" style="width:100%; padding:0.5rem; border:1px solid var(--esa-gray-dark); border-radius:4px;"></textarea>
+        </div>
+        <div style="display:flex; gap:1rem; justify-content:flex-end;">
+            <button class="btn btn-secondary" onclick="closeRejectModal()">Cancel</button>
+            <button class="btn" style="background:#C41230;" onclick="submitReject()">Reject</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.modal-content { background:#fff; padding:2rem; border-radius:8px; width:90%; box-shadow:0 4px 20px rgba(0,0,0,0.2); }
+.modal-content h3 { color:var(--esa-navy); margin-bottom:1.5rem; text-align:center; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const USER_PERMS = {
+        can_approve: {{ 'true' if current_user.can_approve_ecri_objection() else 'false' }},
+        can_create: {{ 'true' if current_user.can_create_ecri_objection() else 'false' }},
+        user_id: {{ current_user.id }},
+        max_pct: {{ current_user.ecri_max_pct_reduction or 0 }},
+        max_abs: {{ current_user.ecri_max_abs_reduction or 0 }},
+    };
+    let OBJ_REASONS = [];
+    let CURRENT_RAISE = null;  // snapshot of the ledger being objected to
+
+    async function loadReasons() {
+        try {
+            const r = await fetch('/ecri/admin/api/ecri-reasons/objection', {headers: apiHeaders()});
+            const d = await r.json();
+            OBJ_REASONS = (d.reasons || []).filter(x => x.active);
+            const sel = document.getElementById('raise-reason');
+            sel.innerHTML = '<option value="">Select a reason…</option>' +
+                OBJ_REASONS.map(r => `<option value="${r.code}">${r.label}</option>`).join('');
+        } catch(e) { /* noop */ }
+    }
+
+    let _searchTimer = null;
+    async function runSearch() {
+        const q = document.getElementById('tenant-search').value.trim();
+        const container = document.getElementById('search-results');
+        const countEl = document.getElementById('search-count');
+        if (q.length < 2) { container.innerHTML = ''; countEl.textContent = ''; return; }
+        try {
+            const res = await fetch(`/ecri/api/objections/search?q=${encodeURIComponent(q)}`, {headers: apiHeaders()});
+            const data = await res.json();
+            countEl.textContent = `${data.count || 0} match(es)`;
+            if (!data.results || data.results.length === 0) {
+                container.innerHTML = '<p style="color:#666; font-size:0.85rem;">No matching tenants in executed batches.</p>';
+                return;
+            }
+            container.innerHTML = `<div style="overflow-x:auto;"><table>
+                <thead><tr>
+                    <th>Site</th><th>Unit</th><th>Ledger</th><th>Tenant</th>
+                    <th>Old → New Rent</th><th>Pushed</th><th>Objection</th><th></th>
+                </tr></thead><tbody>` +
+                data.results.map(r => {
+                    const objBadge = r.active_objection_count > 0
+                        ? `<span class="status ${statusClass(r.last_objection_status)}">${r.last_objection_status}</span>`
+                        : '<span style="color:#888; font-size:0.8rem;">none</span>';
+                    const actionBtn = r.active_objection_count > 0
+                        ? '<span style="color:#888; font-size:0.8rem;">active already</span>'
+                        : USER_PERMS.can_create
+                            ? `<button class="btn" style="padding:2px 8px; font-size:0.78rem;" onclick='openRaiseModal(${JSON.stringify(r).replace(/'/g, "&#39;")})'>Raise Objection</button>`
+                            : '<span style="color:#888; font-size:0.8rem;">no permission</span>';
+                    return `<tr>
+                        <td>${r.site_id}</td>
+                        <td>${r.unit_name || '-'}</td>
+                        <td>${r.ledger_id}</td>
+                        <td>${r.tenant_name || '-'}</td>
+                        <td>${formatCurrency(r.old_rent)} → ${formatCurrency(r.new_rent)} <span style="color:#888; font-size:0.75rem;">${r.currency || ''} (+${r.increase_pct}%)</span></td>
+                        <td style="font-size:0.8rem;">${formatDate(r.pushed_at)}</td>
+                        <td>${objBadge}</td>
+                        <td>${actionBtn}</td>
+                    </tr>`;
+                }).join('') + '</tbody></table></div>';
+        } catch(e) {
+            container.innerHTML = `<p style="color:#C41230;">Search failed — please retry.</p>`;
+        }
+    }
+
+    function openRaiseModal(row) {
+        CURRENT_RAISE = row;
+        document.getElementById('raise-row-id').value = row.batch_ledger_id;
+        document.getElementById('raise-tenant-info').innerHTML =
+            `<strong>${row.tenant_name || 'Tenant'}</strong> — ${row.unit_name || ''} · Site ${row.site_id} · Ledger ${row.ledger_id}` +
+            `<br>Current planned: ${formatCurrency(row.old_rent)} → ${formatCurrency(row.new_rent)} ${row.currency || ''} (+${row.increase_pct}%)`;
+        document.getElementById('raise-new-pct').value = row.increase_pct;
+        document.getElementById('raise-new-rent').value = row.new_rent;
+        document.getElementById('raise-reason').value = '';
+        document.getElementById('raise-notes').value = '';
+        updateApprovalHint();
+        document.getElementById('raise-modal').style.display = 'flex';
+    }
+
+    function closeRaiseModal() { document.getElementById('raise-modal').style.display = 'none'; CURRENT_RAISE = null; }
+
+    function recomputeRent() {
+        if (!CURRENT_RAISE) return;
+        const pct = parseFloat(document.getElementById('raise-new-pct').value);
+        if (!isNaN(pct) && CURRENT_RAISE.old_rent) {
+            const rent = CURRENT_RAISE.old_rent * (1 + pct / 100);
+            document.getElementById('raise-new-rent').value = rent.toFixed(2);
+        }
+    }
+    function recomputePct() {
+        if (!CURRENT_RAISE) return;
+        const rent = parseFloat(document.getElementById('raise-new-rent').value);
+        if (!isNaN(rent) && CURRENT_RAISE.old_rent) {
+            const pct = (rent / CURRENT_RAISE.old_rent - 1) * 100;
+            document.getElementById('raise-new-pct').value = pct.toFixed(2);
+        }
+    }
+
+    function updateApprovalHint() {
+        if (!CURRENT_RAISE) return;
+        const newPct = parseFloat(document.getElementById('raise-new-pct').value) || 0;
+        const newRent = parseFloat(document.getElementById('raise-new-rent').value) || 0;
+        const reductionPct = (CURRENT_RAISE.increase_pct || 0) - newPct;
+        const reductionAbs = (CURRENT_RAISE.new_rent || 0) - newRent;
+        const hint = document.getElementById('raise-approval-hint');
+        if (reductionPct < 0 || reductionAbs < 0) {
+            hint.textContent = 'Bigger increase than planned — requires manager approval.';
+            hint.style.background = '#fef3c7'; hint.style.color = '#92400e';
+        } else if (reductionPct <= USER_PERMS.max_pct && reductionAbs <= USER_PERMS.max_abs) {
+            hint.textContent = `Within your limit (${USER_PERMS.max_pct}% / ${USER_PERMS.max_abs}) — will be auto-approved.`;
+            hint.style.background = '#d1fae5'; hint.style.color = '#065f46';
+        } else {
+            hint.textContent = `Exceeds your limit (${USER_PERMS.max_pct}% / ${USER_PERMS.max_abs}) — needs manager approval.`;
+            hint.style.background = '#fef3c7'; hint.style.color = '#92400e';
+        }
+    }
+
+    async function submitRaise() {
+        const rowId = document.getElementById('raise-row-id').value;
+        const newPct = parseFloat(document.getElementById('raise-new-pct').value);
+        const newRent = parseFloat(document.getElementById('raise-new-rent').value);
+        const reason = document.getElementById('raise-reason').value;
+        const notes = document.getElementById('raise-notes').value.trim();
+        if (!reason) { alert('Please pick a reason.'); return; }
+        try {
+            const res = await fetch('/ecri/api/objection', {
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({batch_ledger_id: parseInt(rowId), new_increase_pct: newPct, new_new_rent: newRent, reason_code: reason, reason_notes: notes}),
+            });
+            const d = await res.json();
+            if (d.success) {
+                closeRaiseModal();
+                const s = (d.objection || {}).status;
+                alert(`Objection created (${s === 'approved' ? 'auto-approved' : 'pending approval'}).`);
+                runSearch();
+                loadObjections();
+            } else {
+                alert('Error: ' + (d.error || 'Unknown'));
+            }
+        } catch(e) { alert('Submit failed — please retry.'); }
+    }
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+    function apiHeaders() { return {'Content-Type':'application/json','X-CSRFToken':getCSRFToken()}; }
+    function formatCurrency(v) { return v==null?'-':'$'+Number(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function formatDate(iso) { return iso ? new Date(iso).toLocaleDateString('en-SG',{day:'2-digit',month:'short',year:'numeric'}) : '-'; }
+
+    function statusClass(s) {
+        return {pending_approval:'status-pending',approved:'status-completed',rejected:'status-failed',applied:'status-completed',cancelled:'status-running'}[s] || '';
+    }
+
+    async function loadObjections() {
+        const status = document.getElementById('filter-status').value;
+        const site = document.getElementById('filter-site').value.trim();
+        let url = '/ecri/api/objections?';
+        if (status) url += `status=${encodeURIComponent(status)}&`;
+        if (site) url += `site_id=${encodeURIComponent(site)}&`;
+
+        const tbody = document.getElementById('obj-tbody');
+        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; color:#666;">Loading...</td></tr>';
+        try {
+            const res = await fetch(url, {headers: apiHeaders()});
+            const data = await res.json();
+            const objs = data.objections || [];
+            document.getElementById('obj-count').textContent = `${objs.length} objection(s)`;
+            if (objs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; color:#666;">No objections found.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = objs.map(o => {
+                let actions = '';
+                if (o.status === 'pending_approval' && USER_PERMS.can_approve) {
+                    actions += `<button class="btn" style="padding:2px 8px;font-size:0.78rem;background:#10b981;margin-right:4px;" onclick="openApproveModal(${o.id},'${o.raised_by_username}',${o.new_new_rent})">Approve</button>`;
+                    actions += `<button class="btn" style="padding:2px 8px;font-size:0.78rem;background:#C41230;" onclick="openRejectModal(${o.id},'${o.raised_by_username}')">Reject</button>`;
+                }
+                if (o.status === 'approved' && (o.raised_by_user_id === USER_PERMS.user_id || USER_PERMS.can_approve)) {
+                    actions += `<button class="btn btn-secondary" style="padding:2px 8px;font-size:0.78rem;margin-left:4px;" onclick="applyObjection(${o.id})">Apply</button>`;
+                }
+                if (['pending_approval','approved'].includes(o.status) && o.raised_by_user_id === USER_PERMS.user_id) {
+                    actions += `<button class="btn btn-secondary" style="padding:2px 8px;font-size:0.78rem;margin-left:4px;background:#f87171;" onclick="cancelObjection(${o.id})">Cancel</button>`;
+                }
+                return `<tr>
+                    <td>${o.id}</td>
+                    <td style="font-size:0.75rem;">${o.batch_id.slice(0,8)}…</td>
+                    <td>${o.site_id}</td>
+                    <td>${o.ledger_id}</td>
+                    <td>${o.original_increase_pct}%</td>
+                    <td>${o.new_increase_pct}%</td>
+                    <td>${formatCurrency(o.original_new_rent)}</td>
+                    <td>${formatCurrency(o.new_new_rent)}</td>
+                    <td style="font-size:0.8rem;">${o.reason_code}${o.reason_notes ? '<br><span style="color:#888;">'+o.reason_notes+'</span>' : ''}</td>
+                    <td><span class="status ${statusClass(o.status)}">${o.status}</span></td>
+                    <td style="font-size:0.8rem;">${o.raised_by_username}</td>
+                    <td style="font-size:0.8rem;">${formatDate(o.raised_at)}</td>
+                    <td style="white-space:nowrap;">${actions}</td>
+                </tr>`;
+            }).join('');
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="13" style="color:#C41230;text-align:center;">Error: ${e.message}</td></tr>`;
+        }
+    }
+
+    function openApproveModal(id, raisedBy, newRent) {
+        document.getElementById('approve-obj-id').value = id;
+        document.getElementById('approve-obj-info').textContent = `Objection #${id} by ${raisedBy}. New rent: ${formatCurrency(newRent)}`;
+        document.getElementById('approve-notes').value = '';
+        document.getElementById('approve-modal').style.display = 'flex';
+    }
+    function closeApproveModal() { document.getElementById('approve-modal').style.display = 'none'; }
+    async function submitApprove() {
+        const id = document.getElementById('approve-obj-id').value;
+        const notes = document.getElementById('approve-notes').value.trim();
+        try {
+            const res = await fetch(`/ecri/api/objection/${id}/approve`, {method:'POST', headers:apiHeaders(), body:JSON.stringify({notes})});
+            const d = await res.json();
+            if (d.success) { closeApproveModal(); loadObjections(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    function openRejectModal(id, raisedBy) {
+        document.getElementById('reject-obj-id').value = id;
+        document.getElementById('reject-obj-info').textContent = `Objection #${id} by ${raisedBy}`;
+        document.getElementById('reject-notes').value = '';
+        document.getElementById('reject-modal').style.display = 'flex';
+    }
+    function closeRejectModal() { document.getElementById('reject-modal').style.display = 'none'; }
+    async function submitReject() {
+        const id = document.getElementById('reject-obj-id').value;
+        const notes = document.getElementById('reject-notes').value.trim();
+        try {
+            const res = await fetch(`/ecri/api/objection/${id}/reject`, {method:'POST', headers:apiHeaders(), body:JSON.stringify({notes})});
+            const d = await res.json();
+            if (d.success) { closeRejectModal(); loadObjections(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    async function applyObjection(id) {
+        if (!confirm(`Apply objection #${id}? This will push the modified rate to SiteLink.`)) return;
+        try {
+            const res = await fetch(`/ecri/api/objection/${id}/apply`, {method:'POST', headers:apiHeaders()});
+            const d = await res.json();
+            if (d.success) { alert('Objection applied successfully.'); loadObjections(); }
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    async function cancelObjection(id) {
+        if (!confirm(`Cancel objection #${id}?`)) return;
+        try {
+            const res = await fetch(`/ecri/api/objection/${id}/cancel`, {method:'POST', headers:apiHeaders()});
+            const d = await res.json();
+            if (d.success) loadObjections();
+            else alert('Error: ' + (d.error || 'Unknown'));
+        } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    document.getElementById('filter-status').addEventListener('change', loadObjections);
+    document.getElementById('filter-site').addEventListener('input', () => setTimeout(loadObjections, 400));
+    document.getElementById('tenant-search').addEventListener('input', () => {
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(runSearch, 300);
+    });
+
+    loadReasons();
+    loadObjections();
+</script>
+{% endblock %}
