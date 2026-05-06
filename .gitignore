@@ -46,6 +46,10 @@ planar-beach-*.json
 *.bak
 temp/
 /Temp/
+output/
+
+# Test caches
+.pytest_cache/
 
 # Legacy vault (decommissioned — secrets now in DB app_secrets table)
 .vault/
