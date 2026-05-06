@@ -126,8 +126,56 @@
                 <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
                     <input type="checkbox" name="can_manage_ecri" {% if role and role.can_manage_ecri %}checked{% endif %}>
                     <div>
-                        <strong>ECRI Management</strong>
-                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Create batches and execute rate increase pushes to SiteLink</p>
+                        <strong>ECRI Manage (legacy)</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Create batches and execute pushes — retained for compatibility; use the per-stage flags below instead</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_request_ecri_exclusion" {% if role and role.can_request_ecri_exclusion %}checked{% endif %}>
+                    <div>
+                        <strong>ECRI Exclusion Request</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Request exclusion of specific tenants during site review (ops, site-scoped)</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_finalize_ecri_batch" {% if role and role.can_finalize_ecri_batch %}checked{% endif %}>
+                    <div>
+                        <strong>ECRI Finalize</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Approve/reject exclusion requests and finalize the batch for execution (Revenue)</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_execute_ecri_batch" {% if role and role.can_execute_ecri_batch %}checked{% endif %}>
+                    <div>
+                        <strong>ECRI Execute</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Push a finalized batch to SiteLink / SMD (Revenue)</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_create_ecri_objection" {% if role and role.can_create_ecri_objection %}checked{% endif %}>
+                    <div>
+                        <strong>ECRI Objection Create</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Raise objections on pushed tenants (ops, site-scoped)</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_approve_ecri_objection" {% if role and role.can_approve_ecri_objection %}checked{% endif %}>
+                    <div>
+                        <strong>ECRI Objection Approve</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Approve above-limit objections (senior ops / Revenue — rank-gated by user limits)</p>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
+                    <input type="checkbox" name="can_manage_ecri_reasons" {% if role and role.can_manage_ecri_reasons %}checked{% endif %}>
+                    <div>
+                        <strong>ECRI Reasons Manage</strong>
+                        <p style="color: #666; font-size: 0.85rem; margin: 0;">Edit the exclusion and objection reason dropdown lists (admin)</p>
                     </div>
                 </label>
 

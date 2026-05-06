@@ -9,4 +9,4 @@ from .oauth import init_oauth, oauth
 from .session_auth import login_manager
 
 # Decorators for role-based access
-from .decorators import login_required, require_roles, admin_required, scheduler_access_required, editor_required
+from .decorators import login_required, require_roles, admin_required, scheduler_access_required, sync_access_required, editor_required

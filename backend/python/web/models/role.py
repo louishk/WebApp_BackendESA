@@ -32,6 +32,13 @@ class Role(Base):
     can_access_statistics = Column(Boolean, default=False)
     can_access_smart_lock = Column(Boolean, default=False)
     can_access_revenue_tools = Column(Boolean, default=False)
+    # ECRI workflow permissions (migration 042)
+    can_request_ecri_exclusion = Column(Boolean, default=False)
+    can_create_ecri_objection = Column(Boolean, default=False)
+    can_approve_ecri_objection = Column(Boolean, default=False)
+    can_finalize_ecri_batch = Column(Boolean, default=False)
+    can_execute_ecri_batch = Column(Boolean, default=False)
+    can_manage_ecri_reasons = Column(Boolean, default=False)
 
     is_system = Column(Boolean, default=False)  # Prevent deletion of core roles
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -120,6 +127,18 @@ class Role(Base):
             permissions.append('Smart Lock')
         if self.can_access_revenue_tools:
             permissions.append('Revenue Tools')
+        if self.can_request_ecri_exclusion:
+            permissions.append('ECRI Exclusion Request')
+        if self.can_create_ecri_objection:
+            permissions.append('ECRI Objection Create')
+        if self.can_approve_ecri_objection:
+            permissions.append('ECRI Objection Approve')
+        if self.can_finalize_ecri_batch:
+            permissions.append('ECRI Finalize')
+        if self.can_execute_ecri_batch:
+            permissions.append('ECRI Execute')
+        if self.can_manage_ecri_reasons:
+            permissions.append('ECRI Reasons Admin')
         return permissions
 
     def to_dict(self):
@@ -141,6 +160,12 @@ class Role(Base):
             'can_access_statistics': self.can_access_statistics,
             'can_access_smart_lock': self.can_access_smart_lock,
             'can_access_revenue_tools': self.can_access_revenue_tools,
+            'can_request_ecri_exclusion': self.can_request_ecri_exclusion,
+            'can_create_ecri_objection': self.can_create_ecri_objection,
+            'can_approve_ecri_objection': self.can_approve_ecri_objection,
+            'can_finalize_ecri_batch': self.can_finalize_ecri_batch,
+            'can_execute_ecri_batch': self.can_execute_ecri_batch,
+            'can_manage_ecri_reasons': self.can_manage_ecri_reasons,
             'is_system': self.is_system,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

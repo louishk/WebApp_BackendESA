@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from flask_login import UserMixin
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Table
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Numeric, ForeignKey, Table
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 
 from web.models.base import Base
@@ -36,6 +37,11 @@ class User(Base, UserMixin):
     employee_id = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # ECRI workflow fields (migrations 039-040, 044)
+    allowed_site_ids = Column(ARRAY(Integer), nullable=True,
+                              comment="NULL/empty = all sites; non-empty = restricted ops")
+    ecri_max_pct_reduction = Column(Numeric(5, 2), default=0)
+    ecri_max_abs_reduction = Column(Numeric(14, 4), default=0)
 
     # Many-to-many relationship to Role
     roles = relationship('Role', secondary=user_roles, backref='role_users')
@@ -97,6 +103,39 @@ class User(Base, UserMixin):
         """Check if user can access revenue management tools."""
         return any(r.can_access_revenue_tools for r in self.roles)
 
+    # ---- ECRI workflow permissions (migration 042) ----
+
+    def can_request_ecri_exclusion(self):
+        return any(r.can_request_ecri_exclusion for r in self.roles)
+
+    def can_create_ecri_objection(self):
+        return any(r.can_create_ecri_objection for r in self.roles)
+
+    def can_approve_ecri_objection(self):
+        return any(r.can_approve_ecri_objection for r in self.roles)
+
+    def can_finalize_ecri_batch(self):
+        return any(r.can_finalize_ecri_batch for r in self.roles)
+
+    def can_execute_ecri_batch(self):
+        return any(r.can_execute_ecri_batch for r in self.roles)
+
+    def can_manage_ecri_reasons(self):
+        return any(r.can_manage_ecri_reasons for r in self.roles)
+
+    def can_see_site(self, site_id):
+        """True if user has no site restriction, or site_id is in their allowed list."""
+        if not self.allowed_site_ids:
+            return True
+        return site_id in self.allowed_site_ids
+
+    def ecri_limits(self):
+        """Return (max_pct_reduction, max_abs_reduction) as floats."""
+        return (
+            float(self.ecri_max_pct_reduction or 0),
+            float(self.ecri_max_abs_reduction or 0),
+        )
+
     def has_role(self, role_names):
         """Check if user has one of the specified role names."""
         if isinstance(role_names, str):
@@ -123,6 +162,9 @@ class User(Base, UserMixin):
             'employee_id': self.employee_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'allowed_site_ids': self.allowed_site_ids,
+            'ecri_max_pct_reduction': float(self.ecri_max_pct_reduction) if self.ecri_max_pct_reduction is not None else 0,
+            'ecri_max_abs_reduction': float(self.ecri_max_abs_reduction) if self.ecri_max_abs_reduction is not None else 0,
         }
 
     def __repr__(self):

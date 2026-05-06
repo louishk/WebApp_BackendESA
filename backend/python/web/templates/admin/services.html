@@ -45,6 +45,18 @@
                 <button class="btn btn-sm btn-danger" id="btn-stop-mcp" onclick="stopMcp()">Stop</button>
             </div>
         </div>
+
+        <div class="service-card" id="service-orchestrator">
+            <div class="service-header">
+                <span class="service-name">Sync Orchestrator</span>
+                <span class="service-status" id="status-orchestrator">checking...</span>
+            </div>
+            <div class="service-info">On-demand ETL service (sync_service)</div>
+            <div class="service-details" id="details-orchestrator"></div>
+            <div class="service-actions">
+                <a href="/orchestrator/" class="btn btn-sm btn-primary">Manage</a>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -135,6 +147,12 @@ function loadServiceStatus() {
                     if (info.pid) details.push('PID: ' + info.pid);
                     if (info.host) details.push('Host: ' + info.host);
                     if (info.transport) details.push('Transport: ' + info.transport);
+                    if (info.pipelines_total !== undefined) {
+                        details.push('Pipelines: ' + (info.pipelines_enabled ?? 0) + '/' + info.pipelines_total);
+                    }
+                    if (info.in_flight !== undefined && info.in_flight > 0) {
+                        details.push('In-flight: ' + info.in_flight);
+                    }
                     if (info.last_heartbeat) {
                         const hb = new Date(info.last_heartbeat);
                         details.push('Heartbeat: ' + hb.toLocaleTimeString());
