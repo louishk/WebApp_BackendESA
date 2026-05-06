@@ -186,8 +186,6 @@ def tax_rates():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def add_charge():
     """ChargeAddToLedger — add a one-time charge to a ledger."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -210,52 +208,22 @@ def add_charge():
     if err:
         return jsonify({'error': f'amount: {err}'}), 400
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="ChargeAddToLedger",
-            parameters={
-                "sLocationCode": site_code,
-                "LedgerID": str(ledger_id),
-                "ChargeDescID": str(charge_desc_id),
-                "dcAmtPreTax": amount,
-            },
-            soap_action=cc_soap_action("ChargeAddToLedger"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "ChargeAddToLedger",
+        {"LedgerID": str(ledger_id), "ChargeDescID": str(charge_desc_id), "dcAmtPreTax": amount},
+        audit_event=AuditEvent.CHARGE_ADDED,
+        audit_detail=(f"site={sanitize_log(site_code)} ledger={ledger_id} "
+                      f"charge_desc={charge_desc_id} amount={amount}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"ChargeAddToLedger failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Charge add failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.CHARGE_ADDED,
-                  f"site={sanitize_log(site_code)} ledger={ledger_id} "
-                  f"charge_desc={charge_desc_id} amount={amount}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'ledger_id': ledger_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault ChargeAddToLedger: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error ChargeAddToLedger: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'ledger_id': ledger_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/charges/recurring', methods=['POST'])
@@ -264,8 +232,6 @@ def add_charge():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def add_recurring_charge():
     """RecurringChargeAddToLedger_v1 — add a recurring charge to a ledger."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -301,55 +267,24 @@ def add_recurring_charge():
     if err:
         return jsonify({'error': f'qty: {err}'}), 400
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="RecurringChargeAddToLedger_v1",
-            parameters={
-                "sLocationCode": site_code,
-                "LedgerID": str(ledger_id),
-                "ChargeDescID": str(charge_desc_id),
-                "dcAmtPreTax": amount,
-                "dcRecurringRateAmt": recurring_amount,
-                "iQty": str(qty),
-            },
-            soap_action=cc_soap_action("RecurringChargeAddToLedger_v1"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "RecurringChargeAddToLedger_v1",
+        {"LedgerID": str(ledger_id), "ChargeDescID": str(charge_desc_id),
+         "dcAmtPreTax": amount, "dcRecurringRateAmt": recurring_amount, "iQty": str(qty)},
+        audit_event=AuditEvent.CHARGE_ADDED,
+        audit_detail=(f"site={sanitize_log(site_code)} ledger={ledger_id} "
+                      f"charge_desc={charge_desc_id} amount={amount} "
+                      f"recurring_amt={recurring_amount} qty={qty}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"RecurringChargeAddToLedger_v1 failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Recurring charge failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.CHARGE_ADDED,
-                  f"site={sanitize_log(site_code)} ledger={ledger_id} "
-                  f"charge_desc={charge_desc_id} amount={amount} "
-                  f"recurring_amt={recurring_amount} qty={qty}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'ledger_id': ledger_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault RecurringChargeAddToLedger_v1: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error RecurringChargeAddToLedger_v1: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'ledger_id': ledger_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/charges/future', methods=['POST'])
@@ -358,8 +293,6 @@ def add_recurring_charge():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def make_future_charges():
     """CustomerAccountsMakeFutureCharges — generate future charges through a date."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -386,52 +319,23 @@ def make_future_charges():
     future_due_iso = (f"{future_due_date}T00:00:00"
                       if "T" not in str(future_due_date) else str(future_due_date))
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="CustomerAccountsMakeFutureCharges",
-            parameters={
-                "sLocationCode": site_code,
-                "iTenantID": str(tenant_id),
-                "iNumberOfFuturePeriods": str(n_periods),
-                "dFutureDueDate": future_due_iso,
-            },
-            soap_action=cc_soap_action("CustomerAccountsMakeFutureCharges"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "CustomerAccountsMakeFutureCharges",
+        {"iTenantID": str(tenant_id), "iNumberOfFuturePeriods": str(n_periods),
+         "dFutureDueDate": future_due_iso},
+        audit_event=AuditEvent.CHARGE_ADDED,
+        audit_detail=(f"site={sanitize_log(site_code)} tenant={tenant_id} "
+                      f"future_charges periods={n_periods} due={future_due_date}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"CustomerAccountsMakeFutureCharges failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Future charges failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.CHARGE_ADDED,
-                  f"site={sanitize_log(site_code)} tenant={tenant_id} "
-                  f"future_charges periods={n_periods} due={future_due_date}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'tenant_id': tenant_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault CustomerAccountsMakeFutureCharges: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error CustomerAccountsMakeFutureCharges: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'tenant_id': tenant_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/charges/<int:ledger_id>', methods=['GET'])
@@ -490,8 +394,6 @@ def charges_by_ledger(ledger_id):
 @rate_limit_api(max_requests=5, window_seconds=60)
 def update_charge_price():
     """ChargePriceUpdate — update the price of an existing charge."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -514,52 +416,22 @@ def update_charge_price():
     if err:
         return jsonify({'error': f'new_price: {err}'}), 400
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="ChargePriceUpdate",
-            parameters={
-                "sLocationCode": site_code,
-                "ledgerId": str(ledger_id),
-                "chargeId": str(charge_id),
-                "amount": new_price,
-            },
-            soap_action=cc_soap_action("ChargePriceUpdate"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "ChargePriceUpdate",
+        {"ledgerId": str(ledger_id), "chargeId": str(charge_id), "amount": new_price},
+        audit_event=AuditEvent.CHARGE_PRICE_UPDATED,
+        audit_detail=(f"site={sanitize_log(site_code)} charge={charge_id} "
+                      f"new_price={new_price}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"ChargePriceUpdate failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Charge price update failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.CHARGE_PRICE_UPDATED,
-                  f"site={sanitize_log(site_code)} charge={charge_id} "
-                  f"new_price={new_price}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'charge_id': charge_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault ChargePriceUpdate: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error ChargePriceUpdate: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'charge_id': charge_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/credits', methods=['POST'])
@@ -568,8 +440,6 @@ def update_charge_price():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def apply_credit():
     """ApplyCredit — apply a credit to a ledger."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -594,53 +464,23 @@ def apply_credit():
 
     credit_reason = clamp(data.get('credit_reason') or data.get('comment', ''), 500)
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="ApplyCredit",
-            parameters={
-                "sLocationCode": site_code,
-                "ledgerId": str(ledger_id),
-                "chargeId": str(charge_id),
-                "amount": amount,
-                "creditReason": credit_reason,
-            },
-            soap_action=cc_soap_action("ApplyCredit"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "ApplyCredit",
+        {"ledgerId": str(ledger_id), "chargeId": str(charge_id),
+         "amount": amount, "creditReason": credit_reason},
+        audit_event=AuditEvent.CREDIT_APPLIED,
+        audit_detail=(f"site={sanitize_log(site_code)} ledger={ledger_id} "
+                      f"amount={amount}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"ApplyCredit failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Apply credit failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.CREDIT_APPLIED,
-                  f"site={sanitize_log(site_code)} ledger={ledger_id} "
-                  f"amount={amount}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'ledger_id': ledger_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault ApplyCredit: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error ApplyCredit: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'ledger_id': ledger_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 # ============================================================================
@@ -968,8 +808,6 @@ def ledger_statement(ledger_id):
 @rate_limit_api(max_requests=5, window_seconds=60)
 def ledger_transfer():
     """LedgerTransferToNewTenant — transfer a ledger to a different tenant."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -988,52 +826,23 @@ def ledger_transfer():
     if err:
         return jsonify({'error': f'new_tenant_id: {err}'}), 400
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="LedgerTransferToNewTenant",
-            parameters={
-                "sLocationCode": site_code,
-                "LedgerID": str(ledger_id),
-                "TenantID": str(new_tenant_id),
-            },
-            soap_action=cc_soap_action("LedgerTransferToNewTenant"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "LedgerTransferToNewTenant",
+        {"LedgerID": str(ledger_id), "TenantID": str(new_tenant_id)},
+        audit_event=AuditEvent.LEDGER_TRANSFERRED,
+        audit_detail=(f"site={sanitize_log(site_code)} ledger={ledger_id} "
+                      f"new_tenant={new_tenant_id}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"LedgerTransferToNewTenant failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Ledger transfer failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.LEDGER_TRANSFERRED,
-                  f"site={sanitize_log(site_code)} ledger={ledger_id} "
-                  f"new_tenant={new_tenant_id}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'ledger_id': ledger_id,
-            'new_tenant_id': new_tenant_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault LedgerTransferToNewTenant: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error LedgerTransferToNewTenant: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'ledger_id': ledger_id,
+        'new_tenant_id': new_tenant_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/discount/remove', methods=['POST'])
@@ -1042,8 +851,6 @@ def ledger_transfer():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def remove_discount():
     """RemoveDiscountFromLedger — remove a discount plan from a ledger."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1062,52 +869,23 @@ def remove_discount():
     if err:
         return jsonify({'error': f'discount_plan_id: {err}'}), 400
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="RemoveDiscountFromLedger",
-            parameters={
-                "sLocationCode": site_code,
-                "LedgerID": str(ledger_id),
-                "ConcessionID": str(discount_plan_id),
-            },
-            soap_action=cc_soap_action("RemoveDiscountFromLedger"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "RemoveDiscountFromLedger",
+        {"LedgerID": str(ledger_id), "ConcessionID": str(discount_plan_id)},
+        audit_event=AuditEvent.DISCOUNT_REMOVED,
+        audit_detail=(f"site={sanitize_log(site_code)} ledger={ledger_id} "
+                      f"discount_plan={discount_plan_id}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"RemoveDiscountFromLedger failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Remove discount failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.DISCOUNT_REMOVED,
-                  f"site={sanitize_log(site_code)} ledger={ledger_id} "
-                  f"discount_plan={discount_plan_id}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'ledger_id': ledger_id,
-            'discount_plan_id': discount_plan_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault RemoveDiscountFromLedger: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error RemoveDiscountFromLedger: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'ledger_id': ledger_id,
+        'discount_plan_id': discount_plan_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 # ============================================================================
@@ -1120,8 +898,6 @@ def remove_discount():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def payment_cash():
     """PaymentSimpleCashWithSource — record a cash payment."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1144,54 +920,24 @@ def payment_cash():
     if err:
         return jsonify({'error': f'amount: {err}'}), 400
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="PaymentSimpleCashWithSource",
-            parameters={
-                "sLocationCode": site_code,
-                "iTenantID": str(tenant_id),
-                "iUnitID": str(unit_id),
-                "dcPaymentAmount": amount,
-                "iSource": "0",
-            },
-            soap_action=cc_soap_action("PaymentSimpleCashWithSource"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "PaymentSimpleCashWithSource",
+        {"iTenantID": str(tenant_id), "iUnitID": str(unit_id),
+         "dcPaymentAmount": amount, "iSource": "0"},
+        audit_event=AuditEvent.PAYMENT_RECORDED,
+        audit_detail=(f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
+                      f"amount={amount} type=cash"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"PaymentSimpleCashWithSource failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Cash payment failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.PAYMENT_RECORDED,
-                  f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
-                  f"amount={amount} type=cash")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'tenant_id': tenant_id,
-            'unit_id': unit_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault PaymentSimpleCashWithSource: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error PaymentSimpleCashWithSource: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'tenant_id': tenant_id,
+        'unit_id': unit_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/payments/check', methods=['POST'])
@@ -1200,8 +946,6 @@ def payment_cash():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def payment_check():
     """PaymentSimpleCheckWithSource — record a check payment."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1229,55 +973,24 @@ def payment_check():
         return jsonify({'error': 'check_number is required'}), 400
     check_number = clamp(check_number, 50)
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="PaymentSimpleCheckWithSource",
-            parameters={
-                "sLocationCode": site_code,
-                "iTenantID": str(tenant_id),
-                "iUnitID": str(unit_id),
-                "dcPaymentAmount": amount,
-                "sCheckNumber": check_number,
-                "iSource": "0",
-            },
-            soap_action=cc_soap_action("PaymentSimpleCheckWithSource"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "PaymentSimpleCheckWithSource",
+        {"iTenantID": str(tenant_id), "iUnitID": str(unit_id),
+         "dcPaymentAmount": amount, "sCheckNumber": check_number, "iSource": "0"},
+        audit_event=AuditEvent.PAYMENT_RECORDED,
+        audit_detail=(f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
+                      f"amount={amount} check={check_number} type=check"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"PaymentSimpleCheckWithSource failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Check payment failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.PAYMENT_RECORDED,
-                  f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
-                  f"amount={amount} check={check_number} type=check")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'tenant_id': tenant_id,
-            'unit_id': unit_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault PaymentSimpleCheckWithSource: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error PaymentSimpleCheckWithSource: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'tenant_id': tenant_id,
+        'unit_id': unit_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/payments/bank-transfer', methods=['POST'])
@@ -1286,8 +999,6 @@ def payment_check():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def payment_bank_transfer():
     """PaymentSimpleBankTransferWithSource — record a bank transfer payment."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1315,55 +1026,24 @@ def payment_bank_transfer():
         return jsonify({'error': 'transfer_number is required'}), 400
     transfer_number = clamp(transfer_number, 100)
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="PaymentSimpleBankTransferWithSource",
-            parameters={
-                "sLocationCode": site_code,
-                "iTenantID": str(tenant_id),
-                "iUnitID": str(unit_id),
-                "dcPaymentAmount": amount,
-                "sTransferNumber": transfer_number,
-                "iSource": "0",
-            },
-            soap_action=cc_soap_action("PaymentSimpleBankTransferWithSource"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "PaymentSimpleBankTransferWithSource",
+        {"iTenantID": str(tenant_id), "iUnitID": str(unit_id),
+         "dcPaymentAmount": amount, "sTransferNumber": transfer_number, "iSource": "0"},
+        audit_event=AuditEvent.PAYMENT_RECORDED,
+        audit_detail=(f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
+                      f"amount={amount} ref={transfer_number} type=bank_transfer"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"PaymentSimpleBankTransferWithSource failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Bank transfer payment failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.PAYMENT_RECORDED,
-                  f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
-                  f"amount={amount} ref={transfer_number} type=bank_transfer")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'tenant_id': tenant_id,
-            'unit_id': unit_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault PaymentSimpleBankTransferWithSource: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error PaymentSimpleBankTransferWithSource: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'tenant_id': tenant_id,
+        'unit_id': unit_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/payments/multi', methods=['POST'])
@@ -1372,8 +1052,6 @@ def payment_bank_transfer():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def payment_multi():
     """PaymentMultipleWithSource_v3 — record multiple payments in one call."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1413,54 +1091,26 @@ def payment_multi():
             return jsonify({'error': f'payments[{i}].amount: {err}'}), 400
         p['_amount'] = amt
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="PaymentMultipleWithSource_v3",
-            parameters={
-                "sLocationCode": site_code,
-                "sTenantIDs": ",".join(str(p['_tenant_id']) for p in payments),
-                "sUnitIDs": ",".join(str(p['_unit_id']) for p in payments),
-                "sAmounts": ",".join(p['_amount'] for p in payments),
-                "iSource": "0",
-            },
-            soap_action=cc_soap_action("PaymentMultipleWithSource_v3"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "PaymentMultipleWithSource_v3",
+        {"sTenantIDs": ",".join(str(p['_tenant_id']) for p in payments),
+         "sUnitIDs": ",".join(str(p['_unit_id']) for p in payments),
+         "sAmounts": ",".join(p['_amount'] for p in payments),
+         "iSource": "0"},
+        audit_event=AuditEvent.PAYMENT_RECORDED,
+        audit_detail=(f"site={sanitize_log(site_code)} "
+                      f"tenants={','.join(str(p['_tenant_id']) for p in payments)} "
+                      f"type=multi count={len(payments)}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"PaymentMultipleWithSource_v3 failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Multi payment failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.PAYMENT_RECORDED,
-                  f"site={sanitize_log(site_code)} "
-                  f"tenants={','.join(str(p['_tenant_id']) for p in payments)} "
-                  f"type=multi count={len(payments)}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'payment_count': len(payments),
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault PaymentMultipleWithSource_v3: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error PaymentMultipleWithSource_v3: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'payment_count': len(payments),
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/payments/<int:ledger_id>', methods=['GET'])
@@ -1569,8 +1219,6 @@ def payment_types():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def refund_cash():
     """RefundPaymentCash — process a cash refund."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1595,55 +1243,25 @@ def refund_cash():
 
     reason = clamp(data.get('reason') or data.get('comment', ''), 500)
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="RefundPaymentCash",
-            parameters={
-                "sLocationCode": site_code,
-                "iTenantID": str(tenant_id),
-                "iUnitID": str(unit_id),
-                "iPaymentID": str(payment_id),
-                "sReason": reason,
-            },
-            soap_action=cc_soap_action("RefundPaymentCash"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "RefundPaymentCash",
+        {"iTenantID": str(tenant_id), "iUnitID": str(unit_id),
+         "iPaymentID": str(payment_id), "sReason": reason},
+        audit_event=AuditEvent.REFUND_PROCESSED,
+        audit_detail=(f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
+                      f"payment={payment_id} type=cash"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"RefundPaymentCash failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Cash refund failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.REFUND_PROCESSED,
-                  f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
-                  f"payment={payment_id} type=cash")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'tenant_id': tenant_id,
-            'unit_id': unit_id,
-            'payment_id': payment_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault RefundPaymentCash: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error RefundPaymentCash: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'tenant_id': tenant_id,
+        'unit_id': unit_id,
+        'payment_id': payment_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/refunds/check', methods=['POST'])
@@ -1652,8 +1270,6 @@ def refund_cash():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def refund_check():
     """RefundPaymentCheck — process a check refund."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1683,56 +1299,25 @@ def refund_check():
 
     reason = clamp(data.get('reason') or data.get('comment', ''), 500)
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="RefundPaymentCheck",
-            parameters={
-                "sLocationCode": site_code,
-                "iTenantID": str(tenant_id),
-                "iUnitID": str(unit_id),
-                "iPaymentID": str(payment_id),
-                "sCheckNumber": check_number,
-                "sReason": reason,
-            },
-            soap_action=cc_soap_action("RefundPaymentCheck"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "RefundPaymentCheck",
+        {"iTenantID": str(tenant_id), "iUnitID": str(unit_id),
+         "iPaymentID": str(payment_id), "sCheckNumber": check_number, "sReason": reason},
+        audit_event=AuditEvent.REFUND_PROCESSED,
+        audit_detail=(f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
+                      f"payment={payment_id} check={check_number} type=check"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"RefundPaymentCheck failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Check refund failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.REFUND_PROCESSED,
-                  f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
-                  f"payment={payment_id} check={check_number} type=check")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'tenant_id': tenant_id,
-            'unit_id': unit_id,
-            'payment_id': payment_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault RefundPaymentCheck: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error RefundPaymentCheck: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'tenant_id': tenant_id,
+        'unit_id': unit_id,
+        'payment_id': payment_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 # ============================================================================
@@ -1811,8 +1396,6 @@ def invoices_by_tenant(tenant_id):
 @rate_limit_api(max_requests=5, window_seconds=60)
 def schedule_move_out():
     """ScheduleMoveOut — schedule a move-out date for a ledger."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1834,53 +1417,23 @@ def schedule_move_out():
     scheduled_date_iso = (f"{scheduled_date}T00:00:00"
                           if "T" not in str(scheduled_date) else str(scheduled_date))
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="ScheduleMoveOut",
-            parameters={
-                "sLocationCode": site_code,
-                "iLedgerID": str(ledger_id),
-                "dScheduledOut": scheduled_date_iso,
-            },
-            soap_action=cc_soap_action("ScheduleMoveOut"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "ScheduleMoveOut",
+        {"iLedgerID": str(ledger_id), "dScheduledOut": scheduled_date_iso},
+        audit_event=AuditEvent.MOVE_OUT_SCHEDULED,
+        audit_detail=(f"site={sanitize_log(site_code)} ledger={ledger_id} "
+                      f"date={scheduled_date}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"ScheduleMoveOut failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Move-out scheduling failed',
-                            'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.MOVE_OUT_SCHEDULED,
-                  f"site={sanitize_log(site_code)} ledger={ledger_id} "
-                  f"date={scheduled_date}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'ledger_id': ledger_id,
-            'scheduled_date': scheduled_date,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault ScheduleMoveOut: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error ScheduleMoveOut: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'ledger_id': ledger_id,
+        'scheduled_date': scheduled_date,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 # ============================================================================
@@ -1893,8 +1446,6 @@ def schedule_move_out():
 @rate_limit_api(max_requests=5, window_seconds=60)
 def add_insurance():
     """InsuranceCoverageAddToLedger — add insurance coverage to a ledger."""
-    from common.soap_client import SOAPFaultError
-
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Request body required'}), 400
@@ -1928,56 +1479,26 @@ def add_insurance():
     start_date_iso = (f"{start_date}T00:00:00"
                       if "T" not in str(start_date) else str(start_date))
 
-    soap_client = None
-    try:
-        soap_client = get_cc_soap_client()
-        results = soap_client.call(
-            operation="InsuranceCoverageAddToLedger",
-            parameters={
-                "sLocationCode": site_code,
-                "TenantID": str(tenant_id),
-                "UnitID": str(unit_id),
-                "InsuranceCoverageID": str(insurance_coverage_id),
-                "sPolicyNumber": policy_number,
-                "dStartDate": start_date_iso,
-            },
-            soap_action=cc_soap_action("InsuranceCoverageAddToLedger"),
-            namespace=CC_NS,
-            result_tag="RT",
-        )
+    results, err_resp = _billing_soap_call(
+        site_code, "InsuranceCoverageAddToLedger",
+        {"TenantID": str(tenant_id), "UnitID": str(unit_id),
+         "InsuranceCoverageID": str(insurance_coverage_id),
+         "sPolicyNumber": policy_number, "dStartDate": start_date_iso},
+        audit_event=AuditEvent.INSURANCE_ADDED,
+        audit_detail=(f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
+                      f"coverage={insurance_coverage_id} policy={policy_number}"),
+    )
+    if err_resp:
+        return err_resp
 
-        ret_code = results[0].get('Ret_Code') if results else None
-        ret_msg = results[0].get('Ret_Msg', '') if results else ''
-
-        if ret_code is None or int(ret_code) <= 0:
-            logger.error(f"InsuranceCoverageAddToLedger failed: ret_code={ret_code} msg={ret_msg}")
-            return jsonify({'error': 'Insurance add failed', 'detail': ret_msg}), 502
-
-        audit_log(AuditEvent.INSURANCE_ADDED,
-                  f"site={sanitize_log(site_code)} tenant={tenant_id} unit={unit_id} "
-                  f"coverage={insurance_coverage_id} policy={policy_number}")
-
-        return jsonify({
-            'status': 'success',
-            'site_code': site_code,
-            'tenant_id': tenant_id,
-            'unit_id': unit_id,
-            'insurance_coverage_id': insurance_coverage_id,
-            'ret_code': ret_code,
-        })
-
-    except SOAPFaultError as e:
-        logger.error(f"SOAP fault InsuranceCoverageAddToLedger: {e}")
-        return jsonify({'error': 'SOAP API error'}), 502
-    except RuntimeError as e:
-        logger.error(f"Config error: {e}")
-        return jsonify({'error': 'SOAP configuration not available'}), 500
-    except Exception as e:
-        logger.error(f"Unexpected error InsuranceCoverageAddToLedger: {e}")
-        return jsonify({'error': 'An internal error occurred'}), 500
-    finally:
-        if soap_client:
-            soap_client.close()
+    return jsonify({
+        'status': 'success',
+        'site_code': site_code,
+        'tenant_id': tenant_id,
+        'unit_id': unit_id,
+        'insurance_coverage_id': insurance_coverage_id,
+        'ret_code': results[0].get('Ret_Code') if results else None,
+    })
 
 
 @billing_bp.route('/insurance/<int:ledger_id>', methods=['GET'])
