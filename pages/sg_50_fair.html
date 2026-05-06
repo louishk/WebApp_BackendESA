@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Furniture Fair 2026 — 50% Off Units · Extra Space Asia</title>
+<!--
+  Furniture Fair 2026 staff list. Paste this full file into the CMS Pages "content"
+  (Admin → Pages → New Page). Suggested slug: furniture-fair-2026 → visit
+  /furniture-fair-2026.html. Page is session-gated by the /<slug>.html route, so the
+  inline JS calls /api/unit-availability with the staff session cookie.
+-->
+<style>
+  :root {
+    --esa-red: #C41230;
+    --esa-red-dark: #9E0E27;
+    --esa-navy: #1A2E5A;
+    --esa-navy-light: #243B6E;
+    --esa-gray: #F5F5F5;
+    --esa-gray-dark: #E0E0E0;
+  }
+  .fair-wrap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif; max-width: 1200px; margin: 0 auto; padding: 0 16px 24px; color: #333; }
+
+  /* Branded header banner — mirrors backend navbar */
+  .fair-header { background: var(--esa-navy); color: #fff; padding: 16px 20px; margin: 0 -16px 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 16px; }
+  .fair-header .logo { height: 44px; width: auto; background: #fff; padding: 4px 8px; border-radius: 4px; }
+  .fair-header .titles { flex: 1; }
+  .fair-header .event { font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: rgba(255,255,255,0.7); margin-bottom: 2px; }
+  .fair-header h1 { font-size: 22px; font-weight: 600; margin: 0; }
+  .fair-header h1 span { color: var(--esa-red); }
+  .fair-header .accent { width: 4px; align-self: stretch; background: var(--esa-red); border-radius: 2px; }
+
+  .fair-wrap h2 { margin: 22px 0 8px; font-size: 16px; color: var(--esa-navy); border-bottom: 2px solid var(--esa-red); padding: 6px 8px 4px; cursor: pointer; user-select: none; background: #fff; }
+  .fair-wrap h2:hover { background: #f9fafb; }
+  .fair-wrap h2 .caret { display: inline-block; width: 14px; color: var(--esa-red); font-size: 12px; transition: transform 0.15s; }
+  .fair-wrap section.fair-group.collapsed table { display: none; }
+  .fair-wrap section.fair-group.collapsed h2 .caret { transform: rotate(-90deg); }
+  .fair-meta { color: #555; font-size: 13px; margin: 4px 0 12px; }
+  .fair-controls { display: flex; gap: 12px; align-items: center; margin: 8px 0 16px; flex-wrap: wrap; }
+  .fair-controls button { background: var(--esa-navy); color: #fff; border: 0; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500; }
+  .fair-controls button:hover { background: var(--esa-navy-light); }
+  .fair-controls button.primary { background: var(--esa-red); }
+  .fair-controls button.primary:hover { background: var(--esa-red-dark); }
+  .fair-controls label { font-size: 13px; color: #374151; }
+  .fair-controls select { padding: 6px 8px; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 13px; background: #fff; }
+  .fair-controls .stat { font-size: 13px; color: #374151; margin-left: auto; }
+  .fair-controls .stat b { color: var(--esa-navy); }
+  table.fair { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+  table.fair th, table.fair td { padding: 6px 8px; border-bottom: 1px solid var(--esa-gray-dark); text-align: left; vertical-align: top; }
+  table.fair th { background: var(--esa-gray); color: var(--esa-navy); font-weight: 600; position: sticky; top: 0; }
+  table.fair tr.sold td, table.fair tr.reserved td { color: #9ca3af; text-decoration: line-through; }
+  table.fair tr.sold td.badge-cell, table.fair tr.reserved td.badge-cell { text-decoration: none; }
+  .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .badge.avail { background: #d1fae5; color: #065f46; }
+  .badge.sold { background: #fee2e2; color: #991b1b; }
+  .badge.reserved { background: #fef3c7; color: #92400e; }
+  .badge.loading { background: #e5e7eb; color: #4b5563; }
+  .badge.reason { background: #ede9fe; color: #5b21b6; margin-left: 4px; }
+  .badge.reason.wine { background: #fce7f3; color: #9d174d; }
+  .price-sale { color: var(--esa-red); font-weight: 700; }
+  .price-std { color: #6b7280; text-decoration: line-through; font-size: 11px; }
+  .summary { background: #fff; border-left: 4px solid var(--esa-red); padding: 10px 14px; border-radius: 4px; margin: 12px 0; font-size: 13px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .summary b { color: var(--esa-navy); }
+  @media (max-width: 720px) {
+    table.fair th:nth-child(4), table.fair td:nth-child(4),
+    table.fair th:nth-child(5), table.fair td:nth-child(5) { display: none; }
+  }
+
+  /* ---- Print stylesheet — condensed paper version ---- */
+  @media print {
+    @page { size: A4; margin: 8mm 8mm 10mm; }
+    body { background: #fff !important; font-size: 8pt; line-height: 1.15; }
+    .fair-controls, #fair-stat { display: none !important; }
+    .fair-wrap { padding: 0; max-width: none; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+    /* Compact branded header */
+    .fair-header { margin: 0 0 4mm; padding: 3mm 5mm; box-shadow: none; page-break-after: avoid; gap: 8px; }
+    .fair-header .logo { height: 26px; padding: 2px 4px; }
+    .fair-header .accent { width: 3px; }
+    .fair-header .event { font-size: 8pt; letter-spacing: 1px; margin-bottom: 0; }
+    .fair-header h1 { font-size: 13pt; }
+    .fair-header > div:last-child { font-size: 7.5pt; }
+
+    .fair-meta { font-size: 8pt; margin: 2mm 0 2mm; }
+    .summary { padding: 3mm 5mm; margin: 2mm 0; font-size: 8pt; box-shadow: none; page-break-after: avoid; }
+
+    /* Tight group headers */
+    .fair-wrap h2 { cursor: default; page-break-after: avoid; font-size: 10pt; margin: 4mm 0 1mm; padding: 2px 4px; border-bottom-width: 1px; }
+    .fair-wrap h2 .caret { display: none; }
+    .fair-wrap section.fair-group.collapsed table { display: table !important; }
+
+    /* Condensed table */
+    table.fair { font-size: 7.5pt; page-break-inside: auto; line-height: 1.15; }
+    table.fair tr { page-break-inside: avoid; }
+    table.fair th, table.fair td { padding: 1.5px 4px; vertical-align: middle; }
+    table.fair th { position: static; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.3px; }
+    table.fair td { border-bottom: 1px solid #e5e7eb; }
+
+    /* Drop the type column on print to save width — type is implied by site+size+climate */
+    table.fair th:nth-child(3), table.fair td:nth-child(3) { display: none; }
+
+    /* Smaller badges so they don't bloat row height */
+    .badge { padding: 0 4px; font-size: 6.5pt; border: 0.5pt solid #999; line-height: 1.4; }
+    .price-std { font-size: 6.5pt; }
+    .price-sale { font-weight: 700; }
+
+    a[href]:after { content: ""; }
+    .print-footer { display: block !important; font-size: 7pt; margin-top: 3mm; padding-top: 2mm; }
+  }
+  .print-footer { display: none; text-align: center; font-size: 9pt; color: #555; margin-top: 8mm; padding-top: 4mm; border-top: 1px solid #ccc; }
+</style>
+</head>
+<body style="margin:0;background:#F5F5F5">
+
+<div class="fair-wrap">
+  <header class="fair-header">
+    <img src="/static/img/logo.jpeg" alt="Extra Space Asia" class="logo" onerror="this.style.display='none'">
+    <div class="accent"></div>
+    <div class="titles">
+      <div class="event">Furniture Fair 2026</div>
+      <h1>50% Off Selected Units <span>· Singapore</span></h1>
+    </div>
+    <div style="text-align:right;font-size:11px;color:rgba(255,255,255,0.75)">
+      <div id="fair-print-date"></div>
+      <div>Internal use · Staff only</div>
+    </div>
+  </header>
+
+  <div class="fair-meta">
+    Self-storage pillar units (priority) + 20 wine picks · 11 SG sites ·
+    Live status auto-pulls from inventory; sold/reserved units are struck through.
+    <span id="fair-count" style="margin-left:8px"></span>
+  </div>
+
+  <div class="fair-controls">
+    <label>Group by:
+      <select id="fair-group">
+        <option value="size">Size (S/M/L/XL/Wine)</option>
+        <option value="site">Location code</option>
+        <option value="climate">Climate type</option>
+      </select>
+    </label>
+    <label>Sort:
+      <select id="fair-sort">
+        <option value="price-asc">Sale price — lowest first</option>
+        <option value="price-desc">Sale price — highest first</option>
+        <option value="area-asc">Area — smallest first</option>
+        <option value="area-desc">Area — largest first</option>
+      </select>
+    </label>
+    <button onclick="fairLoadStatus()">Refresh status</button>
+    <button onclick="fairToggleAll(false)">Expand all</button>
+    <button onclick="fairToggleAll(true)">Collapse all</button>
+    <button class="primary" onclick="fairPrint()" title="Opens print dialog — choose 'Save as PDF' as the destination for a paper copy">🖨 Print / Save as PDF</button>
+    <span class="stat" id="fair-stat">Loading…</span>
+  </div>
+
+  <div id="fair-summary" class="summary"></div>
+
+  <div id="fair-tables"></div>
+
+  <div class="print-footer">
+    Extra Space Asia · Furniture Fair 2026 · 50% off selected units · Internal staff list — pricing &amp; availability subject to change.
+  </div>
+</div>
+
+<script>
+(function () {
+  // ---- 100 curated units (data baked at curation time) -------------------
+  const UNITS = [
+    // === SMALL — Self-storage pillar (15) ===
+    {site:"L001",siteId:48,unit:"4069",type:"S/0-6/W/NC/SS/P",cat:"S",rng:"0-6",area:17.16,std:191,sale:96,desc:"Pillar",reason:"Pillar"},
+    {site:"L001",siteId:48,unit:"A5235",type:"S/14-16/L/A/NR/P",cat:"S",rng:"14-16",area:14.34,std:137,sale:69,desc:"Lower Deck. Pillar",reason:"Pillar"},
+    {site:"L002",siteId:49,unit:"1313",type:"S/22-24/W/NC/NR/P",cat:"S",rng:"22-24",area:23.76,std:295,sale:148,desc:"Pillar",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"A1009",type:"S/24-26/W/A/SS/P",cat:"S",rng:"24-26",area:24.99,std:268,sale:134,desc:"Big pillar",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"24202",type:"S/16-18/W/NC/NR/P",cat:"S",rng:"16-18",area:16.50,std:149,sale:75,desc:"Small pillar",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"A4088",type:"S/22-24/W/A/NR/P",cat:"S",rng:"22-24",area:22.04,std:257,sale:129,desc:"Pillar",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"A4093",type:"S/20-22/W/A/NR/P",cat:"S",rng:"20-22",area:21.46,std:257,sale:129,desc:"Pillar",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"A4108",type:"S/22-24/W/A/NR/P",cat:"S",rng:"22-24",area:22.04,std:257,sale:129,desc:"Pillar",reason:"Pillar"},
+    {site:"L005",siteId:1910,unit:"3215",type:"S/28-30/W/NC/NR/P",cat:"S",rng:"28-30",area:28.60,std:294,sale:147,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"2085",type:"S/26-28/W/NC/SS/P",cat:"S",rng:"26-28",area:27.44,std:265,sale:133,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"2539",type:"S/26-28/W/NC/SS/P",cat:"S",rng:"26-28",area:26.88,std:265,sale:133,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"2029",type:"S/26-28/W/NC/SS/P",cat:"S",rng:"26-28",area:26.00,std:258,sale:129,desc:"Pillar",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S6053X",type:"S/28-30/W/NC/NR/P",cat:"S",rng:"28-30",area:28.67,std:280,sale:140,desc:"Column 0.08",reason:"Pillar"},
+    {site:"L025",siteId:43344,unit:"8130",type:"S/26-28/W/NC/NR/P",cat:"S",rng:"26-28",area:26.91,std:257,sale:129,desc:"Pillar",reason:"Pillar"},
+    {site:"L029",siteId:54219,unit:"A2856",type:"AC Walk In (DH)",cat:"S",rng:"26-28",area:27.44,std:313,sale:157,desc:"Pillar",reason:"Pillar"},
+
+    // === MEDIUM — Self-storage pillar (25) ===
+    {site:"L002",siteId:49,unit:"7051",type:"M/50-60/W/A/SS/P",cat:"M",rng:"50-60",area:55.76,std:563,sale:282,desc:"Pillar",reason:"Pillar"},
+    {site:"L002",siteId:49,unit:"3083",type:"M/50-60/W/A/WR/P",cat:"M",rng:"50-60",area:53.30,std:546,sale:273,desc:"Pillar",reason:"Pillar"},
+    {site:"L002",siteId:49,unit:"A7004",type:"M/40-45/W/A/WR/P",cat:"M",rng:"40-45",area:43.16,std:487,sale:244,desc:"Pillar",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"A1093",type:"M/30-35/W/A/NR/P",cat:"M",rng:"30-35",area:32.39,std:320,sale:160,desc:"Column",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"23084",type:"M/30-35/W/NC/WR/P",cat:"M",rng:"30-35",area:33.00,std:248,sale:124,desc:"Column inside",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"25087",type:"M/30-35/W/NC/WR/P",cat:"M",rng:"30-35",area:33.00,std:248,sale:124,desc:"Small pillar",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"1241",type:"M/50-60/W/NC/SS/P",cat:"M",rng:"50-60",area:52.14,std:441,sale:221,desc:"Pillar",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"4190",type:"M/50-60/W/NC/WR/P",cat:"M",rng:"50-60",area:55.04,std:377,sale:189,desc:"Pillar",reason:"Pillar"},
+    {site:"L005",siteId:1910,unit:"3219C",type:"M/30-35/W/NC/NR/P",cat:"M",rng:"30-35",area:32.00,std:314,sale:157,desc:"Pillar",reason:"Pillar"},
+    {site:"L008",siteId:9415,unit:"6016",type:"M/45-50/W/A/WR/P",cat:"M",rng:"45-50",area:48.00,std:407,sale:204,desc:"Pillar",reason:"Pillar"},
+    {site:"L017",siteId:27903,unit:"6177",type:"M/45-50/W/A/NR/P",cat:"M",rng:"45-50",area:46.20,std:400,sale:200,desc:"Pillar",reason:"Pillar"},
+    {site:"L017",siteId:27903,unit:"6049",type:"M/40-45/W/A/SS/P",cat:"M",rng:"40-45",area:40.12,std:372,sale:186,desc:"Pillar (Toilet to Storage - no ventilation)",reason:"Pillar"},
+    {site:"L017",siteId:27903,unit:"6098",type:"M/35-40/W/A/SS/P",cat:"M",rng:"35-40",area:35.75,std:350,sale:175,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"P2022",type:"M/45-50/W/AD/WR/P",cat:"M",rng:"45-50",area:49.80,std:504,sale:252,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"P2003",type:"M/45-50/W/AD/NR/P",cat:"M",rng:"45-50",area:48.51,std:500,sale:250,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"A3314",type:"M/50-60/W/A/WR/P",cat:"M",rng:"50-60",area:52.29,std:468,sale:234,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"A3348",type:"M/45-50/W/A/WR/P",cat:"M",rng:"45-50",area:45.03,std:438,sale:219,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"A3310",type:"M/45-50/W/A/WR/P",cat:"M",rng:"40-45",area:42.33,std:423,sale:212,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"A3362",type:"M/40-45/W/A/SS/P",cat:"M",rng:"40-45",area:42.09,std:423,sale:212,desc:"Pillar",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S4014B",type:"M/50-60/W/NC/WR/P",cat:"M",rng:"50-60",area:56.00,std:404,sale:202,desc:"Pillar",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S4014F",type:"M/50-60/W/NC/WR/P",cat:"M",rng:"50-60",area:53.20,std:393,sale:197,desc:"Pillar",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S5127",type:"M/40-45/W/NC/SS/P",cat:"M",rng:"40-45",area:44.88,std:365,sale:183,desc:"Column 0.17",reason:"Pillar"},
+    {site:"L025",siteId:43344,unit:"A4706",type:"M/50-60/W/A/OS/P",cat:"M",rng:"50-60",area:56.80,std:473,sale:237,desc:"Odd Shape - Pillar 1000x1000mm",reason:"Pillar"},
+    {site:"L029",siteId:54219,unit:"A1815",type:"AC Walk In",cat:"M",rng:"30-35",area:33.97,std:371,sale:186,desc:"Pillar",reason:"Pillar"},
+    {site:"L029",siteId:54219,unit:"A3303",type:"AC Walk In (DH)",cat:"M",rng:"40-45",area:42.92,std:421,sale:211,desc:"Pillar",reason:"Pillar"},
+
+    // === LARGE — Self-storage pillar (22) ===
+    {site:"L002",siteId:49,unit:"4060",type:"L/80-90/W/A/SS/P",cat:"L",rng:"80-90",area:87.22,std:675,sale:338,desc:"Pillar",reason:"Pillar"},
+    {site:"L002",siteId:49,unit:"2084",type:"L/80-90/W/A/SS/P",cat:"L",rng:"80-90",area:87.12,std:619,sale:310,desc:"Pillar",reason:"Pillar"},
+    {site:"L002",siteId:49,unit:"5118",type:"L/60-70/W/A/WR/P",cat:"L",rng:"60-70",area:65.66,std:608,sale:304,desc:"Pillar",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"A3035",type:"L/80-90/W/A/SS/P",cat:"L",rng:"80-90",area:84.28,std:568,sale:284,desc:"Column inside",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"36073",type:"L/80-90/W/NC/SS/P",cat:"L",rng:"80-90",area:86.24,std:482,sale:241,desc:"Column inside",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"37019",type:"L/70-80/W/D/WR/P",cat:"L",rng:"70-80",area:77.38,std:443,sale:222,desc:"Pillar ~73x73cm",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"1094",type:"L/80-90/W/NC/SS/P",cat:"L",rng:"80-90",area:88.11,std:584,sale:292,desc:"Pillar",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"1227",type:"L/80-90/W/NC/OS/P",cat:"L",rng:"80-90",area:82.17,std:554,sale:277,desc:"Pillar, odd shape",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"1311",type:"L/80-90/W/NC/SS/P",cat:"L",rng:"80-90",area:80.10,std:544,sale:272,desc:"Pillar",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"1097",type:"L/70-80/W/NC/WR/P",cat:"L",rng:"70-80",area:72.27,std:501,sale:251,desc:"Pillar",reason:"Pillar"},
+    {site:"L005",siteId:1910,unit:"4215",type:"L/80-90/W/NC/WR/P",cat:"L",rng:"80-90",area:85.12,std:528,sale:264,desc:"Big pillar",reason:"Pillar"},
+    {site:"L005",siteId:1910,unit:"4021",type:"L/70-80/W/NC/WR/P",cat:"L",rng:"70-80",area:75.24,std:480,sale:240,desc:"Pillar",reason:"Pillar"},
+    {site:"L005",siteId:1910,unit:"3216",type:"L/60-70/W/NC/WR/P",cat:"L",rng:"60-70",area:68.90,std:454,sale:227,desc:"Big pillar",reason:"Pillar"},
+    {site:"L008",siteId:9415,unit:"2141",type:"L/60-70/W/A/WR/P",cat:"L",rng:"60-70",area:61.38,std:462,sale:231,desc:"Pillar",reason:"Pillar"},
+    {site:"L008",siteId:9415,unit:"5120",type:"L/60-70/W/NC/SS/P",cat:"L",rng:"60-70",area:69.70,std:444,sale:222,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"1119",type:"L/80-90/S/D/WR/P",cat:"L",rng:"80-90",area:80.64,std:561,sale:281,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"3150",type:"L/80-90/W/NC/WR/P",cat:"L",rng:"80-90",area:86.32,std:507,sale:254,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"2325",type:"L/70-80/W/NC/SS/P",cat:"L",rng:"70-80",area:78.96,std:476,sale:238,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"4073",type:"L/70-80/W/NC/SS/P",cat:"L",rng:"70-80",area:78.57,std:476,sale:238,desc:"Pillar",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S5019",type:"L/80-90/W/NC/WR/P",cat:"L",rng:"80-90",area:85.88,std:507,sale:254,desc:"Column 0.18",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S4014G",type:"L/70-80/W/NC/SS/P",cat:"L",rng:"70-80",area:78.02,std:472,sale:236,desc:"Pillar",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S5010",type:"L/60-70/W/NC/WR/P",cat:"L",rng:"60-70",area:68.87,std:432,sale:216,desc:"Column 0.24",reason:"Pillar"},
+    {site:"L025",siteId:43344,unit:"A8247",type:"L/70-80/W/A/WR/P",cat:"L",rng:"70-80",area:77.00,std:543,sale:272,desc:"Pillar",reason:"Pillar"},
+
+    // === XL — Self-storage pillar (18) ===
+    {site:"L001",siteId:48,unit:"2009",type:"XL/250+/W/NC/WR/P",cat:"XL",rng:"250+",area:483.60,std:2289,sale:1145,desc:"Pillar",reason:"Pillar"},
+    {site:"L002",siteId:49,unit:"2025",type:"XL/175-200/W/A/WR/P",cat:"XL",rng:"175-200",area:182.36,std:1004,sale:502,desc:"Pillar",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"44028",type:"XL/200-225/W/NC/WR/P",cat:"XL",rng:"200-225",area:215.34,std:817,sale:409,desc:"W/cubix x2, pillar",reason:"Pillar"},
+    {site:"L003",siteId:63,unit:"37020",type:"XL/150-175/W/NC/WR/P",cat:"XL",rng:"150-175",area:168.20,std:713,sale:357,desc:"2 swing doors, corner pillar",reason:"Pillar"},
+    {site:"L005",siteId:1910,unit:"A1000",type:"XL/130-150/W/AD/SS/P",cat:"XL",rng:"130-150",area:139.86,std:953,sale:477,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"D1004",type:"XL/250+/DV/NC/WR/P",cat:"XL",rng:"250+",area:321.16,std:1668,sale:834,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"1126",type:"XL/130-150/S/D/SS/P",cat:"XL",rng:"150-175",area:174.08,std:934,sale:467,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"1002",type:"XL/150-175/W/NC/WR/P",cat:"XL",rng:"150-175",area:170.00,std:873,sale:437,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"1107",type:"XL/130-150/S/D/WR/P",cat:"XL",rng:"130-150",area:138.92,std:793,sale:397,desc:"Pillar",reason:"Pillar"},
+    {site:"L018",siteId:29197,unit:"1112",type:"XL/110-130/S/D/WR/P",cat:"XL",rng:"110-130",area:113.92,std:710,sale:355,desc:"Pillar",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S3078",type:"XL/150-175/W/NC/WR/P",cat:"XL",rng:"150-175",area:160.32,std:754,sale:377,desc:"Pillar (w/floor decking)",reason:"Pillar"},
+    {site:"L022",siteId:38782,unit:"S4010C",type:"XL/150-175/W/NC/WR/P",cat:"XL",rng:"150-175",area:151.20,std:727,sale:364,desc:"Pillar 640x600mm",reason:"Pillar"},
+    {site:"L025",siteId:43344,unit:"4307",type:"XL/150-175/S/NC/WR/P",cat:"XL",rng:"150-175",area:153.12,std:746,sale:373,desc:"Pillar",reason:"Pillar"},
+    {site:"L025",siteId:43344,unit:"A4704",type:"XL/110-130/W/A/OS/P",cat:"XL",rng:"110-130",area:120.19,std:737,sale:369,desc:"Odd shape, pillar 980x880mm",reason:"Pillar"},
+    {site:"L025",siteId:43344,unit:"A8261",type:"XL/110-130/W/A/SS/P",cat:"XL",rng:"110-130",area:115.56,std:722,sale:361,desc:"Pillar",reason:"Pillar"},
+    {site:"L025",siteId:43344,unit:"8173",type:"XL/150-175/W/NC/SS/P",cat:"XL",rng:"150-175",area:155.76,std:720,sale:360,desc:"Pillar",reason:"Pillar"},
+    {site:"L029",siteId:54219,unit:"A3337",type:"AC Walk In (DH)",cat:"XL",rng:"175-200",area:181.93,std:990,sale:495,desc:"Pillar",reason:"Pillar"},
+    {site:"L004",siteId:26486,unit:"1268",type:"XL/90-110/W/NC/WR/P",cat:"XL",rng:"90-110",area:108.36,std:672,sale:336,desc:"Pillar",reason:"Pillar"},
+
+    // === WINE — 20 picks (pillar first, then low-occ) ===
+    {site:"L029",siteId:54219,unit:"W1802",type:"Wine Walk In",cat:"Wine",rng:"30-35",area:30.82,std:497,sale:249,desc:"108 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L029",siteId:54219,unit:"W1872",type:"Wine Walk In",cat:"Wine",rng:"30-35",area:30.36,std:469,sale:235,desc:"102 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L029",siteId:54219,unit:"W1869",type:"Wine Walk In",cat:"Wine",rng:"28-30",area:28.98,std:465,sale:233,desc:"101 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L029",siteId:54219,unit:"W1874",type:"Wine Walk In",cat:"Wine",rng:"24-26",area:25.30,std:391,sale:196,desc:"85 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L029",siteId:54219,unit:"W1836",type:"Wine Walk In",cat:"Wine",rng:"22-24",area:22.36,std:331,sale:166,desc:"72 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L029",siteId:54219,unit:"W1800",type:"Wine Walk In",cat:"Wine",rng:"18-20",area:19.32,std:281,sale:141,desc:"61 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L029",siteId:54219,unit:"W1902",type:"S/18-20/SWN/RF/SS/P/55",cat:"Wine",rng:"18-20",area:18.40,std:253,sale:127,desc:"55 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L029",siteId:54219,unit:"W1841",type:"S/16-18/SWN/RF/SS/P/49",cat:"Wine",rng:"16-18",area:16.34,std:225,sale:113,desc:"49 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L002",siteId:49,unit:"W7004",type:"M/35-40/WN/RF/NR/P/120",cat:"Wine",rng:"35-40",area:39.36,std:504,sale:252,desc:"120 Cases · Pillar",reason:"Wine pillar"},
+    {site:"L029",siteId:54219,unit:"W1735",type:"Wine Walk In",cat:"Wine",rng:"14-16",area:15.48,std:212,sale:106,desc:"46 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1700",type:"Wine Walk In",cat:"Wine",rng:"14-16",area:15.21,std:212,sale:106,desc:"46 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1709",type:"Wine Walk In",cat:"Wine",rng:"14-16",area:15.21,std:212,sale:106,desc:"46 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1629",type:"Wine Walk In",cat:"Wine",rng:"8-10",area:9.36,std:175,sale:88,desc:"38 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1630",type:"Wine Walk In",cat:"Wine",rng:"8-10",area:9.36,std:175,sale:88,desc:"38 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1631",type:"Wine Walk In",cat:"Wine",rng:"8-10",area:9.36,std:175,sale:88,desc:"38 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1625",type:"Wine Walk In",cat:"Wine",rng:"12-14",area:12.96,std:166,sale:83,desc:"36 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1626",type:"Wine Walk In",cat:"Wine",rng:"12-14",area:12.96,std:166,sale:83,desc:"36 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1628",type:"Wine Walk In",cat:"Wine",rng:"12-14",area:12.96,std:143,sale:72,desc:"31 cases",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1727",type:"Wine Locker",cat:"Wine",rng:"8-10",area:9.90,std:101,sale:51,desc:"19 cases · Lower Deck",reason:"Wine low-occ"},
+    {site:"L029",siteId:54219,unit:"W1733",type:"Wine Locker",cat:"Wine",rng:"8-10",area:9.90,std:101,sale:51,desc:"19 cases · Lower Deck",reason:"Wine low-occ"}
+  ];
+
+  // ---- Helpers --------------------------------------------------------------
+  const SIZE_ORDER  = ["S","M","L","XL","Wine"];
+  const SIZE_TITLES = {S:"Small (S)", M:"Medium (M)", L:"Large (L)", XL:"Extra Large (XL)", Wine:"Wine Storage"};
+
+  // Internal site naming (matches siteinfo.InternalLabel)
+  const SITE_INTERNAL = {
+    L001:"IMM", L002:"BKR", L003:"ELK", L004:"WCT", L005:"MMR",
+    L008:"KWY", L017:"WDL", L018:"AMK", L022:"TPY", L025:"HV", L029:"CW"
+  };
+  const SITE_NAMES = {
+    L001:"Jurong East (IMM)", L002:"Boon Keng (BKR)", L003:"Eunos / Kaki Bukit (ELK)",
+    L004:"Toh Tuck (WCT)", L005:"Marymount / Sin Ming (MMR)",
+    L008:"Kallang Way (KWY)", L017:"Woodlands (WDL)", L018:"Ang Mo Kio (AMK)",
+    L022:"Toa Payoh (TPY)", L025:"Hillview (HV)", L029:"Commonwealth (CW)"
+  };
+  const SITE_TITLES = Object.fromEntries(
+    Object.entries(SITE_NAMES).map(([k,v]) => [k, `${k} · ${v}`])
+  );
+
+  const CLIMATE_TITLES = {
+    A:"Air-Conditioned (A)",
+    AD:"AC + Dehumidifier (AD)",
+    NC:"Non-Climate / Ambient (NC)",
+    D:"Dehumidified (D)",
+    RF:"Refrigerated — Wine (RF)"
+  };
+  const CLIMATE_ORDER = ["A","AD","D","NC","RF"];
+
+  function fmt(n) { return n == null ? "" : "$" + Number(n).toLocaleString(); }
+  function escapeHtml(s) { return (s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+  function statusKey(siteId, unitName) { return siteId + "::" + unitName; }
+
+  // Derive climate code from sTypeName (covers standardized labels and special types)
+  function getClimate(u) {
+    const t = u.type || "";
+    // Standardized label slot 4 between slashes, e.g. S/22-24/W/A/NR/P → A
+    const m = t.match(/^[^/]+\/[^/]+\/[^/]+\/(A|AD|NC|D|RF)\b/);
+    if (m) return m[1];
+    // Special name fallbacks
+    if (/Wine/i.test(t)) return "RF";
+    if (/AC.*\(DH\)/i.test(t)) return "AD";
+    if (/AC Walk In|^AC /i.test(t)) return "A";
+    if (/BFS/i.test(t)) return "A";
+    return "NC";
+  }
+
+  // Cached availability state, refreshed by fairLoadStatus().
+  let lastStatus = { availableSet: null, reservedSet: null };
+
+  function groupKey(u, mode) {
+    if (mode === "site")    return u.site;
+    if (mode === "climate") return getClimate(u);
+    return u.cat; // size
+  }
+  function groupTitle(mode, key) {
+    if (mode === "site")    return SITE_TITLES[key] || key;
+    if (mode === "climate") return CLIMATE_TITLES[key] || key;
+    return SIZE_TITLES[key] || key;
+  }
+  function groupSortIndex(mode, key) {
+    if (mode === "site")    return key; // alphabetical
+    if (mode === "climate") {
+      const i = CLIMATE_ORDER.indexOf(key);
+      return i < 0 ? 999 : i;
+    }
+    const i = SIZE_ORDER.indexOf(key);
+    return i < 0 ? 999 : i;
+  }
+
+  function sortRows(rows, mode) {
+    const cmp = {
+      "price-asc":  (a,b) => a.sale - b.sale,
+      "price-desc": (a,b) => b.sale - a.sale,
+      "area-asc":   (a,b) => a.area - b.area,
+      "area-desc":  (a,b) => b.area - a.area
+    }[mode] || ((a,b) => a.sale - b.sale);
+    return rows.slice().sort(cmp);
+  }
+
+  function applyStatus() {
+    const av  = lastStatus.availableSet;
+    const res = lastStatus.reservedSet;
+    let avail = 0, sold = 0, reserved = 0, revStd = 0, revSale = 0;
+    for (const u of UNITS) {
+      const k = statusKey(u.siteId, u.unit);
+      const trs = document.querySelectorAll(`tr[data-key="${k}"]`);
+      trs.forEach(tr => tr.classList.remove("sold","reserved"));
+      let label;
+      if (!av) {
+        label = `<span class="badge loading">…</span>`;
+      } else if (res.has(k)) {
+        trs.forEach(tr => tr.classList.add("reserved"));
+        label = `<span class="badge reserved">RESERVED</span>`;
+        reserved++;
+      } else if (av.has(k)) {
+        label = `<span class="badge avail">Available</span>`;
+        avail++;
+        revStd  += u.std;
+        revSale += u.sale;
+      } else {
+        trs.forEach(tr => tr.classList.add("sold"));
+        label = `<span class="badge sold">RENTED</span>`;
+        sold++;
+      }
+      trs.forEach(tr => {
+        const cell = tr.querySelector(".badge-cell");
+        if (cell) cell.innerHTML = label;
+      });
+    }
+    if (av) {
+      document.getElementById("fair-summary").innerHTML =
+        `<b>${avail}</b> available · <b>${sold}</b> rented · <b>${reserved}</b> reserved` +
+        ` · Available revenue if all rented at sale price: <b>${fmt(revSale)}</b>/mo ` +
+        `<span style="color:#6b7280">(std ${fmt(revStd)})</span>`;
+    }
+  }
+
+  function renderTables() {
+    const root = document.getElementById("fair-tables");
+    const groupMode = document.getElementById("fair-group").value;
+    const sortMode  = document.getElementById("fair-sort").value;
+
+    // Build groups
+    const groups = {};
+    for (const u of UNITS) {
+      const k = groupKey(u, groupMode);
+      (groups[k] = groups[k] || []).push(u);
+    }
+    const keys = Object.keys(groups).sort((a,b) => {
+      const ai = groupSortIndex(groupMode, a), bi = groupSortIndex(groupMode, b);
+      if (typeof ai === "number" && typeof bi === "number") return ai - bi;
+      return String(ai).localeCompare(String(bi));
+    });
+
+    let html = "";
+    for (const gkey of keys) {
+      const rows = sortRows(groups[gkey], sortMode);
+      const title = groupTitle(groupMode, gkey);
+      const minSale = Math.min(...rows.map(r => r.sale));
+      const maxSale = Math.max(...rows.map(r => r.sale));
+      html += `<section class="fair-group" data-group="${escapeHtml(gkey)}">`;
+      html += `<h2 onclick="fairToggleGroup(this)"><span class="caret">▾</span> ${escapeHtml(title)} <span style="font-weight:400;color:#6b7280;font-size:13px">— ${rows.length} units · ${fmt(minSale)}${minSale!==maxSale ? "–"+fmt(maxSale) : ""}/mo</span></h2>`;
+      html += `<table class="fair"><thead><tr>
+        <th>Site</th><th>Unit</th><th>Type</th><th>Size</th><th>Area (sqft)</th>
+        <th>Sale rate</th><th>Note</th><th>Status</th>
+      </tr></thead><tbody>`;
+      for (const u of rows) {
+        const k = statusKey(u.siteId, u.unit);
+        const reasonClass = u.reason.startsWith("Wine") ? "reason wine" : "reason";
+        const internal = SITE_INTERNAL[u.site] || "";
+        html += `<tr data-key="${k}">
+          <td>${u.site}${internal ? `<div style="font-size:10px;color:#6b7280">${internal}</div>` : ""}</td>
+          <td><b>${escapeHtml(u.unit)}</b></td>
+          <td>${escapeHtml(u.type)}</td>
+          <td>${escapeHtml(u.rng)} sqft</td>
+          <td>${u.area.toFixed(1)}</td>
+          <td><span class="price-sale">${fmt(u.sale)}</span> <span class="price-std">${fmt(u.std)}</span></td>
+          <td>${escapeHtml(u.desc || "")} <span class="badge ${reasonClass}">${u.reason}</span></td>
+          <td class="badge-cell"><span class="badge loading">…</span></td>
+        </tr>`;
+      }
+      html += `</tbody></table></section>`;
+    }
+    root.innerHTML = html;
+    document.getElementById("fair-count").textContent = `(${UNITS.length} units total)`;
+    applyStatus();
+  }
+
+  async function fairLoadStatus() {
+    const stat = document.getElementById("fair-stat");
+    stat.textContent = "Loading current status…";
+
+    const siteIds = [...new Set(UNITS.map(u => u.siteId))].join(",");
+    // /api/unit-availability returns ONLY vacant+rentable+not-excluded units
+    // and carries bWaitingListReserved.
+    //   - present + bWaitingListReserved=true  → RESERVED (struck through)
+    //   - present + bWaitingListReserved=false → AVAILABLE
+    //   - absent from response                  → RENTED / not rentable (struck through)
+    const availableSet = new Set();
+    const reservedSet  = new Set();
+    try {
+      const res = await fetch(`/api/unit-availability?site_ids=${siteIds}`, {
+        credentials: "same-origin",
+        headers: { "Accept": "application/json" }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      for (const u of (data.units || [])) {
+        const k = statusKey(u.SiteID, u.sUnitName);
+        if (u.bWaitingListReserved) reservedSet.add(k);
+        else availableSet.add(k);
+      }
+    } catch (e) {
+      stat.textContent = "Could not load live status (" + e.message + ").";
+      console.error(e);
+      return;
+    }
+    lastStatus = { availableSet, reservedSet };
+    applyStatus();
+    stat.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  }
+
+  // expose for the Refresh / collapse / print buttons
+  window.fairLoadStatus = fairLoadStatus;
+  window.fairToggleGroup = function (h) {
+    h.parentElement.classList.toggle("collapsed");
+  };
+  window.fairToggleAll = function (collapse) {
+    document.querySelectorAll("#fair-tables section.fair-group").forEach(s => {
+      s.classList.toggle("collapsed", collapse);
+    });
+  };
+  window.fairPrint = function () {
+    // Refresh status first so the printout reflects current rented/reserved state,
+    // then expand all groups (print CSS also forces this) and trigger the print dialog.
+    fairLoadStatus().finally(() => {
+      window.fairToggleAll(false);
+      setTimeout(() => window.print(), 150);
+    });
+  };
+
+  // Stamp the print date in the header
+  document.getElementById("fair-print-date").textContent =
+    "Generated " + new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+
+  // wire up dropdowns
+  document.getElementById("fair-group").addEventListener("change", renderTables);
+  document.getElementById("fair-sort").addEventListener("change",  renderTables);
+
+  // boot
+  renderTables();
+  fairLoadStatus();
+})();
+</script>
+</body>
+</html>

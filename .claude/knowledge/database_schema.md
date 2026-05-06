@@ -9,7 +9,7 @@
 **pages** — id, title, slug, content, is_secure, is_public, extension, edit_restricted, view_roles, view_users, edit_roles, edit_users
 
 ### API & Audit
-**api_keys** — id, user_id, name, key_id, key_hash, scopes(jsonb), rate_limit, daily_quota, daily_usage, quota_reset_date, is_active, last_used_at, expires_at
+**api_keys** — id, user_id, name, key_id, key_hash, scopes(jsonb), rate_limit, daily_quota, daily_usage, quota_reset_date, is_active, last_used_at, expires_at, mcp_enabled, mcp_tools(jsonb), mcp_db_presets(jsonb), mcp_db_table_rules(jsonb)
 **api_statistics** — id, endpoint, method, status_code, response_time_ms, client_ip, user_agent, request_size, response_size, called_at
 **external_api_statistics** — id, service_name, endpoint, method, status_code, response_time_ms, success, error_message, caller, called_at
 **audit_log** — id, user_id, action, resource, details(jsonb), ip_address, created_at
@@ -84,6 +84,20 @@
 
 ### Reviews
 **embedsocial_reviews** — id, review_id, source_id, source_name, source_address, author_name, rating, caption_text, reply_text, original_created_on
+
+### Zoom Contact Center (migrations 045–049)
+**zoom_call_logs** — call_id(PK), direction, caller_number, callee_number, start_time, end_time, duration, agent_id, recording_url, transcript_status, scoring_status, ...
+**zoom_contacts** — contact_id(PK), display_name, email, phone, extension, department
+**zoom_agent_mapping** — zoom_user_id(PK), zoom_email, esa_user_id, site_id, role, is_active
+**zoom_call_transcripts** — call_id(PK), transcript_text, speaker_segments(jsonb), language, confidence_score, generated_at
+**zoom_call_scores** — id, call_id, scorer_version, overall_score, dimension_scores(jsonb), summary, flags(jsonb), scored_at
+**call_scoring_config** — id, site_id, dimension, weight, rubric(jsonb), is_active
+
+### Smart Lock / Igloo (migrations 038–044)
+**igloo_locks**, **igloo_lock_access_codes**, **smart_lock_site_config**, **siteinfo** (igloo columns added in 043)
+
+### Sync Orchestrator (migration 047, 051)
+**sync_orchestrator_jobs**, **sync_orchestrator_history**, **sync_service_*** — pipeline orchestration state
 
 ### Revenue Config
 **site_revenue_config** — siteid(PK), sitecode, country, use_metric, coverage_pct, dcamt_var_pct, adj_var_pct, notes

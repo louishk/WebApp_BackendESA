@@ -131,12 +131,12 @@ WebApp_BackendESA/
 
 ### SSH
 ```bash
-sshpass -p 'K9wKmtRfj3zJqRU' ssh esa_pbi_admin@20.6.132.108
+sshpass -p "$VM_SSH_PASSWORD" ssh esa_pbi_admin@20.6.132.108
 ```
 
 ### PostgreSQL
 ```bash
-PGPASSWORD='K9wKmtRfj3zJqRU' psql -h esapbi.postgres.database.azure.com -U esa_pbi_admin -d backend
+PGPASSWORD="$DB_PASSWORD" psql -h esapbi.postgres.database.azure.com -U esa_pbi_admin -d backend
 ```
 
 ---

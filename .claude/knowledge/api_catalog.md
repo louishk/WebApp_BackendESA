@@ -209,8 +209,35 @@ Client: custom fetch in pipelines
 
 ---
 
+## Zoom Contact Center (REST)
+Client: `backend/python/common/zoom_client.py`
+Scope: call logs, contacts, recordings, transcripts
+Pipelines: `datalayer/zoom_call_log_sync.py`, `datalayer/zoom_contacts_sync.py`
+Related: `common/call_scorer.py`, `common/transcript_formatter.py`, `common/zoom_agent_resolver.py`, `common/speech_client.py` (Azure speech for transcription)
+
+### Operations
+- ListCallLogs, GetCallLog, GetCallRecording
+- ListContacts, GetContact
+- Agents/users lookup
+
+---
+
+## Google Ads API
+Service: `mcp_esa/services/google_ads_service.py` (MCP tools) + `datalayer/` sync
+Config: `backend/config/mcp.yaml` + vault (GOOGLE_ADS_* secrets)
+26 MCP tools exposed — see `project_mcp_server.md`
+
+---
+
+## Naver SearchAd API
+Service: `mcp_esa/services/naver_searchad_service.py`
+Scope: Korean market search ad campaigns, keywords, performance
+
+---
+
 ## SugarCRM (REST)
 Client: `backend/python/common/sugarcrm_client.py`
+MCP tools: 31 (read/write/admin tiers) — registered in `mcp_esa/server/mcp_server.py`
 
 ### Authentication
 - oauth2_token

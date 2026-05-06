@@ -1,0 +1,117 @@
+<!--
+  GTM Tag: ESA - Get Started Form Populate (Dynamic / Default-Value Discovery)
+  Trigger: Page Path equals /sg/get-started/
+  Purpose: Read esa_attribution cookie and write values into Gravity form
+           hidden fields, discovered dynamically via each field's Default Value.
+
+  Convention:
+    Each Gravity hidden field has its **Default Value** set to the param name
+    that should be assigned to it (e.g. utm_source field's Default Value is
+    the literal string "utm_source").
+
+    On first render with no URL params, the input renders with
+    value="utm_source" — this script reads that as the field's identity,
+    looks up the matching key in the attribution cookie, then either
+    overwrites with the real cookie data, or clears to empty string.
+
+    The clear-on-empty pass is critical: it prevents the literal placeholder
+    string ("utm_source", "gclid", etc.) from ever being submitted to Sugar.
+
+  Form: ID 1 (gform_1)
+-->
+<script>
+(function() {
+  var COOKIE_NAME = 'esa_attribution';
+  var FORM_SELECTOR = '#gform_wrapper_1, #gform_1';
+
+  // Param-name whitelist — fields whose CURRENT VALUE is one of these are
+  // treated as our managed attribution fields. Anything else (real defaults,
+  // user-entered values) is left alone.
+  var KNOWN_PARAMS = {
+    utm_source: 1, utm_medium: 1, utm_campaign: 1, utm_term: 1, utm_content: 1,
+    gclid: 1, fbclid: 1, msclkid: 1, gbraid: 1, wbraid: 1, dclid: 1, ttclid: 1,
+    google_client_id: 1, fbp: 1, gcl_aw: 1, gcl_dc: 1, uetmsclkid: 1,
+    ttp: 1, li_fat_id: 1,
+    landing_page: 1, referrer: 1
+  };
+
+  function getCookie(name) {
+    var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? decodeURIComponent(match[2]) : null;
+  }
+
+  function readAttribution() {
+    var raw = getCookie(COOKIE_NAME);
+    if (!raw) return {};
+    try { return JSON.parse(raw) || {}; } catch (e) { return {}; }
+  }
+
+  function populate() {
+    var data = readAttribution();
+    var scope = document.querySelector(FORM_SELECTOR) || document;
+    var inputs = scope.querySelectorAll('input[type="hidden"]');
+
+    var written = 0;
+    var cleared = 0;
+
+    inputs.forEach(function(input) {
+      var current = input.value;
+      // Only act on placeholder values (matching a known param name).
+      if (!Object.prototype.hasOwnProperty.call(KNOWN_PARAMS, current)) return;
+
+      var paramKey = current;
+      var newVal = data[paramKey];
+
+      if (newVal != null && newVal !== '') {
+        input.value = newVal;
+        written++;
+      } else {
+        // No cookie value — clear so the literal placeholder never submits
+        input.value = '';
+        cleared++;
+      }
+    });
+
+    if (written > 0 || cleared > 0) {
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({
+        event: 'esa_form_attribution_populated',
+        fields_written: written,
+        fields_cleared: cleared
+      });
+    }
+  }
+
+  // Pass 1 — initial render
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', populate);
+  } else {
+    populate();
+  }
+
+  // Pass 2 — after Gravity AJAX validation re-render (form errors etc.)
+  if (window.jQuery) {
+    jQuery(document).on('gform_post_render', populate);
+  }
+
+  // Pass 3 — final sweep right before submit, guarantees no placeholder
+  // strings ever leave the browser. Hooked at capture phase so it runs
+  // before Gravity's own submit handler.
+  function attachSubmitGuard() {
+    var form = document.getElementById('gform_1');
+    if (!form || form.__esaAttrGuardAttached) return;
+    form.__esaAttrGuardAttached = true;
+    form.addEventListener('submit', populate, true);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attachSubmitGuard);
+  } else {
+    attachSubmitGuard();
+  }
+  // Also re-attach after Gravity replaces the form node on AJAX re-render
+  if (window.jQuery) {
+    jQuery(document).on('gform_post_render', attachSubmitGuard);
+  }
+})();
+</script>

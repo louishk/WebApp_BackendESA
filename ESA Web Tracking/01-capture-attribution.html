@@ -1,0 +1,78 @@
+<!--
+  GTM Tag: ESA - Attribution Capture (All Pages)
+  Trigger: All Pages (or Consent Initialization - All Pages if using GTM consent mode)
+  Purpose: Capture UTM/click-ID params + landing context + GA/Meta/TikTok/LinkedIn/MS cookie IDs
+           into a first-party cookie on first touch, so the Get Started form can read it later.
+-->
+<script>
+(function() {
+  var COOKIE_NAME = 'esa_attribution';
+  var COOKIE_DAYS = 90;
+
+  // URL query-string params (click IDs + UTMs)
+  var URL_PARAMS = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content',
+                    'gclid','fbclid','msclkid','gbraid','wbraid','dclid','ttclid'];
+
+  // Cookies to copy verbatim into the captured payload (key = output name, value = cookie name)
+  var COOKIE_FIELDS = {
+    fbp:        '_fbp',         // Meta Pixel browser ID — needed for CAPI offline events
+    gcl_aw:     '_gcl_aw',      // Google Ads auto-tagged click cookie (durable gclid)
+    gcl_dc:     '_gcl_dc',      // DV360 click cookie
+    uetmsclkid: '_uetmsclkid',  // Microsoft UET click ID cookie
+    ttp:        '_ttp',         // TikTok Pixel ID
+    li_fat_id:  'li_fat_id'     // LinkedIn first-party click ID
+  };
+
+  function getCookie(name) {
+    var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? decodeURIComponent(match[2]) : null;
+  }
+
+  function setCookie(name, value, days) {
+    var d = new Date();
+    d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+    document.cookie = name + '=' + encodeURIComponent(value) +
+      ';expires=' + d.toUTCString() +
+      ';path=/;domain=.extraspaceasia.com;SameSite=Lax';
+  }
+
+  // Parse google_client_id out of the _ga cookie (format: GA1.2.<id1>.<id2>)
+  function getGaClientId() {
+    var ga = getCookie('_ga');
+    if (!ga) return null;
+    var parts = ga.split('.');
+    return parts.length >= 4 ? parts[2] + '.' + parts[3] : null;
+  }
+
+  // Already captured? Don't overwrite — first-touch wins.
+  if (getCookie(COOKIE_NAME)) return;
+
+  var url = new URL(window.location.href);
+  var captured = {};
+  var hasAny = false;
+
+  URL_PARAMS.forEach(function(p) {
+    var v = url.searchParams.get(p);
+    if (v) { captured[p] = v; hasAny = true; }
+  });
+
+  // Cookie-derived IDs (read each pageload, persisted on first capture only)
+  var gaClientId = getGaClientId();
+  if (gaClientId) captured.google_client_id = gaClientId;
+
+  Object.keys(COOKIE_FIELDS).forEach(function(outKey) {
+    var v = getCookie(COOKIE_FIELDS[outKey]);
+    if (v) captured[outKey] = v;
+  });
+
+  // Landing context (always captured)
+  captured.landing_page = window.location.pathname + window.location.search;
+  captured.referrer = document.referrer || '';
+  captured.captured_at = new Date().toISOString();
+
+  // Set cookie if we have any attribution signal (paid, organic, or external referrer)
+  if (hasAny || (document.referrer && document.referrer.indexOf(window.location.hostname) === -1)) {
+    setCookie(COOKIE_NAME, JSON.stringify(captured), COOKIE_DAYS);
+  }
+})();
+</script>

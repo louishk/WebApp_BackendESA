@@ -620,7 +620,7 @@ DB_PORT=5432
 DB_NAME=backend
 DB_USER=esa_pbi_admin
 DB_USERNAME=esa_pbi_admin
-DB_PASSWORD=K9wKmtRfj3zJqRU
+DB_PASSWORD=<REDACTED>  # see .env
 DB_SSLMODE=require
 
 # PostgreSQL Data Layer Database (pipeline data)
@@ -628,7 +628,7 @@ DATA_DB_HOST=esapbi.postgres.database.azure.com
 DATA_DB_PORT=5432
 DATA_DB_NAME=esa_pbi
 DATA_DB_USER=esa_pbi_admin
-DATA_DB_PASSWORD=K9wKmtRfj3zJqRU
+DATA_DB_PASSWORD=<REDACTED>  # see .env
 DATA_DB_SSLMODE=require
 
 # Legacy variable names (for compatibility)
@@ -636,10 +636,10 @@ POSTGRESQL_HOST=esapbi.postgres.database.azure.com
 POSTGRESQL_PORT=5432
 POSTGRESQL_DATABASE=backend
 POSTGRESQL_USERNAME=esa_pbi_admin
-POSTGRESQL_PASSWORD=K9wKmtRfj3zJqRU
+POSTGRESQL_PASSWORD=<REDACTED>  # see .env
 
 # JWT Authentication (must match PHP backend)
-JWT_SECRET=x7K9mP2vQ8wR4tY6uB3nC5hJ1fE0gA9s
+JWT_SECRET=<REDACTED>  # now stored in DB vault
 JWT_ALGORITHM=HS256
 
 # Web UI
