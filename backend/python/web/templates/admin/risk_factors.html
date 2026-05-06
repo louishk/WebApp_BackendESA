@@ -6,14 +6,16 @@
 <div class="container my-4">
   <h1>Unit-Category Risk Factors</h1>
 
-  <ul class="nav nav-tabs" id="countryTabs">
-    {% for code, name in countries.items() %}
-    <li class="nav-item">
-      <button class="nav-link {% if loop.first %}active{% endif %}"
-              data-country="{{ code }}">{{ code }} — {{ name }}</button>
-    </li>
-    {% endfor %}
-  </ul>
+  <div class="row g-2 align-items-center my-3">
+    <label for="countrySelect" class="col-auto col-form-label">Country</label>
+    <div class="col-auto">
+      <select id="countrySelect" class="form-select">
+        {% for code, name in countries.items() %}
+        <option value="{{ code }}">{{ code }} — {{ name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
 
   <div id="baselinePanel" class="card my-3 p-3">
     <div class="d-flex justify-content-between align-items-start">
@@ -137,17 +139,12 @@ document.getElementById("btnRecompute").addEventListener("click", async () => {
   loadCountry(currentCountry);
 });
 
-document.querySelectorAll("#countryTabs .nav-link").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("#countryTabs .nav-link")
-      .forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    loadCountry(btn.dataset.country);
-  });
+document.getElementById("countrySelect").addEventListener("change", (e) => {
+  loadCountry(e.target.value);
 });
 
 async function loadInventory(code) {
-  const r = await fetch(`/admin/risk-factors/inventory?country=${code}`);
+  const r = await fetch(`/risk-factors/inventory?country=${code}`);
   if (!r.ok) return;
   const { data } = await r.json();
   const body = document.getElementById("invBody");

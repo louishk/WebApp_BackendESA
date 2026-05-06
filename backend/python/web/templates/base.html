@@ -333,6 +333,16 @@
     </div>
     {% endif %}
 
+    {# --- Risk Factors tertiary navbar --- #}
+    {% if request.endpoint and 'admin_risk' in request.endpoint %}
+    <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
+        <a href="{{ url_for('admin_risk.risk_factors_page') }}"
+           class="{{ 'active' if request.endpoint == 'admin_risk.risk_factors_page' else '' }}">Unit</a>
+        <a href="{{ url_for('admin_risk.tenant_risk_page') }}"
+           class="{{ 'active' if request.endpoint == 'admin_risk.tenant_risk_page' else '' }}">Tenant</a>
+    </div>
+    {% endif %}
+
     {# --- Middleware sub-navbar --- #}
     {% set _in_middleware = request.endpoint and ('discount_plans' in request.endpoint or 'reservation_fees' in request.endpoint or 'orchestrator_ui' in request.endpoint or 'smart_lock' in request.endpoint or 'recommendation_engine' in request.endpoint) %}
     {% if _in_middleware %}
