@@ -3213,7 +3213,23 @@ def api_discount_plans_get(plan_id):
         result = plan.to_dict()
 
         # Optionally resolve linked concession details
-        if request.args.get('include_concessions', '').lower() == 'true' and plan.linked_concessions:
+        if request.args.get('include_concessions', '').lower() == 'true' and plan.is_stdrate_override:
+            from common.models import SiteInfo
+            applicable = sorted(c for c, v in (plan.applicable_sites or {}).items() if v)
+            site_rows = session.query(SiteInfo.SiteID, SiteInfo.Name, SiteInfo.SiteCode) \
+                               .filter(SiteInfo.SiteCode.in_(applicable)).all() if applicable else []
+            by_code = {s.SiteCode: s for s in site_rows}
+            result['linked_concession_details'] = [{
+                'site_id': by_code[c].SiteID if c in by_code else None,
+                'site_code': c,
+                'site_name': by_code[c].Name if c in by_code else None,
+                'concession_id': 0,
+                'plan_name': 'Standard Rate (no concession)',
+                'discount_pct': None,
+                'start': None,
+                'end': None,
+            } for c in applicable]
+        elif request.args.get('include_concessions', '').lower() == 'true' and plan.linked_concessions:
             try:
                 from common.models import CcwsDiscount, SiteInfo
                 details = []

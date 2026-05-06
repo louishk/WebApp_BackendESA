@@ -254,6 +254,12 @@ class UpsertFactory:
         Raises:
             ValueError: If database type is unsupported
         """
+        # Accept both DatabaseType enum and raw string (e.g. 'postgresql')
+        if isinstance(db_type, str):
+            try:
+                db_type = DatabaseType(db_type)
+            except ValueError:
+                pass
         strategy = cls._strategies.get(db_type)
 
         if strategy is None:

@@ -15,7 +15,7 @@ class DiscountPlanConfig(Base):
     The option_value stores the English text; translations holds JSONB with
     language-code keys (ko, zh_cn, zh_tw, ms, ja).
     """
-    __tablename__ = 'discount_plan_config'
+    __tablename__ = 'mw_discount_plan_config'
 
     FIELD_NAMES = [
         'deposit', 'payment_terms', 'termination_notice',
