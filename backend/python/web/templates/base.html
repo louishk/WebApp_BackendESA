@@ -292,7 +292,7 @@
                 {% endif %}
                 {% set has_revenue = current_user.can_access_revenue_tools() or (current_user.can_access_ecri() and has_endpoint('ecri.dashboard')) %}
                 {% if has_revenue %}
-                    <a href="{{ url_for('revenue.dashboard') if current_user.can_access_revenue_tools() else url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint) else '' }}">Revenue</a>
+                    <a href="{{ url_for('revenue.dashboard') if current_user.can_access_revenue_tools() else url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'admin_risk' in request.endpoint) else '' }}">Revenue</a>
                 {% endif %}
                 {% set has_middleware = current_user.can_manage_configs() or current_user.can_access_billing_tools() or current_user.can_access_discount_tools() or current_user.can_access_scheduler() or current_user.can_access_revenue_tools() or current_user.can_access_smart_lock() %}
                 {% if has_middleware %}
@@ -318,7 +318,7 @@
     </div>
 
     {# --- Revenue sub-navbar --- #}
-    {% set _in_revenue = request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint) and not request.endpoint.startswith('admin.') %}
+    {% set _in_revenue = request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'admin_risk' in request.endpoint) and not request.endpoint.startswith('admin.') %}
     {% if _in_revenue %}
     <div class="sub-navbar">
         {% if current_user.can_access_revenue_tools() %}
@@ -326,6 +326,9 @@
         {% endif %}
         {% if current_user.can_access_ecri() and has_endpoint('ecri.dashboard') %}
         <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and 'ecri' in request.endpoint else '' }}">ECRI</a>
+        {% endif %}
+        {% if current_user.can_access_revenue_tools() and has_endpoint('admin_risk.risk_factors_page') %}
+        <a href="{{ url_for('admin_risk.risk_factors_page') }}" class="{{ 'active' if request.endpoint and 'admin_risk' in request.endpoint else '' }}">Risk Factors</a>
         {% endif %}
     </div>
     {% endif %}
