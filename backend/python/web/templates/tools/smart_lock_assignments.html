@@ -24,7 +24,9 @@
             <button class="btn btn-secondary" id="refresh-btn" onclick="refreshUnitData()" style="margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem;">Refresh Unit Data</button>
             <button id="refresh-gate-btn" class="btn btn-secondary" onclick="refreshGateData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #f59e0b; color: #d97706;"><i class="bi bi-shield-lock"></i> Refresh Gate Data</button>
             <button id="refresh-igloo-btn" class="btn btn-secondary" onclick="refreshIglooData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Refresh Igloo Data</button>
+            <button id="sync-pins-btn" class="btn btn-secondary" onclick="syncPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #059669; color: #047857;" title="Reconcile Igloo PINs with SiteLink gate codes (push new / revoke on move-out)"><i class="bi bi-key-fill"></i> Sync PINs</button>
             <button id="audit-pins-btn" class="btn btn-secondary" onclick="auditPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #8b5cf6; color: #7c3aed;"><i class="bi bi-key"></i> Audit PINs</button>
+            <span id="last-audit-info" style="display: none; margin-left: 0.5rem; font-size: 0.75rem; color: #6b7280;" title=""></span>
             <span id="refresh-status" style="display: none; margin-left: 0.5rem;"></span>
         </div>
     </div>
@@ -240,6 +242,7 @@
             document.getElementById('refresh-info-wrapper').style.display = 'block';
             document.getElementById('refresh-gate-btn').style.display = '';
             document.getElementById('refresh-igloo-btn').style.display = '';
+            document.getElementById('sync-pins-btn').style.display = '';
             document.getElementById('audit-pins-btn').style.display = '';
             pinAuditMap = {};  // reset on reload
 
@@ -249,6 +252,8 @@
             allSites = SiteFilter.getSites('site-filter');
             renderTable();
             updateStats();
+            // Load saved pin-audit snapshot (no fresh Igloo round-trip)
+            loadPinAuditSnapshot();
         } catch (e) {
             showStatus('Failed to load units', false);
             console.error(e);
@@ -530,52 +535,33 @@
         } catch (e) { console.error('Audit log error:', e); }
     }
 
-    // Refresh Unit Data via scheduler pipeline
+    // Refresh Unit Data via orchestrator pipeline (units)
     async function refreshUnitData() {
         const btn = document.getElementById('refresh-btn');
         const statusEl = document.getElementById('refresh-status');
         btn.disabled = true;
-        statusEl.textContent = 'Triggering pipeline...';
+        statusEl.textContent = 'Running (this may take 1-2 minutes)...';
         statusEl.style.display = 'inline';
         statusEl.style.color = '#2563eb';
 
         try {
-            const res = await fetch('/api/jobs/unitsinfo/run-async', {
+            const res = await fetch('/api/orchestrator/pipelines/ccws_units/run', {
                 method: 'POST', headers: apiHeaders(),
-                body: JSON.stringify({}),
+                body: JSON.stringify({timeout: 300}),
             });
             if (!res.ok) {
                 const errData = await res.json().catch(() => ({}));
                 throw new Error(errData.error || `HTTP ${res.status}`);
             }
             const data = await res.json();
-            const jobId = data.job_id;
-
-            statusEl.textContent = 'Running (this may take 1-2 minutes)...';
-
-            // Poll for completion
-            const poll = async () => {
-                try {
-                    const r = await fetch(`/api/jobs/${jobId}/status`, { headers: apiHeaders() });
-                    const d = await r.json();
-                    if (d.status === 'completed') {
-                        statusEl.textContent = 'Done! Reloading units...';
-                        statusEl.style.color = '#059669';
-                        btn.disabled = false;
-                        loadUnits(loadedSiteIds);
-                        setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
-                    } else if (d.status === 'failed') {
-                        statusEl.textContent = 'Pipeline failed';
-                        statusEl.style.color = '#dc2626';
-                        btn.disabled = false;
-                    } else {
-                        setTimeout(poll, 5000);
-                    }
-                } catch (e) {
-                    setTimeout(poll, 5000);
-                }
-            };
-            setTimeout(poll, 5000);
+            if (data.status === 'failed') {
+                throw new Error(data.error || 'Pipeline failed');
+            }
+            statusEl.textContent = 'Done! Reloading units...';
+            statusEl.style.color = '#059669';
+            btn.disabled = false;
+            loadUnits(loadedSiteIds);
+            setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
         } catch (e) {
             statusEl.textContent = 'Failed: ' + e.message;
             statusEl.style.color = '#dc2626';
@@ -701,78 +687,95 @@
         }
     }
 
-    // Refresh gate access data via scheduler pipeline
+    // Refresh gate access data via orchestrator pipeline (ccws_gate_access)
     async function refreshGateData() {
         const btn = document.getElementById('refresh-gate-btn');
         btn.disabled = true;
         btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Refreshing...';
 
         try {
-            const res = await fetch('/api/jobs/gateaccess/run-async', {
+            const res = await fetch('/api/orchestrator/pipelines/ccws_gate_access/run', {
                 method: 'POST',
                 headers: apiHeaders(),
+                body: JSON.stringify({timeout: 300}),
             });
             const data = await res.json();
-            const execId = data.execution_id;
-
-            const poll = async () => {
-                const r = await fetch(`/api/history/${execId}`, { headers: apiHeaders() });
-                const d = await r.json();
-                if (d.status === 'completed') {
-                    btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
-                    btn.disabled = false;
-                    showStatus('Gate access data refreshed', true);
-                    if (loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
-                } else if (d.status === 'failed') {
-                    btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
-                    btn.disabled = false;
-                    showStatus('Gate data refresh failed', false);
-                } else {
-                    setTimeout(poll, 5000);
-                }
-            };
-            setTimeout(poll, 5000);
+            if (!res.ok || data.status === 'failed') {
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
+            btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
+            btn.disabled = false;
+            showStatus('Gate access data refreshed', true);
+            if (loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
         } catch (e) {
             btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
             btn.disabled = false;
-            showStatus('Failed to trigger refresh', false);
+            showStatus('Gate data refresh failed: ' + e.message, false);
         }
     }
 
-    // Refresh Igloo device data via sync endpoint
+    // Refresh Igloo device data via orchestrator pipeline (igloo)
     async function refreshIglooData() {
         const btn = document.getElementById('refresh-igloo-btn');
         btn.disabled = true;
         btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Refreshing...';
         try {
-            const res = await fetch('/api/igloo/sync', { method: 'POST', headers: apiHeaders() });
+            const res = await fetch('/api/orchestrator/pipelines/igloo/run', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify({timeout: 300}),
+            });
             const data = await res.json();
-            const execId = data.execution_id;
-            const poll = async () => {
-                const r = await fetch(`/api/history/${execId}`, { headers: apiHeaders() });
-                const d = await r.json();
-                if (d.status === 'completed') {
-                    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
-                    btn.disabled = false;
-                    showStatus('Igloo data refreshed', true);
-                    if (loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
-                } else if (d.status === 'failed') {
-                    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
-                    btn.disabled = false;
-                    showStatus('Igloo refresh failed', false);
-                } else {
-                    setTimeout(poll, 5000);
-                }
-            };
-            setTimeout(poll, 5000);
+            if (!res.ok || data.status === 'failed') {
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
+            btn.disabled = false;
+            showStatus('Igloo data refreshed', true);
+            if (loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
         } catch (e) {
             btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
             btn.disabled = false;
-            showStatus('Failed to trigger Igloo refresh', false);
+            showStatus('Igloo refresh failed: ' + e.message, false);
         }
     }
 
-    // PIN Status cell renderer
+    // Trigger PIN auto-sync (igloo_pin_sync) via orchestrator — pushes new PINs / revokes on move-out
+    async function syncPins() {
+        const btn = document.getElementById('sync-pins-btn');
+        if (!confirm('Run PIN sync now? This will push new PINs for rented units without a matching Igloo PIN, and revoke ESA-tagged PINs for units that are no longer rented.')) return;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Syncing...';
+        try {
+            const scope = { timeout: 600 };
+            if (loadedSiteIds && loadedSiteIds.length) {
+                scope.scope = { site_ids: loadedSiteIds };
+            }
+            const res = await fetch('/api/orchestrator/pipelines/igloo_pin_sync/run', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify(scope),
+            });
+            const data = await res.json();
+            if (!res.ok || data.status === 'failed') {
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
+            const m = data.metadata || {};
+            const msg = `PIN sync complete — pushed: ${m.pushed || 0}, revoked: ${m.revoked || 0}, skipped: ${(m.skipped_pending_job || 0) + (m.skipped_no_gate_code || 0)}, errors: ${m.errors || 0}`;
+            showStatus(msg, (m.errors || 0) === 0);
+            // Re-run audit so the Match/Mismatch column reflects the push
+            if (loadedSiteIds && loadedSiteIds.length) {
+                setTimeout(() => auditPins(), 1500);
+            }
+        } catch (e) {
+            showStatus('PIN sync failed: ' + e.message, false);
+        } finally {
+            btn.innerHTML = '<i class="bi bi-key-fill"></i> Sync PINs';
+            btn.disabled = false;
+        }
+    }
+
+    // PIN Status cell renderer — reconciliation semantics (see /smart-lock/pin-audit)
     function pinStatusCell(u) {
         const key = `${u.SiteID}_${u.UnitID}`;
         const audit = pinAuditMap[key];
@@ -781,20 +784,63 @@
         const current = getCurrentAssignment(u.SiteID, u.UnitID);
         if (!current.keypad_pk) return '<span style="color:#999;font-size:0.75rem;">—</span>';
 
-        if (audit.status === 'match') {
-            return `<span style="background:#d1fae5;color:#059669;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="PIN matches gate code (${esc(audit.matching_pin_type)}: ${esc(audit.matching_pin_name)})"><i class="bi bi-check-circle-fill"></i> Match</span>`;
-        } else if (audit.status === 'mismatch') {
-            return `<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="${audit.igloo_pin_count} PIN(s) on keypad, none match gate code"><i class="bi bi-x-circle-fill"></i> Mismatch</span>
-                    <button onclick="pushGatePin(${u.SiteID}, ${u.UnitID})" style="margin-left:0.25rem;background:none;border:1px solid #7c3aed;color:#7c3aed;border-radius:4px;padding:0.1rem 0.3rem;font-size:0.65rem;cursor:pointer;" title="Push gate code as PIN to keypad"><i class="bi bi-arrow-up-circle"></i> Push</button>`;
-        } else if (audit.status === 'pending') {
-            return `<span style="background:#ede9fe;color:#7c3aed;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="PIN pushed, waiting for device Bluetooth sync"><i class="bi bi-clock-history"></i> Pending</span>`;
-        } else if (audit.status === 'no_igloo_pin') {
-            return `<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="No PINs set on this keypad"><i class="bi bi-exclamation-circle"></i> No PIN</span>
-                    <button onclick="pushGatePin(${u.SiteID}, ${u.UnitID})" style="margin-left:0.25rem;background:none;border:1px solid #7c3aed;color:#7c3aed;border-radius:4px;padding:0.1rem 0.3rem;font-size:0.65rem;cursor:pointer;" title="Push gate code as PIN to keypad"><i class="bi bi-arrow-up-circle"></i> Push</button>`;
-        } else if (audit.status === 'no_gate_code') {
-            return '<span style="background:#f3f4f6;color:#6b7280;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="No SiteLink gate code for this unit"><i class="bi bi-dash-circle"></i> No Code</span>';
+        const pushBtn = `<button onclick="pushGatePin(${u.SiteID}, ${u.UnitID})" style="margin-left:0.25rem;background:none;border:1px solid #7c3aed;color:#7c3aed;border-radius:4px;padding:0.1rem 0.3rem;font-size:0.65rem;cursor:pointer;" title="Push gate code as PIN now (pre-empt cron)"><i class="bi bi-arrow-up-circle"></i> Push</button>`;
+
+        switch (audit.status) {
+            case 'synced':
+                return `<span style="background:#d1fae5;color:#059669;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="ESA-tagged PIN on keypad equals current gate code"><i class="bi bi-check-circle-fill"></i> Synced</span>`;
+            case 'push_pending':
+                return `<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Rented — cron will push ESA PIN on next run"><i class="bi bi-arrow-up-circle"></i> Push pending</span>${pushBtn}`;
+            case 'revoke_pending':
+                return `<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Unit not rented — cron will revoke stale ESA PIN on next run"><i class="bi bi-x-circle-fill"></i> Revoke pending</span>`;
+            case 'clean':
+                return `<span style="background:#f3f4f6;color:#6b7280;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Not rented, no ESA PIN — nothing to do"><i class="bi bi-dash-circle"></i> Clean</span>`;
+            case 'no_gate_code':
+                return `<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Rented but no valid SiteLink gate code — needs manual attention"><i class="bi bi-exclamation-triangle"></i> No code</span>`;
         }
         return '';
+    }
+
+    // Format a UTC ISO timestamp into a relative + absolute hover-tooltip string
+    function _renderAuditTimestamp(isoString, byUser) {
+        const el = document.getElementById('last-audit-info');
+        if (!isoString) {
+            el.style.display = 'none';
+            return;
+        }
+        const dt = new Date(isoString);
+        const ms = Date.now() - dt.getTime();
+        const mins = Math.floor(ms / 60000);
+        let rel;
+        if (mins < 1) rel = 'just now';
+        else if (mins < 60) rel = `${mins}m ago`;
+        else if (mins < 1440) rel = `${Math.floor(mins/60)}h ago`;
+        else rel = `${Math.floor(mins/1440)}d ago`;
+        el.textContent = `Last audit: ${rel}` + (byUser ? ` · ${byUser}` : '');
+        el.title = `${dt.toLocaleString()}` + (byUser ? ` by ${byUser}` : '');
+        el.style.display = 'inline-block';
+    }
+
+    // Apply audit rows to the in-memory map and the table render
+    function _applyAuditRows(rows) {
+        pinAuditMap = {};
+        (rows || []).forEach(r => {
+            const k = `${r.site_id}_${r.unit_id}`;
+            if (!pinAuditMap[k] || r.keypad_slot === 'primary') pinAuditMap[k] = r;
+        });
+        renderTable();
+    }
+
+    // Load most-recent saved audit (no Igloo round-trip)
+    async function loadPinAuditSnapshot() {
+        if (!loadedSiteIds || loadedSiteIds.length === 0) return;
+        try {
+            const res = await fetch(`/api/smart-lock/pin-audit/snapshot?site_ids=${loadedSiteIds.join(',')}`, { headers: apiHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+            _applyAuditRows(data.results || []);
+            _renderAuditTimestamp(data.audited_at, data.audited_by);
+        } catch (e) { /* silent — snapshot is best-effort */ }
     }
 
     // Audit PINs — compare Igloo keypad PINs with SiteLink gate codes
@@ -811,19 +857,18 @@
             }
             const data = await res.json();
 
-            pinAuditMap = {};
-            (data.results || []).forEach(r => {
-                pinAuditMap[`${r.site_id}_${r.unit_id}`] = r;
-            });
+            _applyAuditRows(data.results);
+            _renderAuditTimestamp(data.audited_at, data.audited_by);
 
-            const counts = { match: 0, mismatch: 0, pending: 0, no_igloo_pin: 0, no_gate_code: 0 };
-            Object.values(pinAuditMap).forEach(r => counts[r.status] = (counts[r.status] || 0) + 1);
+            const counts = { synced: 0, push_pending: 0, revoke_pending: 0, clean: 0, no_gate_code: 0 };
+            (data.results || []).forEach(r => counts[r.status] = (counts[r.status] || 0) + 1);
 
-            renderTable();
-            let summary = `PIN audit: ${counts.match} match, ${counts.mismatch} mismatch`;
-            if (counts.pending) summary += `, ${counts.pending} pending`;
-            summary += `, ${counts.no_igloo_pin} no PIN, ${counts.no_gate_code} no code`;
-            showStatus(summary, counts.mismatch === 0);
+            const parts = [`${counts.synced} synced`];
+            if (counts.push_pending) parts.push(`${counts.push_pending} push-pending`);
+            if (counts.revoke_pending) parts.push(`${counts.revoke_pending} revoke-pending`);
+            if (counts.no_gate_code) parts.push(`${counts.no_gate_code} no-code`);
+            if (counts.clean) parts.push(`${counts.clean} clean`);
+            showStatus('PIN audit: ' + parts.join(', '), (counts.push_pending + counts.revoke_pending + counts.no_gate_code) === 0);
             loadAuditLog();
         } catch (e) {
             showStatus('PIN audit failed: ' + e.message, false);

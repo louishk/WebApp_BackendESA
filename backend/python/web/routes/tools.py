@@ -69,6 +69,14 @@ def smart_lock_padlocks():
     return render_template('tools/smart_lock_padlocks.html')
 
 
+@tools_bp.route('/smart-lock/bridges')
+@login_required
+@smart_lock_access_required
+def smart_lock_bridges():
+    """Smart Lock — bridge inventory page (read-only, auto-populated from Igloo)."""
+    return render_template('tools/smart_lock_bridges.html')
+
+
 @tools_bp.route('/smart-lock/assignments')
 @login_required
 @smart_lock_access_required

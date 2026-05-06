@@ -23,6 +23,99 @@
     <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none; margin-top: 0.5rem;"></span>
 </div>
 
+<!-- PIN Sync Policy Reference Card -->
+<div class="card" style="margin-bottom: 1rem;">
+    <h3 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 1rem;">PIN Sync Policy</h3>
+    <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+            <thead>
+                <tr style="background: #f1f5f9;">
+                    <th style="padding: 0.45rem 0.6rem; text-align: center; border: 1px solid #e2e8f0; font-weight: 600; white-space: nowrap;">Rentable</th>
+                    <th style="padding: 0.45rem 0.6rem; text-align: center; border: 1px solid #e2e8f0; font-weight: 600; white-space: nowrap;">Rented</th>
+                    <th style="padding: 0.45rem 0.6rem; text-align: center; border: 1px solid #e2e8f0; font-weight: 600; white-space: nowrap;">Gate-locked</th>
+                    <th style="padding: 0.45rem 0.6rem; text-align: center; border: 1px solid #e2e8f0; font-weight: 600; white-space: nowrap;">Overlocked</th>
+                    <th style="padding: 0.45rem 0.6rem; text-align: center; border: 1px solid #e2e8f0; font-weight: 600; white-space: nowrap;">Gate code</th>
+                    <th style="padding: 0.45rem 0.6rem; text-align: left; border: 1px solid #e2e8f0; font-weight: 600;">Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="background: #f0fdf4;">
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">N</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">N</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; border: 1px solid #e2e8f0;">
+                        <i class="bi bi-check-circle-fill" style="color: #16a34a;"></i>
+                        <span style="margin-left: 0.35rem; color: #15803d; font-weight: 500;">synced</span>
+                    </td>
+                </tr>
+                <tr style="background: #fffbeb;">
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">N</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">N</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">N</td>
+                    <td style="padding: 0.4rem 0.6rem; border: 1px solid #e2e8f0;">
+                        <i class="bi bi-exclamation-triangle" style="color: #d97706;"></i>
+                        <span style="margin-left: 0.35rem; color: #b45309; font-weight: 500;">no code</span>
+                    </td>
+                </tr>
+                <tr style="background: #fff1f2;">
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; border: 1px solid #e2e8f0;">
+                        <i class="bi bi-lock-fill" style="color: #dc2626;"></i>
+                        <span style="margin-left: 0.35rem; color: #b91c1c; font-weight: 500;">revoke — gate locked</span>
+                    </td>
+                </tr>
+                <tr style="background: #fff1f2;">
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; border: 1px solid #e2e8f0;">
+                        <i class="bi bi-lock-fill" style="color: #dc2626;"></i>
+                        <span style="margin-left: 0.35rem; color: #b91c1c; font-weight: 500;">revoke — overlocked</span>
+                    </td>
+                </tr>
+                <tr style="background: #fff1f2;">
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">Y</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">N</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; border: 1px solid #e2e8f0;">
+                        <i class="bi bi-door-open-fill" style="color: #dc2626;"></i>
+                        <span style="margin-left: 0.35rem; color: #b91c1c; font-weight: 500;">revoke — moved out</span>
+                    </td>
+                </tr>
+                <tr style="background: #f5f3ff;">
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">N</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; text-align: center; border: 1px solid #e2e8f0;">*</td>
+                    <td style="padding: 0.4rem 0.6rem; border: 1px solid #e2e8f0;">
+                        <i class="bi bi-x-octagon-fill" style="color: #7c3aed;"></i>
+                        <span style="margin-left: 0.35rem; color: #6d28d9; font-weight: 500;">revoke — not rentable</span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p style="margin: 0.65rem 0 0; font-size: 0.8rem; color: #6b7280;">
+        Toggles in the table below control whether each site enforces the
+        <i class="bi bi-lock-fill" style="color: #dc2626;"></i> and
+        <i class="bi bi-x-octagon-fill" style="color: #7c3aed;"></i> rows.
+        Rented/moved-out revoke is always enforced.
+    </p>
+</div>
+
 <!-- Config Table -->
 <div class="card" style="overflow-x: auto;">
     <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
@@ -32,13 +125,25 @@
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Site Name</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Site ID</th>
                 <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Enabled</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0; white-space: nowrap; cursor: help;"
+                    title="When off: PINs stay on keypad even if the unit is gate-locked via SiteLink. Leave on for security.">
+                    Revoke on<br>Gate-locked
+                </th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0; white-space: nowrap; cursor: help;"
+                    title="When off: PINs stay on keypad even if the unit is overlocked (delinquency/eviction). Leave on for security.">
+                    Revoke on<br>Overlocked
+                </th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0; white-space: nowrap; cursor: help;"
+                    title="When off: PINs stay on keypad even if unit is flagged as non-rentable. Leave on for security.">
+                    Revoke on<br>Not-Rentable
+                </th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Notes</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Updated By</th>
                 <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Updated At</th>
             </tr>
         </thead>
         <tbody id="config-tbody">
-            <tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">Loading...</td></tr>
+            <tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">Loading...</td></tr>
         </tbody>
     </table>
 </div>
@@ -81,14 +186,35 @@
             renderTable(data.configs || []);
         } catch (e) {
             document.getElementById('config-tbody').innerHTML =
-                '<tr><td colspan="7" style="padding:2rem;text-align:center;color:#dc2626;">Failed to load</td></tr>';
+                '<tr><td colspan="10" style="padding:2rem;text-align:center;color:#dc2626;">Failed to load</td></tr>';
         }
+    }
+
+    function policyToggle(siteId, enabled, field, checkbox) {
+        const prev = !checkbox.checked; // value before this click
+        const payload = { site_id: siteId, enabled: enabled, [field]: checkbox.checked };
+
+        fetch('/api/smart-lock/config', {
+            method: 'PUT',
+            headers: apiHeaders(),
+            body: JSON.stringify(payload),
+        }).then(res => res.json().then(data => ({ ok: res.ok, data }))).then(({ ok, data }) => {
+            if (ok && data.success) {
+                showStatus('Saved', true);
+            } else {
+                checkbox.checked = prev;
+                showStatus(data.error || 'Failed to save', false);
+            }
+        }).catch(() => {
+            checkbox.checked = prev;
+            showStatus('Network error', false);
+        });
     }
 
     function renderTable(configs) {
         const tbody = document.getElementById('config-tbody');
         if (configs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="padding:2rem;text-align:center;color:#999;">No sites configured. Use the form above to enable a site.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="padding:2rem;text-align:center;color:#999;">No sites configured. Use the form above to enable a site.</td></tr>';
             return;
         }
         tbody.innerHTML = configs.map(c => {
@@ -98,6 +224,14 @@
                 ? '<span style="background:#d1fae5;color:#059669;padding:0.2rem 0.6rem;border-radius:9999px;font-size:0.75rem;font-weight:500;">ON</span>'
                 : '<span style="background:#fee2e2;color:#dc2626;padding:0.2rem 0.6rem;border-radius:9999px;font-size:0.75rem;font-weight:500;">OFF</span>';
             const dt = c.updated_at ? new Date(c.updated_at + 'Z').toLocaleString() : '—';
+
+            // Default absent policy flags to true (pre-migration safety)
+            const revokeGate = c.revoke_on_gate_locked !== false;
+            const revokeOver = c.revoke_on_overlocked !== false;
+            const revokeNR   = c.revoke_on_not_rentable !== false;
+
+            const cbStyle = 'width:1rem;height:1rem;cursor:pointer;accent-color:#2563eb;';
+
             return `<tr>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;font-weight:500;">${esc(c.site_code || '—')}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(c.site_name || '—')}</td>
@@ -106,6 +240,18 @@
                     ${badge}
                     <button onclick="toggleSite(${c.site_id}, ${!c.enabled})"
                             style="margin-left:0.5rem;background:none;border:1px solid ${toggleColor};color:${toggleColor};border-radius:4px;padding:0.15rem 0.4rem;font-size:0.7rem;cursor:pointer;">${toggleLabel}</button>
+                </td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">
+                    <input type="checkbox" style="${cbStyle}" ${revokeGate ? 'checked' : ''}
+                           onchange="policyToggle(${c.site_id}, ${c.enabled}, 'revoke_on_gate_locked', this)">
+                </td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">
+                    <input type="checkbox" style="${cbStyle}" ${revokeOver ? 'checked' : ''}
+                           onchange="policyToggle(${c.site_id}, ${c.enabled}, 'revoke_on_overlocked', this)">
+                </td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">
+                    <input type="checkbox" style="${cbStyle}" ${revokeNR ? 'checked' : ''}
+                           onchange="policyToggle(${c.site_id}, ${c.enabled}, 'revoke_on_not_rentable', this)">
                 </td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(c.notes || '')}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(c.updated_by || '—')}</td>

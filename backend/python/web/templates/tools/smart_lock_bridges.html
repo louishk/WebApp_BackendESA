@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Smart Lock — Bridges{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Smart Lock — Bridges</h1>
+</div>
+
+<div style="background: #eff6ff; border-left: 3px solid #3b82f6; padding: 0.5rem 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; color: #1e40af; border-radius: 4px;">
+    <strong>Read-only.</strong> Bridges are auto-populated from Igloo on every sync. Each bridge proxies BLE commands to the keypad/lock paired with it (visible in <em>Linked devices</em>).
+</div>
+
+<div class="card" style="margin-bottom: 1rem;">
+    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+        <div>
+            <label style="display: block; font-weight: 500; margin-bottom: 0.25rem; font-size: 0.85rem;">Site</label>
+            <div id="site-filter" style="min-width: 220px;"></div>
+        </div>
+        <button class="btn" onclick="loadBridges()">Load</button>
+        <button class="btn btn-secondary" onclick="loadBridges('')" title="Show all sites">Show All</button>
+        <button id="sync-igloo-btn" class="btn btn-secondary" onclick="syncIgloo()" style="margin-left: auto; font-size: 0.75rem; padding: 0.3rem 0.6rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Sync Igloo</button>
+        <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
+    </div>
+</div>
+
+<div class="card" style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+            <tr style="background: #f1f5f9; position: sticky; top: 0; z-index: 5;">
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Bridge ID</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Site</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Country</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Property</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Battery</th>
+                <th style="padding: 0.5rem; text-align: center; border-bottom: 2px solid #e2e8f0;">Last Sync</th>
+                <th style="padding: 0.5rem; text-align: left; border-bottom: 2px solid #e2e8f0;">Linked Devices</th>
+            </tr>
+        </thead>
+        <tbody id="bridges-tbody">
+            <tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">Loading...</td></tr>
+        </tbody>
+    </table>
+    <div id="count-info" style="margin-top: 0.5rem; font-size: 0.8rem; color: #666;"></div>
+</div>
+
+<script>
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+    let allSites = [];
+    let allBridges = [];
+
+    function timeAgo(date) {
+        const ms = Date.now() - date.getTime();
+        const mins = Math.floor(ms / 60000);
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        const days = Math.floor(hrs / 24);
+        return `${days}d ago`;
+    }
+
+    function esc(str) {
+        if (str == null) return '';
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+    }
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function showStatus(msg, ok) {
+        const el = document.getElementById('status-msg');
+        el.textContent = msg;
+        el.style.display = 'inline-block';
+        el.style.background = ok ? '#d1fae5' : '#fee2e2';
+        el.style.color = ok ? '#059669' : '#dc2626';
+        setTimeout(() => { el.style.display = 'none'; }, 4000);
+    }
+
+    function siteName(siteId) {
+        const s = allSites.find(x => x.site_id === siteId);
+        return s ? `${s.site_code} - ${s.name}` : `Site ${siteId}`;
+    }
+
+    async function loadBridges(forceSiteId) {
+        const siteIds = forceSiteId !== undefined ? [forceSiteId] : SiteFilter.getSelected('site-filter');
+        try {
+            if (siteIds.length === 0 || (siteIds.length === 1 && siteIds[0] === '')) {
+                const res = await fetch('/api/smart-lock/bridges', { headers: apiHeaders() });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                allBridges = data.bridges || [];
+            } else {
+                allBridges = [];
+                for (const sid of siteIds) {
+                    const res = await fetch(`/api/smart-lock/bridges?site_id=${sid}`, { headers: apiHeaders() });
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const data = await res.json();
+                    allBridges.push(...(data.bridges || []));
+                }
+            }
+            renderTable();
+        } catch (e) {
+            showStatus('Failed to load bridges', false);
+        }
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('bridges-tbody');
+        if (allBridges.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">No bridges found</td></tr>';
+            document.getElementById('count-info').textContent = '';
+            return;
+        }
+        tbody.innerHTML = allBridges.map(b => {
+            const ig = b.igloo || {};
+            const bat = ig.batteryLevel != null ? ig.batteryLevel : null;
+            const batBadge = bat !== null
+                ? `<span style="background:${bat >= 60 ? '#d1fae5' : bat >= 30 ? '#fef3c7' : '#fee2e2'};color:${bat >= 60 ? '#059669' : bat >= 30 ? '#d97706' : '#dc2626'};padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">${bat}%</span>`
+                : '<span style="color:#999;">—</span>';
+            const syncDate = ig.lastSync ? new Date(ig.lastSync) : null;
+            const syncText = syncDate ? timeAgo(syncDate) : '—';
+            const syncColor = syncDate && (Date.now() - syncDate) > 7*86400000 ? 'color:#dc2626;' : 'color:#6b7280;';
+            const syncCell = syncDate ? `<span style="${syncColor}font-size:0.8rem;" title="${syncDate.toLocaleString()}">${syncText}</span>` : '<span style="color:#999;">—</span>';
+            const linked = (ig.linked_devices || []).map(d =>
+                `<span style="display:inline-block;background:#eef2ff;color:#4338ca;padding:0.1rem 0.4rem;border-radius:4px;font-size:0.7rem;margin-right:0.25rem;" title="${esc(d.type || '')}">${esc(d.deviceId)}<span style="opacity:0.6;font-size:0.65rem;"> ${esc(d.type || '')}</span></span>`
+            ).join('') || '<span style="color:#999;">—</span>';
+            return `<tr>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;font-weight:500;">${esc(b.bridge_id)}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteName(b.site_id))}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(ig.country || '—')}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(ig.property || '—')}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${batBadge}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${syncCell}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${linked}</td>
+            </tr>`;
+        }).join('');
+        document.getElementById('count-info').textContent = `${allBridges.length} bridge(s)`;
+    }
+
+    async function syncIgloo() {
+        const btn = document.getElementById('sync-igloo-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Syncing...';
+        try {
+            const res = await fetch('/api/orchestrator/pipelines/igloo/run', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify({ timeout: 300 }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.status === 'failed') throw new Error(data.error || `HTTP ${res.status}`);
+            showStatus('Igloo sync complete — bridges updated', true);
+            loadBridges();
+        } catch (e) {
+            showStatus('Igloo sync failed: ' + e.message, false);
+        } finally {
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync Igloo';
+            btn.disabled = false;
+        }
+    }
+
+    SiteFilter.init('site-filter', { mode: 'multi' }).then(() => {
+        allSites = SiteFilter.getSites('site-filter');
+        loadBridges('');
+    });
+</script>
+{% endblock %}

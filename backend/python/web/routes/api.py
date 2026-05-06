@@ -4288,6 +4288,63 @@ def api_sl_keypads_delete(pk):
         session.close()
 
 
+# --- Bridges (read-only — auto-populated from Igloo sync) ---
+
+@api_bp.route('/smart-lock/bridges')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_sl_bridges_list():
+    """List bridges, optionally filtered by site_id. Includes the linked
+    keypad/lock device (from igloo_devices.linkedDevices) for each bridge."""
+    site_id = request.args.get('site_id')
+    session = current_app.get_middleware_session()
+    try:
+        from web.models.smart_lock import SmartLockBridge
+        from common.models import IglooDevice
+
+        q = session.query(SmartLockBridge)
+        if site_id:
+            q = q.filter(SmartLockBridge.site_id == int(site_id))
+        bridges = q.order_by(SmartLockBridge.site_id, SmartLockBridge.bridge_id).all()
+
+        bridge_ids = [b.bridge_id for b in bridges]
+        igloo_map = {}
+        if bridge_ids:
+            igloo_devs = session.query(IglooDevice).filter(
+                IglooDevice.deviceId.in_(bridge_ids),
+                IglooDevice.type == 'Bridge',
+            ).all()
+            for ig in igloo_devs:
+                linked = []
+                for ent in (ig.linkedDevices or []):
+                    if isinstance(ent, dict):
+                        linked.append({
+                            'deviceId': ent.get('deviceId') or ent.get('id'),
+                            'type': ent.get('type'),
+                            'name': ent.get('name'),
+                        })
+                igloo_map[ig.deviceId] = {
+                    'batteryLevel': ig.batteryLevel,
+                    'lastSync': ig.lastSync.isoformat() if ig.lastSync else None,
+                    'country': ig.departmentName,
+                    'property': ig.propertyName,
+                    'linked_devices': linked,
+                }
+
+        result = []
+        for b in bridges:
+            d = b.to_dict()
+            d['igloo'] = igloo_map.get(b.bridge_id)
+            result.append(d)
+        return jsonify({'bridges': result})
+    except Exception as e:
+        current_app.logger.error(f"Smart lock bridges list error: {e}")
+        return jsonify({'error': 'Failed to fetch bridges'}), 500
+    finally:
+        session.close()
+
+
 # --- Padlocks CRUD ---
 
 @api_bp.route('/smart-lock/padlocks')
@@ -5170,8 +5227,14 @@ def api_sl_pin_audit():
 
     _PIN_RE_AUDIT = re.compile(r'^\d{4,10}$')
 
-    def _esa_tag_audit(sid, uid):
-        return f"ESA-{sid}-{uid}"
+    def _esa_tag_audit_matches(name, sid, uid):
+        """Match an ESA-owned access entry name by prefix; the trailing
+        unit-name suffix is informational only.
+        """
+        if not name:
+            return False
+        base = f"ESA-{sid}-{uid}"
+        return name == base or name.startswith(base + ' ')
 
     class _AuditPolicyDefaults:
         revoke_on_gate_locked = True
@@ -5280,7 +5343,6 @@ def api_sl_pin_audit():
             b_rentable = rentable_map.get((a.site_id, a.unit_id), False)
             has_valid_pin = bool(plain_pin and _PIN_RE_AUDIT.match(plain_pin))
             policy = site_configs.get(a.site_id, _AuditPolicyDefaults())
-            tag = _esa_tag_audit(a.site_id, a.unit_id)
 
             # should_have_pin base (excluding gate code validity)
             should_have_pin_base = (
@@ -5301,7 +5363,8 @@ def api_sl_pin_audit():
                 pending_set = device_pending.get(device_id, set())
 
                 esa_entry = next(
-                    (e for e in access_list if e.get('name') == tag),
+                    (e for e in access_list
+                     if _esa_tag_audit_matches(e.get('name'), a.site_id, a.unit_id)),
                     None,
                 )
                 esa_pin_value = esa_entry.get('pin') if esa_entry else None
@@ -5341,15 +5404,114 @@ def api_sl_pin_audit():
                     'pin_type': esa_entry.get('pinType') if esa_entry else None,
                 })
 
+        # Persist snapshot — upsert each row, replacing prior audit for the
+        # same (site, unit, keypad_slot). Tagged with audited_by + audited_at.
+        from sqlalchemy import text as _sql_text
+        from datetime import datetime as _dt
+        audited_at = _dt.utcnow()
+        audited_by = _sl_username()
+        if results:
+            session.execute(_sql_text("""
+                INSERT INTO mw_smart_lock_pin_audit_snapshot (
+                    site_id, unit_id, keypad_pk, keypad_slot, device_id,
+                    status, reason, is_rented, is_gate_locked, is_overlocked,
+                    b_rentable, has_gate_code, has_esa_pin, pin_type,
+                    audited_at, audited_by
+                ) VALUES (
+                    :site_id, :unit_id, :keypad_pk, :keypad_slot, :device_id,
+                    :status, :reason, :is_rented, :is_gate_locked, :is_overlocked,
+                    :b_rentable, :has_gate_code, :has_esa_pin, :pin_type,
+                    :audited_at, :audited_by
+                )
+                ON CONFLICT (site_id, unit_id, keypad_slot) DO UPDATE SET
+                    keypad_pk      = EXCLUDED.keypad_pk,
+                    device_id      = EXCLUDED.device_id,
+                    status         = EXCLUDED.status,
+                    reason         = EXCLUDED.reason,
+                    is_rented      = EXCLUDED.is_rented,
+                    is_gate_locked = EXCLUDED.is_gate_locked,
+                    is_overlocked  = EXCLUDED.is_overlocked,
+                    b_rentable     = EXCLUDED.b_rentable,
+                    has_gate_code  = EXCLUDED.has_gate_code,
+                    has_esa_pin    = EXCLUDED.has_esa_pin,
+                    pin_type       = EXCLUDED.pin_type,
+                    audited_at     = EXCLUDED.audited_at,
+                    audited_by     = EXCLUDED.audited_by
+            """), [{**r, 'audited_at': audited_at, 'audited_by': audited_by} for r in results])
+
         _sl_audit(session, 'pin_audit', 'igloo',
                   detail=f'PIN audit for {len(results)} pair(s) across {len(site_ids)} site(s)')
         session.commit()
 
-        return jsonify({'results': results, 'count': len(results)})
+        return jsonify({
+            'results': results,
+            'count': len(results),
+            'audited_at': audited_at.isoformat() + 'Z',
+            'audited_by': audited_by,
+        })
     except Exception:
         session.rollback()
         current_app.logger.exception("PIN audit error")
         return jsonify({'error': 'Failed to run PIN audit'}), 500
+    finally:
+        session.close()
+
+
+@api_bp.route('/smart-lock/pin-audit/snapshot')
+@require_auth
+@_require_sl_session_access
+@require_api_scope('smart_lock:read')
+def api_sl_pin_audit_snapshot():
+    """Return the most recently saved pin-audit results (no fresh Igloo call).
+
+    Reads `mw_smart_lock_pin_audit_snapshot` filtered by site_ids. Returns the
+    same row shape as /pin-audit plus per-row `audited_at` and a top-level
+    max `audited_at`/`audited_by` for the latest entry seen.
+    """
+    site_ids_param = request.args.get('site_ids', '')
+    if not site_ids_param:
+        return jsonify({'error': 'site_ids parameter is required'}), 400
+    try:
+        site_ids = parse_site_ids(site_ids_param)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    session = current_app.get_middleware_session()
+    try:
+        from sqlalchemy import text as _sql_text
+        rows = session.execute(_sql_text("""
+            SELECT site_id, unit_id, keypad_pk, keypad_slot, device_id,
+                   status, reason, is_rented, is_gate_locked, is_overlocked,
+                   b_rentable, has_gate_code, has_esa_pin, pin_type,
+                   audited_at, audited_by
+            FROM mw_smart_lock_pin_audit_snapshot
+            WHERE site_id = ANY(:site_ids)
+            ORDER BY site_id, unit_id, keypad_slot
+        """), {'site_ids': site_ids}).mappings().all()
+
+        results = []
+        latest_at = None
+        latest_by = None
+        for r in rows:
+            d = dict(r)
+            ts = d.pop('audited_at')
+            by = d.pop('audited_by')
+            d['audited_at'] = ts.isoformat() + 'Z' if ts else None
+            d['audited_by'] = by
+            results.append(d)
+            if ts and (latest_at is None or ts > latest_at):
+                latest_at = ts
+                latest_by = by
+
+        return jsonify({
+            'results': results,
+            'count': len(results),
+            'audited_at': (latest_at.isoformat() + 'Z') if latest_at else None,
+            'audited_by': latest_by,
+        })
+    except Exception:
+        current_app.logger.exception("PIN audit snapshot read error")
+        return jsonify({'error': 'Failed to read snapshot'}), 500
     finally:
         session.close()
 
@@ -5405,10 +5567,13 @@ def api_sl_push_gate_pin():
         if not pin:
             return jsonify({'error': 'Gate access code is empty'}), 400
 
-        # 3) Push to Igloo as custom PIN
+        # 3) Push to Igloo as permanent PIN via bridge
+        from common.igloo_client import PIN_TYPE_PERMANENT
         unit_name = gate.unit_name or f'Unit {unit_id}'
         client = IglooClient()
-        result = client.create_custom_pin(device_id, pin, unit_name)
+        result = client.create_pin_via_bridge(
+            device_id, pin, unit_name, pin_type=PIN_TYPE_PERMANENT,
+        )
 
         # 4) Audit
         _sl_audit(session, 'gate_pin_pushed', 'igloo', device_id,
@@ -5581,13 +5746,34 @@ def api_igloo_properties():
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_igloo_create_custom_pin(device_id):
-    """Create a custom/duration PIN on a device."""
+    """Create a PIN via the device's paired bridge.
+
+    Body:
+        pin (str)         — 4-10 digit PIN
+        name (str)        — label, e.g. "ESA-{site}-{unit}"
+        pin_type (str)    — "duration" (default), "permanent", or "otp"
+        start_datetime    — ISO-8601 with offset (optional, defaults to now)
+        end_datetime      — ISO-8601 with offset (required when pin_type=duration)
+    """
+    from common.igloo_client import (
+        PIN_TYPE_DURATION, PIN_TYPE_PERMANENT, PIN_TYPE_OTP, IglooAPIError,
+    )
     data = request.get_json()
     if not data or 'pin' not in data:
         return jsonify({'error': 'pin is required'}), 400
 
     pin = str(data['pin']).strip()
     name = (data.get('name') or '').strip()[:100] or 'Custom PIN'
+    pin_type_str = (data.get('pin_type') or 'duration').lower()
+    type_map = {
+        'duration': PIN_TYPE_DURATION,
+        'permanent': PIN_TYPE_PERMANENT,
+        'otp': PIN_TYPE_OTP,
+    }
+    pin_type_int = type_map.get(pin_type_str)
+    if pin_type_int is None:
+        return jsonify({'error': 'pin_type must be duration, permanent, or otp'}), 400
+
     try:
         start_dt = _validate_iso_dt(data.get('start_datetime'))
         end_dt = _validate_iso_dt(data.get('end_datetime'))
@@ -5600,14 +5786,23 @@ def api_igloo_create_custom_pin(device_id):
     session = get_session()
     try:
         client = _get_igloo_client()
-        result = client.create_custom_pin(device_id, pin, name, start_dt=start_dt, end_dt=end_dt)
+        result = client.create_pin_via_bridge(
+            device_id, pin, name,
+            pin_type=pin_type_int,
+            start_dt=start_dt,
+            end_dt=end_dt,
+        )
         _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
-                  detail=f'Custom PIN created on {device_id}: {name}')
+                  detail=f'{pin_type_str} PIN created on {device_id}: {name}')
         session.commit()
         return jsonify({'success': True, 'result': result}), 201
-    except Exception as e:
+    except IglooAPIError as e:
         session.rollback()
-        current_app.logger.exception("Igloo create custom PIN error")
+        current_app.logger.warning("Igloo create PIN failed: %s", e)
+        return jsonify({'error': str(e)}), 502
+    except Exception:
+        session.rollback()
+        current_app.logger.exception("Igloo create PIN error")
         return jsonify({'error': 'Failed to create PIN'}), 500
     finally:
         session.close()
@@ -5619,65 +5814,34 @@ def api_igloo_create_custom_pin(device_id):
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_igloo_create_permanent_pin(device_id):
-    """Create a permanent algorithmic PIN."""
+    """Create a permanent custom PIN via the device's paired bridge.
+
+    Body: pin (4-10 digits), name (label).
+    """
+    from common.igloo_client import PIN_TYPE_PERMANENT, IglooAPIError
+    data = request.get_json() or {}
+    pin = str(data.get('pin') or '').strip()
+    name = (data.get('name') or '').strip()[:100] or 'Permanent PIN'
+    if not re.match(r'^\d{4,10}$', pin):
+        return jsonify({'error': 'pin (4-10 digits) is required'}), 400
+
     session = get_session()
     try:
         client = _get_igloo_client()
-        result = client.create_permanent_pin(device_id)
+        result = client.create_pin_via_bridge(
+            device_id, pin, name, pin_type=PIN_TYPE_PERMANENT,
+        )
         _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
-                  detail=f'Permanent PIN created on {device_id}')
+                  detail=f'Permanent PIN created on {device_id}: {name}')
         session.commit()
         return jsonify({'success': True, 'result': result}), 201
-    except Exception as e:
+    except IglooAPIError as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 502
+    except Exception:
         session.rollback()
         current_app.logger.exception("Igloo create permanent PIN error")
         return jsonify({'error': 'Failed to create permanent PIN'}), 500
-    finally:
-        session.close()
-
-
-@api_bp.route('/igloo/devices/<device_id>/pin/daily', methods=['POST'])
-@require_auth
-@_require_sl_session_access
-@require_api_scope('smart_lock:write')
-@rate_limit_api(max_requests=30, window_seconds=60)
-def api_igloo_create_daily_pin(device_id):
-    """Create a daily rotating PIN."""
-    session = get_session()
-    try:
-        client = _get_igloo_client()
-        result = client.create_daily_pin(device_id)
-        _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
-                  detail=f'Daily PIN created on {device_id}')
-        session.commit()
-        return jsonify({'success': True, 'result': result}), 201
-    except Exception as e:
-        session.rollback()
-        current_app.logger.exception("Igloo create daily PIN error")
-        return jsonify({'error': 'Failed to create daily PIN'}), 500
-    finally:
-        session.close()
-
-
-@api_bp.route('/igloo/devices/<device_id>/pin/hourly', methods=['POST'])
-@require_auth
-@_require_sl_session_access
-@require_api_scope('smart_lock:write')
-@rate_limit_api(max_requests=30, window_seconds=60)
-def api_igloo_create_hourly_pin(device_id):
-    """Create an hourly rotating PIN."""
-    session = get_session()
-    try:
-        client = _get_igloo_client()
-        result = client.create_hourly_pin(device_id)
-        _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
-                  detail=f'Hourly PIN created on {device_id}')
-        session.commit()
-        return jsonify({'success': True, 'result': result}), 201
-    except Exception as e:
-        session.rollback()
-        current_app.logger.exception("Igloo create hourly PIN error")
-        return jsonify({'error': 'Failed to create hourly PIN'}), 500
     finally:
         session.close()
 
@@ -5688,21 +5852,40 @@ def api_igloo_create_hourly_pin(device_id):
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_igloo_create_otp_pin(device_id):
-    """Create a one-time PIN."""
+    """Create a one-time PIN via the device's paired bridge.
+
+    Body: pin (4-10 digits), name (label).
+    """
+    from common.igloo_client import PIN_TYPE_OTP, IglooAPIError
+    data = request.get_json() or {}
+    pin = str(data.get('pin') or '').strip()
+    name = (data.get('name') or '').strip()[:100] or 'OTP PIN'
+    if not re.match(r'^\d{4,10}$', pin):
+        return jsonify({'error': 'pin (4-10 digits) is required'}), 400
+
     session = get_session()
     try:
         client = _get_igloo_client()
-        result = client.create_otp_pin(device_id)
+        result = client.create_pin_via_bridge(
+            device_id, pin, name, pin_type=PIN_TYPE_OTP,
+        )
         _sl_audit(session, 'igloo_pin_created', 'igloo', device_id,
-                  detail=f'OTP PIN created on {device_id}')
+                  detail=f'OTP PIN created on {device_id}: {name}')
         session.commit()
         return jsonify({'success': True, 'result': result}), 201
-    except Exception as e:
+    except IglooAPIError as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 502
+    except Exception:
         session.rollback()
         current_app.logger.exception("Igloo create OTP PIN error")
         return jsonify({'error': 'Failed to create OTP PIN'}), 500
     finally:
         session.close()
+
+
+# Algopin (daily/hourly) routes deleted: Igloo bridge does not proxy algorithmic
+# PINs. /pin/daily and /pin/hourly were the only consumers.
 
 
 @api_bp.route('/igloo/devices/<device_id>/ekey', methods=['POST'])
@@ -5748,16 +5931,21 @@ def api_igloo_create_ekey(device_id):
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_igloo_revoke_access(device_id, access_id):
-    """Revoke a PIN or eKey."""
+    """Revoke a PIN via the device's paired bridge (executes immediately on-site)."""
+    from common.igloo_client import IglooAPIError
     session = get_session()
     try:
         client = _get_igloo_client()
-        result = client.revoke_access(device_id, access_id)
+        result = client.delete_pin_via_bridge(device_id, access_id)
         _sl_audit(session, 'igloo_access_revoked', 'igloo', device_id,
                   detail=f'Revoked access {access_id} on {device_id}')
         session.commit()
         return jsonify({'success': True, 'result': result})
-    except Exception as e:
+    except IglooAPIError as e:
+        session.rollback()
+        current_app.logger.warning("Igloo revoke failed: %s", e)
+        return jsonify({'error': str(e)}), 502
+    except Exception:
         session.rollback()
         current_app.logger.exception("Igloo revoke access error")
         return jsonify({'error': 'Failed to revoke access'}), 500

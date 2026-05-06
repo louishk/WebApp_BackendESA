@@ -3,8 +3,11 @@ openapi: 3.0.3
 info:
   title: ESA Backend — Smart Lock API
   description: >
-    Smart lock management endpoints for keypad and padlock assignment to storage units.
-    All routes are under the `api` Flask blueprint with URL prefix `/api/smart-lock`.
+    Smart lock management endpoints for keypad and padlock assignment to storage units,
+    and Igloo API proxy endpoints for live device management (PINs, eKeys, activity).
+
+    All smart-lock routes are under `/api/smart-lock`. Igloo proxy routes are under `/api/igloo`.
+    Both use the `api` Flask blueprint.
 
     **Authentication**: Bearer JWT (`Authorization` header) or API key (`X-API-Key` header).
     Session-authenticated web UI users are also supported.
@@ -15,10 +18,14 @@ info:
 
     **Key concepts**:
     - **Keypads** are site-scoped and can be assigned to multiple units (many-to-many).
+      A unit can have up to two keypads (`keypad_pk` and `keypad_2_pk`).
     - **Padlocks** are site-scoped and assigned 1:1 to units.
-    - Assignments link a unit (site_id + unit_id) to optional keypad and/or padlock.
+    - Assignments link a unit (site_id + unit_id) to optional keypad(s) and/or padlock.
+    - **Igloo proxy** endpoints call `common.igloo_client.IglooClient` directly and proxy
+      live Igloo API v2 data without caching. Write operations are rate-limited (30/min).
+      `POST /api/igloo/sync` is rate-limited to 5/min and triggers the scheduler pipeline.
 
-  version: "1.0.0"
+  version: "1.2.0"
   contact:
     name: ESA Backend
 
@@ -121,13 +128,23 @@ components:
         keypad_pk:
           type: integer
           nullable: true
-          description: Internal PK of assigned keypad (null if none)
+          description: Internal PK of primary assigned keypad (null if none)
           example: 5
         keypad_id:
           type: string
           nullable: true
-          description: Human-readable keypad identifier
+          description: Human-readable primary keypad identifier
           example: "KP-001"
+        keypad_2_pk:
+          type: integer
+          nullable: true
+          description: Internal PK of secondary keypad (null if none)
+          example: 7
+        keypad_2_id:
+          type: string
+          nullable: true
+          description: Human-readable secondary keypad identifier
+          example: "KP-007"
         padlock_pk:
           type: integer
           nullable: true
@@ -160,11 +177,94 @@ components:
         keypad_pk:
           type: integer
           nullable: true
-          description: PK of keypad to assign, or null to unassign
+          description: PK of primary keypad to assign, or null to unassign
+        keypad_2_pk:
+          type: integer
+          nullable: true
+          description: PK of secondary keypad to assign, or null to unassign
         padlock_pk:
           type: integer
           nullable: true
           description: PK of padlock to assign, or null to unassign
+
+    IglooDevice:
+      type: object
+      description: Live Igloo device record as returned by the Igloo API v2.
+      properties:
+        deviceId:
+          type: string
+          description: Bluetooth hardware ID (e.g. SP2X2916499b)
+          example: "SP2X2916499b"
+        deviceName:
+          type: string
+          description: Short name — JOIN KEY to padlock_id / keypad_id
+          example: "6499b"
+        type:
+          type: string
+          enum: [Lock, Keypad, Bridge, KeyBox]
+          example: "Keypad"
+        batteryLevel:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 100
+          example: 87
+        lastSync:
+          type: string
+          format: date-time
+          nullable: true
+        pairedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    IglooAccessCode:
+      type: object
+      description: Cached Igloo access code record from esa_backend.igloo_access_codes.
+      properties:
+        id:
+          type: integer
+        device_id:
+          type: string
+          description: Bluetooth deviceId
+          example: "SP2X2916499b"
+        access_id:
+          type: string
+          description: Igloo access entry ID (used for deletion)
+          example: "acc_abc123"
+        access_type:
+          type: string
+          enum: [pin, ekey]
+          example: "pin"
+        pin_type:
+          type: string
+          nullable: true
+          enum: [permanent, duration, otp, daily, hourly]
+          example: "duration"
+        has_pin:
+          type: boolean
+          description: True if an encrypted PIN value is stored (pin_enc is not null)
+        name:
+          type: string
+          nullable: true
+          example: "Tenant A"
+        start_datetime:
+          type: string
+          format: date-time
+          nullable: true
+        end_datetime:
+          type: string
+          format: date-time
+          nullable: true
+        is_custom_pin:
+          type: boolean
+          example: true
+        site_id:
+          type: integer
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
 
 paths:
 
@@ -251,10 +351,12 @@ paths:
                 - site_id: 123
                   unit_id: 12345
                   keypad_pk: 5
+                  keypad_2_pk: 7
                   padlock_pk: 12
                 - site_id: 123
                   unit_id: 12346
                   keypad_pk: 5
+                  keypad_2_pk: null
                   padlock_pk: null
       responses:
         "200":
@@ -621,3 +723,593 @@ paths:
                         created_at:
                           type: string
                           format: date-time
+
+  # ---------------------------------------------------------------------------
+  # PIN Audit & Push
+  # ---------------------------------------------------------------------------
+
+  /api/smart-lock/pin-audit:
+    get:
+      summary: Audit PINs — compare Igloo keypad PINs with SiteLink gate codes
+      description: >
+        For all units with keypad assignments at the given site(s), compares the
+        Igloo keypad PINs with the decrypted SiteLink gate access codes. Also checks
+        pending Igloo jobs for recently pushed PINs.
+        Returns per-unit match status without exposing actual PIN values.
+      tags: [Smart Lock]
+      security: [{ BearerAuth: [] }]
+      parameters:
+        - name: site_ids
+          in: query
+          required: true
+          schema: { type: string }
+          description: Comma-separated site IDs (e.g. "54219,38782")
+      responses:
+        "200":
+          description: Audit results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        site_id: { type: integer }
+                        unit_id: { type: integer }
+                        keypad_pk: { type: integer }
+                        device_id: { type: string, description: "Igloo Bluetooth deviceId" }
+                        status:
+                          type: string
+                          enum: [match, mismatch, pending, no_igloo_pin, no_gate_code]
+                          description: >
+                            match — an active Igloo PIN matches the gate code.
+                            mismatch — PINs exist but none match.
+                            pending — PIN pushed as job, waiting for Bluetooth sync.
+                            no_igloo_pin — keypad has no PINs set.
+                            no_gate_code — unit has no SiteLink gate access code.
+                        has_gate_code: { type: boolean }
+                        igloo_pin_count: { type: integer }
+                        pending_pin_count: { type: integer }
+                        matching_pin_name: { type: string, nullable: true }
+                        matching_pin_type: { type: string, nullable: true }
+
+  /api/smart-lock/push-gate-pin:
+    post:
+      summary: Push SiteLink gate code as custom PIN to Igloo keypad
+      description: >
+        Reads the encrypted SiteLink gate access code for a unit, decrypts it,
+        and pushes it as a permanent custom PIN to the unit's assigned Igloo keypad.
+        The PIN is queued as a Bluetooth job on Igloo and will activate when the
+        keypad next syncs via Bluetooth (or an Igloo Bridge).
+        Requires the unit to have both a keypad assignment and a gate access code.
+      tags: [Smart Lock]
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [site_id, unit_id]
+              properties:
+                site_id: { type: integer }
+                unit_id: { type: integer }
+      responses:
+        "201":
+          description: PIN job created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  device_id: { type: string }
+                  unit_name: { type: string }
+        "404":
+          description: No keypad assigned or no gate code for this unit
+        "502":
+          description: Igloo API call failed
+
+  # ---------------------------------------------------------------------------
+  # Igloo API Proxy — Read
+  # ---------------------------------------------------------------------------
+  # All /api/igloo/* routes proxy directly to the Igloo API v2 via IglooClient.
+  # Responses are raw Igloo payloads (not normalised). Scope: smart_lock:read (read)
+  # or smart_lock:write (mutations). Rate limit on write routes: 30 req/min.
+  # ---------------------------------------------------------------------------
+
+  /api/igloo/devices:
+    get:
+      summary: List Igloo devices
+      description: >
+        Lists all devices from Igloo API v2. Optionally filter by department_id.
+        Returns live data — not from the local igloo_devices cache.
+      operationId: iglooListDevices
+      tags: [Igloo]
+      parameters:
+        - name: department_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter by Igloo department ID (alphanumeric, max 50 chars)
+      responses:
+        "200":
+          description: Device list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IglooDevice"
+                  count:
+                    type: integer
+        "500":
+          description: Igloo API error
+
+  /api/igloo/devices/{device_id}:
+    get:
+      summary: Get Igloo device detail
+      description: Returns expanded device detail (properties, linked accessories) for a single device.
+      operationId: iglooGetDevice
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Igloo Bluetooth deviceId (alphanumeric + hyphens/underscores, max 30 chars)
+          example: "SP2X2916499b"
+      responses:
+        "200":
+          description: Device detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device:
+                    $ref: "#/components/schemas/IglooDevice"
+        "500":
+          description: Igloo API error
+
+  /api/igloo/devices/{device_id}/access:
+    get:
+      summary: List PINs and eKeys on a device
+      description: Returns all active access entries (PINs, eKeys) for a device from the Igloo API.
+      operationId: iglooListDeviceAccess
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Access entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/igloo/devices/{device_id}/activity:
+    get:
+      summary: Get device unlock activity log
+      description: Returns recent unlock events from Igloo API. Capped at 200 entries per call.
+      operationId: iglooListDeviceActivity
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+      responses:
+        "200":
+          description: Activity entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activity:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/igloo/devices/{device_id}/jobs:
+    get:
+      summary: Get device job history
+      description: Returns pending and completed jobs for a device (e.g. PIN provisioning jobs).
+      operationId: iglooListDeviceJobs
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/igloo/departments:
+    get:
+      summary: List Igloo departments
+      description: Lists all Igloo departments (departments correspond to ESA sites in Igloo's model).
+      operationId: iglooListDepartments
+      tags: [Igloo]
+      responses:
+        "200":
+          description: Department list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  departments:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/igloo/departments/{dept_id}/access:
+    get:
+      summary: List all PINs across a department
+      description: Returns all access entries (PINs/eKeys) for every device in a department.
+      operationId: iglooListDepartmentAccess
+      tags: [Igloo]
+      parameters:
+        - name: dept_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Igloo department ID (alphanumeric + hyphens/underscores, max 50 chars)
+      responses:
+        "200":
+          description: Access entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/igloo/properties:
+    get:
+      summary: List Igloo properties
+      description: Lists all properties (physical locations) from the Igloo API.
+      operationId: iglooListProperties
+      tags: [Igloo]
+      responses:
+        "200":
+          description: Properties list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  properties:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  # ---------------------------------------------------------------------------
+  # Igloo API Proxy — Write (PIN management)
+  # Rate limit: 30 req/min. Scope: smart_lock:write.
+  # All write operations emit a smart_lock audit log entry.
+  # ---------------------------------------------------------------------------
+
+  /api/igloo/devices/{device_id}/pin/custom:
+    post:
+      summary: Create a custom/duration PIN
+      description: >
+        Provisions a custom PIN on a device via an Igloo job. PIN must be 4–10 digits.
+        `start_datetime` and `end_datetime` are optional; if omitted the PIN has no expiry.
+      operationId: iglooCreateCustomPin
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pin]
+              properties:
+                pin:
+                  type: string
+                  pattern: '^\d{4,10}$'
+                  example: "123456"
+                name:
+                  type: string
+                  maxLength: 100
+                  example: "Tenant A"
+                  default: "Custom PIN"
+                start_datetime:
+                  type: string
+                  format: date-time
+                  description: ISO-8601 datetime (max 40 chars). Optional.
+                  example: "2026-04-01T00:00:00Z"
+                end_datetime:
+                  type: string
+                  format: date-time
+                  description: ISO-8601 datetime (max 40 chars). Optional.
+                  example: "2026-04-30T23:59:59Z"
+      responses:
+        "201":
+          description: PIN created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  result:
+                    type: object
+                    description: Raw Igloo job response
+        "400":
+          description: Validation error (missing pin, invalid format, invalid datetime)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Igloo API error
+
+  /api/igloo/devices/{device_id}/pin/permanent:
+    post:
+      summary: Create a permanent algorithmic PIN
+      description: Generates a permanent algorithmic PIN via the Igloo algopin API.
+      operationId: iglooCreatePermanentPin
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: PIN created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  result:
+                    type: object
+        "500":
+          description: Igloo API error
+
+  /api/igloo/devices/{device_id}/pin/daily:
+    post:
+      summary: Create a daily rotating PIN
+      operationId: iglooCreateDailyPin
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: PIN created
+        "500":
+          description: Igloo API error
+
+  /api/igloo/devices/{device_id}/pin/hourly:
+    post:
+      summary: Create an hourly rotating PIN
+      operationId: iglooCreateHourlyPin
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: PIN created
+        "500":
+          description: Igloo API error
+
+  /api/igloo/devices/{device_id}/pin/otp:
+    post:
+      summary: Create a one-time PIN
+      operationId: iglooCreateOtpPin
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: PIN created
+        "500":
+          description: Igloo API error
+
+  /api/igloo/devices/{device_id}/ekey:
+    post:
+      summary: Create a guest Bluetooth eKey
+      description: >
+        Issues a Bluetooth eKey for a device. `name` is required (truncated to 100 chars).
+        `start_datetime` and `end_datetime` are optional validity window.
+      operationId: iglooCreateEkey
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                  example: "Tenant B"
+                start_datetime:
+                  type: string
+                  format: date-time
+                  example: "2026-04-01T00:00:00Z"
+                end_datetime:
+                  type: string
+                  format: date-time
+                  example: "2026-04-30T23:59:59Z"
+      responses:
+        "201":
+          description: eKey created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  result:
+                    type: object
+        "400":
+          description: Missing name or invalid datetime
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Igloo API error
+
+  /api/igloo/devices/{device_id}/access/{access_id}:
+    delete:
+      summary: Revoke a PIN or eKey
+      description: Deletes an access entry by access_id from a device. Emits an audit log entry.
+      operationId: iglooRevokeAccess
+      tags: [Igloo]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Igloo device ID (max 30 chars)
+        - name: access_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Igloo access entry ID to revoke (max 50 chars)
+      responses:
+        "200":
+          description: Access revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  result:
+                    type: object
+        "500":
+          description: Igloo API error
+
+  # ---------------------------------------------------------------------------
+  # Igloo Data Sync
+  # ---------------------------------------------------------------------------
+
+  /api/igloo/sync:
+    post:
+      summary: Trigger Igloo data sync
+      description: >
+        Triggers the `igloo` scheduler pipeline in a background thread (mode: auto).
+        Creates a JobHistory record. Returns immediately with the execution_id.
+
+        Rate limit: 5 req/min. Scope: smart_lock:write.
+      operationId: iglooSync
+      tags: [Igloo]
+      responses:
+        "200":
+          description: Sync started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  execution_id:
+                    type: string
+                    format: uuid
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  message:
+                    type: string
+                    example: "Igloo sync started"
+        "404":
+          description: Igloo pipeline not configured in scheduler
+        "500":
+          description: Failed to trigger sync

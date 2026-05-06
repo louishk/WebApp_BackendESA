@@ -1,14 +1,15 @@
 name: igloo
 description: >
-  Igloo Smart Lock pipeline. Fetches property and device data from the Igloo REST API
+  Igloo Smart Lock pipeline. Fetches property and device data from the Igloo API v2
   and stores them in igloo_properties and igloo_devices tables in the esa_backend
   PostgreSQL database. Provides battery levels, last sync times, and device metadata
-  consumed by the Smart Lock tool. Both run modes perform a full sync — the Igloo API
-  has no delta endpoint.
+  consumed by the Smart Lock tool. After every sync the pipeline auto-populates
+  smart_lock_keypads and smart_lock_padlocks from Igloo device records (Stage 7).
+  Both run modes perform a full sync — the Igloo API has no delta endpoint.
 
 database: esa_backend
-api_base_url: https://api.igloocompany.co/igloo
-auth_url: https://auth.igloocompany.co/oauth2/token
+api_base_url: https://api.iglooworks.co/v2
+auth_url: https://auth.iglooworks.co/oauth2/token
 
 # =============================================================================
 # DB Tables
@@ -107,15 +108,51 @@ api_endpoints:
       fall back to the list-endpoint record.
 
 # =============================================================================
+# Shared Client Module
+# =============================================================================
+client:
+  module: backend/python/common/igloo_client.py
+  class: IglooClient
+  description: >
+    Thread-safe Igloo API v2 client used by both the pipeline and the /api/igloo/*
+    Flask routes. Handles OAuth2 token management (auto-refresh with 30 s buffer),
+    cursor-based pagination, input validation, and all read/write operations.
+    Raises IglooAPIError on failure (message is safe to surface to callers).
+  methods:
+    read:
+      - list_devices(department_id=None)
+      - get_device(device_id)
+      - list_device_access(device_id)
+      - list_device_activity(device_id, limit=50)
+      - list_device_jobs(device_id)
+      - list_departments()
+      - list_department_access(dept_id)
+      - list_properties()
+    write:
+      - create_custom_pin(device_id, pin, name, start_dt=None, end_dt=None)
+      - create_permanent_pin(device_id)
+      - create_daily_pin(device_id)
+      - create_hourly_pin(device_id)
+      - create_otp_pin(device_id)
+      - create_ekey(device_id, name, start_dt=None, end_dt=None)
+      - revoke_access(device_id, access_id)
+  validation:
+    device_id: "^[A-Za-z0-9_-]{1,30}$"
+    access_id: "^[A-Za-z0-9_-]{1,50}$"
+    dept_id: "^[A-Za-z0-9_-]{1,50}$"
+
+# =============================================================================
 # Pipeline Script
 # =============================================================================
 scripts:
   igloo_to_sql.py:
     path: backend/python/datalayer/igloo_to_sql.py
     description: >
-      Six-stage pipeline: fetch properties, fetch departments, fetch devices
-      (list), fetch device details (per-device), transform + deduplicate, then
-      upsert to esa_backend. Both modes perform a full sync.
+      Seven-stage pipeline: fetch properties, fetch departments, fetch devices
+      (list), fetch device details (per-device), transform + deduplicate, upsert
+      to esa_backend, then auto-populate smart_lock_keypads/padlocks. Both modes
+      perform a full sync. Note: the pipeline has its own inline IglooAuth/fetch
+      helpers (separate from IglooClient) — these are pipeline-internal only.
     modes:
       backfill:
         description: Full sync of all properties and devices. Use for initial load or data repair.
@@ -132,6 +169,13 @@ scripts:
       4_fetch_device_details: "GET /devices/{deviceId} per device — expands property + linked info"
       5_transform: "Field validation, deduplication by propertyId / deviceId"
       6_push: "Upsert to igloo_properties (constraint: propertyId) and igloo_devices (constraint: deviceId)"
+      7_sync_smart_locks: >
+        Auto-create/update smart_lock_keypads and smart_lock_padlocks from device records.
+        Uses deviceId (Bluetooth hardware ID) as keypad_id/padlock_id.
+        Igloo type 'Keypad' -> smart_lock_keypads; type 'Lock' -> smart_lock_padlocks.
+        New records get status='not_assigned' and created_by='igloo_pipeline'.
+        Existing records: only site_id is updated if it changed (status is preserved).
+        Devices with no site_id (unmapped property name) are skipped.
     config_keys:
       pipelines.igloo.property_site_map: >
         Dict mapping Igloo property name (string) to ESA SiteID (integer).
@@ -222,20 +266,57 @@ join_strategy:
     or keypad_id recorded in the Smart Lock assignment tables.
 
 # =============================================================================
+# DB Tables — igloo_access_codes
+# =============================================================================
+igloo_access_codes:
+  description: >
+    Cached Igloo access codes (PINs and eKeys) written by the /api/igloo/* write
+    routes. Not populated by the pipeline — written on demand when PINs/eKeys are
+    created via the API. Encrypted PIN values are stored in pin_enc (Fernet).
+    Not populated by igloo_to_sql.py — managed by Flask routes.
+  database: esa_backend
+  migration: backend/python/migrations/042_smart_lock_igloo.sql
+  model: backend/python/web/models/smart_lock.py::IglooAccessCode
+  primary_key: [id]
+  unique_key: [device_id, access_id]
+  columns:
+    - device_id: "VARCHAR(30) NOT NULL — Bluetooth deviceId"
+    - access_id: "VARCHAR(50) NOT NULL — Igloo access entry ID (for deletion)"
+    - access_type: "VARCHAR(10) NOT NULL DEFAULT 'pin' — 'pin' or 'ekey'"
+    - pin_type: "VARCHAR(20) — 'permanent', 'duration', 'otp', 'daily', 'hourly'"
+    - pin_enc: "TEXT — Fernet-encrypted PIN value"
+    - name: "VARCHAR(100) — label (tenant name, etc.)"
+    - start_datetime: "TIMESTAMPTZ — access validity start"
+    - end_datetime: "TIMESTAMPTZ — access validity end"
+    - is_custom_pin: "BOOLEAN DEFAULT FALSE"
+    - site_id: "INTEGER — ESA SiteID"
+    - updated_at: "TIMESTAMPTZ DEFAULT NOW()"
+    - created_at: "TIMESTAMPTZ DEFAULT NOW()"
+  indexes:
+    - ix_igloo_access_codes_device_id: [device_id]
+    - ix_igloo_access_codes_site_id: [site_id]
+
+# =============================================================================
 # Migration
 # =============================================================================
-migration:
-  file: backend/python/migrations/038_igloo_tables.sql
-  description: >
-    Creates igloo_properties and igloo_devices tables with all columns and indexes.
-    Must be applied before running igloo_to_sql.py for the first time.
+migrations:
+  - file: backend/python/migrations/038_igloo_tables.sql
+    description: >
+      Creates igloo_properties and igloo_devices tables with all columns and indexes.
+      Must be applied before running igloo_to_sql.py for the first time.
+  - file: backend/python/migrations/042_smart_lock_igloo.sql
+    description: >
+      Adds keypad_2_pk column (second keypad) to smart_lock_unit_assignments.
+      Creates igloo_access_codes table for PIN/eKey caching.
 
 # =============================================================================
 # Related Code
 # =============================================================================
 related:
   models: backend/python/common/models.py (IglooProperty, IglooDevice)
+  access_code_model: backend/python/web/models/smart_lock.py (IglooAccessCode)
+  shared_client: backend/python/common/igloo_client.py (IglooClient)
   pipeline: backend/python/datalayer/igloo_to_sql.py
   pipeline_config: backend/python/config/pipelines.yaml (igloo section)
-  migration: backend/python/migrations/038_igloo_tables.sql
-  smart_lock_routes: backend/python/web/routes/api.py (smart lock endpoints)
+  igloo_proxy_routes: backend/python/web/routes/api.py (/api/igloo/* endpoints)
+  smart_lock_api_doc: docs/api/smart_lock.yaml

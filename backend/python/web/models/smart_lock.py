@@ -12,7 +12,7 @@ from web.models.base import Base
 
 class SmartLockKeypad(Base):
     """A 3rd-party keypad identifier assigned to a site."""
-    __tablename__ = 'smart_lock_keypads'
+    __tablename__ = 'mw_smart_lock_keypads'
 
     id = Column(Integer, primary_key=True)
     keypad_id = Column(String(50), unique=True, nullable=False)
@@ -39,9 +39,38 @@ class SmartLockKeypad(Base):
         return f"<SmartLockKeypad {self.keypad_id} site={self.site_id}>"
 
 
+class SmartLockBridge(Base):
+    """An Igloo Bridge device assigned to a site (auto-populated from Igloo)."""
+    __tablename__ = 'mw_smart_lock_bridges'
+
+    id = Column(Integer, primary_key=True)
+    bridge_id = Column(String(50), unique=True, nullable=False)
+    site_id = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default='not_assigned')
+    notes = Column(String(255))
+    created_by = Column(String(255))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'bridge_id': self.bridge_id,
+            'site_id': self.site_id,
+            'status': self.status,
+            'notes': self.notes,
+            'created_by': self.created_by,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self):
+        return f"<SmartLockBridge {self.bridge_id} site={self.site_id}>"
+
+
 class SmartLockPadlock(Base):
     """A 3rd-party padlock identifier assigned to a site."""
-    __tablename__ = 'smart_lock_padlocks'
+    __tablename__ = 'mw_smart_lock_padlocks'
 
     id = Column(Integer, primary_key=True)
     padlock_id = Column(String(50), unique=True, nullable=False)
@@ -70,14 +99,14 @@ class SmartLockPadlock(Base):
 
 class SmartLockUnitAssignment(Base):
     """Links a keypad and/or padlock to a specific unit."""
-    __tablename__ = 'smart_lock_unit_assignments'
+    __tablename__ = 'mw_smart_lock_unit_assignments'
 
     id = Column(Integer, primary_key=True)
     site_id = Column(Integer, nullable=False)
     unit_id = Column(Integer, nullable=False)
-    keypad_pk = Column(Integer, ForeignKey('smart_lock_keypads.id', ondelete='SET NULL'))
-    keypad_2_pk = Column(Integer, ForeignKey('smart_lock_keypads.id', ondelete='SET NULL'))
-    padlock_pk = Column(Integer, ForeignKey('smart_lock_padlocks.id', ondelete='SET NULL'))
+    keypad_pk = Column(Integer, ForeignKey('mw_smart_lock_keypads.id', ondelete='SET NULL'))
+    keypad_2_pk = Column(Integer, ForeignKey('mw_smart_lock_keypads.id', ondelete='SET NULL'))
+    padlock_pk = Column(Integer, ForeignKey('mw_smart_lock_padlocks.id', ondelete='SET NULL'))
     assigned_by = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -112,7 +141,7 @@ class SmartLockUnitAssignment(Base):
 
 class SmartLockAuditLog(Base):
     """Append-only audit log for all smart lock operations."""
-    __tablename__ = 'smart_lock_audit_log'
+    __tablename__ = 'mw_smart_lock_audit_log'
 
     id = Column(Integer, primary_key=True)
     action = Column(String(50), nullable=False)
@@ -143,8 +172,13 @@ class SmartLockAuditLog(Base):
 
 class GateAccessData(Base):
     """Gate access data from SMD GateAccessData SOAP endpoint.
-    Access codes are Fernet-encrypted at rest."""
-    __tablename__ = 'gate_access_data'
+    Access codes are Fernet-encrypted at rest.
+
+    Now points at `ccws_gate_access` in esa_middleware (populated by the
+    orchestrator pipeline). Legacy scheduler job still writes to the old
+    `gate_access_data` table in esa_backend for rollback parity.
+    """
+    __tablename__ = 'ccws_gate_access'
 
     id = Column(Integer, primary_key=True)
     location_code = Column(String(10), nullable=False)
@@ -180,48 +214,9 @@ class GateAccessData(Base):
         }
 
 
-class IglooAccessCode(Base):
-    """Igloo access codes (PINs/eKeys) cached from Igloo API, encrypted at rest."""
-    __tablename__ = 'igloo_access_codes'
-
-    id = Column(Integer, primary_key=True)
-    device_id = Column(String(30), nullable=False)
-    access_id = Column(String(50), nullable=False)
-    access_type = Column(String(10), nullable=False, default='pin')
-    pin_type = Column(String(20))
-    pin_enc = Column(Text)
-    name = Column(String(100))
-    start_datetime = Column(DateTime(timezone=True))
-    end_datetime = Column(DateTime(timezone=True))
-    is_custom_pin = Column(Boolean, default=False)
-    site_id = Column(Integer)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        UniqueConstraint('device_id', 'access_id', name='uq_igloo_access_device_access'),
-    )
-
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'device_id': self.device_id,
-            'access_id': self.access_id,
-            'access_type': self.access_type,
-            'pin_type': self.pin_type,
-            'has_pin': bool(self.pin_enc),
-            'name': self.name,
-            'start_datetime': self.start_datetime.isoformat() if self.start_datetime else None,
-            'end_datetime': self.end_datetime.isoformat() if self.end_datetime else None,
-            'is_custom_pin': self.is_custom_pin,
-            'site_id': self.site_id,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-        }
-
-
 class SmartLockSiteConfig(Base):
     """Per-site smart lock enable/disable configuration."""
-    __tablename__ = 'smart_lock_site_config'
+    __tablename__ = 'mw_smart_lock_site_config'
 
     site_id = Column(Integer, primary_key=True)
     enabled = Column(Boolean, nullable=False, default=False)
@@ -231,6 +226,9 @@ class SmartLockSiteConfig(Base):
     updated_by = Column(String(255))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
+    revoke_on_gate_locked = Column(Boolean, nullable=False, default=True, server_default='true')
+    revoke_on_overlocked = Column(Boolean, nullable=False, default=True, server_default='true')
+    revoke_on_not_rentable = Column(Boolean, nullable=False, default=True, server_default='true')
 
     def to_dict(self):
         return {
@@ -241,4 +239,7 @@ class SmartLockSiteConfig(Base):
             'notes': self.notes,
             'updated_by': self.updated_by,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'revoke_on_gate_locked': self.revoke_on_gate_locked,
+            'revoke_on_overlocked': self.revoke_on_overlocked,
+            'revoke_on_not_rentable': self.revoke_on_not_rentable,
         }
