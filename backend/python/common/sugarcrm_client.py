@@ -326,6 +326,54 @@ class SugarCRMClient:
         """Make a DELETE request."""
         return self._request('DELETE', endpoint)
 
+    def upload_file(
+        self,
+        module: str,
+        record_id: str,
+        field: str,
+        filename: str,
+        content: bytes,
+        mime_type: str = 'application/octet-stream',
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        """Upload a file to a file-type field on a SugarCRM record.
+
+        Used for attaching binary content (audio, images, documents) to
+        modules like Notes (filename field) or any module with a file field.
+
+        Args:
+            module: e.g. 'Notes'
+            record_id: target record UUID
+            field: file field name (e.g. 'filename' on Notes)
+            filename: original filename
+            content: raw bytes
+            mime_type: MIME type for the upload
+
+        Returns:
+            Tuple of (response_dict, error_message)
+        """
+        if not self._ensure_authenticated():
+            return None, "Authentication failed"
+
+        url = f"{self.base_url}/{module}/{record_id}/file/{field}"
+        # Bypass session default Content-Type=application/json so requests can
+        # set the multipart boundary correctly. The OAuth-Token still applies.
+        try:
+            response = requests.post(
+                url,
+                headers={'OAuth-Token': self.access_token},
+                files={field: (filename, content, mime_type)},
+                timeout=self.timeout,
+            )
+            if response.status_code in (200, 201):
+                try:
+                    return response.json(), None
+                except Exception:
+                    # Some Sugar deployments return non-JSON on success
+                    return {'status': 'ok'}, None
+            return None, f"Upload failed {response.status_code}: {response.text[:300]}"
+        except Exception as e:
+            return None, f"Upload error: {e}"
+
     # =========================================================================
     # Module Data Operations
     # =========================================================================
@@ -628,6 +676,36 @@ class SugarCRMClient:
         """
         endpoint = f"{module}/{record_id}"
         return self.delete(endpoint)
+
+    def convert_lead(
+        self,
+        lead_id: str,
+        contact_data: Optional[Dict] = None,
+        account_data: Optional[Dict] = None,
+    ) -> Tuple[Optional[Dict], Optional[str]]:
+        """
+        Convert a Lead to Contact (and optionally Account) via SugarCRM v11.
+
+        POSTs to /Leads/{id} with converted=1 plus optional inline contact/account
+        data, which is the standard SugarCRM v11 REST lead-conversion pattern.
+
+        Args:
+            lead_id: SugarCRM Lead UUID
+            contact_data: Optional field dict to create/update the resulting Contact
+            account_data: Optional field dict to create/update the resulting Account
+
+        Returns:
+            Tuple of (response_dict, error_message)
+            response_dict will include the updated lead record; SugarCRM also
+            creates Contact/Account records server-side.
+        """
+        payload: Dict[str, Any] = {'converted': True}
+        if contact_data:
+            payload['contact'] = contact_data
+        if account_data:
+            payload['account'] = account_data
+        endpoint = f"Leads/{lead_id}"
+        return self.put(endpoint, data=payload)
 
     def find_leads_by_email(
         self,
