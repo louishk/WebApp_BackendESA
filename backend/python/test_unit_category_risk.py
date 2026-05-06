@@ -20,6 +20,7 @@ class _RentRoll(Base):
     extract_date = Column(Date, primary_key=True)
     SiteID = Column(Integer, primary_key=True)
     UnitID = Column(Integer, primary_key=True)
+    sUnit = Column(String(50))
     bRented = Column(Boolean)
     sTypeName = Column(String(100))
 
@@ -30,6 +31,7 @@ class _MIMO(Base):
     TenantID = Column(Integer, primary_key=True)
     MoveDate = Column(DateTime, primary_key=True)
     MoveOut = Column(Integer)
+    UnitName = Column(String(100))
     sUnitType = Column(String(100))
 
 
@@ -51,11 +53,13 @@ def session():
         date = today - dt.timedelta(days=d)
         for u in range(100):
             s.add(_RentRoll(extract_date=date, SiteID=1, UnitID=u,
+                            sUnit=f"U{u:04d}",
                             bRented=True, sTypeName="S/8-10/W/A/SS/NP"))
     for m in range(12):
         s.add(_MIMO(SiteID=1, TenantID=m, MoveOut=1,
                     MoveDate=dt.datetime(2026, m + 1 if m < 4 else 1, 15),
-                    sUnitType="S/8-10/W/A/SS/NP"))
+                    UnitName=f"U{m:04d}",
+                    sUnitType="legacy-name-pre-SOP"))
     s.commit()
     return s
 

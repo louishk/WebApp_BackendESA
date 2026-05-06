@@ -129,25 +129,49 @@ def compute_cell_factors(session: Session,
            "country": country_name}).scalar() or 1
     window_months = Decimal((window_end - window_start).days) / DAYS_PER_MONTH
 
+    # Backfill historical events with each unit's CURRENT sTypeName, since SOP
+    # naming is recent in SiteLink and most legacy events carry pre-SOP names.
+    # Assumption: a unit's physical attributes (size/type/climate/...) don't
+    # meaningfully change after rename, so today's parsed dimensions apply.
     occ_rows = session.execute(text("""
-        SELECT r."sTypeName", COUNT(*) AS rows
-        FROM rentroll r
-        JOIN siteinfo s ON s."SiteID" = r."SiteID"
-        WHERE r."bRented" = :rented
-          AND r.extract_date BETWEEN :ws AND :we
-          AND s."Country" = :country
-        GROUP BY r."sTypeName"
+        WITH latest AS (
+            SELECT "SiteID", "sUnit", "sTypeName" FROM (
+                SELECT "SiteID", "sUnit", "sTypeName",
+                       ROW_NUMBER() OVER (PARTITION BY "SiteID", "sUnit"
+                                          ORDER BY extract_date DESC) AS rn
+                  FROM rentroll
+            ) ranked
+            WHERE rn = 1
+        )
+        SELECT l."sTypeName", COUNT(*) AS rows
+          FROM rentroll r
+          JOIN siteinfo s ON s."SiteID" = r."SiteID"
+          JOIN latest   l ON l."SiteID" = r."SiteID" AND l."sUnit" = r."sUnit"
+         WHERE r."bRented" = :rented
+           AND r.extract_date BETWEEN :ws AND :we
+           AND s."Country" = :country
+         GROUP BY l."sTypeName"
     """), {"rented": True, "ws": window_start, "we": window_end,
            "country": country_name}).fetchall()
 
     mo_rows = session.execute(text("""
-        SELECT m."sUnitType", COUNT(*) AS n
-        FROM mimo m
-        JOIN siteinfo s ON s."SiteID" = m."SiteID"
-        WHERE m."MoveOut" = 1
-          AND m."MoveDate" >= :ws AND m."MoveDate" < :we_next
-          AND s."Country" = :country
-        GROUP BY m."sUnitType"
+        WITH latest AS (
+            SELECT "SiteID", "sUnit", "sTypeName" FROM (
+                SELECT "SiteID", "sUnit", "sTypeName",
+                       ROW_NUMBER() OVER (PARTITION BY "SiteID", "sUnit"
+                                          ORDER BY extract_date DESC) AS rn
+                  FROM rentroll
+            ) ranked
+            WHERE rn = 1
+        )
+        SELECT l."sTypeName", COUNT(*) AS n
+          FROM mimo m
+          JOIN siteinfo s ON s."SiteID" = m."SiteID"
+          JOIN latest   l ON l."SiteID" = m."SiteID" AND l."sUnit" = m."UnitName"
+         WHERE m."MoveOut" = 1
+           AND m."MoveDate" >= :ws AND m."MoveDate" < :we_next
+           AND s."Country" = :country
+         GROUP BY l."sTypeName"
     """), {"ws": window_start,
            "we_next": dt.datetime.combine(window_end + dt.timedelta(days=1), dt.time.min),
            "country": country_name}).fetchall()
