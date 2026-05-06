@@ -30,6 +30,8 @@ Project Documentation/
 
 # AI tool artifacts
 .ai/
+.claude/plans/
+.claude/worktrees/
 
 # OS
 .DS_Store
