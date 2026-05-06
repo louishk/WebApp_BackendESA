@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+
+{% block title %}{{ pipeline.display_name }} - Sync Orchestrator{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div>
+            <h2 style="margin: 0;">{{ pipeline.display_name }}</h2>
+            <code style="color: #666;">{{ pipeline.pipeline_name }}</code>
+        </div>
+        <div>
+            <a href="/sync/" class="btn btn-secondary btn-sm">← Back</a>
+            <button onclick="loadState()" class="btn btn-primary btn-sm">Refresh State</button>
+        </div>
+    </div>
+
+    <table class="data-table">
+        <tr><th>Module Path</th><td><code>{{ pipeline.module_path }}</code></td></tr>
+        <tr><th>Enabled</th><td>{{ pipeline.enabled }}</td></tr>
+        <tr><th>Priority</th><td>{{ pipeline.priority }}</td></tr>
+        <tr><th>Schedule</th><td><code>{{ pipeline.schedule_config }}</code></td></tr>
+        <tr><th>Sync Strategy</th><td>{{ pipeline.sync_config.get('strategy', '—') if pipeline.sync_config else '—' }}</td></tr>
+        <tr><th>Watermark Field</th><td>{{ pipeline.sync_config.get('watermark_field', '—') if pipeline.sync_config else '—' }}</td></tr>
+        <tr><th>Checkpoint Interval</th><td>{{ pipeline.sync_config.get('checkpoint_interval', '—') if pipeline.sync_config else '—' }}</td></tr>
+        <tr><th>Managed By</th><td><span class="badge">{{ pipeline.managed_by }}</span></td></tr>
+    </table>
+
+    <h3 style="margin-top: 24px;">Sync Config</h3>
+    <pre id="sync-config-json">{{ pipeline.sync_config | tojson(indent=2) }}</pre>
+
+    <h3 style="margin-top: 24px;">Pipeline-Specific Args</h3>
+    <pre>{{ pipeline.pipeline_specific_args | tojson(indent=2) }}</pre>
+
+    <h3 style="margin-top: 24px;">Sync State</h3>
+    <div id="state-container">Loading...</div>
+</div>
+
+<script>
+async function loadState() {
+    const container = document.getElementById('state-container');
+    try {
+        const r = await fetch('/api/sync/pipelines/{{ pipeline.pipeline_name }}/state');
+        if (!r.ok) {
+            container.innerHTML = '<p class="text-muted">No state available</p>';
+            return;
+        }
+        const data = await r.json();
+        if (!data.states || data.states.length === 0) {
+            container.innerHTML = '<p class="text-muted">No sync state recorded yet</p>';
+            return;
+        }
+        let html = '<table class="data-table"><thead><tr><th>Phase</th><th>Cursor</th><th>Last Sync</th><th>Records</th><th>Status</th></tr></thead><tbody>';
+        for (const s of data.states) {
+            html += `<tr>
+                <td>${s.phase}</td>
+                <td><code>${s.cursor_value || '—'}</code></td>
+                <td>${s.last_sync_at || '—'}</td>
+                <td>${s.records_processed || 0}</td>
+                <td>${s.status || '—'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = `<p class="text-muted">Error: ${err.message}</p>`;
+    }
+}
+
+loadState();
+</script>
+
+<style>
+pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; background: #e0e0e0; }
+.text-muted { color: #999; }
+</style>
+{% endblock %}

@@ -7,14 +7,15 @@ cursor-based pagination, and all device/property/department endpoints.
 Credentials loaded from vault: IGLOO_CLIENT_ID, IGLOO_CLIENT_SECRET
 
 Usage:
-    from common.igloo_client import IglooClient
+    from common.igloo_client import IglooClient, PIN_TYPE_DURATION
 
     client = IglooClient()
     devices = client.list_devices()
     device = client.get_device("ABC123")
-    client.create_custom_pin("ABC123", "1234", "Tenant A",
-                             start_dt="2026-04-01T00:00:00Z",
-                             end_dt="2026-04-30T23:59:59Z")
+    client.create_pin_via_bridge("ABC123", "1234", "ESA-27525-12345",
+                                 pin_type=PIN_TYPE_DURATION,
+                                 start_dt="2026-04-01T00:00:00+00:00",
+                                 end_dt="2026-04-30T23:59:59+00:00")
 """
 
 import logging
@@ -38,11 +39,31 @@ DEFAULT_PAGE_LIMIT = 300
 MAX_PAGES = 500  # Safety ceiling: ~150,000 records at limit=300
 DEFAULT_TIMEOUT = 60
 
+# Bridge-proxied job types (verified live 2026-04-28; see project_igloo_bridge_api.md)
+BRIDGE_JOB_LOCK            = 1
+BRIDGE_JOB_UNLOCK          = 2
+BRIDGE_JOB_CREATE_PIN      = 4
+BRIDGE_JOB_DELETE_PIN      = 5
+BRIDGE_JOB_BATTERY_LEVEL   = 9
+BRIDGE_JOB_DEVICE_STATUS   = 10
+BRIDGE_JOB_ACTIVITY_LOGS   = 15
+
+# Bridge create-pin pinType integer enum
+PIN_TYPE_OTP        = 1
+PIN_TYPE_PERMANENT  = 2
+PIN_TYPE_DURATION   = 4
+
+BRIDGE_POLL_TIMEOUT  = 90   # seconds — battery/status often >30s; expiryDate is ~120s
+BRIDGE_POLL_INTERVAL = 2
+
 # deviceId format: alphanumeric + hyphens/underscores, max 30 chars
 _DEVICE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,30}$')
 # accessId / departmentId: alphanumeric + hyphens/underscores, max 50 chars
 _ACCESS_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,50}$')
 _DEPT_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,50}$')
+# PIN format for bridge create-pin: 4–6 digits (Igloo bridge limit, verified
+# live: longer PINs return 400 "'pin' length is 4-6 digits")
+_PIN_RE_INTERNAL = re.compile(r'^\d{4,6}$')
 
 
 # ---------------------------------------------------------------------------
@@ -224,20 +245,75 @@ class IglooClient:
 
     @staticmethod
     def _resolve_department_id(device_id: str) -> Optional[str]:
-        """Look up departmentId from igloo_devices table in esa_backend DB."""
+        """Resolve departmentId for a device.
+
+        Order: igloo_devices.departmentId → igloo_devices.site_id →
+        mw_siteinfo.igloo_department_id. Keypads/bridges typically have null
+        departmentId at the device level, so the siteinfo fallback is the
+        reliable path.
+        """
         try:
             from sqlalchemy import create_engine, text
             from common.config_loader import get_database_url
-            engine = create_engine(get_database_url('backend'))
+            engine = create_engine(get_database_url('middleware'))
             with engine.connect() as conn:
                 row = conn.execute(
-                    text('SELECT "departmentId" FROM igloo_devices WHERE "deviceId" = :did'),
+                    text(
+                        'SELECT "departmentId", site_id FROM igloo_devices '
+                        'WHERE "deviceId" = :did'
+                    ),
+                    {'did': device_id},
+                ).fetchone()
+                if row and row[0]:
+                    engine.dispose()
+                    return row[0]
+                if row and row[1]:
+                    site_row = conn.execute(
+                        text(
+                            'SELECT igloo_department_id FROM mw_siteinfo '
+                            'WHERE "SiteID" = :sid'
+                        ),
+                        {'sid': row[1]},
+                    ).fetchone()
+                    engine.dispose()
+                    return site_row[0] if site_row and site_row[0] else None
+            engine.dispose()
+            return None
+        except Exception:
+            logger.exception("Failed to resolve departmentId for %s", device_id)
+            return None
+
+    @staticmethod
+    def _resolve_bridge_id(device_id: str) -> Optional[str]:
+        """Find the Bridge paired to a device via igloo_devices.linkedAccessories
+        (keypads link to a bridge there) or linkedDevices (locks). Returns the
+        first Bridge deviceId found, or None.
+        """
+        try:
+            from sqlalchemy import create_engine, text
+            from common.config_loader import get_database_url
+            engine = create_engine(get_database_url('middleware'))
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        'SELECT "linkedAccessories", "linkedDevices" '
+                        'FROM igloo_devices WHERE "deviceId" = :did'
+                    ),
                     {'did': device_id},
                 ).fetchone()
             engine.dispose()
-            return row[0] if row and row[0] else None
+            if not row:
+                return None
+            for blob in (row[0], row[1]):
+                if not blob:
+                    continue
+                items = blob if isinstance(blob, list) else []
+                for ent in items:
+                    if isinstance(ent, dict) and (ent.get('type') or '').lower() == 'bridge':
+                        return ent.get('deviceId') or ent.get('id')
+            return None
         except Exception:
-            logger.exception("Failed to resolve departmentId for %s", device_id)
+            logger.exception("Failed to resolve bridgeId for %s", device_id)
             return None
 
     # ------------------------------------------------------------------
@@ -354,174 +430,10 @@ class IglooClient:
     # Write operations — PIN management
     # ------------------------------------------------------------------
 
-    def create_custom_pin(
-        self,
-        device_id: str,
-        pin: str,
-        name: str,
-        start_dt: Optional[str] = None,
-        end_dt: Optional[str] = None,
-        pin_type: str = 'permanent',
-        department_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Create a custom PIN on a device via a job.
-
-        Args:
-            device_id: Igloo device ID.
-            pin: PIN code to set.
-            name: Human-readable name/label for the PIN.
-            start_dt: ISO-8601 start datetime (required for 'duration' pinType).
-            end_dt: ISO-8601 end datetime (required for 'duration' pinType).
-            pin_type: 'permanent' or 'duration'.
-            department_id: Igloo department ID (required by API).
-
-        Returns:
-            Job response dict.
-        """
-        self._validate_device_id(device_id)
-
-        # Resolve departmentId: try DB first, then API departments list
-        if not department_id:
-            department_id = self._resolve_department_id(device_id)
-        if not department_id:
-            # Fallback: fetch first department from API
-            depts = self.list_departments()
-            if depts:
-                department_id = depts[0].get('id')
-        if not department_id:
-            raise IglooAPIError("Cannot determine departmentId for device")
-
-        now = datetime.now(timezone.utc)
-        if not start_dt:
-            start_dt = now.strftime('%Y-%m-%dT%H:%M:%S+00:00')
-
-        payload: Dict[str, Any] = {
-            'customPin': pin,
-            'pinType': pin_type,
-            'startDateTime': start_dt,
-            'departmentId': department_id,
-        }
-        # endDate only for duration PINs (permanent PINs don't accept it)
-        if pin_type == 'duration':
-            if not end_dt:
-                end_dt = (now + timedelta(days=365)).strftime('%Y-%m-%dT%H:%M:%S+00:00')
-            payload['endDate'] = end_dt
-
-        try:
-            resp = self._http.post(
-                f"{API_BASE_URL}/devices/{device_id}/jobs",
-                headers=self._auth_headers(),
-                json=payload,
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except IglooAPIError:
-            raise
-        except Exception as exc:
-            # Extract response body from HTTPError for debugging
-            resp_body = ''
-            if hasattr(exc, 'response') and exc.response is not None:
-                try:
-                    resp_body = exc.response.text[:500]
-                except Exception:
-                    pass
-            logger.error(
-                "Failed to create custom PIN on device %s — payload: %s — response: %s",
-                device_id, payload, resp_body,
-            )
-            raise IglooAPIError("Failed to create custom PIN")
-
-    def create_permanent_pin(self, device_id: str) -> Dict[str, Any]:
-        """Generate a permanent algorithmic PIN for a device.
-
-        Args:
-            device_id: Igloo device ID.
-
-        Returns:
-            PIN response dict.
-        """
-        self._validate_device_id(device_id)
-        try:
-            resp = self._http.post(
-                f"{API_BASE_URL}/devices/{device_id}/algopin/permanent",
-                headers=self._auth_headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except IglooAPIError:
-            raise
-        except Exception:
-            logger.exception("Failed to create permanent PIN on device %s", device_id)
-            raise IglooAPIError("Failed to create permanent PIN")
-
-    def create_daily_pin(self, device_id: str) -> Dict[str, Any]:
-        """Generate a daily algorithmic PIN for a device.
-
-        Args:
-            device_id: Igloo device ID.
-
-        Returns:
-            PIN response dict.
-        """
-        self._validate_device_id(device_id)
-        try:
-            resp = self._http.post(
-                f"{API_BASE_URL}/devices/{device_id}/algopin/daily",
-                headers=self._auth_headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except IglooAPIError:
-            raise
-        except Exception:
-            logger.exception("Failed to create daily PIN on device %s", device_id)
-            raise IglooAPIError("Failed to create daily PIN")
-
-    def create_hourly_pin(self, device_id: str) -> Dict[str, Any]:
-        """Generate an hourly algorithmic PIN for a device.
-
-        Args:
-            device_id: Igloo device ID.
-
-        Returns:
-            PIN response dict.
-        """
-        self._validate_device_id(device_id)
-        try:
-            resp = self._http.post(
-                f"{API_BASE_URL}/devices/{device_id}/algopin/hourly",
-                headers=self._auth_headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except IglooAPIError:
-            raise
-        except Exception:
-            logger.exception("Failed to create hourly PIN on device %s", device_id)
-            raise IglooAPIError("Failed to create hourly PIN")
-
-    def create_otp_pin(self, device_id: str) -> Dict[str, Any]:
-        """Generate a one-time algorithmic PIN for a device.
-
-        Args:
-            device_id: Igloo device ID.
-
-        Returns:
-            PIN response dict.
-        """
-        self._validate_device_id(device_id)
-        try:
-            resp = self._http.post(
-                f"{API_BASE_URL}/devices/{device_id}/algopin/onetime",
-                headers=self._auth_headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()
-        except IglooAPIError:
-            raise
-        except Exception:
-            logger.exception("Failed to create OTP PIN on device %s", device_id)
-            raise IglooAPIError("Failed to create one-time PIN")
+    # PIN management is via bridge only — see create_pin_via_bridge() and
+    # delete_pin_via_bridge() further below. Direct /devices/{id}/jobs and
+    # /algopin/* are not used (the bridge executes BLE commands on-site, the
+    # direct queues just wait for the next sync).
 
     def create_ekey(
         self,
@@ -563,14 +475,11 @@ class IglooClient:
             raise IglooAPIError("Failed to create eKey")
 
     def revoke_access(self, device_id: str, access_id: str) -> Dict[str, Any]:
-        """Revoke an access entry from a device.
+        """Revoke an access entry from a device (DEPRECATED — direct API).
 
-        Args:
-            device_id: Igloo device ID.
-            access_id: Access entry ID to revoke.
-
-        Returns:
-            Deletion response dict.
+        Use delete_pin_via_bridge() instead. This direct DELETE queues a job
+        for the next BLE sync rather than executing immediately via the
+        on-site bridge.
         """
         self._validate_device_id(device_id)
         self._validate_access_id(access_id)
@@ -588,3 +497,181 @@ class IglooClient:
                 "Failed to revoke access %s on device %s", access_id, device_id
             )
             raise IglooAPIError("Failed to revoke access")
+
+    # ------------------------------------------------------------------
+    # Bridge-proxied operations
+    # ------------------------------------------------------------------
+
+    def _create_bridge_job(
+        self,
+        device_id: str,
+        bridge_id: str,
+        department_id: str,
+        job_type: int,
+        job_data: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Submit a bridge-proxied job. Returns the jobId."""
+        self._validate_device_id(device_id)
+        self._validate_device_id(bridge_id)
+        self._validate_dept_id(department_id)
+        body: Dict[str, Any] = {
+            'jobType': int(job_type),
+            'departmentId': department_id,
+        }
+        if job_data is not None:
+            body['jobData'] = job_data
+        try:
+            resp = self._http.post(
+                f"{API_BASE_URL}/devices/{device_id}/jobs/bridges/{bridge_id}",
+                headers=self._auth_headers(),
+                json=body,
+            )
+            resp.raise_for_status()
+            data = resp.json() or {}
+            job_id = data.get('jobId')
+            if not job_id:
+                raise IglooAPIError("Bridge job submitted but no jobId returned")
+            return job_id
+        except IglooAPIError:
+            raise
+        except Exception as exc:
+            resp_body = ''
+            api_err = ''
+            if hasattr(exc, 'response') and exc.response is not None:
+                try:
+                    resp_body = exc.response.text[:500]
+                    api_err = (exc.response.json() or {}).get('error') or ''
+                except Exception:
+                    pass
+            logger.error(
+                "Bridge job submit failed device=%s bridge=%s jobType=%s body=%s",
+                device_id, bridge_id, job_type, resp_body,
+            )
+            msg = f"Bridge job rejected: {api_err}" if api_err else "Failed to submit bridge job"
+            raise IglooAPIError(msg)
+
+    def _poll_bridge_job(
+        self,
+        job_id: str,
+        timeout: int = BRIDGE_POLL_TIMEOUT,
+        interval: int = BRIDGE_POLL_INTERVAL,
+    ) -> Dict[str, Any]:
+        """Poll /bridge/jobs/{jobId} until completed or timeout.
+
+        Success = `completed=true && jobResponse.jobStatus == 0`.
+        Raises IglooAPIError on non-success completions or timeout.
+        """
+        import time
+        deadline = time.time() + timeout
+        url = f"{API_BASE_URL}/bridge/jobs/{job_id}"
+        headers = self._auth_headers()
+        last: Dict[str, Any] = {}
+        while time.time() < deadline:
+            try:
+                resp = self._http.get(url, headers=headers)
+                resp.raise_for_status()
+                last = resp.json() or {}
+            except Exception:
+                logger.exception("Bridge poll error job=%s", job_id)
+                time.sleep(interval)
+                continue
+            if last.get('completed'):
+                status_code = ((last.get('jobResponse') or {}).get('jobStatus'))
+                if status_code == 0:
+                    return last
+                logger.warning(
+                    "Bridge job %s completed with non-zero jobStatus=%s response=%s",
+                    job_id, status_code, last.get('jobResponse'),
+                )
+                raise IglooAPIError(
+                    f"Bridge job failed (jobStatus={status_code})"
+                )
+            time.sleep(interval)
+        logger.warning("Bridge job %s timed out after %ds: %s", job_id, timeout, last)
+        raise IglooAPIError("Bridge job timed out")
+
+    def create_pin_via_bridge(
+        self,
+        device_id: str,
+        pin: str,
+        access_name: str,
+        *,
+        bridge_id: Optional[str] = None,
+        department_id: Optional[str] = None,
+        pin_type: int = PIN_TYPE_DURATION,
+        start_dt: Optional[str] = None,
+        end_dt: Optional[str] = None,
+        timeout: int = BRIDGE_POLL_TIMEOUT,
+    ) -> Dict[str, Any]:
+        """Program a PIN on a keypad/lock via its paired bridge.
+
+        Args:
+            device_id: Lock or keypad ID (the device receiving the PIN).
+            pin: 4–10 digit PIN value.
+            access_name: Label stored on the access entry. Use ESA-{site}-{unit}
+                for sync-pipeline ownership.
+            bridge_id: Bridge ID; auto-resolved from linkedAccessories if omitted.
+            department_id: Igloo dept ID; auto-resolved via siteinfo if omitted.
+            pin_type: 1=otp, 2=permanent, 4=duration.
+            start_dt: ISO-8601 with offset, e.g. "2026-04-28T10:00:00+00:00".
+            end_dt: ISO-8601; required for pin_type=4 (duration).
+            timeout: Poll deadline in seconds.
+
+        Returns the final job-status payload on success.
+        """
+        from datetime import datetime, timezone, timedelta
+        if not _PIN_RE_INTERNAL.match(pin or ''):
+            raise IglooAPIError("Invalid PIN format (must be 4–6 digits)")
+
+        bridge_id = bridge_id or self._resolve_bridge_id(device_id)
+        if not bridge_id:
+            raise IglooAPIError("No bridge paired to device")
+        department_id = department_id or self._resolve_department_id(device_id)
+        if not department_id:
+            raise IglooAPIError("Cannot resolve departmentId for device")
+
+        if pin_type == PIN_TYPE_DURATION and not end_dt:
+            raise IglooAPIError("end_dt required for duration PIN")
+
+        if not start_dt:
+            now = datetime.now(timezone.utc)
+            start_dt = now.replace(microsecond=0).strftime('%Y-%m-%dT%H:%M:%S+00:00')
+
+        job_data: Dict[str, Any] = {
+            'accessName': access_name,
+            'pin': pin,
+            'pinType': int(pin_type),
+            'startDate': start_dt,
+        }
+        if pin_type == PIN_TYPE_DURATION:
+            job_data['endDate'] = end_dt
+
+        job_id = self._create_bridge_job(
+            device_id, bridge_id, department_id,
+            BRIDGE_JOB_CREATE_PIN, job_data,
+        )
+        return self._poll_bridge_job(job_id, timeout=timeout)
+
+    def delete_pin_via_bridge(
+        self,
+        device_id: str,
+        access_id: str,
+        *,
+        bridge_id: Optional[str] = None,
+        department_id: Optional[str] = None,
+        timeout: int = BRIDGE_POLL_TIMEOUT,
+    ) -> Dict[str, Any]:
+        """Revoke a PIN by accessId via its paired bridge."""
+        self._validate_access_id(access_id)
+        bridge_id = bridge_id or self._resolve_bridge_id(device_id)
+        if not bridge_id:
+            raise IglooAPIError("No bridge paired to device")
+        department_id = department_id or self._resolve_department_id(device_id)
+        if not department_id:
+            raise IglooAPIError("Cannot resolve departmentId for device")
+
+        job_id = self._create_bridge_job(
+            device_id, bridge_id, department_id,
+            BRIDGE_JOB_DELETE_PIN, {'accessId': access_id},
+        )
+        return self._poll_bridge_job(job_id, timeout=timeout)

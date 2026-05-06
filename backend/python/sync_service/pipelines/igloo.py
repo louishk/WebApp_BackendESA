@@ -122,7 +122,7 @@ class IglooPipeline(BasePipeline):
         # Auto-populate mw_smart_lock_keypads / mw_smart_lock_padlocks for newly
         # discovered Igloo devices (parity with the retired legacy scheduler job).
         # Models are bound to middleware tables, so pass the middleware engine.
-        kp_added, pl_added = sync_devices_to_smart_locks(mw_engine, device_records)
+        kp_added, pl_added, br_added = sync_devices_to_smart_locks(mw_engine, device_records)
 
         return RunResult(
             status='refreshed',
@@ -134,5 +134,6 @@ class IglooPipeline(BasePipeline):
                 'siteinfo_enriched': enriched,
                 'keypads_seen': kp_added,
                 'padlocks_seen': pl_added,
+                'bridges_seen': br_added,
             },
         )

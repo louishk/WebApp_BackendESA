@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Orchestrator Runs{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="orch-header">
+        <div>
+            <h2 style="margin:0;">Orchestrator Run History</h2>
+            <p style="color:#666;margin:0.25rem 0 0;">All sync_service runs across pipelines</p>
+        </div>
+        <div class="orch-actions">
+            <a href="/orchestrator/" class="btn btn-secondary btn-sm">← Dashboard</a>
+            <select id="filter-pipeline" onchange="loadRuns()">
+                <option value="">All pipelines</option>
+            </select>
+            <select id="filter-hours" onchange="loadRuns()">
+                <option value="1">Last 1h</option>
+                <option value="24" selected>Last 24h</option>
+                <option value="168">Last 7d</option>
+                <option value="720">Last 30d</option>
+            </select>
+            <button onclick="loadRuns()" class="btn btn-primary btn-sm">Refresh</button>
+        </div>
+    </div>
+
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Time</th><th>Pipeline</th><th>Scope</th><th>Status</th>
+                <th>Records</th><th>Duration</th><th>Age</th><th>Fresh</th><th>Dedup</th><th>Trigger</th>
+            </tr>
+        </thead>
+        <tbody id="runs-tbody">
+            <tr><td colspan="10" style="text-align:center;color:#999;">Loading...</td></tr>
+        </tbody>
+    </table>
+    <p style="margin-top:1rem;color:#666;font-size:0.85rem;">
+        Total: <span id="run-count">—</span>
+    </p>
+</div>
+
+<style>
+.orch-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; gap:1rem; }
+.orch-actions { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; }
+.orch-actions select { padding:0.35rem; border:1px solid #ccc; border-radius:4px; }
+.badge-sm { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; }
+.b-ok { background:#d4edda; color:#155724; }
+.b-warn { background:#fff3cd; color:#856404; }
+.b-err { background:#f8d7da; color:#721c24; }
+.b-info { background:#d1ecf1; color:#0c5460; }
+.data-table { width:100%; border-collapse:collapse; }
+.data-table th, .data-table td { padding:0.5rem 0.75rem; border-bottom:1px solid #e0e0e0; text-align:left; font-size:0.85rem; }
+.data-table th { background:#f8f9fa; font-weight:600; }
+.scope-cell { font-family:monospace; font-size:0.75rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style>
+
+<script>
+function badge(text, kind) { return `<span class="badge-sm b-${kind}">${text}</span>`; }
+
+function fmtDuration(ms) {
+    if (ms === null || ms === undefined) return '—';
+    if (ms < 1000) return ms + 'ms';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+    return Math.floor(ms / 60000) + 'm' + Math.floor((ms % 60000) / 1000) + 's';
+}
+
+async function loadPipelineOptions() {
+    try {
+        const r = await fetch('/api/orchestrator/pipelines');
+        const data = await r.json();
+        const select = document.getElementById('filter-pipeline');
+        for (const p of (data.pipelines || [])) {
+            const opt = document.createElement('option');
+            opt.value = p.pipeline_name;
+            opt.textContent = p.pipeline_name;
+            select.appendChild(opt);
+        }
+    } catch (err) { /* ignore */ }
+}
+
+async function loadRuns() {
+    const pipeline = document.getElementById('filter-pipeline').value;
+    const hours = document.getElementById('filter-hours').value;
+    const params = new URLSearchParams({limit: '200', since_hours: hours});
+    if (pipeline) params.set('pipeline', pipeline);
+
+    try {
+        const r = await fetch('/api/orchestrator/runs?' + params);
+        const data = await r.json();
+        document.getElementById('run-count').textContent = data.count ?? 0;
+
+        const tbody = document.getElementById('runs-tbody');
+        if (!data.runs || data.runs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#999;">No runs in selected window</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.runs.map(r => {
+            const t = r.started_at || r.queued_at;
+            const when = t ? new Date(t).toLocaleString() : '—';
+            const statusBadge = r.status === 'completed' ? badge(r.status, 'ok')
+                : r.status === 'failed' ? badge(r.status, 'err')
+                : badge(r.status, 'info');
+            const age = r.freshness_age_seconds !== null && r.freshness_age_seconds !== undefined
+                ? r.freshness_age_seconds + 's' : '—';
+            return `
+                <tr>
+                    <td>${when}</td>
+                    <td><code>${r.pipeline_name}</code></td>
+                    <td class="scope-cell" title="${JSON.stringify(r.scope)}">${JSON.stringify(r.scope)}</td>
+                    <td>${statusBadge}</td>
+                    <td>${r.records_processed ?? 0}</td>
+                    <td>${fmtDuration(r.duration_ms)}</td>
+                    <td>${age}</td>
+                    <td>${r.was_fresh ? badge('yes', 'info') : badge('ran', 'ok')}</td>
+                    <td>${r.was_deduplicated ? badge('dedup', 'warn') : ''}</td>
+                    <td>${r.triggered_by}</td>
+                </tr>
+            `;
+        }).join('');
+    } catch (err) {
+        document.getElementById('runs-tbody').innerHTML =
+            `<tr><td colspan="10" style="color:#c41230;text-align:center;">${err.message}</td></tr>`;
+    }
+}
+
+loadPipelineOptions().then(loadRuns);
+</script>
+{% endblock %}

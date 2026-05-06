@@ -1,12 +1,20 @@
 """
 Scheduler routes - dashboard pages for job management.
+
+Note: legacy sync orchestrator routes (`/sync`, `/dead-letters`, `/api/sync/*`)
+were removed when the orphan `sync/` module was decommissioned. The new
+orchestrator UI lives under `/orchestrator/` (orchestrator_ui_bp) and its API
+under `/api/orchestrator/` (sync_service_bp).
 """
 
-from flask import Blueprint, render_template, send_from_directory, current_app
+import logging
+from flask import Blueprint, render_template, send_from_directory
 from flask_login import login_required
 from pathlib import Path
 
 from web.auth.decorators import scheduler_access_required
+
+logger = logging.getLogger(__name__)
 
 scheduler_bp = Blueprint('scheduler', __name__, url_prefix='/scheduler')
 

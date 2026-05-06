@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}Sync Orchestrator - ESA Backend{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin: 0;">Sync Orchestrator</h2>
+        <div>
+            <a href="/scheduler/" class="btn btn-secondary btn-sm">Scheduler Dashboard</a>
+            <a href="/scheduler/sync-status" class="btn btn-secondary btn-sm">Sync State</a>
+            <a href="/scheduler/dead-letters" class="btn btn-secondary btn-sm">Dead Letters</a>
+            <button onclick="loadStatus()" class="btn btn-primary btn-sm">Refresh</button>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
+        <div class="stat-box">
+            <div class="stat-label">Sync Pipelines</div>
+            <div class="stat-value">{{ sync_count }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Scheduler Pipelines</div>
+            <div class="stat-value">{{ scheduler_count }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Daemon Status</div>
+            <div class="stat-value" id="daemon-status">checking...</div>
+        </div>
+    </div>
+
+    <h3>Pipelines (managed_by = orchestrator)</h3>
+    {% if sync_pipelines %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Display Name</th>
+                <th>Strategy</th>
+                <th>Enabled</th>
+                <th>Priority</th>
+                <th>Schedule</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in sync_pipelines %}
+            <tr>
+                <td><code>{{ p.pipeline_name }}</code></td>
+                <td>{{ p.display_name }}</td>
+                <td>
+                    {% if p.sync_config and p.sync_config.strategy %}
+                        <span class="badge">{{ p.sync_config.strategy }}</span>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p.enabled %}
+                        <span class="badge badge-success">enabled</span>
+                    {% else %}
+                        <span class="badge badge-warning">disabled</span>
+                    {% endif %}
+                </td>
+                <td>{{ p.priority }}</td>
+                <td><code>{{ p.schedule_config.cron if p.schedule_config and p.schedule_config.cron else '—' }}</code></td>
+                <td>
+                    <a href="/sync/pipelines/{{ p.pipeline_name }}" class="btn btn-sm">Detail</a>
+                    <button onclick="transferToScheduler('{{ p.pipeline_name }}')" class="btn btn-sm btn-warning">→ Scheduler</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">
+        No pipelines are currently owned by the sync orchestrator.
+        <br>
+        Transfer one from the scheduler via:
+        <code>POST /api/pipelines/&lt;name&gt;/transfer {"managed_by": "orchestrator"}</code>
+    </p>
+    {% endif %}
+</div>
+
+<script>
+async function loadStatus() {
+    try {
+        const r = await fetch('/api/sync/status');
+        if (!r.ok) throw new Error('status fetch failed');
+        const data = await r.json();
+        const el = document.getElementById('daemon-status');
+        if (data.daemon_running) {
+            el.innerHTML = `<span class="badge badge-success">running (PID ${data.daemon_pid})</span>`;
+        } else {
+            el.innerHTML = `<span class="badge badge-warning">stopped</span>`;
+        }
+    } catch (err) {
+        document.getElementById('daemon-status').innerHTML = '<span class="text-muted">unknown</span>';
+    }
+}
+
+async function transferToScheduler(name) {
+    if (!confirm(`Transfer "${name}" back to the APScheduler engine?`)) return;
+    try {
+        const r = await fetch(`/api/pipelines/${name}/transfer`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({managed_by: 'scheduler'}),
+        });
+        const data = await r.json();
+        if (r.ok) {
+            alert(`Transferred ${name} → scheduler`);
+            location.reload();
+        } else {
+            alert(`Failed: ${data.error || 'unknown error'}`);
+        }
+    } catch (err) {
+        alert(`Failed: ${err.message}`);
+    }
+}
+
+loadStatus();
+</script>
+
+<style>
+.stat-box { border: 1px solid #e0e0e0; border-radius: 6px; padding: 16px; text-align: center; background: #f9f9f9; }
+.stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
+.stat-value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; background: #e0e0e0; }
+.badge-success { background: #d4edda; color: #155724; }
+.badge-warning { background: #fff3cd; color: #856404; }
+.text-muted { color: #999; }
+</style>
+{% endblock %}

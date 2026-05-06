@@ -362,27 +362,48 @@ def push_to_database(
 def sync_devices_to_smart_locks(
     engine: Engine,
     device_records: List[Dict[str, Any]],
-) -> Tuple[int, int]:
+) -> Tuple[int, int, int]:
     """
-    Auto-create/update smart_lock_keypads and smart_lock_padlocks from Igloo devices.
+    Auto-create/update smart_lock_keypads, smart_lock_padlocks, smart_lock_bridges
+    from Igloo devices.
 
-    Uses deviceId (Bluetooth hardware ID, e.g. SP2X2916499b) as keypad_id/padlock_id.
+    Bridges don't carry `properties` in /devices — they inherit site_id from any
+    linked keypad/lock (via linkedDevices) before upsert.
+
+    Uses deviceId (Bluetooth hardware ID, e.g. SP2X2916499b) as keypad_id/padlock_id/bridge_id.
     On first create: status = 'not_assigned'. On update: preserves existing status.
     Site changes are applied (discrepancy highlighted in UI, not auto-corrected for assignments).
     """
-    from web.models.smart_lock import SmartLockKeypad, SmartLockPadlock
+    from web.models.smart_lock import SmartLockKeypad, SmartLockPadlock, SmartLockBridge
 
     Session = sessionmaker(bind=engine)
     session = Session()
 
     kp_count = 0
     pl_count = 0
+    br_count = 0
+
+    # Build deviceId -> site_id lookup so bridges (no `properties` field) can
+    # inherit site_id from a linked keypad/lock via linkedDevices.
+    device_to_site = {
+        r.get('deviceId'): r.get('site_id')
+        for r in device_records
+        if r.get('deviceId') and r.get('site_id')
+    }
 
     try:
         for rec in device_records:
             device_id = rec.get('deviceId', '')
             device_type = rec.get('type', '')
             site_id = rec.get('site_id')
+
+            # Bridges: derive site_id from linked devices when not directly set
+            if not site_id and device_type == 'Bridge':
+                for ent in (rec.get('linkedDevices') or []):
+                    linked_id = (ent or {}).get('deviceId') or (ent or {}).get('id')
+                    if linked_id and device_to_site.get(linked_id):
+                        site_id = device_to_site[linked_id]
+                        break
 
             if not device_id or not site_id:
                 continue
@@ -421,6 +442,23 @@ def sync_devices_to_smart_locks(
                     ))
                 pl_count += 1
 
+            elif device_type == 'Bridge':
+                existing = session.query(SmartLockBridge).filter_by(
+                    bridge_id=device_id
+                ).first()
+                if existing:
+                    if existing.site_id != site_id:
+                        existing.site_id = site_id
+                        logger.info("Bridge %s site changed to %s", device_id, site_id)
+                else:
+                    session.add(SmartLockBridge(
+                        bridge_id=device_id,
+                        site_id=site_id,
+                        status='not_assigned',
+                        created_by='igloo_pipeline',
+                    ))
+                br_count += 1
+
         session.commit()
     except Exception:
         session.rollback()
@@ -428,7 +466,7 @@ def sync_devices_to_smart_locks(
     finally:
         session.close()
 
-    return kp_count, pl_count
+    return kp_count, pl_count, br_count
 
 
 # Module-level caches (built once per pipeline run)
@@ -584,10 +622,10 @@ def run_pipeline(
             print(f"[STAGE:ENRICH] Writing {len(_new_igloo_mappings)} new Igloo mappings to siteinfo")
             _persist_igloo_mappings()
 
-        # --- Stage 8: Auto-populate smart lock keypads/padlocks ---
-        print("[STAGE:SYNC] Auto-populating smart lock keypads/padlocks from Igloo devices")
-        kp_count, pl_count = sync_devices_to_smart_locks(engine, device_records)
-        print(f"  Keypads: {kp_count} synced, Padlocks: {pl_count} synced")
+        # --- Stage 8: Auto-populate smart lock keypads/padlocks/bridges ---
+        print("[STAGE:SYNC] Auto-populating smart lock keypads/padlocks/bridges from Igloo devices")
+        kp_count, pl_count, br_count = sync_devices_to_smart_locks(engine, device_records)
+        print(f"  Keypads: {kp_count} synced, Padlocks: {pl_count} synced, Bridges: {br_count} synced")
     finally:
         engine.dispose()
 

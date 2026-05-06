@@ -1,0 +1,29 @@
+[Unit]
+Description=ESA Backend - Orchestrator Daemon (sync_service)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/backend/backend/python
+Environment="PATH=/var/www/backend/backend/python/venv/bin:/usr/local/bin:/usr/bin:/bin"
+EnvironmentFile=-/var/www/backend/backend/python/.env
+ExecStart=/var/www/backend/backend/python/venv/bin/python run_orchestrator.py
+
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=esa-orchestrator
+
+TimeoutStopSec=60
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/esa-backend /var/www/backend/backend/python /var/run
+
+[Install]
+WantedBy=multi-user.target

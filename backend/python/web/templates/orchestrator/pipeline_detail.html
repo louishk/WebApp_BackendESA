@@ -1,0 +1,659 @@
+{% extends "base.html" %}
+
+{% block title %}{{ pipeline_name }} - Sync Orchestrator{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="orch-header">
+        <div>
+            <h2 style="margin:0;" id="pipeline-title"><code>{{ pipeline_name }}</code></h2>
+            <p style="color:#666;margin:0.25rem 0 0;" id="pipeline-desc">Loading...</p>
+        </div>
+        <div class="orch-actions">
+            <a href="/orchestrator/" class="btn btn-secondary btn-sm">← Back</a>
+            <button onclick="refreshAll()" class="btn btn-primary btn-sm">Refresh</button>
+        </div>
+    </div>
+
+    <div class="stat-grid">
+        <div class="stat-box">
+            <div class="stat-label">Freshness (portfolio)</div>
+            <div class="stat-value" id="stat-freshness">—</div>
+            <div class="stat-sub" id="stat-freshness-sub"></div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Default TTL</div>
+            <div class="stat-value" id="stat-ttl">—</div>
+            <div class="stat-sub">seconds</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Max Concurrency</div>
+            <div class="stat-value" id="stat-concurrency">—</div>
+            <div class="stat-sub">parallel runs</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Status</div>
+            <div class="stat-value" id="stat-enabled">—</div>
+            <div class="stat-sub" id="stat-resource-group"></div>
+        </div>
+    </div>
+
+    <div class="panel-row">
+        <div class="panel">
+            <h3>Run Scoped Refresh</h3>
+            <p style="font-size:0.85rem;color:#666;">Trigger an on-demand refresh with a specific scope. Leave scope empty for a full-portfolio run.</p>
+            <label>Scope (JSON)</label>
+            <textarea id="scope-input" rows="4" placeholder='{"site_codes": ["L017"]}'>{}</textarea>
+            <label>Max Age (seconds, optional — overrides TTL)</label>
+            <input type="number" id="max-age-input" placeholder="Leave empty for default">
+            <div style="display:flex;gap:0.5rem;margin-top:0.75rem;">
+                <button onclick="doEnsureFresh()" class="btn btn-primary">Ensure Fresh</button>
+                <button onclick="doForceRun()" class="btn">Force Run</button>
+                <button onclick="doFreshnessCheck()" class="btn btn-secondary">Check Freshness</button>
+            </div>
+            <pre id="action-result" style="margin-top:0.75rem;display:none;"></pre>
+        </div>
+
+        <div class="panel">
+            <h3>Freshness Lookup</h3>
+            <p style="font-size:0.85rem;color:#666;">Check current data age for a specific site without triggering any run.</p>
+            <label>Site Code</label>
+            <input type="text" id="freshness-site" placeholder="L017">
+            <button onclick="doSiteFreshness()" class="btn btn-secondary" style="margin-top:0.75rem;">Check</button>
+            <pre id="freshness-result" style="margin-top:0.75rem;display:none;"></pre>
+        </div>
+    </div>
+
+    <h3 style="margin-top:2rem;">Edit Pipeline</h3>
+    <div class="panel edit-panel">
+        <div class="edit-grid">
+            <div>
+                <label>Enabled</label>
+                <label class="switch">
+                    <input type="checkbox" id="edit-enabled">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div>
+                <label>Freshness TTL (seconds)</label>
+                <input type="number" id="edit-ttl" min="0" step="60">
+            </div>
+            <div>
+                <label>Schedule Type</label>
+                <select id="edit-schedule-type" onchange="onScheduleTypeChange()">
+                    <option value="on_demand">on_demand — no schedule</option>
+                    <option value="cron">cron</option>
+                    <option value="interval">interval</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="cron-row" style="margin-top:1rem;">
+            <div class="freq-grid">
+                <div>
+                    <label>Frequency</label>
+                    <select id="scheduleFrequency" onchange="onFrequencyChange()">
+                        <option value="minutes">Every X Minutes</option>
+                        <option value="hourly">Every Hour</option>
+                        <option value="hours">Every X Hours</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                </div>
+
+                <div id="minutesIntervalGroup" style="display:none;">
+                    <label>Run Every</label>
+                    <select id="scheduleMinutesInterval" onchange="updateSchedulePreview()">
+                        <option value="5">5 minutes</option>
+                        <option value="10">10 minutes</option>
+                        <option value="15">15 minutes</option>
+                        <option value="20">20 minutes</option>
+                        <option value="30">30 minutes</option>
+                    </select>
+                </div>
+
+                <div id="hoursIntervalGroup" style="display:none;">
+                    <label>Run Every</label>
+                    <select id="scheduleHoursInterval" onchange="updateSchedulePreview()">
+                        <option value="2">2 hours</option>
+                        <option value="3">3 hours</option>
+                        <option value="4">4 hours</option>
+                        <option value="6">6 hours</option>
+                        <option value="8">8 hours</option>
+                        <option value="12">12 hours</option>
+                    </select>
+                </div>
+
+                <div id="dayOfWeekGroup" style="display:none;">
+                    <label>Day of Week</label>
+                    <select id="scheduleDayOfWeek" onchange="updateSchedulePreview()">
+                        <option value="0">Sunday</option>
+                        <option value="1">Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                    </select>
+                </div>
+
+                <div id="dayOfMonthGroup" style="display:none;">
+                    <label>Day of Month</label>
+                    <select id="scheduleDayOfMonth" onchange="updateSchedulePreview()">
+                        <!-- populated by JS 1..28 -->
+                    </select>
+                </div>
+
+                <div id="timeGroup">
+                    <label>Time (SGT)</label>
+                    <div style="display:flex;gap:6px;align-items:center;">
+                        <select id="scheduleHour" style="width:70px;" onchange="updateSchedulePreview()"></select>
+                        <span>:</span>
+                        <select id="scheduleMinute" style="width:70px;" onchange="updateSchedulePreview()">
+                            <option value="0">00</option>
+                            <option value="15">15</option>
+                            <option value="30">30</option>
+                            <option value="45">45</option>
+                        </select>
+                        <select id="scheduleAmPm" style="width:70px;" onchange="updateSchedulePreview()">
+                            <option value="AM">AM</option>
+                            <option value="PM">PM</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div id="schedulePreview" style="margin-top:0.75rem;padding:0.6rem;background:#f0f6ff;border-left:3px solid #1A2E5A;border-radius:4px;font-size:0.9rem;color:#1A2E5A;">—</div>
+            <div style="margin-top:0.4rem;font-size:0.75rem;color:#888;">
+                Cron expression: <code id="cron-readonly">—</code>
+            </div>
+        </div>
+
+        <div id="interval-row" style="margin-top:1rem; display:none;">
+            <label>Interval (seconds)</label>
+            <input type="number" id="edit-interval" min="10" placeholder="3600">
+        </div>
+
+        <div style="margin-top:1rem;">
+            <label>Default Args (JSON)</label>
+            <textarea id="edit-default-args" rows="6" style="font-family:monospace;"></textarea>
+        </div>
+
+        <div style="display:flex;gap:0.5rem;margin-top:1rem;align-items:center;">
+            <button onclick="saveEdits()" class="btn btn-primary">Save Changes</button>
+            <button onclick="loadConfig()" class="btn btn-secondary">Reset</button>
+            <span id="save-status" style="color:#666;font-size:0.85rem;"></span>
+        </div>
+    </div>
+
+    <h3 style="margin-top:2rem;">Configuration</h3>
+    <table class="data-table config-table" id="config-table"></table>
+
+    <h3 style="margin-top:2rem;">Recent Runs (this pipeline)</h3>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Time</th><th>Scope</th><th>Status</th><th>Records</th><th>Duration</th>
+                <th>Fresh</th><th>Dedup</th><th>Trigger</th>
+            </tr>
+        </thead>
+        <tbody id="runs-tbody">
+            <tr><td colspan="8" style="text-align:center;color:#999;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<style>
+.orch-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; }
+.orch-actions { display:flex; gap:0.5rem; }
+.stat-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; }
+.stat-box { background:var(--esa-navy,#002855); color:#fff; padding:1.25rem; border-radius:8px; }
+.stat-label { font-size:0.75rem; text-transform:uppercase; opacity:0.6; }
+.stat-value { font-size:1.75rem; font-weight:600; margin-top:0.25rem; }
+.stat-sub { font-size:0.75rem; opacity:0.6; margin-top:0.25rem; }
+.panel-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:1rem; margin-top:2rem; }
+.panel { border:1px solid #e0e0e0; border-radius:6px; padding:1rem; background:#fafafa; }
+.panel h3 { margin-top:0; }
+.panel label { display:block; font-size:0.8rem; color:#666; margin-top:0.5rem; }
+.panel input, .panel textarea { width:100%; padding:0.5rem; border:1px solid #ccc; border-radius:4px; font-family:monospace; font-size:0.85rem; }
+pre { background:#f4f4f4; padding:0.75rem; border-radius:4px; font-size:0.8rem; overflow-x:auto; max-height:200px; overflow-y:auto; }
+.badge-sm { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; }
+.b-ok { background:#d4edda; color:#155724; }
+.b-warn { background:#fff3cd; color:#856404; }
+.b-err { background:#f8d7da; color:#721c24; }
+.b-info { background:#d1ecf1; color:#0c5460; }
+.config-table td:first-child { font-weight:600; width:200px; color:#666; }
+.config-table td { padding:0.4rem 0.75rem; border-bottom:1px solid #f0f0f0; }
+.data-table { width:100%; border-collapse:collapse; }
+.data-table th, .data-table td { padding:0.5rem 0.75rem; border-bottom:1px solid #e0e0e0; text-align:left; font-size:0.875rem; }
+.data-table th { background:#f8f9fa; font-weight:600; }
+.edit-panel { background:#fff; border:1px solid #e0e0e0; border-radius:6px; padding:1.25rem; }
+.edit-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; align-items:end; }
+.edit-panel label { display:block; font-size:0.8rem; color:#666; margin-bottom:0.25rem; }
+.edit-panel input[type="text"], .edit-panel input[type="number"], .edit-panel select, .edit-panel textarea {
+    width:100%; padding:0.5rem; border:1px solid #ccc; border-radius:4px; font-size:0.9rem;
+}
+.edit-panel input[type="text"], .edit-panel textarea { font-family:monospace; }
+.switch { position:relative; display:inline-block; width:48px; height:24px; vertical-align:middle; }
+.switch input { opacity:0; width:0; height:0; }
+.slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#ccc; transition:.3s; border-radius:24px; }
+.slider:before { position:absolute; content:""; height:18px; width:18px; left:3px; bottom:3px; background:#fff; transition:.3s; border-radius:50%; }
+input:checked + .slider { background:#28a745; }
+input:checked + .slider:before { transform:translateX(24px); }
+#cron-human { color:#0c5460; font-style:italic; }
+#cron-human.error { color:#c41230; }
+.freq-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.75rem; align-items:end; }
+</style>
+
+<script>
+const PIPELINE = {{ pipeline_name | tojson }};
+
+function badge(text, kind) { return `<span class="badge-sm b-${kind}">${text}</span>`; }
+
+function fmtDuration(ms) {
+    if (ms === null || ms === undefined) return '—';
+    if (ms < 1000) return ms + 'ms';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+    return Math.floor(ms / 60000) + 'm' + Math.floor((ms % 60000) / 1000) + 's';
+}
+
+function fmtAge(seconds) {
+    if (seconds === null || seconds === undefined) return 'never';
+    if (seconds < 60) return Math.floor(seconds) + 's';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm';
+    return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+}
+
+async function loadConfig() {
+    try {
+        const r = await fetch(`/api/orchestrator/pipelines/${PIPELINE}`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const p = await r.json();
+        document.getElementById('pipeline-title').innerHTML = `${p.display_name} — <code>${p.pipeline_name}</code>`;
+        document.getElementById('pipeline-desc').textContent = p.description || '—';
+        document.getElementById('stat-ttl').textContent = p.freshness?.ttl_seconds ?? '—';
+        document.getElementById('stat-concurrency').textContent = p.execution?.max_concurrency ?? '—';
+        document.getElementById('stat-enabled').textContent = p.enabled ? 'enabled' : 'disabled';
+        document.getElementById('stat-enabled').style.color = p.enabled ? '#9cff7c' : '#ffa07a';
+        document.getElementById('stat-resource-group').textContent = p.execution?.resource_group || '';
+
+        const table = document.getElementById('config-table');
+        table.innerHTML = `
+            <tr><td>Pipeline Class</td><td><code>${p.pipeline_class}</code></td></tr>
+            <tr><td>Schedule Type</td><td>${p.schedule_type}</td></tr>
+            <tr><td>Schedule Config</td><td><code>${JSON.stringify(p.schedule_config)}</code></td></tr>
+            <tr><td>Freshness Table</td><td><code>${p.freshness?.table ?? '—'}.${p.freshness?.column ?? '—'}</code> (${p.freshness?.database ?? '—'})</td></tr>
+            <tr><td>Scope Column</td><td><code>${p.freshness?.scope_column ?? '—'}</code></td></tr>
+            <tr><td>Resource Group</td><td>${p.execution?.resource_group ?? '—'}</td></tr>
+            <tr><td>Max DB Connections</td><td>${p.execution?.max_db_connections ?? '—'}</td></tr>
+            <tr><td>Timeout</td><td>${p.execution?.timeout_seconds ?? '—'}s</td></tr>
+            <tr><td>Max Retries</td><td>${p.execution?.max_retries ?? '—'}</td></tr>
+            <tr><td>Default Args</td><td><pre style="margin:0;">${JSON.stringify(p.default_args, null, 2)}</pre></td></tr>
+        `;
+    } catch (err) {
+        document.getElementById('pipeline-desc').textContent = 'Failed: ' + err.message;
+    }
+}
+
+async function loadFreshness() {
+    try {
+        const r = await fetch(`/api/orchestrator/pipelines/${PIPELINE}/freshness`);
+        const data = await r.json();
+        const age = data.age_seconds;
+        document.getElementById('stat-freshness').textContent = fmtAge(age);
+        const sub = document.getElementById('stat-freshness-sub');
+        if (age === null) {
+            sub.textContent = 'never synced';
+        } else if (data.is_stale) {
+            sub.innerHTML = badge('stale', 'warn');
+        } else {
+            sub.innerHTML = badge('fresh', 'ok');
+        }
+    } catch (err) {
+        document.getElementById('stat-freshness').textContent = 'error';
+    }
+}
+
+async function loadRuns() {
+    try {
+        const r = await fetch(`/api/orchestrator/runs?pipeline=${PIPELINE}&limit=50&since_hours=168`);
+        const data = await r.json();
+        const tbody = document.getElementById('runs-tbody');
+        if (!data.runs || data.runs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#999;">No runs yet</td></tr>';
+            return;
+        }
+        tbody.innerHTML = data.runs.map(r => {
+            const t = r.started_at || r.queued_at;
+            const when = t ? new Date(t).toLocaleString() : '—';
+            const statusBadge = r.status === 'completed' ? badge(r.status, 'ok')
+                : r.status === 'failed' ? badge(r.status, 'err')
+                : badge(r.status, 'info');
+            return `
+                <tr>
+                    <td>${when}</td>
+                    <td><code style="font-size:0.75rem;">${JSON.stringify(r.scope) || '—'}</code></td>
+                    <td>${statusBadge}</td>
+                    <td>${r.records_processed ?? 0}</td>
+                    <td>${fmtDuration(r.duration_ms)}</td>
+                    <td>${r.was_fresh ? badge('yes', 'info') : badge('ran', 'ok')}</td>
+                    <td>${r.was_deduplicated ? badge('dedup', 'warn') : ''}</td>
+                    <td>${r.triggered_by}</td>
+                </tr>
+            `;
+        }).join('');
+    } catch (err) {
+        document.getElementById('runs-tbody').innerHTML =
+            `<tr><td colspan="8" style="color:#c41230;text-align:center;">${err.message}</td></tr>`;
+    }
+}
+
+function parseScope() {
+    const raw = document.getElementById('scope-input').value.trim();
+    if (!raw || raw === '{}') return {};
+    try { return JSON.parse(raw); }
+    catch (e) { alert('Invalid JSON in scope'); throw e; }
+}
+
+function showResult(elId, data) {
+    const el = document.getElementById(elId);
+    el.style.display = 'block';
+    el.textContent = JSON.stringify(data, null, 2);
+}
+
+async function doEnsureFresh() {
+    try {
+        const scope = parseScope();
+        const body = { scope, timeout: 120 };
+        const maxAge = document.getElementById('max-age-input').value;
+        if (maxAge) body.max_age_seconds = parseInt(maxAge);
+        const r = await fetch(`/api/orchestrator/pipelines/${PIPELINE}/ensure-fresh`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        showResult('action-result', data);
+        loadRuns(); loadFreshness();
+    } catch (e) { /* already handled */ }
+}
+
+async function doForceRun() {
+    try {
+        const scope = parseScope();
+        const r = await fetch(`/api/orchestrator/pipelines/${PIPELINE}/run`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ scope, timeout: 300 }),
+        });
+        const data = await r.json();
+        showResult('action-result', data);
+        loadRuns(); loadFreshness();
+    } catch (e) { /* already handled */ }
+}
+
+async function doFreshnessCheck() {
+    try {
+        const scope = parseScope();
+        const params = new URLSearchParams();
+        if (scope.site_code) params.set('site_code', scope.site_code);
+        if (scope.site_codes) params.set('site_codes', scope.site_codes.join(','));
+        const r = await fetch(`/api/orchestrator/pipelines/${PIPELINE}/freshness?${params}`);
+        const data = await r.json();
+        showResult('action-result', data);
+    } catch (e) {}
+}
+
+async function doSiteFreshness() {
+    const site = document.getElementById('freshness-site').value.trim();
+    if (!site) return;
+    try {
+        const r = await fetch(`/api/orchestrator/pipelines/${PIPELINE}/freshness?site_code=${site}`);
+        const data = await r.json();
+        showResult('freshness-result', data);
+    } catch (e) {
+        document.getElementById('freshness-result').textContent = 'Error: ' + e.message;
+        document.getElementById('freshness-result').style.display = 'block';
+    }
+}
+
+// ========== Edit panel ==========
+
+const DAYS_OF_WEEK = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+// Populate hour + day-of-month selects on load
+(function populateSelects() {
+    const hourSel = document.getElementById('scheduleHour');
+    if (hourSel && hourSel.options.length === 0) {
+        const hours = [12,1,2,3,4,5,6,7,8,9,10,11];
+        hours.forEach(h => {
+            const o = document.createElement('option');
+            o.value = h; o.textContent = h;
+            hourSel.appendChild(o);
+        });
+    }
+    const domSel = document.getElementById('scheduleDayOfMonth');
+    if (domSel && domSel.options.length === 0) {
+        for (let d = 1; d <= 28; d++) {
+            const suffix = d === 1 ? 'st' : d === 2 ? 'nd' : d === 3 ? 'rd' : 'th';
+            const o = document.createElement('option');
+            o.value = d; o.textContent = d + suffix;
+            domSel.appendChild(o);
+        }
+    }
+})();
+
+function onFrequencyChange() {
+    const freq = document.getElementById('scheduleFrequency').value;
+    document.getElementById('minutesIntervalGroup').style.display = freq === 'minutes' ? 'block' : 'none';
+    document.getElementById('hoursIntervalGroup').style.display = freq === 'hours' ? 'block' : 'none';
+    document.getElementById('dayOfWeekGroup').style.display = freq === 'weekly' ? 'block' : 'none';
+    document.getElementById('dayOfMonthGroup').style.display = freq === 'monthly' ? 'block' : 'none';
+    document.getElementById('timeGroup').style.display =
+        (freq === 'minutes' || freq === 'hourly' || freq === 'hours') ? 'none' : 'block';
+    updateSchedulePreview();
+}
+
+function buildCronFromUI() {
+    const freq = document.getElementById('scheduleFrequency').value;
+    const minute = document.getElementById('scheduleMinute').value;
+    let hour = parseInt(document.getElementById('scheduleHour').value);
+    const ampm = document.getElementById('scheduleAmPm').value;
+    if (ampm === 'PM' && hour !== 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+
+    if (freq === 'minutes') {
+        const i = document.getElementById('scheduleMinutesInterval').value;
+        return `*/${i} * * * *`;
+    } else if (freq === 'hourly') {
+        return `0 * * * *`;
+    } else if (freq === 'hours') {
+        const i = document.getElementById('scheduleHoursInterval').value;
+        return `0 */${i} * * *`;
+    } else if (freq === 'daily') {
+        return `${minute} ${hour} * * *`;
+    } else if (freq === 'weekly') {
+        const dow = document.getElementById('scheduleDayOfWeek').value;
+        return `${minute} ${hour} * * ${dow}`;
+    } else if (freq === 'monthly') {
+        const dom = document.getElementById('scheduleDayOfMonth').value;
+        return `${minute} ${hour} ${dom} * *`;
+    }
+    return `${minute} ${hour} * * *`;
+}
+
+function parseCronToUI(cron) {
+    if (!cron) return;
+    const parts = cron.split(/\s+/);
+    if (parts.length < 5) return;
+    const [minute, hour24, dom, month, dow] = parts;
+
+    // Every X minutes
+    if (minute.startsWith('*/') && hour24 === '*') {
+        document.getElementById('scheduleFrequency').value = 'minutes';
+        const sel = document.getElementById('scheduleMinutesInterval');
+        sel.value = minute.slice(2);
+        if (sel.value === '') sel.value = '5';
+        onFrequencyChange();
+        return;
+    }
+    // Every X hours
+    if (hour24.startsWith('*/')) {
+        document.getElementById('scheduleFrequency').value = 'hours';
+        const sel = document.getElementById('scheduleHoursInterval');
+        sel.value = hour24.slice(2);
+        if (sel.value === '') sel.value = '2';
+        onFrequencyChange();
+        return;
+    }
+    // Hourly
+    if (hour24 === '*' && !minute.startsWith('*/')) {
+        document.getElementById('scheduleFrequency').value = 'hourly';
+        onFrequencyChange();
+        return;
+    }
+
+    // Pick closest predefined minute (0/15/30/45)
+    const minVal = parseInt(minute) || 0;
+    const closest = [0,15,30,45].reduce((a,b) => Math.abs(b-minVal) < Math.abs(a-minVal) ? b : a);
+    document.getElementById('scheduleMinute').value = closest;
+
+    // Convert 24h → 12h
+    let hour = parseInt(hour24) || 0;
+    let ampm = 'AM';
+    if (hour >= 12) { ampm = 'PM'; if (hour > 12) hour -= 12; }
+    if (hour === 0) hour = 12;
+    document.getElementById('scheduleHour').value = hour;
+    document.getElementById('scheduleAmPm').value = ampm;
+
+    if (dow !== '*' && dom === '*') {
+        document.getElementById('scheduleFrequency').value = 'weekly';
+        document.getElementById('scheduleDayOfWeek').value = dow;
+    } else if (dom !== '*' && dow === '*') {
+        document.getElementById('scheduleFrequency').value = 'monthly';
+        document.getElementById('scheduleDayOfMonth').value = dom;
+    } else {
+        document.getElementById('scheduleFrequency').value = 'daily';
+    }
+    onFrequencyChange();
+}
+
+function updateSchedulePreview() {
+    const freq = document.getElementById('scheduleFrequency').value;
+    const hour = document.getElementById('scheduleHour').value;
+    const minute = document.getElementById('scheduleMinute').value;
+    const ampm = document.getElementById('scheduleAmPm').value;
+    const timeStr = `${hour}:${String(minute).padStart(2,'0')} ${ampm}`;
+
+    let preview = '';
+    if (freq === 'minutes') {
+        preview = `Every ${document.getElementById('scheduleMinutesInterval').value} minutes`;
+    } else if (freq === 'hourly') {
+        preview = 'Every hour';
+    } else if (freq === 'hours') {
+        preview = `Every ${document.getElementById('scheduleHoursInterval').value} hours`;
+    } else if (freq === 'daily') {
+        preview = `Daily at ${timeStr} SGT`;
+    } else if (freq === 'weekly') {
+        preview = `Every ${DAYS_OF_WEEK[document.getElementById('scheduleDayOfWeek').value]} at ${timeStr} SGT`;
+    } else if (freq === 'monthly') {
+        const dom = document.getElementById('scheduleDayOfMonth').value;
+        const sfx = dom == 1 ? 'st' : dom == 2 ? 'nd' : dom == 3 ? 'rd' : 'th';
+        preview = `Monthly on the ${dom}${sfx} at ${timeStr} SGT`;
+    }
+    document.getElementById('schedulePreview').textContent = preview;
+    document.getElementById('cron-readonly').textContent = buildCronFromUI();
+}
+
+function onScheduleTypeChange() {
+    const t = document.getElementById('edit-schedule-type').value;
+    document.getElementById('cron-row').style.display = t === 'cron' ? 'block' : 'none';
+    document.getElementById('interval-row').style.display = t === 'interval' ? 'block' : 'none';
+}
+
+function applyConfigToEditForm(p) {
+    document.getElementById('edit-enabled').checked = !!p.enabled;
+    document.getElementById('edit-ttl').value = p.freshness?.ttl_seconds ?? '';
+    document.getElementById('edit-schedule-type').value = p.schedule_type || 'on_demand';
+    const sc = p.schedule_config || {};
+    parseCronToUI(sc.cron || '');
+    document.getElementById('edit-interval').value = sc.interval_seconds || '';
+    document.getElementById('edit-default-args').value = JSON.stringify(p.default_args || {}, null, 2);
+    onScheduleTypeChange();
+    updateSchedulePreview();
+}
+
+async function saveEdits() {
+    const status = document.getElementById('save-status');
+    status.textContent = 'Saving…';
+    status.style.color = '#666';
+
+    const stype = document.getElementById('edit-schedule-type').value;
+    const payload = {
+        enabled: document.getElementById('edit-enabled').checked,
+        freshness_ttl_seconds: parseInt(document.getElementById('edit-ttl').value) || 0,
+        schedule_type: stype,
+    };
+
+    if (stype === 'cron') {
+        const expr = buildCronFromUI();
+        if (!expr) { status.textContent = 'Cron builder returned empty'; status.style.color = '#c41230'; return; }
+        payload.schedule_config = { cron: expr };
+    } else if (stype === 'interval') {
+        const secs = parseInt(document.getElementById('edit-interval').value);
+        if (!secs || secs <= 0) { status.textContent = 'Interval must be > 0'; status.style.color = '#c41230'; return; }
+        payload.schedule_config = { interval_seconds: secs };
+    } else {
+        payload.schedule_config = {};
+    }
+
+    try {
+        payload.default_args = JSON.parse(document.getElementById('edit-default-args').value || '{}');
+    } catch (e) {
+        status.textContent = 'Invalid JSON in default_args: ' + e.message;
+        status.style.color = '#c41230';
+        return;
+    }
+
+    try {
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const r = await fetch(`/api/orchestrator/pipelines/${PIPELINE}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+            body: JSON.stringify(payload),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+            status.textContent = 'Error: ' + (data.error || r.status);
+            status.style.color = '#c41230';
+            return;
+        }
+        status.textContent = '✓ Saved — daemon will reload schedule within 5 min';
+        status.style.color = '#28a745';
+        loadConfig();
+    } catch (err) {
+        status.textContent = 'Request failed: ' + err.message;
+        status.style.color = '#c41230';
+    }
+}
+
+// Patch loadConfig to also populate the edit form
+const _origLoadConfig = loadConfig;
+loadConfig = async function() {
+    await _origLoadConfig();
+    try {
+        const p = await fetch(`/api/orchestrator/pipelines/${PIPELINE}`).then(r => r.json());
+        applyConfigToEditForm(p);
+    } catch (e) {}
+};
+
+function refreshAll() {
+    loadConfig();
+    loadFreshness();
+    loadRuns();
+}
+
+refreshAll();
+</script>
+{% endblock %}
