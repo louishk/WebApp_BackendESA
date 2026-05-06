@@ -373,11 +373,13 @@ class SchedulerConfig:
     @classmethod
     def from_db(cls, session) -> 'SchedulerConfig':
         """
-        Load pipeline definitions from database, with daemon/scheduler/alert
-        settings from YAML (cached).  DB is the source of truth for pipelines.
+        Load scheduler-owned pipeline definitions from database via the neutral
+        registry module. Daemon/scheduler/alert settings come from YAML (cached).
+        Only pipelines with managed_by='scheduler' are loaded — sync orchestrator
+        pipelines are filtered out by the registry.
         Falls back to from_yaml() if the DB table is empty or unavailable.
         """
-        from scheduler.models import PipelineConfig
+        from common.pipeline_registry import load_scheduler_pipelines
         import copy
 
         # Cache YAML base config on first call (daemon/scheduler/alerts rarely change)
@@ -388,54 +390,49 @@ class SchedulerConfig:
         config.pipelines = {}
 
         try:
-            rows = session.query(PipelineConfig).all()
-            if not rows:
-                # Table empty — fall back to YAML pipelines (bootstrap)
+            records = load_scheduler_pipelines(session)
+            if not records:
+                # Table empty or no scheduler pipelines — fall back to YAML
                 return cls.from_yaml()
 
-            for row in rows:
+            for rec in records:
                 retry_conf = RetryConfig(
-                    max_attempts=row.max_retries or 3,
-                    delay_seconds=row.retry_delay_seconds or 300,
-                    backoff_multiplier=float(row.retry_backoff_multiplier or 2.0),
+                    max_attempts=rec.max_retries,
+                    delay_seconds=rec.retry_delay_seconds,
+                    backoff_multiplier=rec.retry_backoff_multiplier,
                 )
 
-                freshness_conf = DataFreshnessConfig()
-                if row.data_freshness_config:
-                    df = row.data_freshness_config
-                    db_value = df.get('database', 'pbi')
-                    if db_value not in ('pbi', 'backend'):
-                        db_value = 'pbi'
-                    freshness_conf = DataFreshnessConfig(
-                        table=df.get('table', ''),
-                        date_column=df.get('date_column', 'updated_at'),
-                        database=db_value,
-                    )
+                db_value = rec.data_freshness_config.get('database', 'pbi')
+                if db_value not in ('pbi', 'backend'):
+                    db_value = 'pbi'
+                freshness_conf = DataFreshnessConfig(
+                    table=rec.data_freshness_config.get('table', ''),
+                    date_column=rec.data_freshness_config.get('date_column', 'updated_at'),
+                    database=db_value,
+                )
 
-                config.pipelines[row.pipeline_name] = PipelineDefinition(
-                    pipeline_name=row.pipeline_name,
-                    display_name=row.display_name,
-                    module_path=row.module_path,
-                    schedule_type=row.schedule_type,
-                    schedule_config=row.schedule_config or {},
-                    enabled=row.enabled,
-                    priority=row.priority or 5,
-                    depends_on=row.depends_on or [],
-                    conflicts_with=row.conflicts_with or [],
-                    resource_group=row.resource_group or 'soap_api',
-                    max_db_connections=row.max_db_connections or 3,
-                    estimated_duration_seconds=row.estimated_duration_seconds or 600,
-                    default_args=row.default_args or {},
+                config.pipelines[rec.pipeline_name] = PipelineDefinition(
+                    pipeline_name=rec.pipeline_name,
+                    display_name=rec.display_name,
+                    module_path=rec.module_path,
+                    schedule_type=rec.schedule_type,
+                    schedule_config=rec.schedule_config,
+                    enabled=rec.enabled,
+                    priority=rec.priority,
+                    depends_on=rec.depends_on,
+                    conflicts_with=rec.conflicts_with,
+                    resource_group=rec.resource_group,
+                    max_db_connections=rec.max_db_connections,
+                    estimated_duration_seconds=rec.estimated_duration_seconds,
+                    default_args=rec.default_args,
                     retry=retry_conf,
-                    timeout_seconds=row.timeout_seconds or 3600,
+                    timeout_seconds=rec.timeout_seconds,
                     data_freshness=freshness_conf,
-                    sync_config=row.sync_config or {},
-                    pipeline_specific_args=row.pipeline_specific_args or {},
-                    # getattr guard: column may not exist if running before migration 048
-                    managed_by=getattr(row, 'managed_by', None) or 'scheduler',
+                    sync_config=rec.sync_config,
+                    pipeline_specific_args=rec.pipeline_specific_args,
+                    managed_by=rec.managed_by,
                 )
         except Exception:
-            # DB unavailable — fall back to YAML pipelines
             import logging
             logging.getLogger(__name__).warning(
                 "Could not load pipeline config from DB, falling back to YAML"

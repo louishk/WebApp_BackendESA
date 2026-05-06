@@ -5,3 +5,11 @@ azure_foundry:
   base_url: "https://esa-foundry.services.ai.azure.com/openai/v1/"
   model: "grok-3-mini"
   api_key_vault: "AZURE_FOUNDRY_API_KEY"
+
+# Azure OpenAI Whisper deployment (south india) for speech-to-text
+azure_whisper:
+  base_url: "https://louis-mnsa8q5a-southindia.cognitiveservices.azure.com"
+  deployment: "whisper"
+  api_version: "2024-06-01"
+  api_key_vault: "AZURE_WHISPER_API_KEY"
+  timeout: 300

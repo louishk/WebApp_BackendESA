@@ -64,6 +64,14 @@ alerts:
       - rentroll
       - managementsummary
 
+  # Microsoft Teams Incoming Webhook
+  teams:
+    enabled: false
+    webhook_url: ${TEAMS_WEBHOOK_URL}
+    on_failure: true
+    on_retry: false
+    on_success: false
+
   # Webhook Configuration (for custom integrations)
   webhook:
     enabled: false

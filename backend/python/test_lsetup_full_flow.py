@@ -153,7 +153,7 @@ def main():
         dep_tax = ChargeTypeTax('SecDep', cfg['SecDep'][1], cfg['SecDep'][2])
         ins_tax = ChargeTypeTax('Insurance', cfg['Insurance'][1], cfg['Insurance'][2])
 
-        internal_charges = calculate_movein_cost(
+        internal_charges, confidence_reason = calculate_movein_cost(
             std_rate=std_rate,
             security_deposit=deposit,
             admin_fee=admin_fee,
@@ -163,6 +163,8 @@ def main():
             pc_discount=pc_disc,
             insurance_premium=ins_premium,
         )
+        if confidence_reason:
+            print(f"  [LOW CONFIDENCE: {confidence_reason}]")
         internal_total = estimate_total(internal_charges)
         print(f"  Calculator output ({len(internal_charges)} lines):")
         for c in internal_charges:

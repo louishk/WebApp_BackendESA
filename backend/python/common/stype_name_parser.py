@@ -55,6 +55,47 @@ WINE_TYPES = frozenset({'WN', 'WNU', 'WNM', 'WNL', 'SWN', 'SWNU', 'SWNM', 'SWNL'
 
 SEPARATOR = '/'
 
+# ---------------------------------------------------------------------------
+# Canonical ordered list (28 ranges, SOP order — used by pricing engine)
+# ---------------------------------------------------------------------------
+SIZE_RANGE_LIST: list[str] = [
+    '0-6', '6-8', '8-10', '10-12', '12-14', '14-16', '16-18', '18-20',
+    '20-22', '22-24', '24-26', '26-28', '28-30', '30-35', '35-40', '40-45',
+    '45-50', '50-60', '60-70', '70-80', '80-90', '90-110', '110-130',
+    '130-150', '150-175', '175-200', '200-225', '225-250', '250+',
+]
+
+# Human labels for type codes — sourced verbatim from SOP COM01 Jan 2026.
+TYPE_CODE_LABELS: dict[str, str] = {
+    'W':    'Walk-In',
+    'E':    'Executive Walk-In',
+    'S':    'Smart Walk-In',
+    'U':    'Locker Upper',
+    'M':    'Locker Middle',
+    'L':    'Locker Lower',
+    'SU':   'Smart Locker Upper',
+    'SM':   'Smart Locker Middle',
+    'SL':   'Smart Locker Lower',
+    'EU':   'Executive Locker Upper',
+    'EM':   'Executive Locker Middle',
+    'EL':   'Executive Locker Lower',
+    'WN':   'Wine Walk-In',
+    'WNU':  'Wine Locker Upper',
+    'WNM':  'Wine Locker Middle',
+    'WNL':  'Wine Locker Lower',
+    'SWN':  'Smart Wine Walk-In',
+    'SWNU': 'Smart Wine Locker Upper',
+    'SWNM': 'Smart Wine Locker Middle',
+    'SWNL': 'Smart Wine Locker Lower',
+    'DV':   'Drive-Up',
+    'RB':   'Wardrobe',
+    'MB':   'Mailbox',
+    'BZ':   'BizPlus',
+    'SC':   'Showcase',
+    'SB':   'SubTenant',
+    'PR':   'Parking',
+}
+
 
 @dataclass(frozen=True)
 class StypeNameParts:
@@ -149,3 +190,23 @@ def parse_stype_name(raw: Optional[str]) -> StypeNameParts:
         parse_ok=parse_ok,
         invalid_tokens=tuple(invalid),
     )
+
+
+def is_wine_type(parts: StypeNameParts) -> bool:
+    """Return True when the decoded unit_type is a wine-storage code."""
+    return parts.unit_type in WINE_TYPES
+
+
+def all_size_ranges() -> list[str]:
+    """Return the 29 canonical size-range strings from SOP COM01 in SOP order."""
+    return list(SIZE_RANGE_LIST)
+
+
+def all_climate_codes() -> list[str]:
+    """Return all valid climate codes from SOP COM01."""
+    return list(CLIMATE_TYPE_CODES)
+
+
+def all_type_codes() -> dict[str, str]:
+    """Return {code: human_label} for every type code defined in SOP COM01."""
+    return dict(TYPE_CODE_LABELS)

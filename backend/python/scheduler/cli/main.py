@@ -55,12 +55,24 @@ def daemon():
 @click.pass_context
 def start(ctx, foreground):
     """Start the scheduler daemon."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
     from scheduler.config import SchedulerConfig
     from scheduler.engine import SchedulerEngine
     from scheduler.alert_manager import AlertManager
 
-    config = SchedulerConfig.from_yaml()
     db_url = get_db_url()
+
+    # Load pipeline config from DB (authoritative source) with YAML fallback
+    # inside from_db(). Ensures enabled=false in DB is honored at startup.
+    db_engine = create_engine(db_url)
+    Session = sessionmaker(bind=db_engine)
+    session = Session()
+    try:
+        config = SchedulerConfig.from_db(session)
+    finally:
+        session.close()
+        db_engine.dispose()
 
     console.print("[yellow]Starting scheduler...[/yellow]")
 

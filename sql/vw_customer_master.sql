@@ -553,7 +553,7 @@ CREATE OR REPLACE VIEW vw_customer_master AS
             WHEN 'Tai Seng'::text THEN 'L030'::text
             WHEN 'ES Yatap'::text THEN 'L011'::text
             WHEN 'ES Bundang'::text THEN 'L011'::text
-            WHEN 'Commonwealth'::text THEN 'L028'::text
+            WHEN 'Commonwealth'::text THEN 'L029'::text
             WHEN 'Sai Wan'::text THEN 'L015'::text
             WHEN 'Hung Hom'::text THEN 'L020'::text
             WHEN 'Hillview'::text THEN 'L025'::text

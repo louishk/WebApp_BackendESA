@@ -251,6 +251,98 @@ Traceback
             return False
 
 
+class TeamsAlertChannel(AlertChannel):
+    """Microsoft Teams incoming webhook alert channel."""
+
+    def __init__(self, webhook_url: str, on_failure: bool = True,
+                 on_retry: bool = False, on_success: bool = False):
+        self.webhook_url = webhook_url
+        self.on_failure = on_failure
+        self.on_retry = on_retry
+        self.on_success = on_success
+
+    def is_configured(self) -> bool:
+        return bool(self.webhook_url)
+
+    def send(self, context: AlertContext, message: str) -> bool:
+        if not self.is_configured():
+            return False
+
+        try:
+            color_map = {
+                'failed': 'FF0000',
+                'completed': '00FF00',
+                'retrying': 'FFA500',
+                'running': '439FE0',
+            }
+            color = color_map.get(context.status, '808080')
+
+            # Teams Adaptive Card payload
+            payload = {
+                'type': 'message',
+                'attachments': [{
+                    'contentType': 'application/vnd.microsoft.card.adaptive',
+                    'contentUrl': None,
+                    'content': {
+                        '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json',
+                        'type': 'AdaptiveCard',
+                        'version': '1.4',
+                        'body': [
+                            {
+                                'type': 'Container',
+                                'style': 'emphasis',
+                                'items': [{
+                                    'type': 'TextBlock',
+                                    'text': f'Pipeline Alert: {context.pipeline_name}',
+                                    'weight': 'Bolder',
+                                    'size': 'Medium',
+                                    'color': 'Attention' if context.status == 'failed' else 'Good',
+                                }]
+                            },
+                            {
+                                'type': 'FactSet',
+                                'facts': [
+                                    {'title': 'Status', 'value': context.status.upper()},
+                                    {'title': 'Attempt', 'value': f'{context.attempt}/{context.max_retries}'},
+                                    {'title': 'Execution ID', 'value': str(context.execution_id)},
+                                    {'title': 'Time', 'value': context.timestamp.strftime('%Y-%m-%d %H:%M:%S')},
+                                ]
+                            },
+                            {
+                                'type': 'TextBlock',
+                                'text': message,
+                                'wrap': True,
+                            }
+                        ]
+                    }
+                }]
+            }
+
+            # Add duration/records facts if available
+            facts = payload['attachments'][0]['content']['body'][1]['facts']
+            if context.duration_seconds:
+                facts.append({'title': 'Duration', 'value': f'{context.duration_seconds:.1f}s'})
+            if context.records_processed:
+                facts.append({'title': 'Records', 'value': str(context.records_processed)})
+
+            response = requests.post(
+                self.webhook_url,
+                json=payload,
+                timeout=30
+            )
+
+            if response.status_code in (200, 202):
+                logger.info(f"Teams alert sent for {context.pipeline_name}")
+                return True
+            else:
+                logger.error(f"Teams alert failed: {response.status_code} - {response.text}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Teams alert error: {e}")
+            return False
+
+
 class WebhookAlertChannel(AlertChannel):
     """Generic webhook alert channel."""
 
@@ -340,15 +432,17 @@ class AlertManager:
         ),
     }
 
-    def __init__(self, config: AlertsConfig):
+    def __init__(self, config: AlertsConfig, session_factory=None):
         """
         Initialize alert manager.
 
         Args:
             config: Alert configuration
+            session_factory: Optional SQLAlchemy session factory for alert_log writes
         """
         self.config = config
         self.channels: List[AlertChannel] = []
+        self._session_factory = session_factory
 
         # Initialize configured channels
         if config.slack.enabled:
@@ -356,6 +450,17 @@ class AlertManager:
 
         if config.email.enabled:
             self.channels.append(EmailAlertChannel(config.email))
+
+        # Teams channel
+        if hasattr(config, 'teams') and config.teams.get('enabled'):
+            webhook_url = config.teams.get('webhook_url', '')
+            if webhook_url:
+                self.channels.append(TeamsAlertChannel(
+                    webhook_url=webhook_url,
+                    on_failure=config.teams.get('on_failure', True),
+                    on_retry=config.teams.get('on_retry', False),
+                    on_success=config.teams.get('on_success', False),
+                ))
 
         logger.info(f"AlertManager initialized with {len(self.channels)} channel(s)")
 
@@ -430,9 +535,14 @@ class AlertManager:
         records_processed: int,
         duration_seconds: float
     ):
-        """Send success notification (if configured)."""
-        # Check if success alerts are enabled
-        if not self.config.slack.on_success and not hasattr(self.config, 'email') or not self.config.email.enabled:
+        """Send success notification (if configured on any channel)."""
+        # Check if any channel wants success alerts
+        slack_wants = self.config.slack.enabled and self.config.slack.on_success
+        email_wants = self.config.email.enabled
+        teams_wants = (hasattr(self.config, 'teams')
+                       and self.config.teams.get('enabled')
+                       and self.config.teams.get('on_success'))
+        if not (slack_wants or email_wants or teams_wants):
             return
 
         context = AlertContext(
@@ -469,13 +579,71 @@ class AlertManager:
         self._send_to_all(context, message)
 
     def _send_to_all(self, context: AlertContext, message: str):
-        """Send alert to all configured channels."""
+        """Send alert to all configured channels and log results."""
         for channel in self.channels:
             if channel.is_configured():
+                delivered = False
+                error_text = None
                 try:
-                    channel.send(context, message)
+                    delivered = channel.send(context, message)
                 except Exception as e:
+                    error_text = str(e)
                     logger.error(f"Alert channel error: {e}")
+
+                # Log to alert_log table if session factory available
+                if self._session_factory:
+                    self._log_alert(
+                        context=context,
+                        channel=type(channel).__name__,
+                        message=message,
+                        delivered=delivered,
+                        error=error_text,
+                    )
+
+    def _log_alert(self, context: AlertContext, channel: str, message: str,
+                   delivered: bool, error: Optional[str] = None):
+        """Write alert delivery record to alert_log table."""
+        try:
+            from sync.models import AlertLog
+        except ImportError:
+            return
+
+        # Map channel class name to short name
+        channel_map = {
+            'SlackAlertChannel': 'slack',
+            'EmailAlertChannel': 'email',
+            'TeamsAlertChannel': 'teams',
+            'WebhookAlertChannel': 'webhook',
+        }
+        channel_name = channel_map.get(channel, 'webhook')
+
+        # Map status to event_type
+        event_map = {
+            'failed': 'failure',
+            'completed': 'success',
+            'retrying': 'retry',
+            'test': 'failure',
+        }
+        event_type = event_map.get(context.status, 'failure')
+
+        session = self._session_factory()
+        try:
+            entry = AlertLog(
+                pipeline_name=context.pipeline_name,
+                execution_id=context.execution_id,
+                channel=channel_name,
+                event_type=event_type,
+                message=message[:2000] if message else None,
+                delivered=delivered,
+                error=error,
+            )
+            session.add(entry)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.debug(f"Failed to log alert: {e}")
+        finally:
+            session.close()
 
     def test_alerts(self) -> Dict[str, bool]:
         """

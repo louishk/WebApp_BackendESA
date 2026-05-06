@@ -371,7 +371,7 @@ def recommend_offers():
     if tenancy_months is not None and (tenancy_months < 1 or tenancy_months > 120):
         return jsonify({'error': 'tenancy_months out of valid range'}), 400
 
-    db = current_app.get_db_session()
+    db = current_app.get_middleware_session()
     try:
         from web.services.offer_engine import recommend_offers as _recommend
         offers = _recommend(db, site_code, area, tenancy_months, std_rate)

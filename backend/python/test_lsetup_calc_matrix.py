@@ -230,7 +230,7 @@ def main():
                 soap_charges = soap_movein_cost(client, unit_id, wid, move_in_iso, iid, cid)
                 soap_total = sum(float(r.get('dcTotal', 0)) for r in soap_charges)
 
-                calc_charges = calculate_movein_cost(
+                calc_charges, calc_confidence = calculate_movein_cost(
                     std_rate=std_rate, security_deposit=deposit, admin_fee=admin_fee,
                     move_in_date=date,
                     rent_tax=rent_tax, admin_tax=admin_tax,
@@ -275,7 +275,7 @@ def main():
          dict(std_rate=75, security_deposit=75, admin_fee=30, anniversary_billing=True)),
     ]
     for label, kw in edge_cases:
-        ch = calculate_movein_cost(
+        ch, _reason = calculate_movein_cost(
             move_in_date=edge_date, rent_tax=rent_tax,
             admin_tax=admin_tax, deposit_tax=dep_tax,
             insurance_tax=ins_tax, **kw)

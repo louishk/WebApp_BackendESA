@@ -16,7 +16,7 @@ soap:
 # SugarCRM REST API
 sugarcrm:
   base_url: "https://extraspace.sugarondemand.com"
-  username: "louisver"
+  username: "api_data"
   password_vault: "SUGARCRM_PASSWORD"  # Reference to vault secret
   client_id: "sugar"
   client_secret_vault: "SUGARCRM_CLIENT_SECRET"  # Reference to vault secret
@@ -30,6 +30,15 @@ http:
   pool_maxsize: 20
   total_retries: 3
   timeout: 30
+
+# Zoom Phone API (S2S OAuth)
+zoom:
+  base_url: "https://api.zoom.us/v2"
+  auth_url: "https://zoom.us/oauth/token"
+  account_id_vault: "ZOOM_ACCOUNT_ID"  # Reference to vault secret
+  client_id_vault: "ZOOM_CLIENT_ID"  # Reference to vault secret
+  client_secret_vault: "ZOOM_CLIENT_SECRET"  # Reference to vault secret
+  timeout: 60
 
 # Azure VM (for deployment)
 azure_vm:
