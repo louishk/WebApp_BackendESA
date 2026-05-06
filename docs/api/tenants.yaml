@@ -1,0 +1,984 @@
+openapi: 3.0.3
+
+info:
+  title: ESA Backend — Tenants API
+  description: >
+    SOAP-backed tenant management endpoints for StorageMaker/SMD CallCenterWs.
+    All routes are under the `tenants` Flask blueprint with URL prefix `/api/tenants`.
+
+    **Authentication**: Bearer JWT in the `Authorization` header.
+
+    **Rate limiting** is applied per API key per sliding window; limits vary by endpoint.
+
+    **SOAP backend**: All operations proxy to the SMD CallCenterWs SOAP service
+    (`CallCenterWs.asmx`). The `site_code` parameter is validated against the
+    `site_info` table in the `esa_pbi` database before every SOAP call.
+
+  version: "1.0.0"
+  contact:
+    name: ESA Backend
+
+servers:
+  - url: https://app.extraspaceasia.com.sg
+    description: Production (Azure VM)
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        HS256-signed JWT issued by `POST /api/auth/token`. Include as
+        `Authorization: Bearer <token>`.
+
+  schemas:
+
+    # -------------------------------------------------------------------------
+    # Shared / reusable
+    # -------------------------------------------------------------------------
+
+    SiteCode:
+      type: string
+      description: >
+        StorageMaker location code. Validated against the `site_info` table in
+        the `esa_pbi` database before any SOAP call is made.
+      example: "LSETUP"
+
+    RetResult:
+      type: object
+      description: SOAP operation return code and message, passed through as-is.
+      properties:
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from the SOAP operation (e.g. "0" for success).
+          example: "0"
+        message:
+          type: string
+          description: Human-readable return message from SOAP.
+          example: "Tenant updated"
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "site_code is required"
+
+    SoapErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "SOAP API error"
+
+    # -------------------------------------------------------------------------
+    # Request bodies
+    # -------------------------------------------------------------------------
+
+    TenantNoteInsertRequest:
+      type: object
+      required:
+        - site_code
+        - note
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        note:
+          type: string
+          description: Note text to attach to the tenant.
+          maxLength: 2000
+          example: "Customer called to ask about rate adjustment"
+        note_category:
+          type: string
+          description: Note category ID. Defaults to "0" if omitted.
+          default: "0"
+          example: "0"
+
+    TenantUpdateRequest:
+      type: object
+      required:
+        - site_code
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        first_name:
+          type: string
+          description: First name.
+          maxLength: 100
+          example: "John"
+        last_name:
+          type: string
+          description: Last name.
+          maxLength: 100
+          example: "Smith"
+        email:
+          type: string
+          format: email
+          description: Email address.
+          maxLength: 100
+          example: "john.smith@example.com"
+        phone:
+          type: string
+          description: Phone number.
+          maxLength: 20
+          example: "+6591234567"
+        mobile:
+          type: string
+          description: Mobile phone number.
+          maxLength: 20
+          example: "+6591234567"
+        address:
+          type: string
+          description: Street address.
+          maxLength: 200
+          example: "123 Orchard Road"
+        city:
+          type: string
+          description: City.
+          maxLength: 100
+          example: "Singapore"
+        postal_code:
+          type: string
+          description: Postal code.
+          maxLength: 20
+          example: "238858"
+        country:
+          type: string
+          description: Country code (e.g. "SG").
+          maxLength: 10
+          example: "SG"
+        company:
+          type: string
+          description: Company name.
+          maxLength: 100
+          example: "Acme Pte Ltd"
+
+    TenantRateChangeRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - new_rate
+        - effective_date
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Ledger ID for the rate change.
+          minimum: 1
+          example: 5001
+        new_rate:
+          type: number
+          format: float
+          description: New monthly rate (0–1000000).
+          minimum: 0
+          maximum: 1000000
+          example: 320.00
+        effective_date:
+          type: string
+          format: date
+          description: Effective date for the rate change (YYYY-MM-DD).
+          example: "2026-05-01"
+
+    # -------------------------------------------------------------------------
+    # Response bodies
+    # -------------------------------------------------------------------------
+
+    TenantRecord:
+      type: object
+      description: >
+        A single tenant record as returned by SMD SOAP operations
+        (TenantSearchDetailed, TenantInfoByTenantID, TenantListDetailed_v3).
+        Field names are the raw SMD column names; exact set depends on the
+        SMD version configured on each site.
+      additionalProperties: true
+      example:
+        TenantID: "12345"
+        sFName: "John"
+        sLName: "Smith"
+        sEmail: "john.smith@example.com"
+        sPhone: "+6591234567"
+        sMobile: "+6591234567"
+        sAddr1: "123 Orchard Road"
+        sCity: "Singapore"
+
+    TenantSearchResponse:
+      type: object
+      required: [status, site_code, data, count]
+      properties:
+        status:
+          type: string
+          example: "success"
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantRecord"
+        count:
+          type: integer
+          example: 3
+
+    TenantInfoResponse:
+      type: object
+      required: [status, site_code, tenant_id, data]
+      properties:
+        status:
+          type: string
+          example: "success"
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        tenant_id:
+          type: integer
+          example: 12345
+        data:
+          $ref: "#/components/schemas/TenantRecord"
+
+    TenantByUnitResponse:
+      type: object
+      required: [status, site_code, data, count]
+      properties:
+        status:
+          type: string
+          example: "success"
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        data:
+          type: array
+          description: >
+            Array of tenant ID lookup results from TenantIDByUnitNameOrAccessCode.
+          items:
+            type: object
+            additionalProperties: true
+        count:
+          type: integer
+          example: 1
+
+    TenantListResponse:
+      type: object
+      required: [status, site_code, data, count]
+      properties:
+        status:
+          type: string
+          example: "success"
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantRecord"
+        count:
+          type: integer
+          example: 42
+
+    TenantNotesResponse:
+      type: object
+      required: [status, site_code, tenant_id, data, count]
+      properties:
+        status:
+          type: string
+          example: "success"
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        tenant_id:
+          type: integer
+          example: 12345
+        data:
+          type: array
+          description: Array of tenant note records from TenantNotesRetrieve.
+          items:
+            type: object
+            additionalProperties: true
+            example:
+              NoteID: "4412"
+              sNote: "Customer called about rate"
+              dNoteDate: "2026-03-16"
+        count:
+          type: integer
+          example: 2
+
+    TenantNoteInsertResponse:
+      type: object
+      required: [status, tenant_id, message]
+      properties:
+        status:
+          type: string
+          example: "success"
+        tenant_id:
+          type: integer
+          example: 12345
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from the TenantNoteInsert_v2 SOAP response.
+          example: "0"
+        message:
+          type: string
+          description: Return message from SOAP, or "Note added" if null.
+          example: "Note added"
+
+    TenantUpdateResponse:
+      type: object
+      required: [status, tenant_id, message]
+      properties:
+        status:
+          type: string
+          example: "success"
+        tenant_id:
+          type: integer
+          example: 12345
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from the TenantUpdate_v3 SOAP response.
+          example: "0"
+        message:
+          type: string
+          description: Return message from SOAP, or "Tenant updated" if null.
+          example: "Tenant updated"
+
+    TenantRateChangeResponse:
+      type: object
+      required: [status, tenant_id, ledger_id, new_rate, effective_date, message]
+      properties:
+        status:
+          type: string
+          example: "success"
+        tenant_id:
+          type: integer
+          example: 12345
+        ledger_id:
+          type: integer
+          example: 5001
+        new_rate:
+          type: string
+          description: Formatted rate string (2 decimal places).
+          example: "320.00"
+        effective_date:
+          type: string
+          format: date
+          example: "2026-05-01"
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from the ScheduleTenantRateChange_v2 SOAP response.
+          example: "0"
+        message:
+          type: string
+          description: Return message from SOAP, or "Rate change scheduled" if null.
+          example: "Rate change scheduled"
+
+  responses:
+    400BadRequest:
+      description: Missing or invalid request parameter.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    401Unauthorized:
+      description: Missing, expired, or invalid JWT.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Unauthorized"
+
+    403Forbidden:
+      description: JWT is valid but does not carry the required scope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Insufficient scope"
+
+    404NotFound:
+      description: The requested tenant does not exist for the given site.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Tenant not found"
+
+    429TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Rate limit exceeded"
+
+    500InternalError:
+      description: Unexpected internal server error or SOAP configuration unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    502SoapError:
+      description: The upstream SMD SOAP service returned a fault.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SoapErrorResponse"
+
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+paths:
+
+  # ---------------------------------------------------------------------------
+  # GET /api/tenants/search — TenantSearchDetailed
+  # ---------------------------------------------------------------------------
+  /api/tenants/search:
+    get:
+      summary: Search tenants by name, phone, or email (TenantSearchDetailed)
+      operationId: tenantSearch
+      description: >
+        Searches tenants at a site by first name, last name, phone, or email via
+        the SMD `TenantSearchDetailed` SOAP operation. All search fields are
+        optional, but at least one is recommended for meaningful results.
+
+        **SOAP operation**: `TenantSearchDetailed`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `tenants:read`
+      tags:
+        - Tenants
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_code
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+          description: StorageMaker location code.
+        - name: first_name
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+          description: First name to search for.
+          example: "John"
+        - name: last_name
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+          description: Last name to search for.
+          example: "Smith"
+        - name: phone
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 20
+          description: Phone number to search for.
+          example: "+6591234567"
+        - name: email
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 100
+          description: Email address to search for.
+          example: "john.smith@example.com"
+      responses:
+        "200":
+          description: Search results returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantSearchResponse"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                data:
+                  - TenantID: "12345"
+                    sFName: "John"
+                    sLName: "Smith"
+                    sEmail: "john.smith@example.com"
+                count: 1
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/tenants/{tenant_id} — TenantInfoByTenantID
+  # ---------------------------------------------------------------------------
+  /api/tenants/{tenant_id}:
+    get:
+      summary: Get tenant details by ID (TenantInfoByTenantID)
+      operationId: tenantInfo
+      description: >
+        Retrieves full tenant details by tenant ID via the SMD
+        `TenantInfoByTenantID` SOAP operation. Returns 404 if the tenant
+        is not found at the specified site.
+
+        **SOAP operation**: `TenantInfoByTenantID`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `tenants:read`
+      tags:
+        - Tenants
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The SMD tenant ID.
+          example: 12345
+        - name: site_code
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+          description: StorageMaker location code.
+      responses:
+        "200":
+          description: Tenant details returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantInfoResponse"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                tenant_id: 12345
+                data:
+                  TenantID: "12345"
+                  sFName: "John"
+                  sLName: "Smith"
+                  sEmail: "john.smith@example.com"
+                  sPhone: "+6591234567"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "404":
+          $ref: "#/components/responses/404NotFound"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+    put:
+      summary: Update tenant details (TenantUpdate_v3)
+      operationId: tenantUpdate
+      description: >
+        Updates tenant contact details via the SMD `TenantUpdate_v3` SOAP
+        operation. Only `site_code` is required in the body; all other fields
+        are optional and will be sent as empty strings to SOAP if omitted.
+
+        **SOAP operation**: `TenantUpdate_v3`
+
+        **Audit event**: `TENANT_UPDATED`
+
+        **Rate limit**: 10 requests per 60 seconds per API key.
+
+        **Required scope**: `tenants:write`
+      tags:
+        - Tenants
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The SMD tenant ID to update.
+          example: 12345
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantUpdateRequest"
+            example:
+              site_code: "LSETUP"
+              first_name: "John"
+              last_name: "Smith"
+              email: "john.smith@example.com"
+              phone: "+6591234567"
+      responses:
+        "200":
+          description: Tenant updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantUpdateResponse"
+              example:
+                status: "success"
+                tenant_id: 12345
+                ret_code: "0"
+                message: "Tenant updated"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/tenants/by-unit — TenantIDByUnitNameOrAccessCode
+  # ---------------------------------------------------------------------------
+  /api/tenants/by-unit:
+    get:
+      summary: Lookup tenant by unit name or access code (TenantIDByUnitNameOrAccessCode)
+      operationId: tenantByUnit
+      description: >
+        Looks up the tenant associated with a unit by unit name or access code
+        via the SMD `TenantIDByUnitNameOrAccessCode` SOAP operation. At least
+        one of `unit_name` or `access_code` must be provided.
+
+        **SOAP operation**: `TenantIDByUnitNameOrAccessCode`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `tenants:read`
+      tags:
+        - Tenants
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_code
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+          description: StorageMaker location code.
+        - name: unit_name
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 50
+          description: Unit name (e.g. "A101"). At least one of `unit_name` or `access_code` is required.
+          example: "A101"
+        - name: access_code
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 50
+          description: Access code. At least one of `unit_name` or `access_code` is required.
+          example: "1234"
+      responses:
+        "200":
+          description: Tenant lookup results returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantByUnitResponse"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                data:
+                  - TenantID: "12345"
+                count: 1
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/tenants/list — TenantListDetailed_v3
+  # ---------------------------------------------------------------------------
+  /api/tenants/list:
+    get:
+      summary: List all tenants for a site (TenantListDetailed_v3)
+      operationId: tenantList
+      description: >
+        Returns all tenants for a site via the SMD `TenantListDetailed_v3`
+        SOAP operation. This can return a large dataset for busy sites.
+
+        **SOAP operation**: `TenantListDetailed_v3`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `tenants:read`
+      tags:
+        - Tenants
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_code
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+          description: StorageMaker location code.
+      responses:
+        "200":
+          description: Full tenant list returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantListResponse"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                data:
+                  - TenantID: "12345"
+                    sFName: "John"
+                    sLName: "Smith"
+                  - TenantID: "12346"
+                    sFName: "Jane"
+                    sLName: "Doe"
+                count: 2
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/tenants/{tenant_id}/notes — TenantNotesRetrieve
+  # ---------------------------------------------------------------------------
+  /api/tenants/{tenant_id}/notes:
+    get:
+      summary: Retrieve tenant notes (TenantNotesRetrieve)
+      operationId: tenantNotesGet
+      description: >
+        Retrieves all notes for a tenant via the SMD `TenantNotesRetrieve`
+        SOAP operation.
+
+        **SOAP operation**: `TenantNotesRetrieve`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `tenants:read`
+      tags:
+        - Tenants
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The SMD tenant ID.
+          example: 12345
+        - name: site_code
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+          description: StorageMaker location code.
+      responses:
+        "200":
+          description: Tenant notes returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantNotesResponse"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                tenant_id: 12345
+                data:
+                  - NoteID: "4412"
+                    sNote: "Customer called about rate"
+                    dNoteDate: "2026-03-16"
+                count: 1
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+    post:
+      summary: Add a note to a tenant (TenantNoteInsert_v2)
+      operationId: tenantNotesAdd
+      description: >
+        Inserts a new note for a tenant via the SMD `TenantNoteInsert_v2`
+        SOAP operation.
+
+        **SOAP operation**: `TenantNoteInsert_v2`
+
+        **Audit event**: `TENANT_NOTE_ADDED`
+
+        **Rate limit**: 10 requests per 60 seconds per API key.
+
+        **Required scope**: `tenants:write`
+      tags:
+        - Tenants
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The SMD tenant ID.
+          example: 12345
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantNoteInsertRequest"
+            example:
+              site_code: "LSETUP"
+              note: "Customer called to ask about rate adjustment"
+              note_category: "0"
+      responses:
+        "200":
+          description: Note added successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantNoteInsertResponse"
+              example:
+                status: "success"
+                tenant_id: 12345
+                ret_code: "0"
+                message: "Note added"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/tenants/{tenant_id}/rate-change — ScheduleTenantRateChange_v2
+  # ---------------------------------------------------------------------------
+  /api/tenants/{tenant_id}/rate-change:
+    post:
+      summary: Schedule a tenant rate change (ScheduleTenantRateChange_v2)
+      operationId: tenantRateChange
+      description: >
+        Schedules a rate change for a tenant's ledger via the SMD
+        `ScheduleTenantRateChange_v2` SOAP operation. The rate change takes
+        effect on the specified `effective_date`.
+
+        **SOAP operation**: `ScheduleTenantRateChange_v2`
+
+        **Audit event**: `TENANT_RATE_CHANGE_SCHEDULED`
+
+        **Rate limit**: 10 requests per 60 seconds per API key.
+
+        **Required scope**: `tenants:write`
+      tags:
+        - Tenants
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: The SMD tenant ID.
+          example: 12345
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantRateChangeRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              new_rate: 320.00
+              effective_date: "2026-05-01"
+      responses:
+        "200":
+          description: Rate change scheduled successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantRateChangeResponse"
+              example:
+                status: "success"
+                tenant_id: 12345
+                ledger_id: 5001
+                new_rate: "320.00"
+                effective_date: "2026-05-01"
+                ret_code: "0"
+                message: "Rate change scheduled"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"

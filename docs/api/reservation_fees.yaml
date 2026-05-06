@@ -1,0 +1,151 @@
+openapi: 3.0.3
+
+info:
+  title: ESA Backend — Reservation Fees API
+  description: >
+    Per-site reservation fee management. Each site has at most one reservation fee
+    (in the site's local currency). Used by the Revenue tools page and exposed
+    externally for integrations.
+
+    **Routes**: `/api/reservation-fees` (external) and `/tools/reservation-fees/*` (session UI).
+
+    **Authentication**: Bearer JWT (`Authorization` header), API key (`X-API-Key` header),
+    or session cookie for the UI routes.
+
+    **Scopes**: `reservation_fees:read` for GET, `reservation_fees:write` for POST/PUT/DELETE.
+
+    **RBAC**: Session users require `can_access_revenue_tools`.
+  version: "1.0.0"
+  contact:
+    name: ESA Backend
+
+servers:
+  - url: https://app.extraspaceasia.com.sg
+    description: Production (Azure VM)
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    ReservationFee:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        site_id: { type: integer, example: 4 }
+        site_code: { type: string, example: "L004" }
+        reservation_fee: { type: number, format: float, example: 50.00 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        created_by: { type: string, nullable: true }
+        updated_by: { type: string, nullable: true }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+paths:
+  /api/reservation-fees:
+    get:
+      summary: List reservation fees
+      description: Returns all reservation fees, optionally filtered by `site_id`.
+      parameters:
+        - in: query
+          name: site_id
+          schema: { type: integer }
+          required: false
+          description: Filter to a single site.
+      responses:
+        '200':
+          description: List of reservation fees.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  fees:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReservationFee' }
+        '401': { description: Unauthorized }
+        '403': { description: Forbidden — missing scope reservation_fees:read }
+    post:
+      summary: Create a reservation fee for a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [site_id, reservation_fee]
+              properties:
+                site_id: { type: integer, example: 4 }
+                reservation_fee: { type: number, format: float, example: 50.00 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  fee: { $ref: '#/components/schemas/ReservationFee' }
+        '400': { description: Invalid input, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+        '404': { description: Site not found }
+        '409': { description: Reservation fee already exists for this site }
+
+  /api/reservation-fees/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer }
+    put:
+      summary: Update a reservation fee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reservation_fee]
+              properties:
+                reservation_fee: { type: number, format: float, example: 75.00 }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  fee: { $ref: '#/components/schemas/ReservationFee' }
+        '400': { description: Invalid input }
+        '404': { description: Not found }
+    delete:
+      summary: Delete a reservation fee
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+        '404': { description: Not found }

@@ -1,0 +1,637 @@
+# =============================================================================
+# SMD CallCenterWs SOAP Operations — Reservation & Move-In Reference
+# =============================================================================
+#
+# Endpoint: https://api.smdservers.net/CCWs_3.5/CallCenterWs.asmx
+# Namespace: http://tempuri.org/CallCenterWs/CallCenterWs
+# Auth: sCorpCode, sCorpUserName (format: username:::APIKEY), sCorpPassword
+#       Auto-injected by common/soap_client.py
+#
+# Tested against: LSETUP (2026-04-09)
+#
+# This documents the raw SOAP operations used by the reservations blueprint.
+# For the HTTP API layer, see docs/api/reservations.yaml.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. TenantNewDetailed_v3 — Create a new tenant
+# -----------------------------------------------------------------------------
+# Used by: POST /api/reservations/reserve (step 1)
+#
+# Parameters (auth fields omitted — auto-injected):
+#   sWebPassword:      string  (opt)  — web portal password (usually empty)
+#   sMrMrs:            string  (opt)  — salutation
+#   sFName:            string  (opt)  — first name
+#   sMI:               string  (opt)  — middle initial
+#   sLName:            string  (opt)  — last name
+#   sCompany:          string  (opt)  — company name
+#   sAddr1:            string  (opt)  — address line 1
+#   sAddr2:            string  (opt)  — address line 2
+#   sCity:             string  (opt)  — city
+#   sRegion:           string  (opt)  — state/region
+#   sPostalCode:       string  (opt)  — postal code
+#   sCountry:          string  (opt)  — country code
+#   sPhone:            string  (opt)  — primary phone
+#   sMrMrsAlt..sPhoneAlt:  string (opt) — alternate contact fields
+#   sMrMrsBus..sPhoneBus:  string (opt) — business contact fields
+#   sFax:              string  (opt)  — fax
+#   sEmail:            string  (opt)  — email
+#   sPager:            string  (opt)  — pager
+#   sMobile:           string  (opt)  — mobile phone
+#   bCommercial:       boolean (req)  — commercial tenant flag
+#   bCompanyIsTenant:  boolean (req)  — company-as-tenant flag
+#   dDOB:              dateTime(req)  — date of birth (NEVER empty — use 1900-01-01T00:00:00)
+#   sTenNote:          string  (opt)  — tenant note
+#   sLicense:          string  (opt)  — license number
+#   sLicRegion:        string  (opt)  — license region
+#   sSSN:              string  (opt)  — SSN (usually empty for SG)
+#   sGateCode:         string  (opt)  — gate access code
+#   sEmailAlt:         string  (opt)  — alternate email
+#   sRelationshipAlt:  string  (opt)  — relationship to alternate
+#   sTaxID:            string  (opt)  — tax ID
+#   bSMSOptIn:         boolean (req)  — SMS opt-in flag
+#   sCountryCode:      string  (opt)  — country code for mobile
+#
+# Response (result_tag="RT"):
+#   Ret_Code:    string  — "1" on success
+#   TenantID:    string  — new tenant ID (e.g. "1111172")
+#   AccessCode:  string  — generated gate access code (e.g. "3506685952")
+#
+# CRITICAL: dDOB must NEVER be empty — SMD crashes with HTTP 500.
+#           Always use "1900-01-01T00:00:00" as placeholder.
+
+# -----------------------------------------------------------------------------
+# 2. ReservationNewWithSource_v6 — Create a reservation
+# -----------------------------------------------------------------------------
+# Used by: POST /api/reservations/reserve (step 2), POST /api/reservations/create
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:     string   (opt)  — site code (e.g. "LSETUP")
+#   sTenantID:         string   (opt)  — tenant ID (from TenantNewDetailed_v3)
+#   sUnitID:           string   (opt)  — unit ID to reserve
+#   dNeeded:           dateTime (req)  — desired move-in date
+#   sComment:          string   (opt)  — reservation comment
+#   iSource:           int      (req)  — source ID (usually 0)
+#   sSource:           string   (opt)  — source name (e.g. "ESA Backend")
+#   QTRentalTypeID:    int      (req)  — rental type ID (0 = default)
+#   iInquiryType:      int      (req)  — inquiry channel type (0 = default)
+#   dcQuotedRate:      decimal  (req)  — quoted monthly rate
+#   dExpires:          dateTime (req)  — reservation expiry date
+#   dFollowUp:         dateTime (req)  — follow-up date
+#   sTrackingCode:     string   (opt)  — marketing tracking code
+#   sCallerID:         string   (opt)  — caller/agent identifier
+#   ConcessionID:      int      (req)  — discount/concession plan ID (0 = none)
+#   PromoGlobalNum:    int      (req)  — global promo number (0 = none)
+#
+# Response (result_tag="RT"):
+#   Ret_Code:  string  — WaitingID on success (positive int), error code on failure
+#   Ret_Msg:   string  — GlobalWaitingNum on success, error message on failure
+#
+# IMPORTANT: This operation overloads Ret_Code/Ret_Msg:
+#   - Success: Ret_Code = WaitingID (e.g. "850665"), Ret_Msg = GlobalWaitingNum (e.g. "1503404115")
+#   - Failure: Ret_Code = negative error code, Ret_Msg = error message
+#
+# Known error codes:
+#   -25  "Invalid Unit ID Provided." — unit doesn't exist or isn't rentable
+#   -95  "Invalid tenantID provided." — tenant ID 0 or doesn't exist
+#
+# Date fields must NEVER be empty — always provide real datetime values.
+
+# -----------------------------------------------------------------------------
+# 3. ReservationList_v3 — List/get reservations
+# -----------------------------------------------------------------------------
+# Used by: GET /api/reservations/list, GET /api/reservations/<id>,
+#          PUT /api/reservations/<id>/cancel (fetches current state)
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:      string (opt)  — site code
+#   iGlobalWaitingNum:  int    (req)  — global waiting number (0 = all)
+#   WaitingID:          int    (req)  — specific reservation (0 = all)
+#
+# Response (result_tag="Table"):
+#   Returns array of reservation records with 193 fields (joined with unit + tenant data).
+#
+#   Key reservation fields:
+#     WaitingID           — unique reservation ID
+#     SiteID              — site ID
+#     TenantID            — tenant ID (0 = walk-in/no tenant)
+#     UnitID1             — reserved unit ID (also UnitID in unit section)
+#     dPlaced             — date reservation was placed
+#     dNeeded             — desired move-in date
+#     dExpires            — reservation expiry date
+#     dcPaidReserveFee    — fee paid (decimal, e.g. "0.0000")
+#     sComment            — reservation comment (nullable)
+#     bFollowup           — follow-up scheduled (boolean string)
+#     dFollowup           — follow-up date
+#     dFollowupLast       — last follow-up date
+#     iWaitingStatus      — status (0=active, 2=cancelled)
+#     dcRate_Quoted       — quoted rate
+#     dcRate_Tax1_Quoted  — quoted tax 1
+#     dcRate_Tax2_Quoted  — quoted tax 2
+#     CorpUserID          — placing user ID
+#     QTRentalTypeID      — rental type
+#     sCancellationReason — cancellation reason (nullable)
+#     dCancelled          — cancellation date
+#     iInquiryType        — inquiry type code
+#     iGlobalWaitingNum   — global waiting number
+#     sTrackingCode       — marketing tracking code (nullable)
+#     dCreated            — creation timestamp
+#     dUpdated            — last update timestamp
+#     dConverted_ToRsv    — conversion timestamp
+#
+#   Key unit fields (joined):
+#     UnitID              — unit ID
+#     sUnitName           — unit name (e.g. "1003")
+#     iFloor              — floor number
+#     dcWidth / dcLength  — unit dimensions
+#     dcPushRate1         — push rate
+#     dcStdRate1          — standard rate
+#     bClimate            — climate controlled (unreliable for SG, see CLAUDE.md)
+#     bRented             — currently rented
+#     bRentable           — available for rent
+#     dcWebRate           — web rate
+#
+#   Key tenant fields (joined):
+#     TenantID1           — tenant ID
+#     sFName              — first name
+#     sLName              — last name
+#     sCompany            — company
+#     sPhone              — phone
+#     sEmail              — email
+#     sMobile             — mobile
+#     sAddr1..sCountry    — address fields
+
+# -----------------------------------------------------------------------------
+# 4. ReservationUpdate_v4 — Update a reservation
+# -----------------------------------------------------------------------------
+# Used by: PUT /api/reservations/<id>, PUT /api/reservations/<id>/cancel
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:        string   (opt)  — site code
+#   WaitingID:            int      (req)  — reservation to update
+#   sTenantID:            string   (opt)  — tenant ID
+#   sUnitID:              string   (opt)  — unit ID
+#   dNeeded:              dateTime (req)  — move-in date (NEVER empty)
+#   sComment:             string   (opt)  — comment
+#   iStatus:              int      (req)  — status (0=active, 2=cancelled)
+#   bFollowup:            boolean  (req)  — follow-up flag
+#   dFollowup:            dateTime (req)  — follow-up date (NEVER empty)
+#   dFollowupLast:        dateTime (req)  — last follow-up date (NEVER empty)
+#   iInquiryType:         int      (req)  — inquiry type
+#   dcQuotedRate:         decimal  (req)  — quoted rate
+#   dExpires:             dateTime (req)  — expiry date (NEVER empty)
+#   QTRentalTypeID:       int      (req)  — rental type
+#   QTCancellationTypeID: int      (req)  — cancellation category (0 = none)
+#   sCancellationReason:  string   (opt)  — cancellation reason text
+#   ConcessionID:         int      (req)  — discount plan ID (0 = none)
+#
+# Response (result_tag="RT"):
+#   Ret_Code:  string  — "0" on success, negative on failure
+#   Ret_Msg:   string  — result message (nullable)
+#
+# CRITICAL: ALL dateTime fields must NEVER be empty strings.
+#           SMD returns HTTP 500 on empty <dFollowup></dFollowup> etc.
+#           Always use _parse_date() or fallback to today+offset.
+
+# -----------------------------------------------------------------------------
+# 5. ReservationNoteInsert — Add a note to a reservation
+# -----------------------------------------------------------------------------
+# Used by: POST /api/reservations/<id>/notes
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:  string (opt)  — site code
+#   WaitingID:      int    (req)  — reservation ID
+#   sNote:          string (opt)  — note text
+#
+# Response (result_tag="RT"):
+#   Ret_Code:  string  — note ID on success (e.g. "3215907")
+#   Ret_Msg:   string  — null on success
+
+# -----------------------------------------------------------------------------
+# 6. ReservationNotesRetrieve — Get notes for a reservation
+# -----------------------------------------------------------------------------
+# Used by: GET /api/reservations/<id>/notes
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:  string (opt)  — site code
+#   WaitingID:      int    (req)  — reservation ID
+#
+# Response (result_tag="Table"):
+#   Array of note records. May return empty array.
+#   Fields (per note):
+#     NoteID:      string  — unique note ID
+#     WaitingID:   string  — reservation ID
+#     sNote:       string  — note text
+#     dNoteDate:   string  — note creation date
+
+# -----------------------------------------------------------------------------
+# 7. ReservationFeeRetrieve — Get fee configuration for a site
+# -----------------------------------------------------------------------------
+# Used by: GET /api/reservations/fees
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:  string (opt)  — site code
+#
+# Response (result_tag="Table"):
+#   Single record with fee configuration.
+#   Fields:
+#     dcPrice:                        decimal  — reservation fee amount
+#     dcTax1Rate:                     decimal  — tax rate 1
+#     dcTax2Rate:                     decimal  — tax rate 2
+#     dcTotal:                        decimal  — total with tax
+#     iDaysReservationExpAfterDateNeed: int    — days after needed date before auto-expiry
+#     bReqReservationFee:             boolean  — whether fee is required
+#     bUsePushRateMoveIn:             boolean  — use push rate at move-in
+#
+# LSETUP example:
+#   dcPrice=0, bReqReservationFee=true, iDaysReservationExpAfterDateNeed=7
+
+# -----------------------------------------------------------------------------
+# 8. MakeReservation — Simple reservation (DEPRECATED/BROKEN)
+# -----------------------------------------------------------------------------
+# NOT IN WSDL SCHEMA. Returns HTTP 500 consistently.
+# Do NOT use. Use TenantNewDetailed_v3 + ReservationNewWithSource_v6 instead.
+
+# -----------------------------------------------------------------------------
+# 9. SendReservationConfirmationEmail — Send confirmation email
+# -----------------------------------------------------------------------------
+# NOT IMPLEMENTED in SMD. Returns Ret_Code=-99 "Method not implemented."
+# Do NOT implement an API endpoint for this.
+#
+# Parameters (for reference):
+#   sLocationCode:  string (opt)  — site code
+#   waitingId:      int    (req)  — reservation ID
+#   moveInLink:     string (opt)  — URL to embed in email
+
+
+# =============================================================================
+# MOVE-IN OPERATIONS
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 10. MoveInCostRetrieveWithDiscount_v4 — Get move-in cost breakdown
+# -----------------------------------------------------------------------------
+# Use this to calculate the exact payment amount before calling a move-in operation.
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:       string   (opt)  — site code
+#   iUnitID:             int      (req)  — unit ID
+#   dMoveInDate:         dateTime (req)  — planned move-in date
+#   InsuranceCoverageID: int      (req)  — insurance coverage (0 = none)
+#   ConcessionPlanID:    int      (req)  — discount plan (0 = none)
+#   ChannelType:         int      (req)  — channel type (0 = default)
+#   bApplyInsuranceCredit: boolean (req) — apply insurance credit
+#   sCreditCardNum:      string   (opt)  — CC number (for surcharge calc, usually empty)
+#
+# Response (result_tag="Table"):
+#   Returns MULTIPLE ROWS — one per charge line. Sum dcTotal across all rows
+#   for the total payment required.
+#
+#   Fields per row:
+#     ChargeDescription:  string   — e.g. "First Monthly Rent Fee", "Administrative Fee", "Security Deposit"
+#     ChargeAmount:       decimal  — base charge amount (before tax)
+#     ChargeAmountRnd:    decimal  — rounded charge amount
+#     TaxAmount:          decimal  — tax 1 amount
+#     TaxAmount2:         decimal  — tax 2 amount
+#     dcTotal:            decimal  — charge + taxes for this line
+#     StartDate:          dateTime — charge period start
+#     EndDate:            dateTime — charge period end
+#     UnitID:             int      — unit ID
+#     UnitName:           string   — unit name (e.g. "1003")
+#     TypeName:           string   — unit type (e.g. "XL/110-130/DV/NC/SS/NP")
+#     Width / Length:     int      — unit dimensions
+#     bClimate:           boolean  — climate controlled
+#     bMoveInRequired:    boolean  — whether this charge is mandatory
+#     dcPushRate:         decimal  — push rate
+#     dcTenantRate:       decimal  — tenant rate
+#     WebRate:            decimal  — web rate
+#     dcDiscount:         decimal  — discount amount applied
+#     ConcessionID:       int      — concession ID (-999 = none)
+#     Ret_Code:           string   — "1" on success
+#     dcTax1 / dcTax2:    decimal  — tax rates
+#     dcPriceTax1/2:      decimal  — price-level taxes
+#     iDayStrtProrating:  int      — proration start day
+#     iDayStrtProratePlusNext: int — proration threshold day
+#     b2ndMonthProrate:   boolean  — second month proration flag
+#     bAnnivDateLeasing:  boolean  — anniversary date leasing
+#     dcRM_RoundTo:       decimal  — revenue management rounding
+#     iCurrencyDecimalPlaces: int  — currency decimal places (2 for SGD)
+#
+# LSETUP example (unit 106020, move-in tomorrow):
+#   Row 0: First Monthly Rent Fee = 448.00 + tax 40.32 = 488.32
+#   Row 1: Administrative Fee     =  30.00 + tax  2.70 =  32.70
+#   Row 2: Security Deposit       = 640.00 + tax  0.00 = 640.00
+#   TOTAL = 1161.02
+
+# -----------------------------------------------------------------------------
+# 11. MoveInReservation_v6 — Move-in from existing reservation
+# -----------------------------------------------------------------------------
+# Converts a reservation into a move-in. Recommended for reservation-based flow.
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:       string   (opt)  — site code
+#   WaitingID:           int      (req)  — reservation WaitingID
+#   TenantID:            int      (req)  — tenant ID
+#   UnitID:              int      (req)  — unit ID
+#   dStartDate:          dateTime (req)  — lease start date
+#   dEndDate:            dateTime (req)  — lease end date
+#   dcPaymentAmount:     decimal  (req)  — MUST match MoveInCostRetrieve total exactly
+#   iCreditCardType:     int      (req)  — CC type (0 when using cash)
+#   sCreditCardNumber:   string   (opt)  — CC number (empty for cash)
+#   sCreditCardCVV:      string   (opt)  — CVV (empty for cash)
+#   dExpirationDate:     dateTime (req)  — CC expiry (placeholder: 2030-01-01T00:00:00)
+#   sBillingName:        string   (opt)  — billing name
+#   sBillingAddress:     string   (opt)  — billing address
+#   sBillingZipCode:     string   (opt)  — billing zip
+#   InsuranceCoverageID: int      (req)  — insurance (0 = none)
+#   ConcessionPlanID:    int      (req)  — discount plan (0 = none)
+#   iPayMethod:          int      (req)  — payment method:
+#                                            0 = none (rejected — payment required)
+#                                            1 = credit card
+#                                            2 = cash (BYPASSES CC VALIDATION)
+#                                            3 = check
+#                                            4 = ACH
+#   sABARoutingNum:      string   (opt)  — ACH routing (empty for cash)
+#   sAccountNum:         string   (opt)  — ACH account (empty for cash)
+#   iAccountType:        int      (req)  — ACH account type (0 for cash)
+#   iSource:             int      (req)  — source ID (0 = default)
+#   bTestMode:           boolean  (req)  — test mode (true = no actual charge)
+#   bApplyInsuranceCredit: boolean (req) — apply insurance credit
+#   iPromoGlobalNum:     int      (req)  — promo number (0 = none)
+#
+# Response (result_tag="RT"):
+#   Ret_Code:   string  — LedgerID on success (positive int), error code on failure
+#   iLeaseNum:  string  — lease number (present on success)
+#
+# Bypass CC: Set iPayMethod=2, iCreditCardType=0, empty CC fields.
+#            dcPaymentAmount must still match the exact total from MoveInCostRetrieve.
+#
+# Known error codes:
+#   -2   "Payment amount must be greater than zero"
+#   -11  "Payment amount does not match required payment of $X"
+#
+# LSETUP test (bTestMode=true): Ret_Code=592446 (LedgerID), iLeaseNum=1643
+
+# -----------------------------------------------------------------------------
+# 12. MoveInWithDiscount_v7 — Move-in with discount (most parameters)
+# -----------------------------------------------------------------------------
+# The most feature-rich move-in operation. Includes billing frequency, channel, keypad zone.
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:       string   (opt)  — site code
+#   TenantID:            int      (req)  — tenant ID
+#   sAccessCode:         string   (opt)  — access code
+#   UnitID:              int      (req)  — unit ID
+#   dStartDate:          dateTime (req)  — lease start
+#   dEndDate:            dateTime (req)  — lease end
+#   dcPaymentAmount:     decimal  (req)  — exact total from MoveInCostRetrieve
+#   iCreditCardType:     int      (req)  — CC type (0 for cash)
+#   sCreditCardNumber:   string   (opt)  — CC number
+#   sCreditCardCVV:      string   (opt)  — CVV
+#   sCCTrack2:           string   (opt)  — mag stripe track 2
+#   dExpirationDate:     dateTime (req)  — CC expiry (placeholder ok)
+#   sBillingName:        string   (opt)  — billing name
+#   sBillingAddress:     string   (opt)  — billing address
+#   sBillingZipCode:     string   (opt)  — billing zip
+#   InsuranceCoverageID: int      (req)  — insurance (0 = none)
+#   ConcessionPlanID:    int      (req)  — discount plan (0 = none)
+#   iSource:             int      (req)  — source ID
+#   sSource:             string   (opt)  — source name
+#   bUsePushRate:        boolean  (req)  — use push rate
+#   iPayMethod:          int      (req)  — 0=none, 1=CC, 2=cash, 3=check, 4=ACH
+#   sABARoutingNum:      string   (opt)  — ACH routing
+#   sAccountNum:         string   (opt)  — ACH account
+#   iAccountType:        int      (req)  — ACH account type
+#   iKeypadZoneID:       int      (req)  — keypad zone (0 = default)
+#   iTimeZoneID:         int      (req)  — timezone (0 = default)
+#   iBillingFrequency:   int      (req)  — billing frequency (SITE-SPECIFIC!)
+#                                            LSETUP: 3 = valid (monthly)
+#                                            1 and 2 are rejected on LSETUP
+#   WaitingID:           int      (req)  — reservation ID (0 if no reservation)
+#   ChannelType:         int      (req)  — channel type (0 = default)
+#   bTestMode:           boolean  (req)  — test mode
+#   bApplyInsuranceCredit: boolean (req) — apply insurance credit
+#
+# Response (result_tag="RT"):
+#   Ret_Code:   string  — LedgerID on success, negative error code on failure
+#   Ret_Msg:    string  — error message (null on success)
+#
+# Known error codes:
+#   -11  "Payment amount does not match required payment of $X"
+#   -28  "Invalid Billing Frequency value (N)" — site-specific valid values
+#
+# NOTE: iBillingFrequency is site-specific. Query the site's billing config
+#       to determine valid values. For LSETUP, value 3 is valid.
+
+# -----------------------------------------------------------------------------
+# 13. MoveIn — Basic move-in (requires CC)
+# -----------------------------------------------------------------------------
+# Simplest move-in operation. REQUIRES credit card — no iPayMethod parameter.
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:     string   (opt)  — site code
+#   TenantID:          int      (req)  — tenant ID
+#   sAccessCode:       string   (opt)  — access code
+#   UnitID:            int      (req)  — unit ID
+#   dStartDate:        dateTime (req)  — lease start
+#   dEndDate:          dateTime (req)  — lease end
+#   dcPaymentAmount:   decimal  (req)  — exact total
+#   iCreditCardType:   int      (req)  — CC type (REQUIRED, non-zero)
+#   sCreditCardNumber: string   (opt)  — CC number
+#   sCreditCardCVV:    string   (opt)  — CVV
+#   dExpirationDate:   dateTime (req)  — CC expiry
+#   sBillingName:      string   (opt)  — billing name
+#   sBillingAddress:   string   (opt)  — billing address
+#   sBillingZipCode:   string   (opt)  — billing zip
+#   bTestMode:         boolean  (req)  — test mode
+#
+# Response (result_tag="RT"):
+#   Ret_Code:  string  — LedgerID on success
+#   Ret_Msg:   string  — error message on failure
+#
+# Error: iCreditCardType=0 → Ret_Code=-4 "Unable to get Credit Card Type ID"
+# Cannot bypass CC with this operation. Use MoveInReservation_v6 or
+# MoveInWithDiscount_v7 with iPayMethod=2 instead.
+
+# -----------------------------------------------------------------------------
+# 14. MoveOut — Move out a tenant
+# -----------------------------------------------------------------------------
+# Parameters (auth fields omitted):
+#   sLocationCode:   string   (opt)  — site code
+#   sUsagePassword:  string   (opt)  — usage password (site-specific)
+#   TenantID:        int      (req)  — tenant ID
+#   UnitID:          int      (req)  — unit ID
+#
+# Response (result_tag="RT"):
+#   Ret_Code:  string
+#   Ret_Msg:   string
+#
+# NOTE: Requires correct sUsagePassword for the site.
+#   -94  "Incorrect usage password"
+
+# -----------------------------------------------------------------------------
+# 15. ScheduleMoveOut — Schedule a future move-out
+# -----------------------------------------------------------------------------
+# Parameters (auth fields omitted):
+#   sLocationCode:  string   (opt)  — site code
+#   iLedgerID:      int      (req)  — ledger ID (from move-in response)
+#   dScheduledOut:  dateTime (req)  — scheduled move-out date
+#
+# Response (result_tag="RT"):
+#   Ret_Code:  string
+#   Ret_Msg:   string
+
+# -----------------------------------------------------------------------------
+# 16. MoveInOutList — List recent move-ins and move-outs
+# -----------------------------------------------------------------------------
+# Parameters (auth fields omitted):
+#   sLocationCode:   string (opt)  — site code
+#   sUsagePassword:  string (opt)  — usage password
+#
+# Response (result_tag="Table"):
+#   Array of move-in/move-out records.
+#   NOTE: Returns empty on LSETUP during testing (may require sUsagePassword).
+
+# -----------------------------------------------------------------------------
+# 17. MoveInCostRetrieveWithDiscount_28DayBilling_Reservation_v4
+# -----------------------------------------------------------------------------
+# Same as MoveInCostRetrieveWithDiscount_v4 but for 28-day billing sites.
+# Includes WaitingID for reservation-based cost calculation.
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:         string   (opt)
+#   iUnitID:               int      (req)
+#   dMoveInDate:           dateTime (req)
+#   InsuranceCoverageID:   int      (req)
+#   ConcessionPlanID:      int      (req)
+#   WaitingID:             int      (req)  — reservation ID (0 for non-reservation)
+#   bApplyInsuranceCredit: boolean  (req)
+#   iPromoGlobalNum:       int      (req)
+#   sCreditCardNum:        string   (opt)
+
+
+# -----------------------------------------------------------------------------
+# 18. MoveInCostRetrieveWithDiscount_28DayBilling_v3 — 28-day billing cost
+# -----------------------------------------------------------------------------
+# Used by: GET /api/reservations/move-in/cost?variant=28day
+#
+# Same response format as MoveInCostRetrieveWithDiscount_v4 but calculates
+# charges using 28-day billing cycle (full month, not prorated).
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:       string   (opt)  — site code
+#   iUnitID:             int      (req)  — unit ID
+#   dMoveInDate:         dateTime (req)  — planned move-in date
+#   InsuranceCoverageID: int      (req)  — insurance (0 = none)
+#   ConcessionPlanID:    int      (req)  — discount plan (0 = none)
+#   ChannelType:         int      (req)  — channel type (0 = default)
+#   bApplyInsuranceCredit: boolean (req)
+#
+# Response: same Table structure as v4
+#
+# LSETUP example (unit 106020):
+#   Row 0: First Monthly Rent Fee = 640.00 + tax 57.60 = 697.60 (full month, not prorated)
+#   Row 1: Administrative Fee     =  30.00 + tax  2.70 =  32.70
+#   Row 2: Security Deposit       = 640.00 + tax  0.00 = 640.00
+#   TOTAL = 1370.30
+
+# -----------------------------------------------------------------------------
+# 19. MoveInCostRetrieveWithDiscount_Reservation_v4 — reservation-based cost
+# -----------------------------------------------------------------------------
+# Used by: GET /api/reservations/move-in/cost?variant=reservation
+#
+# Same as MoveInCostRetrieveWithDiscount_v4 but requires a WaitingID.
+# Returns empty when WaitingID=0 — a real reservation is needed.
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:         string   (opt)
+#   iUnitID:               int      (req)
+#   dMoveInDate:           dateTime (req)
+#   InsuranceCoverageID:   int      (req)
+#   ConcessionPlanID:      int      (req)
+#   WaitingID:             int      (req)  — reservation ID (MUST be > 0)
+#   bApplyInsuranceCredit: boolean  (req)
+#   iPromoGlobalNum:       int      (req)
+#   sCreditCardNum:        string   (opt)
+#
+# Response: same Table structure as v4
+#
+# LSETUP example (unit 106020, WID=850669):
+#   Same 3 rows, total = 1161.02
+
+# -----------------------------------------------------------------------------
+# 20. MoveInCostRetrieveWithPushRate_v2 — simplest cost variant
+# -----------------------------------------------------------------------------
+# Used by: GET /api/reservations/move-in/cost?variant=push_rate
+#
+# Fewest parameters. Same response fields as v4 (31 fields).
+# No ChannelType or sCreditCardNum params.
+#
+# Parameters (auth fields omitted):
+#   sLocationCode:         string   (opt)
+#   iUnitID:               int      (req)
+#   dMoveInDate:           dateTime (req)
+#   InsuranceCoverageID:   int      (req)
+#   ConcessionPlanID:      int      (req)
+#   bApplyInsuranceCredit: boolean  (req)
+#
+# Response: same Table structure as v4
+#
+# LSETUP example (unit 106020): total = 1161.02
+
+
+# =============================================================================
+# RECOMMENDED FLOWS
+# =============================================================================
+#
+# --- Walk-in Reservation (used by unit availability tool) ---
+# 1. TenantNewDetailed_v3 → get TenantID
+# 2. ReservationNewWithSource_v6 → get WaitingID (from Ret_Code)
+# 3. (optional) ReservationNoteInsert → add notes
+#
+# --- Reservation to Move-In (CC bypass) ---
+# 1. MoveInCostRetrieveWithDiscount_v4 → get exact total (sum all rows)
+# 2. MoveInReservation_v6 with:
+#    - iPayMethod = 2 (cash)
+#    - dcPaymentAmount = exact total from step 1
+#    - iCreditCardType = 0
+#    - Empty CC fields
+#    - bTestMode = false (true for testing)
+#    → get LedgerID (from Ret_Code) + iLeaseNum
+#
+# --- Direct Move-In (no reservation, CC bypass) ---
+# 1. TenantNewDetailed_v3 → get TenantID
+# 2. MoveInCostRetrieveWithDiscount_v4 → get exact total
+# 3. MoveInWithDiscount_v7 with:
+#    - iPayMethod = 2 (cash)
+#    - WaitingID = 0 (no reservation)
+#    - iBillingFrequency = site-specific (3 for LSETUP)
+#    - dcPaymentAmount = exact total
+#    - bTestMode = false
+#
+# --- Cancel a Reservation ---
+# 1. ReservationList_v3 → fetch current state (preserve date fields)
+# 2. ReservationUpdate_v4 with iStatus=2 + cancellation reason
+
+
+# =============================================================================
+# iPayMethod VALUES (for CC bypass)
+# =============================================================================
+# 0 = None         — rejected ("Payment amount must be greater than zero")
+# 1 = Credit Card  — requires valid CC fields
+# 2 = Cash         — BYPASSES CC validation entirely
+# 3 = Check        — bypasses CC
+# 4 = ACH          — requires routing/account numbers
+#
+# Available on: MoveInReservation_v3-v6, MoveInWithDiscount_v3-v7
+# NOT available on: MoveIn (basic) — always requires CC
+
+
+# =============================================================================
+# iBillingFrequency VALUES (site-specific)
+# =============================================================================
+# Values are site-specific. Query ProrationInformationRetrieve or test empirically.
+# LSETUP: 3 = monthly (valid), 1 and 2 are rejected
+# Error: -28 "Invalid Billing Frequency value (N)"
+#
+# Only required by MoveInWithDiscount_v7. MoveInReservation_v6 does not need it.

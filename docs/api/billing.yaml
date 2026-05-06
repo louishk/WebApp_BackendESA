@@ -1,0 +1,2702 @@
+openapi: 3.0.3
+
+info:
+  title: ESA Backend — Billing API
+  description: >
+    SOAP-backed billing management endpoints for StorageMaker/SMD CallCenterWs.
+    All routes are under the `billing` Flask blueprint with URL prefix `/api/billing`.
+
+    **Authentication**: Bearer JWT in the `Authorization` header.
+
+    **Rate limiting** is applied per API key per sliding window; limits vary by endpoint.
+    Read endpoints allow 30 req/min; write endpoints allow 5 req/min.
+
+    **SOAP backend**: All operations proxy to the SMD CallCenterWs SOAP
+    service (`CallCenterWs.asmx`). The `site_code` parameter is validated against the
+    `site_info` table in the `esa_pbi` database before every SOAP call.
+
+    **Sections**:
+    1. Charge Management — add, list, update, and credit charges
+    2. Ledger & Balance — ledger queries, balance details, statements, transfers
+    3. Payments — cash, check, bank transfer, card, and multi-payment recording
+    4. Refunds — cash, check, and credit card refunds
+    5. Invoices & Move-Out — tenant invoices and move-out scheduling
+    6. Insurance — add and query insurance coverage
+
+  version: "1.0.0"
+  contact:
+    name: ESA Backend
+
+servers:
+  - url: https://app.extraspaceasia.com.sg
+    description: Production (Azure VM)
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        HS256-signed JWT issued by `POST /api/auth/token`. Include as
+        `Authorization: Bearer <token>`.
+
+  schemas:
+
+    # -------------------------------------------------------------------------
+    # Shared / reusable
+    # -------------------------------------------------------------------------
+
+    SiteCode:
+      type: string
+      description: >
+        StorageMaker location code. Validated against the `site_info` table in
+        the `esa_pbi` database before any SOAP call is made.
+      example: "LSETUP"
+
+    RetResult:
+      type: object
+      description: SOAP operation return code and message, passed through as-is.
+      properties:
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from the SOAP operation.
+          example: "1"
+        ret_msg:
+          type: string
+          description: Human-readable return message from SOAP.
+          example: ""
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "site_code is required"
+
+    SoapErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "SOAP API error"
+
+    # -------------------------------------------------------------------------
+    # Request bodies
+    # -------------------------------------------------------------------------
+
+    AddChargeRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - charge_description_id
+        - amount
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        charge_description_id:
+          type: integer
+          description: Charge description ID (from `/charge-types`).
+          minimum: 1
+          example: 12
+        amount:
+          type: number
+          format: float
+          description: Charge amount.
+          example: 150.00
+        comment:
+          type: string
+          description: Optional comment for the charge.
+          maxLength: 500
+          default: ""
+          example: "Late fee"
+
+    RecurringChargeRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - charge_description_id
+        - amount
+        - start_date
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        charge_description_id:
+          type: integer
+          description: Charge description ID (from `/charge-types`).
+          minimum: 1
+          example: 12
+        amount:
+          type: number
+          format: float
+          description: Recurring charge amount.
+          example: 50.00
+        start_date:
+          type: string
+          format: date
+          description: Start date for recurring charge (YYYY-MM-DD).
+          example: "2026-05-01"
+        frequency:
+          type: integer
+          description: Recurrence frequency in months (1-12).
+          minimum: 1
+          maximum: 12
+          default: 1
+          example: 1
+
+    FutureChargesRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - charge_through_date
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        charge_through_date:
+          type: string
+          format: date
+          description: Generate charges through this date (YYYY-MM-DD).
+          example: "2026-06-30"
+
+    UpdateChargePriceRequest:
+      type: object
+      required:
+        - site_code
+        - charge_id
+        - new_price
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        charge_id:
+          type: integer
+          description: ID of the charge to update.
+          minimum: 1
+          example: 8001
+        new_price:
+          type: number
+          format: float
+          description: New price for the charge.
+          example: 175.00
+
+    ApplyCreditRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - amount
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        amount:
+          type: number
+          format: float
+          description: Credit amount to apply.
+          example: 25.00
+        comment:
+          type: string
+          description: Optional comment for the credit.
+          maxLength: 500
+          default: ""
+          example: "Goodwill credit"
+
+    LedgerTransferRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - new_tenant_id
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Ledger ID to transfer.
+          minimum: 1
+          example: 5001
+        new_tenant_id:
+          type: integer
+          description: Target tenant ID to receive the ledger.
+          minimum: 1
+          example: 67890
+
+    RemoveDiscountRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - discount_plan_id
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Ledger ID to remove discount from.
+          minimum: 1
+          example: 5001
+        discount_plan_id:
+          type: integer
+          description: Discount plan ID to remove.
+          minimum: 1
+          example: 42
+
+    PaymentCashRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - amount
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        amount:
+          type: number
+          format: float
+          description: Payment amount.
+          example: 280.00
+        source:
+          type: string
+          description: Payment source label passed to SOAP.
+          maxLength: 64
+          default: "ESA Backend"
+          example: "Walk-in"
+        test_mode:
+          type: boolean
+          description: If true, SOAP processes in test mode (no real transaction).
+          default: false
+          example: false
+
+    PaymentCheckRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - amount
+        - check_number
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        amount:
+          type: number
+          format: float
+          description: Payment amount.
+          example: 280.00
+        check_number:
+          type: string
+          description: Check/cheque number.
+          maxLength: 50
+          example: "CHK-20260410-001"
+        source:
+          type: string
+          description: Payment source label passed to SOAP.
+          maxLength: 64
+          default: "ESA Backend"
+          example: "Walk-in"
+        test_mode:
+          type: boolean
+          description: If true, SOAP processes in test mode.
+          default: false
+
+    PaymentBankTransferRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - amount
+        - reference
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        amount:
+          type: number
+          format: float
+          description: Payment amount.
+          example: 280.00
+        reference:
+          type: string
+          description: Bank transfer reference number.
+          maxLength: 100
+          example: "TRF-20260410-ABC"
+        source:
+          type: string
+          description: Payment source label passed to SOAP.
+          maxLength: 64
+          default: "ESA Backend"
+          example: "Online Banking"
+        test_mode:
+          type: boolean
+          description: If true, SOAP processes in test mode.
+          default: false
+
+    PaymentCardRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - amount
+        - payment_type_id
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        amount:
+          type: number
+          format: float
+          description: Payment amount.
+          example: 280.00
+        payment_type_id:
+          type: integer
+          description: Payment type ID (from `/payment-types`).
+          minimum: 1
+          example: 3
+        source:
+          type: string
+          description: Payment source label passed to SOAP.
+          maxLength: 64
+          default: "ESA Backend"
+          example: "POS Terminal"
+        test_mode:
+          type: boolean
+          description: If true, SOAP processes in test mode.
+          default: false
+
+    PaymentMultiRequest:
+      type: object
+      required:
+        - site_code
+        - payments
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        payments:
+          type: array
+          description: Array of payment entries (max 50).
+          maxItems: 50
+          items:
+            type: object
+            required:
+              - ledger_id
+              - amount
+              - payment_type_id
+            properties:
+              ledger_id:
+                type: integer
+                description: Target ledger ID.
+                minimum: 1
+                example: 5001
+              amount:
+                type: number
+                format: float
+                description: Payment amount.
+                example: 280.00
+              payment_type_id:
+                type: integer
+                description: Payment type ID (from `/payment-types`).
+                minimum: 1
+                example: 3
+        source:
+          type: string
+          description: Payment source label passed to SOAP.
+          maxLength: 64
+          default: "ESA Backend"
+          example: "Batch Payment"
+        test_mode:
+          type: boolean
+          description: If true, SOAP processes in test mode.
+          default: false
+
+    RefundCashRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - amount
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        amount:
+          type: number
+          format: float
+          description: Refund amount.
+          example: 50.00
+        comment:
+          type: string
+          description: Optional comment for the refund.
+          maxLength: 500
+          default: ""
+          example: "Overpayment refund"
+
+    RefundCheckRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - amount
+        - check_number
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        amount:
+          type: number
+          format: float
+          description: Refund amount.
+          example: 50.00
+        check_number:
+          type: string
+          description: Refund check number.
+          maxLength: 50
+          example: "REF-CHK-001"
+        comment:
+          type: string
+          description: Optional comment for the refund.
+          maxLength: 500
+          default: ""
+          example: "Deposit refund"
+
+    RefundCardRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - amount
+        - payment_id
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        amount:
+          type: number
+          format: float
+          description: Refund amount.
+          example: 50.00
+        payment_id:
+          type: integer
+          description: Original payment ID to refund against.
+          minimum: 1
+          example: 9001
+        comment:
+          type: string
+          description: Optional comment for the refund.
+          maxLength: 500
+          default: ""
+          example: "Card refund — duplicate charge"
+
+    ScheduleMoveOutRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - scheduled_date
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Ledger ID to schedule move-out for.
+          minimum: 1
+          example: 5001
+        scheduled_date:
+          type: string
+          format: date
+          description: Scheduled move-out date (YYYY-MM-DD).
+          example: "2026-05-31"
+
+    AddInsuranceRequest:
+      type: object
+      required:
+        - site_code
+        - ledger_id
+        - insurance_coverage_id
+      properties:
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ledger_id:
+          type: integer
+          description: Target ledger ID.
+          minimum: 1
+          example: 5001
+        insurance_coverage_id:
+          type: integer
+          description: Insurance coverage plan ID to add.
+          minimum: 1
+          example: 7
+
+    # -------------------------------------------------------------------------
+    # Response bodies
+    # -------------------------------------------------------------------------
+
+    MutationResponse:
+      type: object
+      description: >
+        Standard response for SOAP mutation operations. The `status` field
+        indicates whether the SOAP call succeeded. `ret_code` and `ret_msg`
+        are passed through from the SOAP response.
+      required: [status, site_code, ret_code, ret_msg]
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+          example: "success"
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        ret_code:
+          type: string
+          nullable: true
+          description: Return code from the SOAP operation.
+          example: "1"
+        ret_msg:
+          type: string
+          description: Return message from SOAP.
+          example: ""
+
+    ListResponse:
+      type: object
+      description: >
+        Standard response for SOAP list/query operations. `data` contains the
+        array of records returned by the SOAP operation. Field names within
+        each record are the raw SMD column names.
+      required: [status, site_code, count, data]
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: "success"
+        site_code:
+          $ref: "#/components/schemas/SiteCode"
+        count:
+          type: integer
+          description: Number of records returned.
+          example: 3
+        data:
+          type: array
+          description: Array of SOAP result records. Field names are raw SMD column names.
+          items:
+            type: object
+            additionalProperties: true
+
+    SoapRecord:
+      type: object
+      description: >
+        A single record as returned by a SOAP operation. Field names are the
+        raw SMD column names; exact set depends on the SOAP operation and
+        SMD version configured on each site.
+      additionalProperties: true
+
+  responses:
+    400BadRequest:
+      description: Missing or invalid request parameter.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    401Unauthorized:
+      description: Missing, expired, or invalid JWT.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Unauthorized"
+
+    403Forbidden:
+      description: JWT is valid but does not carry the required scope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Insufficient scope"
+
+    429TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "Rate limit exceeded"
+
+    500InternalError:
+      description: Unexpected internal server error or SOAP configuration unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    502SoapError:
+      description: The upstream SMD SOAP service returned a fault.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SoapErrorResponse"
+
+
+# =============================================================================
+# Paths
+# =============================================================================
+
+paths:
+
+  # ===========================================================================
+  # SECTION 1: Charge Management
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/charge-types
+  # ---------------------------------------------------------------------------
+  /api/billing/charge-types:
+    get:
+      summary: List available charge types (ChargeDescriptionsRetrieve)
+      operationId: billingChargeTypes
+      description: >
+        Returns the list of available charge description types for a site.
+        These IDs are used when adding charges via `POST /charges`.
+
+        **SOAP operation**: `ChargeDescriptionsRetrieve`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Charge Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: List of charge description types.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListResponse"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                count: 5
+                data:
+                  - ChargeDescriptionID: "12"
+                    sDescription: "Late Fee"
+                    dcAmount: "25.00"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/charges
+  # ---------------------------------------------------------------------------
+  /api/billing/charges:
+    post:
+      summary: Add a one-time charge (ChargeAddToLedger)
+      operationId: billingAddCharge
+      description: >
+        Adds a one-time charge to a ledger via `ChargeAddToLedger`.
+
+        **SOAP operation**: `ChargeAddToLedger`
+
+        **Audit event**: `CHARGE_ADDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Charge Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddChargeRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              charge_description_id: 12
+              amount: 150.00
+              comment: "Late fee"
+      responses:
+        "200":
+          description: >
+            Charge submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/charges/recurring
+  # ---------------------------------------------------------------------------
+  /api/billing/charges/recurring:
+    post:
+      summary: Add a recurring charge (RecurringChargeAddToLedger_v1)
+      operationId: billingAddRecurringCharge
+      description: >
+        Adds a recurring charge to a ledger. The charge recurs at the given
+        `frequency` (in months) starting from `start_date`.
+
+        **SOAP operation**: `RecurringChargeAddToLedger_v1`
+
+        **Audit event**: `CHARGE_ADDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Charge Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecurringChargeRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              charge_description_id: 12
+              amount: 50.00
+              start_date: "2026-05-01"
+              frequency: 1
+      responses:
+        "200":
+          description: >
+            Recurring charge submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/charges/future
+  # ---------------------------------------------------------------------------
+  /api/billing/charges/future:
+    post:
+      summary: Generate future charges (CustomerAccountsMakeFutureCharges)
+      operationId: billingMakeFutureCharges
+      description: >
+        Generates all outstanding charges for a ledger through the specified date.
+
+        **SOAP operation**: `CustomerAccountsMakeFutureCharges`
+
+        **Audit event**: `CHARGE_ADDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Charge Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FutureChargesRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              charge_through_date: "2026-06-30"
+      responses:
+        "200":
+          description: >
+            Future charges generated. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/charges/{ledger_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/charges/{ledger_id}:
+    get:
+      summary: List all charges for a ledger (ChargesAllByLedgerID)
+      operationId: billingChargesByLedger
+      description: >
+        Returns all charges associated with a ledger.
+
+        **SOAP operation**: `ChargesAllByLedgerID`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Charge Management
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ledger_id
+          in: path
+          required: true
+          description: Ledger ID to retrieve charges for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5001
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: List of charges for the ledger.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                count: 3
+                data:
+                  - ChargeID: "8001"
+                    ChargeDescriptionID: "12"
+                    dcAmount: "150.00"
+                    dCharged: "2026-04-01"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # PUT /api/billing/charges/price
+  # ---------------------------------------------------------------------------
+  /api/billing/charges/price:
+    put:
+      summary: Update charge price (ChargePriceUpdate)
+      operationId: billingUpdateChargePrice
+      description: >
+        Updates the price of an existing charge.
+
+        **SOAP operation**: `ChargePriceUpdate`
+
+        **Audit event**: `CHARGE_PRICE_UPDATED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Charge Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChargePriceRequest"
+            example:
+              site_code: "LSETUP"
+              charge_id: 8001
+              new_price: 175.00
+      responses:
+        "200":
+          description: >
+            Price updated. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      charge_id:
+                        type: integer
+                        example: 8001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                charge_id: 8001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/credits
+  # ---------------------------------------------------------------------------
+  /api/billing/credits:
+    post:
+      summary: Apply a credit (ApplyCredit)
+      operationId: billingApplyCredit
+      description: >
+        Applies a credit amount to a ledger.
+
+        **SOAP operation**: `ApplyCredit`
+
+        **Audit event**: `CREDIT_APPLIED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Charge Management
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyCreditRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              amount: 25.00
+              comment: "Goodwill credit"
+      responses:
+        "200":
+          description: >
+            Credit applied. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ===========================================================================
+  # SECTION 2: Ledger & Balance
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/ledgers/{tenant_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/ledgers/{tenant_id}:
+    get:
+      summary: List ledgers for a tenant (LedgersByTenantID_v3)
+      operationId: billingLedgersByTenant
+      description: >
+        Returns all ledgers associated with a tenant.
+
+        **SOAP operation**: `LedgersByTenantID_v3`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Ledger & Balance
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          description: Tenant ID to retrieve ledgers for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 12345
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: List of ledgers for the tenant.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      tenant_id:
+                        type: integer
+                        example: 12345
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                tenant_id: 12345
+                count: 2
+                data:
+                  - LedgerID: "5001"
+                    UnitID: "10042"
+                    iStatus: "1"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/balance/{ledger_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/balance/{ledger_id}:
+    get:
+      summary: Get balance details (CustomerAccountsBalanceDetails_v2)
+      operationId: billingBalanceDetails
+      description: >
+        Returns balance details for a ledger, including outstanding amounts
+        and payment history summary.
+
+        **SOAP operation**: `CustomerAccountsBalanceDetails_v2`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Ledger & Balance
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ledger_id
+          in: path
+          required: true
+          description: Ledger ID to retrieve balance for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5001
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: Balance details for the ledger.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                count: 1
+                data:
+                  - dcBalance: "280.00"
+                    dcTotalCharges: "560.00"
+                    dcTotalPayments: "280.00"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/balance-with-discount/{ledger_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/balance-with-discount/{ledger_id}:
+    get:
+      summary: Get balance with discount info (CustomerAccountsBalanceDetailsWithDiscount)
+      operationId: billingBalanceWithDiscount
+      description: >
+        Returns balance details for a ledger including any active discount
+        plan information.
+
+        **SOAP operation**: `CustomerAccountsBalanceDetailsWithDiscount`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Ledger & Balance
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ledger_id
+          in: path
+          required: true
+          description: Ledger ID to retrieve balance for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5001
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: Balance details with discount information.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                count: 1
+                data:
+                  - dcBalance: "252.00"
+                    dcDiscountAmount: "28.00"
+                    sDiscountPlanName: "10% Off First 3 Months"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/paid-through/{ledger_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/paid-through/{ledger_id}:
+    get:
+      summary: Get paid-through date (PaidThroughDateByLedgerID)
+      operationId: billingPaidThroughDate
+      description: >
+        Returns the paid-through date for a ledger, indicating how far
+        ahead the account is paid.
+
+        **SOAP operation**: `PaidThroughDateByLedgerID`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Ledger & Balance
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ledger_id
+          in: path
+          required: true
+          description: Ledger ID to query.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5001
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: Paid-through date and SOAP return info.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, site_code, ledger_id, ret_code, ret_msg, data]
+                properties:
+                  status:
+                    type: string
+                    enum: [success]
+                    example: "success"
+                  site_code:
+                    $ref: "#/components/schemas/SiteCode"
+                  ledger_id:
+                    type: integer
+                    example: 5001
+                  ret_code:
+                    type: string
+                    nullable: true
+                    example: "1"
+                  ret_msg:
+                    type: string
+                    example: "2026-05-31"
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SoapRecord"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: "2026-05-31"
+                data:
+                  - Ret_Code: "1"
+                    Ret_Msg: "2026-05-31"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/transactions/{ledger_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/transactions/{ledger_id}:
+    get:
+      summary: List all charges and payments (ChargesAndPaymentsByLedgerID)
+      operationId: billingTransactionsByLedger
+      description: >
+        Returns all charges and payments for a ledger in a single combined list.
+
+        **SOAP operation**: `ChargesAndPaymentsByLedgerID`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Ledger & Balance
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ledger_id
+          in: path
+          required: true
+          description: Ledger ID to retrieve transactions for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5001
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: Combined list of charges and payments.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                count: 6
+                data:
+                  - TransactionType: "Charge"
+                    dcAmount: "280.00"
+                    dTransaction: "2026-04-01"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/statement/{ledger_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/statement/{ledger_id}:
+    get:
+      summary: Get full ledger statement (LedgerStatementByLedgerID)
+      operationId: billingLedgerStatement
+      description: >
+        Returns the full statement for a ledger, including all line items.
+
+        **SOAP operation**: `LedgerStatementByLedgerID`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Ledger & Balance
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ledger_id
+          in: path
+          required: true
+          description: Ledger ID to retrieve statement for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5001
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: Full statement for the ledger.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                count: 10
+                data:
+                  - LineType: "Charge"
+                    sDescription: "Monthly Rent"
+                    dcAmount: "280.00"
+                    dDate: "2026-04-01"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/ledger-transfer
+  # ---------------------------------------------------------------------------
+  /api/billing/ledger-transfer:
+    post:
+      summary: Transfer ledger to new tenant (LedgerTransferToNewTenant)
+      operationId: billingLedgerTransfer
+      description: >
+        Transfers a ledger from its current tenant to a different tenant.
+
+        **SOAP operation**: `LedgerTransferToNewTenant`
+
+        **Audit event**: `LEDGER_TRANSFERRED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Ledger & Balance
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LedgerTransferRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              new_tenant_id: 67890
+      responses:
+        "200":
+          description: >
+            Transfer submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+                      new_tenant_id:
+                        type: integer
+                        example: 67890
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                new_tenant_id: 67890
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/discount/remove
+  # ---------------------------------------------------------------------------
+  /api/billing/discount/remove:
+    post:
+      summary: Remove discount from ledger (RemoveDiscountFromLedger)
+      operationId: billingRemoveDiscount
+      description: >
+        Removes a discount plan from a ledger.
+
+        **SOAP operation**: `RemoveDiscountFromLedger`
+
+        **Audit event**: `DISCOUNT_REMOVED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Ledger & Balance
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveDiscountRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              discount_plan_id: 42
+      responses:
+        "200":
+          description: >
+            Discount removal submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+                      discount_plan_id:
+                        type: integer
+                        example: 42
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                discount_plan_id: 42
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ===========================================================================
+  # SECTION 3: Payments
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/payments/cash
+  # ---------------------------------------------------------------------------
+  /api/billing/payments/cash:
+    post:
+      summary: Record cash payment (PaymentSimpleCashWithSource)
+      operationId: billingPaymentCash
+      description: >
+        Records a cash payment against a ledger.
+
+        **SOAP operation**: `PaymentSimpleCashWithSource`
+
+        **Audit event**: `PAYMENT_RECORDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCashRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              amount: 280.00
+              source: "Walk-in"
+              test_mode: false
+      responses:
+        "200":
+          description: >
+            Payment submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/payments/check
+  # ---------------------------------------------------------------------------
+  /api/billing/payments/check:
+    post:
+      summary: Record check payment (PaymentSimpleCheckWithSource)
+      operationId: billingPaymentCheck
+      description: >
+        Records a check/cheque payment against a ledger.
+
+        **SOAP operation**: `PaymentSimpleCheckWithSource`
+
+        **Audit event**: `PAYMENT_RECORDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCheckRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              amount: 280.00
+              check_number: "CHK-20260410-001"
+              source: "Walk-in"
+              test_mode: false
+      responses:
+        "200":
+          description: >
+            Payment submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/payments/bank-transfer
+  # ---------------------------------------------------------------------------
+  /api/billing/payments/bank-transfer:
+    post:
+      summary: Record bank transfer payment (PaymentSimpleBankTransferWithSource)
+      operationId: billingPaymentBankTransfer
+      description: >
+        Records a bank transfer payment against a ledger.
+
+        **SOAP operation**: `PaymentSimpleBankTransferWithSource`
+
+        **Audit event**: `PAYMENT_RECORDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentBankTransferRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              amount: 280.00
+              reference: "TRF-20260410-ABC"
+              source: "Online Banking"
+              test_mode: false
+      responses:
+        "200":
+          description: >
+            Payment submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/payments/card
+  # ---------------------------------------------------------------------------
+  /api/billing/payments/card:
+    post:
+      summary: Record card payment (PaymentSimpleWithSource_v3)
+      operationId: billingPaymentCard
+      description: >
+        Records a card payment against a ledger. Requires a `payment_type_id`
+        from the `/payment-types` endpoint.
+
+        **SOAP operation**: `PaymentSimpleWithSource_v3`
+
+        **Audit event**: `PAYMENT_RECORDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCardRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              amount: 280.00
+              payment_type_id: 3
+              source: "POS Terminal"
+              test_mode: false
+      responses:
+        "200":
+          description: >
+            Payment submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/payments/multi
+  # ---------------------------------------------------------------------------
+  /api/billing/payments/multi:
+    post:
+      summary: Record multiple payments (PaymentMultipleWithSource_v3)
+      operationId: billingPaymentMulti
+      description: >
+        Records multiple payments in a single SOAP call. Ledger IDs, amounts,
+        and payment type IDs are sent as comma-separated strings to the SOAP
+        operation. Maximum 50 payments per request.
+
+        **SOAP operation**: `PaymentMultipleWithSource_v3`
+
+        **Audit event**: `PAYMENT_RECORDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentMultiRequest"
+            example:
+              site_code: "LSETUP"
+              payments:
+                - ledger_id: 5001
+                  amount: 280.00
+                  payment_type_id: 3
+                - ledger_id: 5002
+                  amount: 150.00
+                  payment_type_id: 3
+              source: "Batch Payment"
+              test_mode: false
+      responses:
+        "200":
+          description: >
+            Payments submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, site_code, payment_count, ret_code, ret_msg]
+                properties:
+                  status:
+                    type: string
+                    enum: [success, error]
+                    example: "success"
+                  site_code:
+                    $ref: "#/components/schemas/SiteCode"
+                  payment_count:
+                    type: integer
+                    description: Number of payments in the request.
+                    example: 2
+                  ret_code:
+                    type: string
+                    nullable: true
+                    example: "1"
+                  ret_msg:
+                    type: string
+                    example: ""
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                payment_count: 2
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/payments/{ledger_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/payments/{ledger_id}:
+    get:
+      summary: List payments for a ledger (PaymentsByLedgerID)
+      operationId: billingPaymentsByLedger
+      description: >
+        Returns all payments recorded against a ledger.
+
+        **SOAP operation**: `PaymentsByLedgerID`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ledger_id
+          in: path
+          required: true
+          description: Ledger ID to retrieve payments for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5001
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: List of payments for the ledger.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                count: 2
+                data:
+                  - PaymentID: "9001"
+                    dcAmount: "280.00"
+                    sPaymentType: "Cash"
+                    dPayment: "2026-04-01"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/payment-types
+  # ---------------------------------------------------------------------------
+  /api/billing/payment-types:
+    get:
+      summary: List available payment types (PaymentTypesRetrieve)
+      operationId: billingPaymentTypes
+      description: >
+        Returns the list of available payment types for a site. These IDs
+        are used when recording card or multi payments.
+
+        **SOAP operation**: `PaymentTypesRetrieve`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Payments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: List of payment types.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListResponse"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                count: 4
+                data:
+                  - PaymentTypeID: "1"
+                    sDescription: "Cash"
+                  - PaymentTypeID: "3"
+                    sDescription: "Visa/Mastercard"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ===========================================================================
+  # SECTION 4: Refunds
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/refunds/cash
+  # ---------------------------------------------------------------------------
+  /api/billing/refunds/cash:
+    post:
+      summary: Process cash refund (RefundPaymentCash)
+      operationId: billingRefundCash
+      description: >
+        Processes a cash refund against a ledger.
+
+        **SOAP operation**: `RefundPaymentCash`
+
+        **Audit event**: `REFUND_PROCESSED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Refunds
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundCashRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              amount: 50.00
+              comment: "Overpayment refund"
+      responses:
+        "200":
+          description: >
+            Refund submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/refunds/check
+  # ---------------------------------------------------------------------------
+  /api/billing/refunds/check:
+    post:
+      summary: Process check refund (RefundPaymentCheck)
+      operationId: billingRefundCheck
+      description: >
+        Processes a check/cheque refund against a ledger.
+
+        **SOAP operation**: `RefundPaymentCheck`
+
+        **Audit event**: `REFUND_PROCESSED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Refunds
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundCheckRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              amount: 50.00
+              check_number: "REF-CHK-001"
+              comment: "Deposit refund"
+      responses:
+        "200":
+          description: >
+            Refund submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/refunds/card
+  # ---------------------------------------------------------------------------
+  /api/billing/refunds/card:
+    post:
+      summary: Process credit card refund (RefundPaymentCreditCard_v2)
+      operationId: billingRefundCard
+      description: >
+        Processes a credit card refund against a ledger. Requires the original
+        `payment_id` to refund against.
+
+        **SOAP operation**: `RefundPaymentCreditCard_v2`
+
+        **Audit event**: `REFUND_PROCESSED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Refunds
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundCardRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              amount: 50.00
+              payment_id: 9001
+              comment: "Card refund — duplicate charge"
+      responses:
+        "200":
+          description: >
+            Refund submitted. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ===========================================================================
+  # SECTION 5: Invoices & Move-Out
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/invoices/{tenant_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/invoices/{tenant_id}:
+    get:
+      summary: List invoices for a tenant (TenantInvoicesByTenantID)
+      operationId: billingInvoicesByTenant
+      description: >
+        Returns all invoices for a tenant.
+
+        **SOAP operation**: `TenantInvoicesByTenantID`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Invoices & Move-Out
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: tenant_id
+          in: path
+          required: true
+          description: Tenant ID to retrieve invoices for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 12345
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: List of invoices for the tenant.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      tenant_id:
+                        type: integer
+                        example: 12345
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                tenant_id: 12345
+                count: 3
+                data:
+                  - InvoiceID: "2001"
+                    dInvoice: "2026-04-01"
+                    dcAmount: "280.00"
+                    bPaid: "true"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/move-out/schedule
+  # ---------------------------------------------------------------------------
+  /api/billing/move-out/schedule:
+    post:
+      summary: Schedule a move-out (ScheduleMoveOut)
+      operationId: billingScheduleMoveOut
+      description: >
+        Schedules a move-out date for a ledger. The tenant's unit will be
+        vacated on the specified date.
+
+        **SOAP operation**: `ScheduleMoveOut`
+
+        **Audit event**: `MOVE_OUT_SCHEDULED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Invoices & Move-Out
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleMoveOutRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              scheduled_date: "2026-05-31"
+      responses:
+        "200":
+          description: >
+            Move-out scheduled. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+                      scheduled_date:
+                        type: string
+                        format: date
+                        example: "2026-05-31"
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                scheduled_date: "2026-05-31"
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ===========================================================================
+  # SECTION 6: Insurance
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # POST /api/billing/insurance
+  # ---------------------------------------------------------------------------
+  /api/billing/insurance:
+    post:
+      summary: Add insurance coverage (InsuranceCoverageAddToLedger)
+      operationId: billingAddInsurance
+      description: >
+        Adds insurance coverage to a ledger.
+
+        **SOAP operation**: `InsuranceCoverageAddToLedger`
+
+        **Audit event**: `INSURANCE_ADDED`
+
+        **Rate limit**: 5 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:write`
+      tags:
+        - Insurance
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddInsuranceRequest"
+            example:
+              site_code: "LSETUP"
+              ledger_id: 5001
+              insurance_coverage_id: 7
+      responses:
+        "200":
+          description: >
+            Insurance added. Check `status` and `ret_code` for SOAP-level result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/MutationResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+                      insurance_coverage_id:
+                        type: integer
+                        example: 7
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                insurance_coverage_id: 7
+                ret_code: "1"
+                ret_msg: ""
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
+
+  # ---------------------------------------------------------------------------
+  # GET /api/billing/insurance/{ledger_id}
+  # ---------------------------------------------------------------------------
+  /api/billing/insurance/{ledger_id}:
+    get:
+      summary: Get insurance status (InsuranceLedgerStatusByLedgerID)
+      operationId: billingInsuranceStatus
+      description: >
+        Returns the current insurance coverage status for a ledger.
+
+        **SOAP operation**: `InsuranceLedgerStatusByLedgerID`
+
+        **Rate limit**: 30 requests per 60 seconds per API key.
+
+        **Required scope**: `billing:read`
+      tags:
+        - Insurance
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: ledger_id
+          in: path
+          required: true
+          description: Ledger ID to retrieve insurance status for.
+          schema:
+            type: integer
+            minimum: 1
+          example: 5001
+        - name: site_code
+          in: query
+          required: true
+          description: StorageMaker location code.
+          schema:
+            $ref: "#/components/schemas/SiteCode"
+      responses:
+        "200":
+          description: Insurance status for the ledger.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListResponse"
+                  - type: object
+                    properties:
+                      ledger_id:
+                        type: integer
+                        example: 5001
+              example:
+                status: "success"
+                site_code: "LSETUP"
+                ledger_id: 5001
+                count: 1
+                data:
+                  - InsuranceCoverageID: "7"
+                    sDescription: "Standard Coverage"
+                    dcCoverageAmount: "5000.00"
+                    dcPremium: "15.00"
+        "400":
+          $ref: "#/components/responses/400BadRequest"
+        "401":
+          $ref: "#/components/responses/401Unauthorized"
+        "403":
+          $ref: "#/components/responses/403Forbidden"
+        "429":
+          $ref: "#/components/responses/429TooManyRequests"
+        "500":
+          $ref: "#/components/responses/500InternalError"
+        "502":
+          $ref: "#/components/responses/502SoapError"
