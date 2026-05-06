@@ -1,0 +1,467 @@
+{% extends "base.html" %}
+{% block title %}Call Scoring Rubric{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>Call Scoring Rubric</h1>
+    <span id="version-info" style="font-size: 0.85rem; color: #6b7280;"></span>
+</div>
+
+<p style="color: #6b7280; font-size: 0.9rem; margin-bottom: 1rem;">
+    Edit the LLM rubric used to score Zoom calls. Changes take effect within 5 minutes
+    of saving (in-process cache TTL). Use the test panel to preview how Grok will score
+    a transcript with your current draft.
+</p>
+
+<!-- DATA QUALITY ENUMS — form editor for Categories / Subcategories / Sales Outcomes -->
+<div class="card" style="margin-bottom: 1rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+        <h3 style="margin: 0; font-size: 1rem;">Data Quality Enums</h3>
+        <span style="font-size: 0.8rem; color: #6b7280;">These are the fixed lists the LLM must pick from. Edit here, then Save below.</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 1rem;">
+
+        <!-- Categories -->
+        <div>
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem;">Call Categories</h4>
+            <div id="categories-list" style="border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.5rem; min-height: 150px; background: #f9fafb;"></div>
+            <div style="display: flex; gap: 0.25rem; margin-top: 0.5rem;">
+                <input id="new-category" type="text" placeholder="New category" style="flex: 1; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.8rem;">
+                <button class="btn" onclick="addCategory()" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;">Add</button>
+            </div>
+        </div>
+
+        <!-- Subcategories (hierarchical) -->
+        <div>
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem;">Call Subcategories <span style="font-size: 0.75rem; color: #6b7280; font-weight: normal;">(per category)</span></h4>
+            <div id="subcategories-editor" style="border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.5rem; min-height: 150px; background: #f9fafb; max-height: 40vh; overflow-y: auto;"></div>
+        </div>
+
+        <!-- Sales Outcomes -->
+        <div>
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem;">Sales Outcomes</h4>
+            <div id="outcomes-list" style="border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.5rem; min-height: 150px; background: #f9fafb;"></div>
+            <div style="display: flex; gap: 0.25rem; margin-top: 0.5rem;">
+                <input id="new-outcome" type="text" placeholder="New outcome" style="flex: 1; padding: 0.3rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: 0.8rem;">
+                <button class="btn" onclick="addOutcome()" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;">Add</button>
+            </div>
+        </div>
+
+    </div>
+
+    <div style="display: flex; justify-content: flex-end; margin-top: 0.75rem; gap: 0.5rem;">
+        <span id="enum-status" style="font-size: 0.8rem; color: #059669; align-self: center;"></span>
+        <button class="btn" onclick="applyEnumsToJson()" style="background: #2563eb; color: white;">Apply Enums to JSON</button>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+
+    <!-- LEFT: Config editor -->
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <h3 style="margin: 0; font-size: 1rem;">Rubric JSON</h3>
+            <div>
+                <button class="btn" onclick="reloadConfig()" style="margin-right: 0.5rem;">Reload</button>
+                <button class="btn" onclick="saveConfig()" style="background: #059669; color: white;">Save</button>
+            </div>
+        </div>
+        <div id="validation-errors" style="display: none; padding: 0.75rem; background: #fee2e2; color: #b91c1c; border-radius: 4px; margin-bottom: 0.5rem; font-size: 0.85rem;"></div>
+        <textarea id="config-editor"
+                  spellcheck="false"
+                  style="width: 100%; height: 70vh; font-family: 'Courier New', monospace; font-size: 0.78rem; border: 1px solid #d1d5db; border-radius: 4px; padding: 0.5rem; resize: vertical;"
+                  placeholder="Loading..."></textarea>
+        <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #6b7280;">
+            Each dimension needs: <code>key</code>, <code>type</code> (int|enum|text|bool),
+            <code>applies_to</code> (all|sales|support), <code>sugar_field</code>, <code>rubric</code>, <code>enabled</code>.
+            Set <code>"enabled": false</code> to disable a dimension without removing it.
+        </div>
+    </div>
+
+    <!-- RIGHT: Test panel -->
+    <div class="card">
+        <h3 style="margin: 0 0 0.75rem 0; font-size: 1rem;">Test on Transcript</h3>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 80px; gap: 0.5rem; margin-bottom: 0.5rem;">
+            <div>
+                <label style="display: block; font-size: 0.75rem; margin-bottom: 0.2rem;">Direction</label>
+                <select id="test-direction" style="width: 100%; padding: 0.4rem; border: 1px solid #d1d5db; border-radius: 4px;">
+                    <option value="outbound">Outbound</option>
+                    <option value="inbound">Inbound</option>
+                </select>
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; margin-bottom: 0.2rem;">Agent</label>
+                <input id="test-agent" type="text" value="James Oh" style="width: 100%; padding: 0.4rem; border: 1px solid #d1d5db; border-radius: 4px;">
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; margin-bottom: 0.2rem;">Customer</label>
+                <input id="test-customer" type="text" value="Mr Lee" style="width: 100%; padding: 0.4rem; border: 1px solid #d1d5db; border-radius: 4px;">
+            </div>
+            <div>
+                <label style="display: block; font-size: 0.75rem; margin-bottom: 0.2rem;">Duration (s)</label>
+                <input id="test-duration" type="number" value="171" style="width: 100%; padding: 0.4rem; border: 1px solid #d1d5db; border-radius: 4px;">
+            </div>
+        </div>
+
+        <textarea id="test-transcript"
+                  spellcheck="false"
+                  placeholder="Paste a conversation-formatted transcript here (e.g. [Agent (James Oh)]: Hello...\n[Customer]: Yes...)"
+                  style="width: 100%; height: 16vh; font-family: 'Courier New', monospace; font-size: 0.8rem; border: 1px solid #d1d5db; border-radius: 4px; padding: 0.5rem; resize: vertical;"></textarea>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin: 0.5rem 0;">
+            <button class="btn" onclick="loadSampleTranscript()" style="font-size: 0.8rem; padding: 0.3rem 0.6rem;">Load James Oh sample</button>
+            <button class="btn" onclick="runTest()" style="background: #2563eb; color: white;">Run Scoring Test</button>
+        </div>
+
+        <div id="test-status" style="font-size: 0.85rem; padding: 0.4rem; border-radius: 4px; display: none; margin-bottom: 0.5rem;"></div>
+
+        <pre id="test-result" style="background: #f3f4f6; padding: 0.75rem; border-radius: 4px; font-size: 0.78rem; max-height: 40vh; overflow-y: auto; margin: 0;">No test run yet.</pre>
+    </div>
+</div>
+
+<script>
+    const API_TOKEN = localStorage.getItem('api_token') || '';
+
+    function getCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    function apiHeaders() {
+        const headers = { 'Content-Type': 'application/json' };
+        if (API_TOKEN) headers['Authorization'] = `Bearer ${API_TOKEN}`;
+        const csrf = getCSRFToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
+        return headers;
+    }
+
+    function showErrors(messages) {
+        const el = document.getElementById('validation-errors');
+        if (!messages || messages.length === 0) {
+            el.style.display = 'none';
+            return;
+        }
+        el.innerHTML = '<strong>Validation errors:</strong><ul style="margin: 0.25rem 0 0 1rem;">' +
+            messages.map(m => '<li>' + escHtml(m) + '</li>').join('') + '</ul>';
+        el.style.display = 'block';
+    }
+
+    function escHtml(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function showTestStatus(msg, ok) {
+        const el = document.getElementById('test-status');
+        el.textContent = msg;
+        el.style.display = 'block';
+        el.style.background = ok ? '#d1fae5' : '#fee2e2';
+        el.style.color = ok ? '#059669' : '#b91c1c';
+    }
+
+    async function reloadConfig() {
+        try {
+            const res = await fetch('/api/call-scoring/config', { headers: apiHeaders() });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            const cfg = data.config || {};
+            // Strip the synthetic _version key from the editor view
+            delete cfg._version;
+            document.getElementById('config-editor').value = JSON.stringify(cfg, null, 2);
+            document.getElementById('version-info').textContent =
+                'Version ' + data.version + ' · updated ' + (data.updated_at || 'unknown') +
+                ' by ' + (data.updated_by || 'unknown');
+            showErrors([]);
+            // Parse and render the enum editors from the loaded JSON
+            renderEnumEditors(cfg);
+        } catch (e) {
+            showErrors(['Failed to load config: ' + e.message]);
+        }
+    }
+
+    // ---------- Enum form editors ----------
+
+    function getDim(cfg, key) {
+        return (cfg.dimensions || []).find(d => d.key === key);
+    }
+
+    function renderEnumEditors(cfg) {
+        const catDim = getDim(cfg, 'call_category');
+        const subDim = getDim(cfg, 'call_subcategory');
+        const outDim = getDim(cfg, 'sales_outcome');
+
+        const categories = (catDim && catDim.values) || [];
+        const subsByParent = (subDim && subDim.values_by_parent) || {};
+        const outcomes = (outDim && outDim.values) || [];
+
+        renderCategories(categories);
+        renderSubcategories(categories, subsByParent);
+        renderOutcomes(outcomes);
+    }
+
+    function renderCategories(categories) {
+        const box = document.getElementById('categories-list');
+        box.innerHTML = '';
+        categories.forEach((c, i) => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; gap: 0.25rem; margin-bottom: 0.25rem;';
+            row.innerHTML = `
+                <input type="text" value="${escAttr(c)}" data-idx="${i}" style="flex: 1; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 3px; font-size: 0.8rem;">
+                <button onclick="removeCategory(${i})" style="padding: 0.15rem 0.4rem; background: #fee2e2; color: #b91c1c; border: none; border-radius: 3px; cursor: pointer;">×</button>
+            `;
+            box.appendChild(row);
+        });
+    }
+
+    function renderSubcategories(categories, subsByParent) {
+        const box = document.getElementById('subcategories-editor');
+        box.innerHTML = '';
+        categories.forEach(cat => {
+            const subs = subsByParent[cat] || [];
+            const group = document.createElement('details');
+            group.style.cssText = 'margin-bottom: 0.5rem; border: 1px solid #e5e7eb; border-radius: 3px; padding: 0.35rem;';
+            if (subs.length === 0) group.open = true;
+
+            let subHtml = '';
+            subs.forEach((s, i) => {
+                subHtml += `
+                    <div style="display: flex; gap: 0.25rem; margin-top: 0.2rem;">
+                        <input type="text" value="${escAttr(s)}" data-cat="${escAttr(cat)}" data-idx="${i}" style="flex: 1; padding: 0.2rem; border: 1px solid #d1d5db; border-radius: 3px; font-size: 0.78rem;">
+                        <button onclick="removeSub('${escAttr(cat)}', ${i})" style="padding: 0.1rem 0.35rem; background: #fee2e2; color: #b91c1c; border: none; border-radius: 3px; cursor: pointer; font-size: 0.75rem;">×</button>
+                    </div>
+                `;
+            });
+
+            group.innerHTML = `
+                <summary style="cursor: pointer; font-size: 0.85rem; font-weight: 500;">${escHtml(cat)} <span style="color: #6b7280; font-weight: normal;">(${subs.length})</span></summary>
+                <div style="margin-top: 0.3rem;">${subHtml}</div>
+                <div style="display: flex; gap: 0.25rem; margin-top: 0.3rem;">
+                    <input type="text" id="new-sub-${cssEsc(cat)}" placeholder="New subcategory" style="flex: 1; padding: 0.2rem; border: 1px solid #d1d5db; border-radius: 3px; font-size: 0.78rem;">
+                    <button onclick="addSub('${escAttr(cat)}')" style="padding: 0.1rem 0.5rem; font-size: 0.75rem;">Add</button>
+                </div>
+            `;
+            box.appendChild(group);
+        });
+    }
+
+    function renderOutcomes(outcomes) {
+        const box = document.getElementById('outcomes-list');
+        box.innerHTML = '';
+        outcomes.forEach((o, i) => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; gap: 0.25rem; margin-bottom: 0.25rem;';
+            row.innerHTML = `
+                <input type="text" value="${escAttr(o)}" data-idx="${i}" style="flex: 1; padding: 0.25rem; border: 1px solid #d1d5db; border-radius: 3px; font-size: 0.8rem;">
+                <button onclick="removeOutcome(${i})" style="padding: 0.15rem 0.4rem; background: #fee2e2; color: #b91c1c; border: none; border-radius: 3px; cursor: pointer;">×</button>
+            `;
+            box.appendChild(row);
+        });
+    }
+
+    function escAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/</g,'&lt;'); }
+    function cssEsc(s) { return String(s).replace(/[^a-z0-9]/gi, '_'); }
+
+    // --- Categories ---
+    function readEnumsFromDom() {
+        const categories = Array.from(document.querySelectorAll('#categories-list input[type=text]'))
+            .map(i => i.value.trim()).filter(Boolean);
+
+        const subsByParent = {};
+        document.querySelectorAll('#subcategories-editor details').forEach(g => {
+            // Find the parent category from the summary text
+            const summaryText = g.querySelector('summary').textContent || '';
+            const cat = summaryText.replace(/\s*\(\d+\)\s*$/, '').trim();
+            const subs = Array.from(g.querySelectorAll('input[type=text]'))
+                .filter(i => i.dataset && i.dataset.cat)  // skip the "new-sub" input
+                .map(i => i.value.trim())
+                .filter(Boolean);
+            if (cat) subsByParent[cat] = subs;
+        });
+        // Ensure every category has a key, even if empty, so removed subcats persist
+        categories.forEach(c => { if (!(c in subsByParent)) subsByParent[c] = []; });
+
+        const outcomes = Array.from(document.querySelectorAll('#outcomes-list input[type=text]'))
+            .map(i => i.value.trim()).filter(Boolean);
+
+        return { categories, subsByParent, outcomes };
+    }
+
+    function addCategory() {
+        const input = document.getElementById('new-category');
+        const val = input.value.trim();
+        if (!val) return;
+        const { categories, subsByParent, outcomes } = readEnumsFromDom();
+        if (categories.includes(val)) return;
+        categories.push(val);
+        subsByParent[val] = [];
+        renderCategories(categories);
+        renderSubcategories(categories, subsByParent);
+        input.value = '';
+    }
+
+    function removeCategory(idx) {
+        const { categories, subsByParent, outcomes } = readEnumsFromDom();
+        const removed = categories.splice(idx, 1)[0];
+        delete subsByParent[removed];
+        renderCategories(categories);
+        renderSubcategories(categories, subsByParent);
+    }
+
+    // --- Subcategories ---
+    function addSub(cat) {
+        const field = document.getElementById('new-sub-' + cssEsc(cat));
+        const val = field.value.trim();
+        if (!val) return;
+        const { categories, subsByParent, outcomes } = readEnumsFromDom();
+        if (!subsByParent[cat]) subsByParent[cat] = [];
+        if (subsByParent[cat].includes(val)) return;
+        subsByParent[cat].push(val);
+        renderSubcategories(categories, subsByParent);
+    }
+
+    function removeSub(cat, idx) {
+        const { categories, subsByParent, outcomes } = readEnumsFromDom();
+        if (subsByParent[cat]) {
+            subsByParent[cat].splice(idx, 1);
+            renderSubcategories(categories, subsByParent);
+        }
+    }
+
+    // --- Outcomes ---
+    function addOutcome() {
+        const input = document.getElementById('new-outcome');
+        const val = input.value.trim();
+        if (!val) return;
+        const { outcomes } = readEnumsFromDom();
+        if (outcomes.includes(val)) return;
+        outcomes.push(val);
+        renderOutcomes(outcomes);
+        input.value = '';
+    }
+
+    function removeOutcome(idx) {
+        const { outcomes } = readEnumsFromDom();
+        outcomes.splice(idx, 1);
+        renderOutcomes(outcomes);
+    }
+
+    // Write enum form state back into the JSON editor (still needs to be Saved separately)
+    function applyEnumsToJson() {
+        let cfg;
+        try {
+            cfg = JSON.parse(document.getElementById('config-editor').value);
+        } catch (e) {
+            showErrors(['Config JSON invalid: ' + e.message]);
+            return;
+        }
+        const { categories, subsByParent, outcomes } = readEnumsFromDom();
+
+        const catDim = getDim(cfg, 'call_category');
+        const subDim = getDim(cfg, 'call_subcategory');
+        const outDim = getDim(cfg, 'sales_outcome');
+
+        if (catDim) catDim.values = categories;
+        if (subDim) {
+            subDim.type = 'enum';
+            subDim.parent_key = 'call_category';
+            subDim.values_by_parent = subsByParent;
+            delete subDim.values;
+            delete subDim.max_length;
+        }
+        if (outDim) outDim.values = outcomes;
+
+        document.getElementById('config-editor').value = JSON.stringify(cfg, null, 2);
+        const st = document.getElementById('enum-status');
+        st.textContent = '✓ Applied to JSON — click Save below to persist';
+        setTimeout(() => { st.textContent = ''; }, 5000);
+    }
+
+    async function saveConfig() {
+        let cfg;
+        try {
+            cfg = JSON.parse(document.getElementById('config-editor').value);
+        } catch (e) {
+            showErrors(['Invalid JSON: ' + e.message]);
+            return;
+        }
+        try {
+            const res = await fetch('/api/call-scoring/config', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify({ config: cfg }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showErrors(data.errors || [data.error || 'Save failed']);
+                return;
+            }
+            showErrors([]);
+            document.getElementById('version-info').textContent =
+                'Version ' + data.version + ' · saved just now';
+        } catch (e) {
+            showErrors(['Save failed: ' + e.message]);
+        }
+    }
+
+    async function runTest() {
+        let cfg;
+        try {
+            cfg = JSON.parse(document.getElementById('config-editor').value);
+        } catch (e) {
+            showTestStatus('Config JSON invalid: ' + e.message, false);
+            return;
+        }
+        const transcript = document.getElementById('test-transcript').value.trim();
+        if (!transcript) {
+            showTestStatus('Paste a transcript first', false);
+            return;
+        }
+        showTestStatus('Calling Grok…', true);
+        document.getElementById('test-result').textContent = 'Running…';
+        try {
+            const res = await fetch('/api/call-scoring/test', {
+                method: 'POST',
+                headers: apiHeaders(),
+                body: JSON.stringify({
+                    transcript: transcript,
+                    direction: document.getElementById('test-direction').value,
+                    agent_name: document.getElementById('test-agent').value,
+                    customer_name: document.getElementById('test-customer').value,
+                    duration_sec: parseInt(document.getElementById('test-duration').value, 10) || 0,
+                    config: cfg,  // use the unsaved draft
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                showTestStatus('Test failed: ' + (data.error || res.status), false);
+                document.getElementById('test-result').textContent = JSON.stringify(data, null, 2);
+                return;
+            }
+            showTestStatus('Done', true);
+            document.getElementById('test-result').textContent = JSON.stringify(data.result, null, 2);
+        } catch (e) {
+            showTestStatus('Test failed: ' + e.message, false);
+        }
+    }
+
+    function loadSampleTranscript() {
+        document.getElementById('test-transcript').value =
+`[Agent (James Oh)]: Hello. Hi, is that Mr Lee?
+[Customer]: Yes, speaking.
+[Agent (James Oh)]: This is James calling from Extra Space at Innoslink. I'm following up on your storage enquiry.
+[Customer]: Yes, you sent me the pricing for the wine storage. The unit is too big for me — I was looking for something for 6 to 10 cases.
+[Agent (James Oh)]: Ah okay, you're looking for a smaller locker. Let me check what's available and call you back today.
+[Customer]: Yes please, the smallest one you have. Thanks.
+[Agent (James Oh)]: Got it, I'll find one and revert. Thank you, bye.
+[Customer]: Bye.`;
+        document.getElementById('test-direction').value = 'outbound';
+        document.getElementById('test-agent').value = 'James Oh';
+        document.getElementById('test-customer').value = 'Mr Lee';
+        document.getElementById('test-duration').value = '171';
+    }
+
+    // Initial load
+    reloadConfig();
+</script>
+{% endblock %}

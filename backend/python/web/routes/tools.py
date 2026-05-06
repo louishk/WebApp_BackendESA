@@ -8,6 +8,7 @@ from flask_login import login_required
 from web.auth.decorators import (
     billing_tools_access_required, inventory_tools_access_required,
     discount_tools_access_required, smart_lock_access_required,
+    scheduler_access_required,
 )
 
 tools_bp = Blueprint('tools', __name__, url_prefix='/tools')
@@ -91,3 +92,11 @@ def smart_lock_assignments():
 def smart_lock_config():
     """Smart Lock — site configuration page."""
     return render_template('tools/smart_lock_config.html')
+
+
+@tools_bp.route('/call-scoring')
+@login_required
+@scheduler_access_required
+def call_scoring():
+    """Call Scoring rubric editor (Zoom call quality LLM config)."""
+    return render_template('tools/call_scoring.html')
