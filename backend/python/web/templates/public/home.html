@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESA Backend Portal — Extra Space Asia</title>
+    <meta name="description" content="ESA Backend Portal is an internal operations platform for Extra Space Asia staff managing self-storage facilities across Asia.">
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+    <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet">
+    <style>
+        :root {
+            --esa-red: #C41230;
+            --esa-red-dark: #9E0E27;
+            --esa-navy: #1A2E5A;
+            --esa-gray: #F5F5F5;
+            --text: #222;
+            --muted: #666;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: var(--text);
+            line-height: 1.6;
+            background: #fff;
+        }
+        header {
+            background: var(--esa-navy);
+            color: #fff;
+            padding: 20px 0;
+        }
+        .container { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+        header .container { display: flex; justify-content: space-between; align-items: center; }
+        header h1 { font-size: 20px; font-weight: 600; }
+        header nav a {
+            color: #fff;
+            text-decoration: none;
+            margin-left: 24px;
+            font-size: 14px;
+        }
+        header nav a:hover { text-decoration: underline; }
+        .hero {
+            background: linear-gradient(135deg, var(--esa-navy) 0%, var(--esa-red) 100%);
+            color: #fff;
+            padding: 80px 0;
+            text-align: center;
+        }
+        .hero h2 { font-size: 38px; margin-bottom: 16px; font-weight: 700; }
+        .hero p { font-size: 18px; opacity: 0.95; max-width: 680px; margin: 0 auto; }
+        section { padding: 60px 0; }
+        section:nth-child(even) { background: var(--esa-gray); }
+        section h3 {
+            font-size: 26px;
+            margin-bottom: 20px;
+            color: var(--esa-navy);
+        }
+        section p { margin-bottom: 16px; color: var(--text); }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 24px;
+            margin-top: 30px;
+        }
+        .feature {
+            background: #fff;
+            padding: 24px;
+            border-radius: 8px;
+            border-left: 4px solid var(--esa-red);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .feature h4 { color: var(--esa-navy); margin-bottom: 10px; font-size: 17px; }
+        .feature p { color: var(--muted); font-size: 14px; margin: 0; }
+        footer {
+            background: var(--esa-navy);
+            color: #fff;
+            padding: 30px 0;
+            text-align: center;
+            font-size: 14px;
+        }
+        footer a { color: #fff; text-decoration: underline; margin: 0 12px; }
+        .login-btn {
+            display: inline-block;
+            margin-top: 24px;
+            padding: 12px 28px;
+            background: #fff;
+            color: var(--esa-navy);
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>ESA Backend Portal</h1>
+            <nav>
+                <a href="/home">Home</a>
+                <a href="/terms">Terms of Service</a>
+                <a href="/privacy">Privacy Policy</a>
+                <a href="/login">Staff Login</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="hero">
+        <div class="container">
+            <div style="display:inline-block;background:rgba(255,255,255,0.15);color:#fff;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600;letter-spacing:0.5px;margin-bottom:18px;">INTERNAL STAFF APPLICATION &middot; AUTHORIZED ACCESS ONLY</div>
+            <h2>ESA Backend Portal</h2>
+            <p>An internal operations platform used exclusively by authorized Extra Space Asia employees and contractors to manage self-storage facilities, customer reservations, billing, and analytics across our sites in Asia.</p>
+            <a href="/login" class="login-btn">Staff Login</a>
+        </div>
+    </div>
+
+    <section>
+        <div class="container">
+            <h3>About This Application</h3>
+            <p>The ESA Backend Portal is a <strong>private, internal-only</strong> web application operated by the <strong>Extra Space Asia</strong> group of companies, a self-storage operator with facilities across Singapore, Malaysia, Hong Kong, Taiwan, Japan, and Korea.</p>
+            <p>Access is restricted to authorized ESA staff and contractors. There is no public sign-up, no self-service registration, and no consumer-facing functionality. The Portal is not a product offered to the public, and it is not marketed to or usable by end consumers. Members of the public cannot create an account or use any feature of the Portal.</p>
+            <p>This Portal consolidates the internal operational tools used by our site managers, customer service teams, finance team, and corporate staff to run day-to-day storage operations. Consumer-facing services (customer sign-up, unit bookings, account management for renters) live on our separate public website at <a href="https://extraspaceasia.com/sg/">extraspaceasia.com/sg</a> and are governed by the group's <a href="https://extraspaceasia.com/sg/privacy-policy/">Corporate Privacy Policy</a>.</p>
+        </div>
+    </section>
+
+    <section>
+        <div class="container">
+            <h3>What the Portal Does</h3>
+            <div class="features">
+                <div class="feature">
+                    <h4>Reservations &amp; Billing</h4>
+                    <p>Staff tools for creating customer reservations, managing discount plans, and reviewing billing charges at each facility.</p>
+                </div>
+                <div class="feature">
+                    <h4>Site Operations</h4>
+                    <p>Inventory checkers, unit availability, smart lock management, and rent roll reporting across all ESA sites.</p>
+                </div>
+                <div class="feature">
+                    <h4>Analytics &amp; Reporting</h4>
+                    <p>Occupancy trends, revenue analysis, budget tracking, and executive dashboards sourced from our data warehouse.</p>
+                </div>
+                <div class="feature">
+                    <h4>Integrations</h4>
+                    <p>Connects with our StorageMaker property management system, SugarCRM, Google services, and other internal systems used for daily operations.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <div class="container">
+            <h3>Google API Usage</h3>
+            <p>The Portal uses Google APIs (primarily the Google Ads API and Google Cloud / BigQuery) so that authorized ESA marketing and analytics staff can review advertising campaign performance and internal business metrics from within a single internal tool. Only named ESA employees with explicit role-based permissions can sign in with Google and trigger these API calls; the Portal does not serve Google data to the public, does not resell it, and does not use it for advertising purposes.</p>
+            <p>Our use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements. Full details are in our <a href="/privacy">Privacy Policy</a>.</p>
+        </div>
+    </section>
+
+    <section>
+        <div class="container">
+            <h3>Who Can Use This Portal</h3>
+            <p>The Portal is accessible only to:</p>
+            <ul style="padding-left:24px;">
+                <li>Full-time and part-time employees of the Extra Space Asia group.</li>
+                <li>Contractors and service providers engaged by ESA under confidentiality and data protection obligations.</li>
+            </ul>
+            <p style="margin-top:12px;">All accounts are created and managed by ESA administrators. There is no public registration flow. If you are not an authorized ESA staff member and have arrived at this page, the Portal is not intended for you and no feature beyond this home page and the Privacy Policy is available without authentication.</p>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>&copy; Extra Space Asia. All rights reserved.</p>
+            <p style="margin-top:10px;">
+                <a href="/home">Home</a>
+                <a href="/terms">Terms of Service</a>
+                <a href="/privacy">Privacy Policy</a>
+                <a href="https://extraspaceasia.com/sg/">Company Website</a>
+                <a href="https://extraspaceasia.com/sg/privacy-policy/">Corporate Privacy Policy</a>
+            </p>
+        </div>
+    </footer>
+</body>
+</html>

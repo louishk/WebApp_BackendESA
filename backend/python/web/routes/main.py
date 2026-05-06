@@ -29,10 +29,30 @@ def robots_txt():
 
 @main_bp.route('/')
 def index():
-    """Landing page - redirect to dashboard if logged in."""
+    """Landing page - redirect to dashboard if logged in, else login."""
     if current_user.is_authenticated:
         return redirect(url_for('main.dashboard'))
     return redirect(url_for('auth.login'))
+
+
+@main_bp.route('/home')
+def public_home():
+    """Public marketing/info page (used as the Google OAuth homepage URL)."""
+    return render_template('public/home.html')
+
+
+@main_bp.route('/privacy')
+@main_bp.route('/privacy-policy')
+def privacy_policy():
+    """Public privacy policy (required for Google OAuth verification)."""
+    return render_template('public/privacy.html')
+
+
+@main_bp.route('/terms')
+@main_bp.route('/terms-of-service')
+def terms_of_service():
+    """Public terms of service (required for Google OAuth verification)."""
+    return render_template('public/terms.html')
 
 
 @main_bp.route('/dashboard')
