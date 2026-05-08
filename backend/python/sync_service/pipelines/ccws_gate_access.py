@@ -44,11 +44,12 @@ def _build_loc_to_site_map() -> Dict[str, int]:
 
 class CcwsGateAccessPipeline(BasePipeline):
 
-    def _make_fetcher(self, soap, crypto, loc_to_site, successful_sites):
+    def _make_fetcher(self, soap, crypto, loc_to_site, successful_sites, failed_sites):
         def fetch(sc: str) -> List[Dict[str, Any]]:
             site_id = loc_to_site.get(sc.strip())
             if site_id is None:
                 self.log.warning(f"{sc}: no SiteID mapping, skipped")
+                failed_sites.add(sc.strip())
                 return []
             try:
                 results = soap.call(
@@ -63,6 +64,7 @@ class CcwsGateAccessPipeline(BasePipeline):
                 )
             except Exception as e:
                 self.log.error(f"SOAP fetch failed for {sc}: {e}")
+                failed_sites.add(sc.strip())
                 return []
             # Mark site as successfully fetched (even if 0 rows came back) —
             # tombstone pass below uses this to clear ghost rows for sites
@@ -103,8 +105,11 @@ class CcwsGateAccessPipeline(BasePipeline):
         soap = build_soap_client()
         try:
             successful_sites: set = set()
+            failed_sites: set = set()
             rows, per_site = parallel_fetch(
-                self._make_fetcher(soap, crypto, loc_to_site, successful_sites),
+                self._make_fetcher(
+                    soap, crypto, loc_to_site, successful_sites, failed_sites,
+                ),
                 site_codes,
             )
 
@@ -191,7 +196,9 @@ class CcwsGateAccessPipeline(BasePipeline):
                              metadata={'per_site_counts': per_site,
                                        'sites_queried': len(site_codes),
                                        'tombstoned_rows': tombstoned,
-                                       'tombstone_skipped_sites': tombstone_skipped})
+                                       'tombstone_skipped_sites': tombstone_skipped,
+                                       'fetch_failed_sites': sorted(failed_sites),
+                                       'fetch_failed_count': len(failed_sites)})
         finally:
             try: soap.close()
             except Exception: pass

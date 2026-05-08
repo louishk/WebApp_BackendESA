@@ -78,6 +78,14 @@ class IglooAPIError(Exception):
     pass
 
 
+class IglooBridgePendingError(IglooAPIError):
+    """Raised when a bridge job submission is rejected because Igloo already
+    has a pending bridge job for the same PIN. Benign — caller should treat
+    as a skipped (not failed) push.
+    """
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -537,12 +545,25 @@ class IglooClient:
         except Exception as exc:
             resp_body = ''
             api_err = ''
+            status_code = None
             if hasattr(exc, 'response') and exc.response is not None:
+                status_code = exc.response.status_code
                 try:
                     resp_body = exc.response.text[:500]
                     api_err = (exc.response.json() or {}).get('error') or ''
                 except Exception:
                     pass
+
+            # 406 with "Existing job with the same PIN" is a benign duplicate —
+            # Igloo already has a pending bridge job for this PIN. Surface as a
+            # skip-worthy subclass so callers don't count it as a hard error.
+            if status_code == 406 and 'same pin' in (api_err or '').lower():
+                logger.debug(
+                    "Bridge job duplicate pin device=%s bridge=%s jobType=%s",
+                    device_id, bridge_id, job_type,
+                )
+                raise IglooBridgePendingError(f"Bridge pending: {api_err}")
+
             logger.error(
                 "Bridge job submit failed device=%s bridge=%s jobType=%s body=%s",
                 device_id, bridge_id, job_type, resp_body,

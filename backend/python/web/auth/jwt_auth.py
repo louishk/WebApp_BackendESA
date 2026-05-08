@@ -69,6 +69,10 @@ KNOWN_API_SCOPES = [
     'recommender:write',     # POST /reservations/reserve + POST /reservations/move-in
     'risk:read',             # GET /api/risk/* — read-only risk lookup
     'risk:admin',            # PUT/POST /api/risk/* — override + recompute
+    'smart_lock:read',       # GET /api/smart-lock/* — read keypads, padlocks, gate access
+    'smart_lock:write',      # PUT/POST /api/smart-lock/* — assign/revoke/push PINs
+    'sync:read',             # GET /api/orchestrator/* — pipeline state and runs
+    'sync:write',            # POST /api/orchestrator/pipelines/<name>/run — force-run
 ]
 
 

@@ -36,6 +36,13 @@ from sync_service.config import get_engine, session_scope
 logger = logging.getLogger(__name__)
 
 _PIN_RE = re.compile(r'^\d{4,10}$')
+_DIGIT_REDACT_RE = re.compile(r'\b\d{4,10}\b')
+
+
+def _redact_digits(s: str) -> str:
+    """Redact 4-10 digit sequences (likely PINs) from error messages
+    before persisting to the audit log."""
+    return _DIGIT_REDACT_RE.sub('<redacted>', s or '')
 
 
 def _esa_tag(site_id: int, unit_id: int, unit_name: Optional[str] = None) -> str:
@@ -93,7 +100,9 @@ def _revoke_reason(
 class IglooPinSyncPipeline(BasePipeline):
 
     def _execute(self, scope: Dict[str, Any]) -> RunResult:
-        from common.igloo_client import IglooClient, IglooAPIError, PIN_TYPE_PERMANENT
+        from common.igloo_client import (
+            IglooClient, IglooAPIError, IglooBridgePendingError, PIN_TYPE_PERMANENT,
+        )
         from common.gate_access_crypto import get_gate_crypto
 
         dry_run: bool = bool(scope.get('dry_run', False))
@@ -245,10 +254,19 @@ class IglooPinSyncPipeline(BasePipeline):
                     jobs = client.list_device_jobs(device_id)
                     pending_pins: Set[str] = set()
                     for j in jobs:
-                        if (j.get('status') == 'pending' and
-                                j.get('description') == 'create_bluetooth_pin'):
-                            ad = j.get('accessData', {})
-                            cp = ad.get('customPin')
+                        if j.get('status') != 'pending':
+                            continue
+                        # Direct device job: customPin in accessData
+                        if j.get('description') == 'create_bluetooth_pin':
+                            cp = (j.get('accessData') or {}).get('customPin')
+                            if cp:
+                                pending_pins.add(cp)
+                            continue
+                        # Bridge-proxied create-pin job (jobType=4). Distinct
+                        # shape: pin lives under jobData.pin.
+                        if j.get('jobType') == 4:
+                            jd = j.get('jobData') or {}
+                            cp = jd.get('pin') or jd.get('customPin')
                             if cp:
                                 pending_pins.add(cp)
                     device_pending[device_id] = pending_pins
@@ -448,21 +466,71 @@ class IglooPinSyncPipeline(BasePipeline):
                                 'pin': plain_pin,
                                 'pinType': 'permanent',
                             })
-                        except IglooAPIError:
+                        except IglooBridgePendingError:
+                            # Igloo already has a pending bridge job for this
+                            # PIN — benign, will resolve on a subsequent cycle.
+                            skipped_pending_job += 1
+                            logger.debug(
+                                "skip site=%s unit=%s device=%s: bridge job pending",
+                                site_id, unit_id, device_id,
+                            )
+                        except IglooAPIError as exc:
                             logger.error(
                                 "IglooPinSyncPipeline: push failed "
-                                "device=%s site=%s unit=%s",
-                                device_id, site_id, unit_id,
+                                "device=%s site=%s unit=%s err=%s",
+                                device_id, site_id, unit_id, exc,
                             )
+                            audit_rows.append(SmartLockAuditLog(
+                                action='pin_push_failed',
+                                entity_type='igloo',
+                                entity_id=device_id,
+                                site_id=site_id,
+                                unit_id=unit_id,
+                                detail=f"push error: {_redact_digits(str(exc))[:400]}",
+                                username='orchestrator',
+                            ))
                             errors += 1
 
                     else:
-                        # should_have_pin = False — revoke ESA-tagged PIN if present
+                        # should_have_pin = False — revoke ESA-tagged PIN if present.
                         if not existing_esa:
-                            continue  # nothing to do
+                            # No ESA-owned entry. But if the device has a
+                            # legacy (non-ESA) entry whose PIN matches the
+                            # current gate code, that's a security gap on
+                            # move-out: the tenant's PIN is live and we can't
+                            # revoke it (no accessId we own). Surface as a
+                            # warning + audit row so operators can clean up.
+                            if plain_pin and any(
+                                e.get('pin') == plain_pin
+                                and not _esa_tag_matches(e.get('name'), site_id, unit_id)
+                                for e in access_list
+                            ):
+                                logger.warning(
+                                    "IglooPinSyncPipeline: legacy PIN not revoked "
+                                    "on move-out site=%s unit=%s device=%s",
+                                    site_id, unit_id, device_id,
+                                )
+                                audit_rows.append(SmartLockAuditLog(
+                                    action='pin_revoke_skipped_legacy',
+                                    entity_type='igloo',
+                                    entity_id=device_id,
+                                    site_id=site_id,
+                                    unit_id=unit_id,
+                                    detail=(
+                                        f"unit {unit_id} vacated but PIN is on a "
+                                        f"non-ESA entry — manual revoke required"
+                                    ),
+                                    username='orchestrator',
+                                ))
+                            continue
 
                         access_id = existing_esa.get('id') or existing_esa.get('accessId', '')
                         if not access_id:
+                            logger.warning(
+                                "IglooPinSyncPipeline: ESA entry without accessId "
+                                "site=%s unit=%s device=%s — cannot revoke",
+                                site_id, unit_id, device_id,
+                            )
                             continue
 
                         reason = _revoke_reason(
@@ -494,12 +562,21 @@ class IglooPinSyncPipeline(BasePipeline):
                                 revoked_gate_locked += 1
                             else:
                                 revoked_moved_out += 1
-                        except IglooAPIError:
+                        except IglooAPIError as exc:
                             logger.error(
                                 "IglooPinSyncPipeline: revoke (%s) failed "
-                                "device=%s access_id=%s site=%s unit=%s",
-                                reason, device_id, access_id, site_id, unit_id,
+                                "device=%s access_id=%s site=%s unit=%s err=%s",
+                                reason, device_id, access_id, site_id, unit_id, exc,
                             )
+                            audit_rows.append(SmartLockAuditLog(
+                                action='pin_revoke_failed',
+                                entity_type='igloo',
+                                entity_id=device_id,
+                                site_id=site_id,
+                                unit_id=unit_id,
+                                detail=f"revoke ({reason}) error: {_redact_digits(str(exc))[:380]}",
+                                username='orchestrator',
+                            ))
                             errors += 1
 
             # --- 5) Flush audit log rows ---

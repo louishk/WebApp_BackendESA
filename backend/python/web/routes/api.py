@@ -5037,6 +5037,7 @@ def api_sl_config_list():
 
 @api_bp.route('/smart-lock/config/enabled')
 @require_auth
+@_require_sl_session_access
 @require_api_scope('smart_lock:read')
 def api_sl_config_enabled():
     """List only enabled smart lock sites. Lightweight endpoint for external consumers."""
@@ -5149,8 +5150,8 @@ def api_sl_gate_code():
     location_code = request.args.get('location_code', '')
     site_id = request.args.get('site_id', type=int)
 
-    if not unit_id or not location_code:
-        return jsonify({'error': 'unit_id and location_code required'}), 400
+    if not unit_id or not location_code or not site_id:
+        return jsonify({'error': 'unit_id, location_code, and site_id are required'}), 400
 
     session = current_app.get_middleware_session()
     try:
@@ -5161,8 +5162,8 @@ def api_sl_gate_code():
         if not record:
             return jsonify({'error': 'No gate access data for this unit'}), 404
 
-        # Site-scoping: verify caller-supplied site_id matches the record
-        if site_id and record.site_id != site_id:
+        # Site-scoping: site_id is mandatory and must match — fail closed.
+        if record.site_id != site_id:
             return jsonify({'error': 'Forbidden'}), 403
 
         from common.gate_access_crypto import get_gate_crypto
@@ -5567,12 +5568,17 @@ def api_sl_push_gate_pin():
         if not pin:
             return jsonify({'error': 'Gate access code is empty'}), 400
 
-        # 3) Push to Igloo as permanent PIN via bridge
+        # 3) Push to Igloo as permanent PIN via bridge.
+        # Use the canonical ESA-{site}-{unit} tag so igloo_pin_sync recognizes
+        # ownership and revokes on move-out. Plain unit_name leaves a dangling
+        # PIN forever after the tenant leaves.
         from common.igloo_client import PIN_TYPE_PERMANENT
+        from sync_service.pipelines.igloo_pin_sync import _esa_tag
         unit_name = gate.unit_name or f'Unit {unit_id}'
+        access_name = _esa_tag(site_id, unit_id, gate.unit_name)
         client = IglooClient()
         result = client.create_pin_via_bridge(
-            device_id, pin, unit_name, pin_type=PIN_TYPE_PERMANENT,
+            device_id, pin, access_name, pin_type=PIN_TYPE_PERMANENT,
         )
 
         # 4) Audit
