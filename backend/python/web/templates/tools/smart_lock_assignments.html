@@ -19,18 +19,77 @@
             <button class="btn btn-secondary" id="auto-assign-btn" onclick="autoAssignPadlocks()" style="display: none;">Auto-Assign Padlocks</button>
         </div>
         <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
-        <div id="refresh-info-wrapper" style="display: none; font-size: 0.8rem; color: #666;">
-            <span id="refresh-info"></span>
-            <button class="btn btn-secondary" id="refresh-btn" onclick="refreshUnitData()" style="margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem;">Refresh Unit Data</button>
-            <button id="refresh-gate-btn" class="btn btn-secondary" onclick="refreshGateData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #f59e0b; color: #d97706;"><i class="bi bi-shield-lock"></i> Refresh Gate Data</button>
-            <button id="refresh-igloo-btn" class="btn btn-secondary" onclick="refreshIglooData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Refresh Igloo Data</button>
-            <button id="sync-pins-btn" class="btn btn-secondary" onclick="syncPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #059669; color: #047857;" title="Reconcile Igloo PINs with SiteLink gate codes (push new / revoke on move-out)"><i class="bi bi-key-fill"></i> Sync PINs</button>
-            <button id="audit-pins-btn" class="btn btn-secondary" onclick="auditPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #8b5cf6; color: #7c3aed;"><i class="bi bi-key"></i> Audit PINs</button>
-            <span id="last-audit-info" style="display: none; margin-left: 0.5rem; font-size: 0.75rem; color: #6b7280;" title=""></span>
-            <span id="refresh-status" style="display: none; margin-left: 0.5rem;"></span>
+
+        <!-- Freshness metric tiles (2x2 grid). Each tile turns amber when its
+             timestamp is older than the per-source warn threshold and red when
+             stale beyond the alarm threshold. -->
+        <div id="freshness-tiles" style="display: none; margin-left: auto; display: grid; grid-template-columns: repeat(2, minmax(160px, 1fr)); gap: 0.4rem; align-self: center;">
+            <div class="freshness-tile" data-key="ccws_units">
+                <div class="freshness-tile-label">Unit data</div>
+                <div class="freshness-tile-time" id="ft-units">—</div>
+            </div>
+            <div class="freshness-tile" data-key="ccws_gate_access">
+                <div class="freshness-tile-label">Gate data</div>
+                <div class="freshness-tile-time" id="ft-gate">—</div>
+            </div>
+            <div class="freshness-tile" data-key="igloo">
+                <div class="freshness-tile-label">Igloo data</div>
+                <div class="freshness-tile-time" id="ft-igloo">—</div>
+            </div>
+            <div class="freshness-tile" data-key="igloo_pin_sync">
+                <div class="freshness-tile-label">PIN sync</div>
+                <div class="freshness-tile-time" id="ft-sync">—</div>
+            </div>
         </div>
     </div>
+
+    <!-- Action buttons row (refresh + sync + audit). Pushed below the
+         freshness tiles so the metric grid has horizontal room. -->
+    <div id="refresh-info-wrapper" style="display: none; margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid #f1f5f9; font-size: 0.8rem; color: #666;">
+        <button class="btn btn-secondary" id="refresh-btn" onclick="refreshUnitData()" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">Refresh Unit Data</button>
+        <button id="refresh-gate-btn" class="btn btn-secondary" onclick="refreshGateData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #f59e0b; color: #d97706;"><i class="bi bi-shield-lock"></i> Refresh Gate Data</button>
+        <button id="refresh-igloo-btn" class="btn btn-secondary" onclick="refreshIglooData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Refresh Igloo Data</button>
+        <button id="sync-pins-btn" class="btn btn-secondary" onclick="syncPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #059669; color: #047857;" title="Reconcile Igloo PINs with SiteLink gate codes (push new / revoke on move-out)"><i class="bi bi-key-fill"></i> Sync PINs</button>
+        <button id="audit-pins-btn" class="btn btn-secondary" onclick="auditPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #8b5cf6; color: #7c3aed;"><i class="bi bi-key"></i> Audit PINs</button>
+        <span id="last-audit-info" style="display: none; margin-left: 0.5rem; font-size: 0.75rem; color: #6b7280;" title=""></span>
+        <span id="refresh-status" style="display: none; margin-left: 0.5rem;"></span>
+    </div>
 </div>
+
+<style>
+.freshness-tile {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 0.35rem 0.6rem;
+    min-width: 150px;
+}
+.freshness-tile-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1.1;
+}
+.freshness-tile-time {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #111827;
+    margin-top: 0.1rem;
+    line-height: 1.2;
+}
+.freshness-tile.warn {
+    background: #fef3c7;
+    border-color: #fbbf24;
+}
+.freshness-tile.warn .freshness-tile-time { color: #b45309; }
+.freshness-tile.stale {
+    background: #fee2e2;
+    border-color: #f87171;
+}
+.freshness-tile.stale .freshness-tile-time { color: #b91c1c; }
+</style>
 
 <!-- Summary -->
 <div id="summary-row" style="display: none; margin-bottom: 1rem; gap: 1rem; flex-wrap: wrap;">
@@ -225,30 +284,47 @@
                 }
             });
 
-            // Show last refresh time
-            let refreshText = '';
-            // Build "Label: <timestamp>" items. Prefer per-site data
+            // Render the four freshness metric tiles. Prefer per-site data
             // freshness; fall back to last pipeline run (so freshly-onboarded
             // sites with zero rows still show when the cron last fired).
             const runs = data.pipeline_runs || {};
-            const _fmt = (s) => {
+            const _parse = (s) => {
                 if (!s) return null;
                 const d = new Date(s + 'Z');
-                return isNaN(d.getTime()) ? null : d.toLocaleString();
+                return isNaN(d.getTime()) ? null : d;
             };
-            const parts = [];
-            const unitTs = _fmt(data.last_refresh) || _fmt(runs.ccws_units);
-            if (unitTs) parts.push('Unit data: ' + unitTs);
-            const gateTs = _fmt(data.gate_refresh) || _fmt(runs.ccws_gate_access);
-            if (gateTs) parts.push('Gate data: ' + gateTs);
-            const iglooTs = _fmt(data.igloo_refresh) || _fmt(runs.igloo);
-            if (iglooTs) parts.push('Igloo data: ' + iglooTs);
-            const syncTs = _fmt(runs.igloo_pin_sync);
-            if (syncTs) parts.push('PIN sync: ' + syncTs);
-            refreshText = parts.join(' · ');
-            if (refreshText) {
-                document.getElementById('refresh-info').textContent = refreshText;
+            // Format relative time like "2m ago" / "3h ago" / absolute string
+            const _relAbs = (d) => {
+                if (!d) return ['—', null, null];
+                const ms = Date.now() - d.getTime();
+                const m = Math.floor(ms / 60000);
+                let rel;
+                if (m < 1) rel = 'just now';
+                else if (m < 60) rel = m + 'm ago';
+                else if (m < 1440) rel = Math.floor(m / 60) + 'h ago';
+                else rel = Math.floor(m / 1440) + 'd ago';
+                return [rel, d.toLocaleString(), m];
+            };
+            // warn / alarm thresholds in minutes per source — picked so the
+            // badge turns colour at the point an operator should investigate.
+            const TILE_THRESHOLDS = {
+                'ft-units': { warn: 240,  stale: 720,  d: _parse(data.last_refresh) || _parse(runs.ccws_units) },
+                'ft-gate':  { warn: 60,   stale: 240,  d: _parse(data.gate_refresh) || _parse(runs.ccws_gate_access) },
+                'ft-igloo': { warn: 360,  stale: 1440, d: _parse(data.igloo_refresh) || _parse(runs.igloo) },
+                'ft-sync':  { warn: 30,   stale: 60,   d: _parse(runs.igloo_pin_sync) },
+            };
+            for (const [tileId, cfg] of Object.entries(TILE_THRESHOLDS)) {
+                const el = document.getElementById(tileId);
+                const tile = el.parentElement;
+                const [rel, abs, mins] = _relAbs(cfg.d);
+                el.textContent = rel;
+                tile.title = abs || 'No data';
+                tile.classList.remove('warn', 'stale');
+                if (mins == null) tile.classList.add('stale');
+                else if (mins >= cfg.stale) tile.classList.add('stale');
+                else if (mins >= cfg.warn) tile.classList.add('warn');
             }
+            document.getElementById('freshness-tiles').style.display = 'grid';
             document.getElementById('refresh-info-wrapper').style.display = 'block';
             document.getElementById('refresh-gate-btn').style.display = '';
             document.getElementById('refresh-igloo-btn').style.display = '';
