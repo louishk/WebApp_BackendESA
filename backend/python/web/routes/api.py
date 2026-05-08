@@ -4694,11 +4694,14 @@ def api_sl_units():
             d['igloo'] = igloo_map.get(p.padlock_id)
             padlocks_out.append(d)
 
-        # Igloo data last refresh
+        # Igloo data last refresh — use lastSync (Igloo's "device last
+        # contacted Igloo cloud" timestamp), NOT updated_at (which only
+        # bumps when a DB column actually changes — produces stale-looking
+        # data for devices that haven't had any field change recently).
         igloo_refresh = None
         if igloo_devs:
             igloo_refresh = max(
-                (ig.updated_at for ig in igloo_devs if ig.updated_at), default=None
+                (ig.lastSync for ig in igloo_devs if ig.lastSync), default=None
             )
             if igloo_refresh:
                 igloo_refresh = igloo_refresh.isoformat()

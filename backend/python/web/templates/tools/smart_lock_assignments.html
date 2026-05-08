@@ -61,7 +61,10 @@
             <input type="checkbox" id="filter-rentable" onchange="renderTable()"> Rentable only
         </label>
         <label style="font-size: 0.8rem; cursor: pointer;">
-            <input type="checkbox" id="filter-vacant" onchange="renderTable()"> Vacant only
+            <input type="checkbox" id="filter-rented" onchange="onRentedToggle()"> Rented only
+        </label>
+        <label style="font-size: 0.8rem; cursor: pointer;">
+            <input type="checkbox" id="filter-vacant" onchange="onVacantToggle()"> Vacant only
         </label>
         <div style="display: flex; gap: 0.25rem; align-items: center; margin-left: 0.5rem; border-left: 1px solid #e5e7eb; padding-left: 0.75rem;">
             <span style="font-size: 0.8rem; color: #6b7280; margin-right: 0.25rem;">Keypad:</span>
@@ -294,15 +297,35 @@
         renderTable();
     }
 
+    // Rented and Vacant filters are mutually exclusive — toggling one
+    // clears the other so the table never shows zero rows accidentally.
+    function onRentedToggle() {
+        if (document.getElementById('filter-rented').checked) {
+            document.getElementById('filter-vacant').checked = false;
+        }
+        renderTable();
+    }
+    function onVacantToggle() {
+        if (document.getElementById('filter-vacant').checked) {
+            document.getElementById('filter-rented').checked = false;
+        }
+        renderTable();
+    }
+
     function renderTable() {
         const tbody = document.getElementById('units-tbody');
         const search = (document.getElementById('search-input').value || '').toLowerCase();
         const rentableOnly = document.getElementById('filter-rentable').checked;
+        const rentedOnly = document.getElementById('filter-rented').checked;
         const vacantOnly = document.getElementById('filter-vacant').checked;
 
         let filtered = units;
-        if (search) filtered = filtered.filter(u => (u.sUnitName || '').toLowerCase().includes(search));
+        if (search) filtered = filtered.filter(u =>
+            (u.sUnitName || '').toLowerCase().includes(search) ||
+            String(u.UnitID).includes(search)
+        );
         if (rentableOnly) filtered = filtered.filter(u => u.bRentable === true);
+        if (rentedOnly) filtered = filtered.filter(u => u.bRented === true);
         if (vacantOnly) filtered = filtered.filter(u => u.bRented !== true);
         if (kpFilter === 'assigned') filtered = filtered.filter(u => {
             const a = getCurrentAssignment(u.SiteID, u.UnitID);
