@@ -101,7 +101,8 @@ class IglooPinSyncPipeline(BasePipeline):
 
     def _execute(self, scope: Dict[str, Any]) -> RunResult:
         from common.igloo_client import (
-            IglooClient, IglooAPIError, IglooBridgePendingError, PIN_TYPE_PERMANENT,
+            IglooClient, IglooAPIError, IglooBridgePendingError,
+            IglooBridgeOfflineError, PIN_TYPE_PERMANENT,
         )
         from common.gate_access_crypto import get_gate_crypto
 
@@ -120,6 +121,10 @@ class IglooPinSyncPipeline(BasePipeline):
         skipped_no_gate_code = 0
         skipped_invalid_pin = 0
         skipped_site_disabled = 0
+        skipped_bridge_offline = 0
+        # Track devices that have been confirmed offline this run; subsequent
+        # units on these devices are skipped without retrying the bridge.
+        offline_devices: Set[str] = set()
         skipped_pending_job = 0
         skipped_legacy_in_sync = 0
         errors = 0
@@ -178,6 +183,8 @@ class IglooPinSyncPipeline(BasePipeline):
                         'skipped_no_gate_code': 0, 'skipped_invalid_pin': 0,
                         'skipped_site_disabled': 0, 'skipped_pending_job': 0,
                         'skipped_legacy_in_sync': 0,
+                        'skipped_bridge_offline': 0,
+                        'offline_devices': [],
                         'errors': 0, 'dry_run': dry_run,
                     },
                 )
@@ -336,6 +343,12 @@ class IglooPinSyncPipeline(BasePipeline):
                 )
 
                 for device_id in device_slots:
+                    # Bridge offline short-circuit: if a previous unit on this
+                    # device hit a "bridge offline" 406, don't keep retrying.
+                    if device_id in offline_devices:
+                        skipped_bridge_offline += 1
+                        continue
+
                     access_list = device_access.get(device_id, [])
                     pending_set = device_pending.get(device_id, set())
 
@@ -364,6 +377,18 @@ class IglooPinSyncPipeline(BasePipeline):
                                 "skip site=%s unit=%s device=%s: invalid PIN format",
                                 site_id, unit_id, device_id,
                             )
+                            audit_rows.append(SmartLockAuditLog(
+                                action='pin_invalid_format',
+                                entity_type='igloo',
+                                entity_id=device_id,
+                                site_id=site_id,
+                                unit_id=unit_id,
+                                detail=(
+                                    f"unit {unit_id} gate code is invalid "
+                                    f"(must be 4-10 digits) — fix in SiteLink"
+                                ),
+                                username='orchestrator',
+                            ))
                         continue
 
                     if should_have_pin:
@@ -398,6 +423,18 @@ class IglooPinSyncPipeline(BasePipeline):
                             for e in access_list
                         ):
                             skipped_legacy_in_sync += 1
+                            audit_rows.append(SmartLockAuditLog(
+                                action='pin_collision_with_legacy',
+                                entity_type='igloo',
+                                entity_id=device_id,
+                                site_id=site_id,
+                                unit_id=unit_id,
+                                detail=(
+                                    f"unit {unit_id} gate code already exists on "
+                                    f"keypad as a non-ESA entry — manual review"
+                                ),
+                                username='orchestrator',
+                            ))
                             logger.debug(
                                 "skip site=%s unit=%s device=%s: legacy PIN already matches",
                                 site_id, unit_id, device_id,
@@ -474,6 +511,30 @@ class IglooPinSyncPipeline(BasePipeline):
                                 "skip site=%s unit=%s device=%s: bridge job pending",
                                 site_id, unit_id, device_id,
                             )
+                        except IglooBridgeOfflineError as exc:
+                            # Bridge unreachable. Mark device offline so we
+                            # don't keep retrying for the rest of this run, and
+                            # write a single audit row per device-run.
+                            if device_id not in offline_devices:
+                                offline_devices.add(device_id)
+                                logger.warning(
+                                    "Bridge offline for device=%s site=%s — "
+                                    "skipping remaining units this run",
+                                    device_id, site_id,
+                                )
+                                audit_rows.append(SmartLockAuditLog(
+                                    action='bridge_offline',
+                                    entity_type='igloo',
+                                    entity_id=device_id,
+                                    site_id=site_id,
+                                    unit_id=unit_id,
+                                    detail=(
+                                        f"keypad bridge offline — "
+                                        f"on-site network/power check needed"
+                                    ),
+                                    username='orchestrator',
+                                ))
+                            skipped_bridge_offline += 1
                         except IglooAPIError as exc:
                             logger.error(
                                 "IglooPinSyncPipeline: push failed "
@@ -562,6 +623,26 @@ class IglooPinSyncPipeline(BasePipeline):
                                 revoked_gate_locked += 1
                             else:
                                 revoked_moved_out += 1
+                        except IglooBridgeOfflineError:
+                            if device_id not in offline_devices:
+                                offline_devices.add(device_id)
+                                logger.warning(
+                                    "Bridge offline (revoke path) device=%s site=%s",
+                                    device_id, site_id,
+                                )
+                                audit_rows.append(SmartLockAuditLog(
+                                    action='bridge_offline',
+                                    entity_type='igloo',
+                                    entity_id=device_id,
+                                    site_id=site_id,
+                                    unit_id=unit_id,
+                                    detail=(
+                                        f"keypad bridge offline during revoke — "
+                                        f"PIN remains active until bridge restored"
+                                    ),
+                                    username='orchestrator',
+                                ))
+                            skipped_bridge_offline += 1
                         except IglooAPIError as exc:
                             logger.error(
                                 "IglooPinSyncPipeline: revoke (%s) failed "
@@ -608,6 +689,8 @@ class IglooPinSyncPipeline(BasePipeline):
                 'skipped_site_disabled': skipped_site_disabled,
                 'skipped_pending_job': skipped_pending_job,
                 'skipped_legacy_in_sync': skipped_legacy_in_sync,
+                'skipped_bridge_offline': skipped_bridge_offline,
+                'offline_devices': sorted(offline_devices),
                 'errors': errors,
                 'dry_run': dry_run,
             },

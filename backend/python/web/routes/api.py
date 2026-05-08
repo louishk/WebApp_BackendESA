@@ -5201,11 +5201,18 @@ def api_sl_pin_audit():
     """Reconcile Igloo keypad PINs against SiteLink gate access codes.
 
     Uses the same reconciliation semantics as igloo_pin_sync:
-      synced          — should_have_pin=True + ESA-tagged PIN equals gate code
-      push_pending    — should_have_pin=True + no/stale ESA PIN (cron will push)
-      revoke_pending  — should_have_pin=False + ESA PIN still on device (cron will revoke)
-      clean           — should_have_pin=False + no ESA PIN (nothing to do)
-      no_gate_code    — rented + rentable + not locked/overlocked + no valid gate code
+      synced              — should_have_pin=True + ESA-tagged PIN equals gate code
+      push_pending        — should_have_pin=True + no/stale ESA PIN (cron will push)
+      revoke_pending      — should_have_pin=False + ESA PIN still on device
+      clean               — should_have_pin=False + no ESA PIN (nothing to do)
+      no_gate_code        — rented but no SiteLink gate code at all
+      invalid_pin_format  — rented, gate code present but not 4-10 digits
+      legacy_collision    — should_have_pin=True + non-ESA entry already holds the PIN
+                            (we cannot push; manual review needed)
+      legacy_revoke_blocked — should_have_pin=False + non-ESA entry holds tenant's old
+                              PIN (we cannot revoke; tenant retains access)
+      bridge_offline      — keypad's bridge unreachable in the last 30min based on
+                            recent pin_push_failed audit rows
 
     Each (unit × keypad) pair is evaluated independently so secondary keypads
     (keypad_2_pk) are covered.
@@ -5227,6 +5234,9 @@ def api_sl_pin_audit():
         return jsonify({'error': str(e)}), 400
 
     _PIN_RE_AUDIT = re.compile(r'^\d{4,10}$')
+    # Use bRented from ccws_units (authoritative occupancy source) — same fix
+    # applied in igloo_pin_sync. ccws_gate_access.is_rented is unreliable at
+    # sites where SiteLink deletes enrollments on move-out.
 
     def _esa_tag_audit_matches(name, sid, uid):
         """Match an ESA-owned access entry name by prefix; the trailing
@@ -5283,21 +5293,37 @@ def api_sl_pin_audit():
         ).all()
         gate_map = {(g.site_id, g.unit_id): g for g in gate_rows}
 
-        # Load bRentable from ccws_units for the requested sites
+        # Load bRentable + bRented from ccws_units (authoritative occupancy)
         rentable_map = {}
+        rented_map = {}
         if site_ids:
-            placeholders = ','.join(f':s{i}' for i in range(len(site_ids)))
-            params = {f's{i}': sid for i, sid in enumerate(site_ids)}
             rows = session.execute(
                 text(
-                    f'SELECT "SiteID", "UnitID", "bRentable" '
-                    f'FROM ccws_units WHERE "SiteID" IN ({placeholders}) '
-                    f'AND deleted_at IS NULL'
+                    'SELECT "SiteID", "UnitID", "bRentable", "bRented" '
+                    'FROM ccws_units WHERE "SiteID" = ANY(:sids) '
+                    'AND deleted_at IS NULL'
                 ),
-                params,
+                {'sids': list(site_ids)},
             ).fetchall()
-            for sid, uid, rentable in rows:
+            for sid, uid, rentable, rented in rows:
                 rentable_map[(sid, uid)] = bool(rentable)
+                rented_map[(sid, uid)] = bool(rented)
+
+        # Pre-load device_ids that hit a bridge-offline event in the last
+        # 30min. We surface those units as bridge_offline status until the
+        # next successful push (which will not produce an audit row, but
+        # the status will simply revert to push_pending/synced).
+        from web.models.smart_lock import SmartLockAuditLog as _SLA
+        from datetime import datetime as _dt2, timedelta as _td2
+        offline_cutoff = _dt2.utcnow() - _td2(minutes=30)
+        offline_devices = {
+            row.entity_id
+            for row in session.query(_SLA.entity_id).filter(
+                _SLA.action == 'bridge_offline',
+                _SLA.site_id.in_(site_ids),
+                _SLA.created_at >= offline_cutoff,
+            ).distinct()
+        }
 
         from common.gate_access_crypto import get_gate_crypto
         crypto = get_gate_crypto()
@@ -5338,11 +5364,12 @@ def api_sl_pin_audit():
                 except Exception:
                     plain_pin = None
 
-            is_rented = bool(gate and gate.is_rented)
+            is_rented = rented_map.get((a.site_id, a.unit_id), False)
             is_gate_locked = bool(gate and gate.is_gate_locked)
             is_overlocked = bool(gate and gate.is_overlocked)
             b_rentable = rentable_map.get((a.site_id, a.unit_id), False)
             has_valid_pin = bool(plain_pin and _PIN_RE_AUDIT.match(plain_pin))
+            has_invalid_pin = bool(plain_pin and not _PIN_RE_AUDIT.match(plain_pin))
             policy = site_configs.get(a.site_id, _AuditPolicyDefaults())
 
             # should_have_pin base (excluding gate code validity)
@@ -5370,12 +5397,30 @@ def api_sl_pin_audit():
                 )
                 esa_pin_value = esa_entry.get('pin') if esa_entry else None
 
+                # Helper: does any non-ESA entry on this device hold the
+                # current SiteLink gate code? Two implications:
+                #   - on push side: we cannot push (Igloo PIN-uniqueness)
+                #   - on revoke side: we cannot revoke (no accessId we own)
+                legacy_holds_pin = bool(plain_pin) and any(
+                    e.get('pin') == plain_pin
+                    and not _esa_tag_audit_matches(e.get('name'), a.site_id, a.unit_id)
+                    for e in access_list
+                )
+
                 reason = None
-                if should_have_pin_base and not has_valid_pin:
+                if device_id in offline_devices:
+                    # Bridge offline trumps everything — neither push nor
+                    # revoke can succeed until on-site IT restores the bridge.
+                    status = 'bridge_offline'
+                elif should_have_pin_base and has_invalid_pin:
+                    status = 'invalid_pin_format'
+                elif should_have_pin_base and not has_valid_pin:
                     status = 'no_gate_code'
                 elif should_have_pin_base and has_valid_pin:
                     if esa_entry and esa_pin_value == plain_pin:
                         status = 'synced'
+                    elif legacy_holds_pin and not esa_entry:
+                        status = 'legacy_collision'
                     else:
                         status = 'push_pending'
                 else:
@@ -5385,6 +5430,11 @@ def api_sl_pin_audit():
                         reason = _audit_revoke_reason(
                             is_rented, b_rentable, is_gate_locked, is_overlocked, policy
                         )
+                    elif legacy_holds_pin:
+                        # Vacated unit, no ESA-owned entry, but the gate code
+                        # is still on the device under a non-ESA name — we
+                        # can't revoke it. Real security gap.
+                        status = 'legacy_revoke_blocked'
                     else:
                         status = 'clean'
 

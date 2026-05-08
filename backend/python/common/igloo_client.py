@@ -86,6 +86,14 @@ class IglooBridgePendingError(IglooAPIError):
     pass
 
 
+class IglooBridgeOfflineError(IglooAPIError):
+    """Raised when the bridge for a device is unreachable. Caller should stop
+    attempting pushes to this device for the remainder of the run; subsequent
+    units on the same device will fail identically.
+    """
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -563,6 +571,19 @@ class IglooClient:
                     device_id, bridge_id, job_type,
                 )
                 raise IglooBridgePendingError(f"Bridge pending: {api_err}")
+
+            # 406 with "bridge offline" / "appears to be offline" — bridge is
+            # unreachable. Distinct subclass so the caller can short-circuit
+            # remaining pushes to this device for the run.
+            api_err_l = (api_err or '').lower()
+            if status_code == 406 and (
+                'offline' in api_err_l or 'unable to contact bridge' in api_err_l
+            ):
+                logger.warning(
+                    "Bridge offline device=%s bridge=%s",
+                    device_id, bridge_id,
+                )
+                raise IglooBridgeOfflineError(f"Bridge offline: {api_err}")
 
             logger.error(
                 "Bridge job submit failed device=%s bridge=%s jobType=%s body=%s",

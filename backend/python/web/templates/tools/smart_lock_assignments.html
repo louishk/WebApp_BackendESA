@@ -799,7 +799,15 @@
             case 'clean':
                 return `<span style="background:#f3f4f6;color:#6b7280;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Not rented, no ESA PIN — nothing to do"><i class="bi bi-dash-circle"></i> Clean</span>`;
             case 'no_gate_code':
-                return `<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Rented but no valid SiteLink gate code — needs manual attention"><i class="bi bi-exclamation-triangle"></i> No code</span>`;
+                return `<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Rented but no SiteLink gate code — set the unit's gate code in SiteLink"><i class="bi bi-exclamation-triangle"></i> No code</span>`;
+            case 'invalid_pin_format':
+                return `<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Rented but the SiteLink gate code is not 4–10 digits — fix in SiteLink"><i class="bi bi-exclamation-octagon-fill"></i> Bad code</span>`;
+            case 'bridge_offline':
+                return `<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Keypad bridge is offline — on-site IT needs to check the bridge's power/network. Sync is paused for this device."><i class="bi bi-wifi-off"></i> Bridge offline</span>`;
+            case 'legacy_collision':
+                return `<span style="background:#fef3c7;color:#d97706;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="The tenant's gate code already exists on this keypad as a non-ESA entry. The PIN is live (tenant can access) but ESA does not own it — we cannot revoke it on move-out. Manually rename the entry on Igloo or change the gate code in SiteLink."><i class="bi bi-link-45deg"></i> Legacy match</span>${pushBtn}`;
+            case 'legacy_revoke_blocked':
+                return `<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.7rem;" title="Unit is vacated but the previous tenant's PIN remains on the keypad as a non-ESA entry — we cannot revoke it. Manually delete the entry from Igloo Workspace."><i class="bi bi-shield-exclamation"></i> Manual revoke needed</span>`;
         }
         return '';
     }
