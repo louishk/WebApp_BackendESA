@@ -4710,6 +4710,29 @@ def api_sl_units():
                     igloo_refresh = igloo_refresh.replace(tzinfo=None)
                 igloo_refresh = igloo_refresh.isoformat()
 
+        # Pipeline run timestamps — when did each cron last complete?
+        # Falls back to these when site-level data is empty (e.g. fresh sites
+        # with no gate enrollments). Naive UTC so the frontend's 'Z' append
+        # produces a valid Date.
+        pipeline_runs: Dict[str, Optional[str]] = {
+            'ccws_units': None, 'ccws_gate_access': None,
+            'igloo': None, 'igloo_pin_sync': None,
+        }
+        try:
+            run_rows = session.execute(text("""
+                SELECT pipeline_name, MAX(completed_at) AS last_run
+                FROM mw_sync_runs
+                WHERE pipeline_name = ANY(:names) AND status = 'completed'
+                GROUP BY pipeline_name
+            """), {'names': list(pipeline_runs.keys())}).fetchall()
+            for name, ts in run_rows:
+                if ts is not None:
+                    if getattr(ts, 'tzinfo', None) is not None:
+                        ts = ts.replace(tzinfo=None)
+                    pipeline_runs[name] = ts.isoformat()
+        except Exception:
+            current_app.logger.exception("pipeline_runs lookup failed")
+
         # Merge assignments into units
         for u in units:
             key = (u['SiteID'], u['UnitID'])
@@ -4724,6 +4747,7 @@ def api_sl_units():
             'last_refresh': last_refresh,
             'gate_refresh': gate_refresh,
             'igloo_refresh': igloo_refresh,
+            'pipeline_runs': pipeline_runs,
         })
     except Exception as e:
         current_app.logger.error(f"Smart lock assignments query error: {e}")

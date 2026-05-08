@@ -227,18 +227,25 @@
 
             // Show last refresh time
             let refreshText = '';
-            if (data.last_refresh) {
-                const dt = new Date(data.last_refresh + 'Z');
-                refreshText = 'Unit data: ' + dt.toLocaleString();
-            }
-            if (data.gate_refresh) {
-                const gdt = new Date(data.gate_refresh + 'Z');
-                refreshText += (refreshText ? ' · ' : '') + 'Gate data: ' + gdt.toLocaleString();
-            }
-            if (data.igloo_refresh) {
-                const idt = new Date(data.igloo_refresh + 'Z');
-                refreshText += (refreshText ? ' · ' : '') + 'Igloo data: ' + idt.toLocaleString();
-            }
+            // Build "Label: <timestamp>" items. Prefer per-site data
+            // freshness; fall back to last pipeline run (so freshly-onboarded
+            // sites with zero rows still show when the cron last fired).
+            const runs = data.pipeline_runs || {};
+            const _fmt = (s) => {
+                if (!s) return null;
+                const d = new Date(s + 'Z');
+                return isNaN(d.getTime()) ? null : d.toLocaleString();
+            };
+            const parts = [];
+            const unitTs = _fmt(data.last_refresh) || _fmt(runs.ccws_units);
+            if (unitTs) parts.push('Unit data: ' + unitTs);
+            const gateTs = _fmt(data.gate_refresh) || _fmt(runs.ccws_gate_access);
+            if (gateTs) parts.push('Gate data: ' + gateTs);
+            const iglooTs = _fmt(data.igloo_refresh) || _fmt(runs.igloo);
+            if (iglooTs) parts.push('Igloo data: ' + iglooTs);
+            const syncTs = _fmt(runs.igloo_pin_sync);
+            if (syncTs) parts.push('PIN sync: ' + syncTs);
+            refreshText = parts.join(' · ');
             if (refreshText) {
                 document.getElementById('refresh-info').textContent = refreshText;
             }
