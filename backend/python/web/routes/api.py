@@ -4698,12 +4698,16 @@ def api_sl_units():
         # contacted Igloo cloud" timestamp), NOT updated_at (which only
         # bumps when a DB column actually changes — produces stale-looking
         # data for devices that haven't had any field change recently).
+        # Strip tzinfo so the format matches last_refresh / gate_refresh:
+        # the frontend appends 'Z' to mark UTC, so we must emit naive UTC.
         igloo_refresh = None
         if igloo_devs:
             igloo_refresh = max(
                 (ig.lastSync for ig in igloo_devs if ig.lastSync), default=None
             )
             if igloo_refresh:
+                if igloo_refresh.tzinfo is not None:
+                    igloo_refresh = igloo_refresh.replace(tzinfo=None)
                 igloo_refresh = igloo_refresh.isoformat()
 
         # Merge assignments into units
