@@ -389,9 +389,12 @@
                 plOptions += `<option value="${p.id}" ${sel}>${esc(p.padlock_id)}</option>`;
             });
 
-            // Gate access cells
+            // Gate access cells. For vacant units show "—" (no gate state to
+            // report) regardless of stale gate_access enrollment data.
             const gateLocked = u.gate_access && u.gate_access.is_gate_locked;
-            const gateBadge = gateLocked
+            const gateBadge = !u.bRented
+                ? '<span style="color:#999;">—</span>'
+                : gateLocked
                 ? '<span style="background:#fee2e2;color:#dc2626;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">Locked</span>'
                 : '<span style="background:#d1fae5;color:#059669;padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;">OK</span>';
             const overlocked = u.gate_access && u.gate_access.is_overlocked;

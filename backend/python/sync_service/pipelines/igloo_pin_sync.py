@@ -200,24 +200,27 @@ class IglooPinSyncPipeline(BasePipeline):
                 (g.site_id, g.unit_id): g for g in gate_rows
             }
 
-            # Load bRentable from ccws_units for active sites.
-            # Missing row -> False (fail-safe: no PIN).
+            # Load bRentable + bRented from ccws_units for active sites.
+            # ccws_units.bRented is the authoritative occupancy signal —
+            # ccws_gate_access.is_rented is unreliable because some sites
+            # delete the gate-access enrollment on move-out (SiteLink-side
+            # behavior), leaving stale is_rented=true rows in our DB.
+            # Missing row -> bRentable=False, bRented=False (fail-safe: no PIN).
             from sqlalchemy import text as _text
             rentable_map: Dict[Tuple[int, int], bool] = {}
+            rented_map: Dict[Tuple[int, int], bool] = {}
             if active_site_ids:
-                site_id_list = list(active_site_ids)
-                placeholders = ','.join(f':s{i}' for i in range(len(site_id_list)))
-                params = {f's{i}': sid for i, sid in enumerate(site_id_list)}
                 rows = session.execute(
                     _text(
-                        f'SELECT "SiteID", "UnitID", "bRentable" '
-                        f'FROM ccws_units WHERE "SiteID" IN ({placeholders}) '
-                        f'AND deleted_at IS NULL'
+                        'SELECT "SiteID", "UnitID", "bRentable", "bRented" '
+                        'FROM ccws_units WHERE "SiteID" = ANY(:sids) '
+                        'AND deleted_at IS NULL'
                     ),
-                    params,
+                    {'sids': list(active_site_ids)},
                 ).fetchall()
-                for sid, uid, rentable in rows:
+                for sid, uid, rentable, rented in rows:
                     rentable_map[(sid, uid)] = bool(rentable)
+                    rented_map[(sid, uid)] = bool(rented)
 
             # --- 3) Pre-fetch Igloo device state (one call per unique device_id) ---
             all_device_ids: Set[str] = set(kp_map[pk] for pk in all_kp_pks if pk in kp_map)
@@ -299,7 +302,8 @@ class IglooPinSyncPipeline(BasePipeline):
                             site_id, unit_id,
                         )
 
-                is_rented = bool(gate and gate.is_rented)
+                # Occupancy from ccws_units (source of truth), not gate_access.
+                is_rented = rented_map.get((site_id, unit_id), False)
                 is_gate_locked = bool(gate and gate.is_gate_locked)
                 is_overlocked = bool(gate and gate.is_overlocked)
                 b_rentable = rentable_map.get((site_id, unit_id), False)
