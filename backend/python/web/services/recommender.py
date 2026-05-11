@@ -1367,7 +1367,57 @@ def quote_slot(
         )
         raise
 
+    fee, fee_source = _resolve_reservation_fee(
+        site_id=row.site_id,
+        std_rate=row.std_rate,
+        db_session=db_session,
+        site_cache=site_cache,
+    )
+    quote.reservation_fee = fee          # type: ignore[attr-defined]
+    quote.reservation_fee_source = fee_source  # type: ignore[attr-defined]
+
     return quote
+
+
+def _resolve_reservation_fee(
+    site_id: int,
+    std_rate: Optional[Decimal],
+    db_session,
+    site_cache: Optional[Dict[Any, Dict[str, Any]]] = None,
+) -> Tuple[Optional[Decimal], str]:
+    """Return (fee, source) for a slot. source is 'override' or 'default'.
+
+    Reads mw_reservation_fees (esa_backend DB) once per site per request,
+    memoised in site_cache under key (site_id, 'reservation_fee'). Falls back
+    to std_rate when no override row exists.
+    """
+    cache_key = (site_id, 'reservation_fee')
+    if site_cache is not None and cache_key in site_cache:
+        return site_cache[cache_key]
+
+    result: Tuple[Optional[Decimal], str]
+    try:
+        from web.models.reservation_fee import ReservationFee
+        rf = db_session.query(ReservationFee).filter_by(site_id=site_id).first()
+        if rf is not None:
+            result = (Decimal(str(rf.reservation_fee)), 'override')
+        elif std_rate is not None:
+            result = (Decimal(str(std_rate)), 'default')
+        else:
+            result = (None, 'default')
+    except Exception as exc:
+        logger.warning(
+            "_resolve_reservation_fee failed for site_id=%s: %s", site_id, exc
+        )
+        try:
+            db_session.rollback()
+        except Exception:
+            pass
+        result = (Decimal(str(std_rate)), 'default') if std_rate is not None else (None, 'default')
+
+    if site_cache is not None:
+        site_cache[cache_key] = result
+    return result
 
 
 def compute_first_month_cost_calculator(
@@ -1790,14 +1840,20 @@ def log_served(
                 f'{prefix}_concession_id': None,
                 f'{prefix}_first_month': None,
                 f'{prefix}_total_contract': None,
+                f'{prefix}_reservation_fee': None,
+                f'{prefix}_reservation_fee_source': None,
             }
         row, quote = slots_with_quotes[idx]
+        rf = getattr(quote, 'reservation_fee', None)
+        rf_src = getattr(quote, 'reservation_fee_source', None)
         return {
             f'{prefix}_unit_id': row.unit_id,
             f'{prefix}_plan_id': row.plan_id,
             f'{prefix}_concession_id': row.concession_id,
             f'{prefix}_first_month': float(quote.first_month_total),
             f'{prefix}_total_contract': float(quote.total_contract),
+            f'{prefix}_reservation_fee': float(rf) if rf is not None else None,
+            f'{prefix}_reservation_fee_source': rf_src,
         }
 
     ctx = req.context
@@ -1831,10 +1887,13 @@ def log_served(
             candidates_pool_size, total_matches,
             slot1_unit_id, slot1_plan_id, slot1_concession_id,
             slot1_first_month, slot1_total_contract,
+            slot1_reservation_fee, slot1_reservation_fee_source,
             slot2_unit_id, slot2_plan_id, slot2_concession_id,
             slot2_first_month, slot2_total_contract,
+            slot2_reservation_fee, slot2_reservation_fee_source,
             slot3_unit_id, slot3_plan_id, slot3_concession_id,
             slot3_first_month, slot3_total_contract,
+            slot3_reservation_fee, slot3_reservation_fee_source,
             full_response, api_key_id
         ) VALUES (
             :request_id, :session_id, :customer_id, :channel, :mode, :level,
@@ -1845,10 +1904,13 @@ def log_served(
             :candidates_pool_size, :total_matches,
             :slot1_unit_id, :slot1_plan_id, :slot1_concession_id,
             :slot1_first_month, :slot1_total_contract,
+            :slot1_reservation_fee, :slot1_reservation_fee_source,
             :slot2_unit_id, :slot2_plan_id, :slot2_concession_id,
             :slot2_first_month, :slot2_total_contract,
+            :slot2_reservation_fee, :slot2_reservation_fee_source,
             :slot3_unit_id, :slot3_plan_id, :slot3_concession_id,
             :slot3_first_month, :slot3_total_contract,
+            :slot3_reservation_fee, :slot3_reservation_fee_source,
             CAST(:full_response AS jsonb), :api_key_id
         )
         RETURNING id

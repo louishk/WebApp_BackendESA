@@ -218,7 +218,9 @@ def feed():
                    channel, mode, level, relax_strategy,
                    filters_applied, candidates_pool_size, total_matches,
                    slot1_unit_id, slot1_first_month,
-                   slot2_unit_id, slot3_unit_id,
+                   slot1_reservation_fee, slot1_reservation_fee_source,
+                   slot2_unit_id, slot2_reservation_fee, slot2_reservation_fee_source,
+                   slot3_unit_id, slot3_reservation_fee, slot3_reservation_fee_source,
                    booked_unit_id, booked_slot, booked_at
             FROM mw_recommendations_served
             WHERE {where_clause}

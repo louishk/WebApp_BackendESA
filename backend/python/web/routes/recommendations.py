@@ -389,6 +389,11 @@ def _serialise_slot(
         # one and only this one for /move-in's payment_amount.
         'pricing': _build_pricing_block(quote, perpetual_extras),
         'customer_disclosure': customer_disclosure,
+        'reservation_fee': (
+            float(getattr(quote, 'reservation_fee', None))
+            if getattr(quote, 'reservation_fee', None) is not None else None
+        ),
+        'reservation_fee_source': getattr(quote, 'reservation_fee_source', None),
     }
 
 

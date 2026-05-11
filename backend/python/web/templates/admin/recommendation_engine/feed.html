@@ -219,9 +219,24 @@
                     {% endif %}
                 </td>
                 <td class="mono" style="font-size: 0.7rem;">
-                    {% if r.slot1_unit_id %}1: {{ r.slot1_unit_id }}{% if r.slot1_first_month %} · ${{ "%.0f"|format(r.slot1_first_month) }}{% endif %}{% endif %}
-                    {% if r.slot2_unit_id %}<br>2: {{ r.slot2_unit_id }}{% endif %}
-                    {% if r.slot3_unit_id %}<br>3: {{ r.slot3_unit_id }}{% endif %}
+                    {% if r.slot1_unit_id %}
+                        1: {{ r.slot1_unit_id }}{% if r.slot1_first_month %} · ${{ "%.0f"|format(r.slot1_first_month) }}{% endif %}
+                        {% if r.slot1_reservation_fee is not none %}
+                            <br><span style="font-family: inherit; font-size: 0.67rem; {% if r.slot1_reservation_fee_source == 'override' %}color: #374151;{% else %}color: #9ca3af;{% endif %}">Res. fee: ${{ "%.2f"|format(r.slot1_reservation_fee) }} ({{ r.slot1_reservation_fee_source }})</span>
+                        {% endif %}
+                    {% endif %}
+                    {% if r.slot2_unit_id %}
+                        <br>2: {{ r.slot2_unit_id }}
+                        {% if r.slot2_reservation_fee is not none %}
+                            <br><span style="font-family: inherit; font-size: 0.67rem; {% if r.slot2_reservation_fee_source == 'override' %}color: #374151;{% else %}color: #9ca3af;{% endif %}">Res. fee: ${{ "%.2f"|format(r.slot2_reservation_fee) }} ({{ r.slot2_reservation_fee_source }})</span>
+                        {% endif %}
+                    {% endif %}
+                    {% if r.slot3_unit_id %}
+                        <br>3: {{ r.slot3_unit_id }}
+                        {% if r.slot3_reservation_fee is not none %}
+                            <br><span style="font-family: inherit; font-size: 0.67rem; {% if r.slot3_reservation_fee_source == 'override' %}color: #374151;{% else %}color: #9ca3af;{% endif %}">Res. fee: ${{ "%.2f"|format(r.slot3_reservation_fee) }} ({{ r.slot3_reservation_fee_source }})</span>
+                        {% endif %}
+                    {% endif %}
                     {% if not r.slot1_unit_id and not r.slot2_unit_id and not r.slot3_unit_id %}—{% endif %}
                 </td>
                 <td style="max-width: 260px; font-size: 0.7rem; color: #6b7280; word-break: break-word;">
