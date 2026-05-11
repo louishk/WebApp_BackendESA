@@ -63,14 +63,21 @@ def run(mode='auto', **kwargs):
 
             print(f"\n[Batch {batch_id}] Executed: {executed_date}, Window ends: {window_end}")
 
-            # Get batch ledgers that don't have outcomes yet
+            # Get pending ledgers joined with current SMD status in a single query.
+            # LEFT JOIN to the view so ledgers absent from active pipeline come back
+            # as NULL (= tenant moved out).
             pending_sql = text("""
-                SELECT bl.site_id, bl.ledger_id, bl.notice_date
+                SELECT bl.site_id, bl.ledger_id, bl.notice_date,
+                       v."dSchedOut" AS sched_out,
+                       (v."SiteID" IS NULL) AS is_absent
                 FROM ecri_batch_ledgers bl
                 LEFT JOIN ecri_outcomes o
                     ON bl.batch_id = o.batch_id
                     AND bl.site_id = o.site_id
                     AND bl.ledger_id = o.ledger_id
+                LEFT JOIN vw_ecri_eligible_ledgers v
+                    ON v."SiteID" = bl.site_id
+                    AND v."LedgerID" = bl.ledger_id
                 WHERE bl.batch_id = :batch_id
                   AND bl.api_status = 'success'
                   AND o.id IS NULL
@@ -78,69 +85,45 @@ def run(mode='auto', **kwargs):
             pending = session.execute(pending_sql, {'batch_id': batch_id}).fetchall()
             print(f"[Batch {batch_id}] {len(pending)} ledgers pending outcome check")
 
+            rows_to_insert = []
             for led_row in pending:
                 site_id = led_row[0]
                 ledger_id = led_row[1]
                 notice_date = led_row[2]
-
-                # Check current ledger status via vw_ecri_eligible_ledgers
-                # (ccws_ledgers is active-only: absence = tenant has moved out).
-                status_sql = text("""
-                    SELECT "dSchedOut"
-                    FROM vw_ecri_eligible_ledgers
-                    WHERE "SiteID" = :site_id AND "LedgerID" = :ledger_id
-                    LIMIT 1
-                """)
-                status = session.execute(status_sql, {
-                    'site_id': site_id,
-                    'ledger_id': ledger_id
-                }).fetchone()
+                sched_out = led_row[3]
+                is_absent = led_row[4]
 
                 outcome_type = None
                 outcome_date = None
                 days_after = None
 
-                if status is None:
+                if is_absent:
                     # Absent from live pipeline → tenant has moved out.
-                    # We don't know the exact move-out date from ccws; use today
-                    # as a best-effort. Attribution-window math still works.
+                    # Best-effort outcome_date = today; attribution math still works.
                     outcome_type = 'moved_out'
                     outcome_date = today
                     if notice_date:
                         days_after = (outcome_date - notice_date).days
-                elif status[0] is not None and status[0].date() <= window_end:
-                    sched_out = status[0]
-                    # Tenant has scheduled move-out within window
+                elif sched_out is not None and sched_out.date() <= window_end:
                     outcome_type = 'scheduled_out'
                     outcome_date = sched_out.date() if hasattr(sched_out, 'date') else sched_out
                     if notice_date:
                         days_after = (outcome_date - notice_date).days
                 elif today > window_end:
-                    # Attribution window has expired and tenant is still there
+                    # Attribution window expired, tenant still there
                     outcome_type = 'stayed'
                     outcome_date = window_end
                     if notice_date:
                         days_after = (window_end - notice_date).days
 
                 if outcome_type:
-                    # Calculate months at new rent
                     months_at_new = None
                     if notice_date and outcome_date:
                         months_at_new = max(0,
                             (outcome_date.year - notice_date.year) * 12 +
                             (outcome_date.month - notice_date.month)
                         )
-
-                    insert_sql = text("""
-                        INSERT INTO ecri_outcomes
-                            (batch_id, site_id, ledger_id, outcome_date,
-                             outcome_type, days_after_notice, months_at_new_rent)
-                        VALUES
-                            (:batch_id, :site_id, :ledger_id, :outcome_date,
-                             :outcome_type, :days_after, :months_at_new)
-                        ON CONFLICT (batch_id, site_id, ledger_id, outcome_type) DO NOTHING
-                    """)
-                    session.execute(insert_sql, {
+                    rows_to_insert.append({
                         'batch_id': batch_id,
                         'site_id': site_id,
                         'ledger_id': ledger_id,
@@ -149,8 +132,20 @@ def run(mode='auto', **kwargs):
                         'days_after': days_after,
                         'months_at_new': months_at_new,
                     })
-                    records_processed += 1
-                    print(f"  Ledger {site_id}/{ledger_id}: {outcome_type}")
+
+            if rows_to_insert:
+                insert_sql = text("""
+                    INSERT INTO ecri_outcomes
+                        (batch_id, site_id, ledger_id, outcome_date,
+                         outcome_type, days_after_notice, months_at_new_rent)
+                    VALUES
+                        (:batch_id, :site_id, :ledger_id, :outcome_date,
+                         :outcome_type, :days_after, :months_at_new)
+                    ON CONFLICT (batch_id, site_id, ledger_id, outcome_type) DO NOTHING
+                """)
+                session.execute(insert_sql, rows_to_insert)
+                records_processed += len(rows_to_insert)
+                print(f"[Batch {batch_id}] Inserted {len(rows_to_insert)} outcomes")
 
             session.commit()
 
