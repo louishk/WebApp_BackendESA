@@ -1,5 +1,5 @@
 -- Migration: add reservation_fee columns to mw_recommendations_served
--- Run against esa_backend DB.
+-- Run against esa_middleware DB (the mw_* tables live there, not esa_backend).
 -- Safe to run on a live app — all columns are nullable, no default required.
 
 ALTER TABLE mw_recommendations_served
