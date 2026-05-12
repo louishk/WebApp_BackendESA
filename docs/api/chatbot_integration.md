@@ -378,6 +378,22 @@ X-API-Key: ...
 Bot can pick any opaque string as long as it's stable across retries
 of the **same logical booking**. UUID v4 per booking attempt is fine.
 
+### Reservation fee — what to charge to confirm the booking
+
+Each slot in the `/api/recommendations` response carries:
+
+```jsonc
+{
+  "reservation_fee":        150.00,
+  "reservation_fee_source": "override"   // or "default"
+}
+```
+
+- `override` — Revenue has configured a flat reservation fee for this site at `/tools/reservation-fees` (stored in `mw_reservation_fees`).
+- `default` — no per-site override; falls back to **one month of `std_rate`** for this unit (the historical chatbot default).
+
+The amount is in the site's local currency. Use this number — not `std_rate`, not `first_month_total` — when telling the customer how much they need to pay to confirm the reservation. Revenue ops can flip a site to a flat fee or back to the default without any bot deploy.
+
 ### Sanity guard on `payment_amount`
 
 The handler computes the SOAP-truth move-in cost (calculator, validated

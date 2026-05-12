@@ -602,6 +602,30 @@ components:
           description: |
             Customer-facing first-month total ( = pricing.first_month_total).
             What the bot should advertise.
+        reservation_fee:
+          type: number
+          nullable: true
+          description: |
+            The fee the customer should be charged to confirm the reservation
+            (i.e. pass as the `payment_amount` on the reservation step). In
+            the slot's site local currency.
+
+            Resolution:
+              - If a per-site override exists in `mw_reservation_fees`,
+                that value is returned.
+              - Otherwise, falls back to one month of `std_rate` (the
+                historical default for the chatbot flow).
+
+            Null only when both the override and `std_rate` are unavailable
+            (defensive — should not occur for any real candidate row).
+        reservation_fee_source:
+          type: string
+          enum: [override, default]
+          description: |
+            How `reservation_fee` was resolved.
+              - `override`: site has a configured row in `mw_reservation_fees`
+                (managed at `/tools/reservation-fees`).
+              - `default`: no override; falls back to one month of `std_rate`.
         is_hidden_rate:
           type: boolean
           description: |
@@ -851,6 +875,8 @@ paths:
                     std_rate: 149.0
                     effective_rate: 104.30
                     price: 298.66
+                    reservation_fee: 149.0
+                    reservation_fee_source: default
                     is_hidden_rate: false
                     authorised_channels: [Offline, Web, "Mobile App", Chatbot, Walk-In]
                     smart_lock: null

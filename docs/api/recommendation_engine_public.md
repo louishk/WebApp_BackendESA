@@ -234,6 +234,9 @@ curl -X POST https://backend.extraspace.com.sg/api/recommendations \
         "promo_valid_until":      "2026-12-31"
       },
 
+      "reservation_fee":        50000.0,
+      "reservation_fee_source": "override",
+
       "pricing": {
         "first_month_total":            238.71,
         "total_due_at_movein":          693.76,
@@ -322,6 +325,22 @@ When the strict-filter pool is empty, the engine runs **pool rescue** — it aut
 Combined with directional actions (`bigger_size` / `smaller_size` open the range fully in that direction), this means an action that lands on an empty bucket still returns the closest available match — never zero slots in normal operation.
 
 The response is guaranteed to contain **≥ 2 slots in normal operation**. Slot 3 is best-effort; `null` if no strictly-cheaper unit exists at the site.
+
+### Reservation fee (`reservation_fee`)
+
+Each slot carries the amount to charge the customer when they confirm the reservation, in the slot's site local currency:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `reservation_fee` | number | Amount to charge to confirm the booking |
+| `reservation_fee_source` | `"override"` \| `"default"` | How it was resolved |
+
+**Resolution rules:**
+
+- `override` — site has a configured reservation fee in `mw_reservation_fees` (managed by Revenue at `/tools/reservation-fees`). That value is used as-is.
+- `default` — no override row for the site. Falls back to **one month of `std_rate`** for the slot's unit — the historical default for the chatbot flow.
+
+The two-tier model lets Revenue ops set a flat fee per site (e.g. ₩50,000 across all units at L031) while every other site continues with the per-unit standard-rate default — no bot change required.
 
 ### `mode=quote` — single-unit pricing
 
