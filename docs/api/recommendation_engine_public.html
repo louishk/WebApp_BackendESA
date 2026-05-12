@@ -455,6 +455,9 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 <span class="w">        </span><span class="nt">&quot;promo_valid_until&quot;</span><span class="p">:</span><span class="w">      </span><span class="s2">&quot;2026-12-31&quot;</span>
 <span class="w">      </span><span class="p">},</span>
 
+<span class="w">      </span><span class="nt">&quot;reservation_fee&quot;</span><span class="p">:</span><span class="w">        </span><span class="mf">50000.0</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;reservation_fee_source&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;override&quot;</span><span class="p">,</span>
+
 <span class="w">      </span><span class="nt">&quot;pricing&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">        </span><span class="nt">&quot;first_month_total&quot;</span><span class="p">:</span><span class="w">            </span><span class="mf">238.71</span><span class="p">,</span>
 <span class="w">        </span><span class="nt">&quot;total_due_at_movein&quot;</span><span class="p">:</span><span class="w">          </span><span class="mf">693.76</span><span class="p">,</span>
@@ -565,6 +568,35 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 </ul>
 <p>Combined with directional actions (<code>bigger_size</code> / <code>smaller_size</code> open the range fully in that direction), this means an action that lands on an empty bucket still returns the closest available match — never zero slots in normal operation.</p>
 <p>The response is guaranteed to contain <strong>≥ 2 slots in normal operation</strong>. Slot 3 is best-effort; <code>null</code> if no strictly-cheaper unit exists at the site.</p>
+<h3 id="reservation-fee-reservation_fee">Reservation fee (<code>reservation_fee</code>)</h3>
+<p>Each slot carries the amount to charge the customer when they confirm the reservation, in the slot's site local currency:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reservation_fee</code></td>
+<td>number</td>
+<td>Amount to charge to confirm the booking</td>
+</tr>
+<tr>
+<td><code>reservation_fee_source</code></td>
+<td><code>"override"</code> | <code>"default"</code></td>
+<td>How it was resolved</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Resolution rules:</strong></p>
+<ul>
+<li><code>override</code> — site has a configured reservation fee in <code>mw_reservation_fees</code> (managed by Revenue at <code>/tools/reservation-fees</code>). That value is used as-is.</li>
+<li><code>default</code> — no override row for the site. Falls back to <strong>one month of <code>std_rate</code></strong> for the slot's unit — the historical default for the chatbot flow.</li>
+</ul>
+<p>The two-tier model lets Revenue ops set a flat fee per site (e.g. ₩50,000 across all units at L031) while every other site continues with the per-unit standard-rate default — no bot change required.</p>
 <h3 id="modequote-single-unit-pricing"><code>mode=quote</code> — single-unit pricing</h3>
 <p>For "what does unit X cost?" — pass <code>mode: "quote"</code> plus EITHER <code>filters.unit_id: [N]</code> (when you have the internal id) OR <code>filters.unit_name: ["4120"]</code> (when the customer named the unit by its printed number). Returns one slot keyed to that unit. Pricing is <strong>cent-identical</strong> to what <code>mode=recommendation</code> returned for the same unit.</p>
 <p><code>mode=quote</code> is <strong>stateless</strong> — it does not consume a recommendation log row, does not enforce <code>request_id</code> uniqueness, and does not participate in the multi-turn chain-depth cap (§5). The bot can re-price freely mid-conversation without affecting the L1/L2/L3 chain.</p>
