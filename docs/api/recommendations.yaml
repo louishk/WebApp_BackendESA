@@ -30,7 +30,7 @@
 openapi: 3.0.3
 info:
   title: ESA Recommendation Engine
-  version: 1.0.0
+  version: 1.1.0
   description: |
     3-slot recommendation engine for unit-level pricing quotes. Designed for
     PandaAI chatbot integration but usable by any client with the `recommender`

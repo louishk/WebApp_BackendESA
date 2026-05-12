@@ -105,6 +105,7 @@ blockquote p { margin: 0.2rem 0; }
   <h1 id="extra-space-asia-recommendation-booking-api">Extra Space Asia — Recommendation &amp; Booking API</h1>
 <p>Build chat / web / mobile experiences that quote and reserve self-storage units through Extra Space Asia.</p>
 <ul>
+<li><strong>Version</strong> — <code>1.1.0</code> (2026-05-12) — see <a href="#13--changelog">§13 · Changelog</a></li>
 <li><strong>Base URL</strong> — <code>https://backend.extraspace.com.sg</code></li>
 <li><strong>Auth</strong> — <code>X-API-Key: esa_&lt;prefix&gt;.&lt;secret&gt;</code> on every request</li>
 <li><strong>Format</strong> — JSON in/out, UTF-8, ISO dates (<code>YYYY-MM-DD</code>), decimals as numbers (<code>91.01</code>)</li>
@@ -128,6 +129,7 @@ blockquote p { margin: 0.2rem 0; }
 <li><a href="#10--reference">Reference tables</a></li>
 <li><a href="#11--best-practices">Best practices</a></li>
 <li><a href="#12--support">Support</a></li>
+<li><a href="#13--changelog">Changelog</a></li>
 </ol>
 <hr>
 <h2 id="1-quick-start">1 · Quick-start</h2>
@@ -1165,6 +1167,18 @@ GET /api/reservations/move-in/cost
 <li><strong>Integration questions</strong> — contact your Extra Space Asia integration manager.</li>
 <li><strong>Liveness check</strong> — <code>GET /api/health</code> returns <code>{"status": "ok"}</code> when the API is up.</li>
 <li><strong>API key management</strong> — <code>https://backend.extraspace.com.sg/api-keys/</code> (auth required).</li>
+</ul>
+<hr>
+<h2 id="13-changelog">13 · Changelog</h2>
+<p>Versioning follows <a href="https://semver.org">semver</a>: MAJOR.MINOR.PATCH. <strong>MINOR</strong> bumps add optional response fields or new endpoints and are backwards-compatible — existing integrations keep working without changes.</p>
+<h3 id="110-2026-05-12">1.1.0 — 2026-05-12</h3>
+<p><strong>Added</strong></p>
+<ul>
+<li>Each slot in <code>POST /api/recommendations</code> responses now carries <code>reservation_fee</code> and <code>reservation_fee_source</code> (<code>"override"</code> | <code>"default"</code>). See <a href="#reservation-fee-reservation_fee">§4 · Reservation fee</a>. Use this as the amount to charge to confirm the booking — it's authoritative over <code>std_rate</code> when Revenue has set a per-site override.</li>
+</ul>
+<h3 id="100-2026-04-29">1.0.0 — 2026-04-29</h3>
+<ul>
+<li>Initial public release: <code>/api/recommendations</code> (recommendation + quote modes), <code>/api/reservations/reserve</code>, <code>/api/reservations/move-in/cost</code>, reservation lifecycle endpoints.</li>
 </ul>
 </body>
 </html>

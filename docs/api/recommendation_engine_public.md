@@ -2,6 +2,7 @@
 
 Build chat / web / mobile experiences that quote and reserve self-storage units through Extra Space Asia.
 
+- **Version** — `1.1.0` (2026-05-12) — see [§13 · Changelog](#13--changelog)
 - **Base URL** — `https://backend.extraspace.com.sg`
 - **Auth** — `X-API-Key: esa_<prefix>.<secret>` on every request
 - **Format** — JSON in/out, UTF-8, ISO dates (`YYYY-MM-DD`), decimals as numbers (`91.01`)
@@ -25,6 +26,7 @@ Build chat / web / mobile experiences that quote and reserve self-storage units 
 10. [Reference tables](#10--reference)
 11. [Best practices](#11--best-practices)
 12. [Support](#12--support)
+13. [Changelog](#13--changelog)
 
 ---
 
@@ -701,3 +703,19 @@ Pass `concession_id` (the integer) verbatim through `/reserve`. Use `plan_name` 
 - **Integration questions** — contact your Extra Space Asia integration manager.
 - **Liveness check** — `GET /api/health` returns `{"status": "ok"}` when the API is up.
 - **API key management** — `https://backend.extraspace.com.sg/api-keys/` (auth required).
+
+---
+
+## 13 · Changelog
+
+Versioning follows [semver](https://semver.org): MAJOR.MINOR.PATCH. **MINOR** bumps add optional response fields or new endpoints and are backwards-compatible — existing integrations keep working without changes.
+
+### 1.1.0 — 2026-05-12
+
+**Added**
+
+- Each slot in `POST /api/recommendations` responses now carries `reservation_fee` and `reservation_fee_source` (`"override"` | `"default"`). See [§4 · Reservation fee](#reservation-fee-reservation_fee). Use this as the amount to charge to confirm the booking — it's authoritative over `std_rate` when Revenue has set a per-site override.
+
+### 1.0.0 — 2026-04-29
+
+- Initial public release: `/api/recommendations` (recommendation + quote modes), `/api/reservations/reserve`, `/api/reservations/move-in/cost`, reservation lifecycle endpoints.
