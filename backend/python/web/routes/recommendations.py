@@ -723,22 +723,26 @@ def recommend():
             ),
             'reserve_template': {
                 'endpoint': 'POST /api/reservations/reserve',
-                'required_fields': [
-                    'site_code', 'unit_id', 'concession_id',
-                    'first_name', 'last_name', 'phone', 'email',
-                    'needed_date', 'session_id', 'customer_id',
+                # Fields that are identical regardless of which slot the
+                # customer picks. Bot copies these into every reserve call.
+                'shared': {
+                    'session_id':          req.context.get('session_id'),
+                    'customer_id':         req.context.get('customer_id'),
+                    'previous_request_id': request_id,
+                },
+                # Per-slot blocks indexed 0-2 to mirror slots[]. null when
+                # the corresponding slot is empty. Bot integrates as:
+                #   { ...rt.shared, ...rt.slots[pickedIndex], <customer fields> }
+                'slots': [
+                    {
+                        'site_code':     row.site_code,
+                        'unit_id':       row.unit_id,
+                        'concession_id': row.concession_id,
+                        'plan_id':       row.plan_id,
+                        'quoted_rate':   float(row.std_rate) if row.std_rate is not None else None,
+                    } if row is not None else None
+                    for row in (slot1_row, slot2_row, slot3_row)
                 ],
-                'recommended_fields': ['plan_id', 'previous_request_id'],
-                # Pre-filled from slot 1 (Best Match) so the bot can ship
-                # the reserve call with these values verbatim. Override
-                # if the customer picked a different slot.
-                'site_code':           slot1_row.site_code if slot1_row else None,
-                'unit_id':             slot1_row.unit_id if slot1_row else None,
-                'concession_id':       slot1_row.concession_id if slot1_row else None,
-                'plan_id':             slot1_row.plan_id if slot1_row else None,
-                'session_id':          req.context.get('session_id'),
-                'customer_id':         req.context.get('customer_id'),
-                'previous_request_id': request_id,
             },
             'tracking_id': None,  # filled after log_served
         }

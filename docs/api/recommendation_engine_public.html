@@ -105,7 +105,7 @@ blockquote p { margin: 0.2rem 0; }
   <h1 id="extra-space-asia-recommendation-booking-api">Extra Space Asia — Recommendation &amp; Booking API</h1>
 <p>Build chat / web / mobile experiences that quote and reserve self-storage units through Extra Space Asia.</p>
 <ul>
-<li><strong>Version</strong> — <code>1.1.0</code> (2026-05-12) — see <a href="#13--changelog">§13 · Changelog</a></li>
+<li><strong>Version</strong> — <code>1.2.0</code> (2026-05-12) — see <a href="#13--changelog">§13 · Changelog</a></li>
 <li><strong>Base URL</strong> — <code>https://backend.extraspace.com.sg</code></li>
 <li><strong>Auth</strong> — <code>X-API-Key: esa_&lt;prefix&gt;.&lt;secret&gt;</code> on every request</li>
 <li><strong>Format</strong> — JSON in/out, UTF-8, ISO dates (<code>YYYY-MM-DD</code>), decimals as numbers (<code>91.01</code>)</li>
@@ -522,11 +522,29 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 <span class="w">  </span><span class="p">},</span>
 
 <span class="w">  </span><span class="nt">&quot;reserve_template&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="nt">&quot;endpoint&quot;</span><span class="p">:</span><span class="w">      </span><span class="s2">&quot;POST /api/reservations/reserve&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;site_code&quot;</span><span class="p">:</span><span class="w">     </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">107197</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;concession_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11872</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;plan_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">10</span>
+<span class="w">    </span><span class="nt">&quot;endpoint&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;POST /api/reservations/reserve&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;shared&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;session_id&quot;</span><span class="p">:</span><span class="w">          </span><span class="s2">&quot;sess-conv-7&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;customer_id&quot;</span><span class="p">:</span><span class="w">         </span><span class="s2">&quot;user_xyz_123&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;previous_request_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;550e8400-e29b-41d4-a716-446655440000&quot;</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="nt">&quot;slots&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;site_code&quot;</span><span class="p">:</span><span class="w">     </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">107197</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;concession_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11872</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;plan_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;quoted_rate&quot;</span><span class="p">:</span><span class="w">   </span><span class="mf">149.00</span>
+<span class="w">      </span><span class="p">},</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;site_code&quot;</span><span class="p">:</span><span class="w">     </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">107298</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;concession_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11873</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;plan_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">10</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">&quot;quoted_rate&quot;</span><span class="p">:</span><span class="w">   </span><span class="mf">159.00</span>
+<span class="w">      </span><span class="p">},</span>
+<span class="w">      </span><span class="kc">null</span>
+<span class="w">    </span><span class="p">]</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -733,6 +751,21 @@ Level 4   REJECTED with HTTP 400 ─── customer must accept a slot or pivot 
 <span class="s1">  }&#39;</span>
 </code></pre></div>
 
+<h3 id="bridge-from-reserve_template">Bridge from reserve_template</h3>
+<p>The recommend response includes a <code>reserve_template</code> object. Bot integration is a single spread regardless of which slot the customer picked:</p>
+<div class="codehilite"><pre><span></span><code><span class="kd">const</span><span class="w"> </span><span class="nx">rt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">recommendResponse</span><span class="p">.</span><span class="nx">reserve_template</span><span class="p">;</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">pickedIndex</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1</span><span class="p">;</span><span class="w"> </span><span class="c1">// 0-based: slot 1 = index 0, slot 2 = index 1, slot 3 = index 2</span>
+
+<span class="kd">const</span><span class="w"> </span><span class="nx">body</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="p">...</span><span class="nx">rt</span><span class="p">.</span><span class="nx">shared</span><span class="p">,</span>
+<span class="w">  </span><span class="p">...</span><span class="nx">rt</span><span class="p">.</span><span class="nx">slots</span><span class="p">[</span><span class="nx">pickedIndex</span><span class="p">],</span>
+<span class="w">  </span><span class="nx">first_name</span><span class="p">,</span><span class="w"> </span><span class="nx">last_name</span><span class="p">,</span><span class="w"> </span><span class="nx">phone</span><span class="p">,</span><span class="w"> </span><span class="nx">email</span><span class="p">,</span><span class="w"> </span><span class="nx">needed_date</span><span class="p">,</span><span class="w"> </span><span class="nx">expires_date</span><span class="p">,</span>
+<span class="p">};</span>
+
+<span class="nx">fetch</span><span class="p">(</span><span class="s1">&#39;/api/reservations/reserve&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">method</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;POST&#39;</span><span class="p">,</span><span class="w"> </span><span class="nx">body</span><span class="o">:</span><span class="w"> </span><span class="nb">JSON</span><span class="p">.</span><span class="nx">stringify</span><span class="p">(</span><span class="nx">body</span><span class="p">)</span><span class="w"> </span><span class="p">});</span>
+</code></pre></div>
+
+<p><code>rt.slots[N]</code> is <code>null</code> when slot N+1 was empty in the recommend response — guard before spreading. <code>concession_id</code> of <code>0</code> means standard rate; pass <code>0</code>, never <code>null</code>.</p>
 <h3 id="body-fields">Body fields</h3>
 <table>
 <thead>
@@ -957,17 +990,20 @@ POST /api/recommendations
 
 
 // ─── Customer picks slot 1 — hold the unit ───────────────────────────
+// rt = response.reserve_template; pickedIndex = 0 (slot 1)
 POST /api/reservations/reserve
 {
-  &quot;site_code&quot;:     &quot;L017&quot;,
-  &quot;unit_id&quot;:       107298,
-  &quot;concession_id&quot;: 11872,
+  // spread: { ...reserve_template.shared, ...reserve_template.slots[0], &lt;customer fields&gt; }
+  &quot;session_id&quot;:          &quot;sess-conv-7&quot;,
+  &quot;customer_id&quot;:         &quot;user_xyz_123&quot;,
+  &quot;previous_request_id&quot;: &quot;req-bbbb-2222&quot;,
+  &quot;site_code&quot;:           &quot;L017&quot;,
+  &quot;unit_id&quot;:             107298,
+  &quot;concession_id&quot;:       11872,
+  &quot;plan_id&quot;:             10,
   &quot;first_name&quot;:    &quot;Jane&quot;, &quot;last_name&quot;: &quot;Tan&quot;, &quot;phone&quot;: &quot;+6591234567&quot;,
   &quot;email&quot;:         &quot;jane@example.com&quot;,
-  &quot;needed_date&quot;:   &quot;2026-05-15&quot;,
-  &quot;session_id&quot;:    &quot;sess-conv-7&quot;,
-  &quot;customer_id&quot;:   &quot;user_xyz_123&quot;,
-  &quot;previous_request_id&quot;: &quot;req-bbbb-2222&quot;
+  &quot;needed_date&quot;:   &quot;2026-05-15&quot;
 }
 // → tenant_id = 1109544, waiting_id = 848757
 
@@ -1171,6 +1207,11 @@ GET /api/reservations/move-in/cost
 <hr>
 <h2 id="13-changelog">13 · Changelog</h2>
 <p>Versioning follows <a href="https://semver.org">semver</a>: MAJOR.MINOR.PATCH. <strong>MINOR</strong> bumps add optional response fields or new endpoints and are backwards-compatible — existing integrations keep working without changes.</p>
+<h3 id="120-2026-05-12">1.2.0 — 2026-05-12</h3>
+<p><strong>Changed</strong></p>
+<ul>
+<li><code>reserve_template</code> restructured to a nested shape with <code>shared</code> + per-slot <code>slots[]</code> array (indexed 0-2 to mirror <code>slots[]</code>). Each slot's block now includes <code>quoted_rate</code> (= std_rate). Bot integration is now a single merge regardless of which slot the customer picked. <strong>Note:</strong> this is a breaking change to <code>reserve_template</code> only — all other response fields are unchanged. No partner has shipped against the old shape, so no compat shim is provided.</li>
+</ul>
 <h3 id="110-2026-05-12">1.1.0 — 2026-05-12</h3>
 <p><strong>Added</strong></p>
 <ul>

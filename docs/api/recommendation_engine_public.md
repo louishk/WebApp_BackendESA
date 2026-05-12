@@ -2,7 +2,7 @@
 
 Build chat / web / mobile experiences that quote and reserve self-storage units through Extra Space Asia.
 
-- **Version** — `1.1.0` (2026-05-12) — see [§13 · Changelog](#13--changelog)
+- **Version** — `1.2.0` (2026-05-12) — see [§13 · Changelog](#13--changelog)
 - **Base URL** — `https://backend.extraspace.com.sg`
 - **Auth** — `X-API-Key: esa_<prefix>.<secret>` on every request
 - **Format** — JSON in/out, UTF-8, ISO dates (`YYYY-MM-DD`), decimals as numbers (`91.01`)
@@ -301,11 +301,29 @@ curl -X POST https://backend.extraspace.com.sg/api/recommendations \
   },
 
   "reserve_template": {
-    "endpoint":      "POST /api/reservations/reserve",
-    "site_code":     "L017",
-    "unit_id":       107197,
-    "concession_id": 11872,
-    "plan_id":       10
+    "endpoint": "POST /api/reservations/reserve",
+    "shared": {
+      "session_id":          "sess-conv-7",
+      "customer_id":         "user_xyz_123",
+      "previous_request_id": "550e8400-e29b-41d4-a716-446655440000"
+    },
+    "slots": [
+      {
+        "site_code":     "L017",
+        "unit_id":       107197,
+        "concession_id": 11872,
+        "plan_id":       10,
+        "quoted_rate":   149.00
+      },
+      {
+        "site_code":     "L017",
+        "unit_id":       107298,
+        "concession_id": 11873,
+        "plan_id":       10,
+        "quoted_rate":   159.00
+      },
+      null
+    ]
   }
 }
 ```
@@ -435,6 +453,25 @@ curl -X POST https://backend.extraspace.com.sg/api/reservations/reserve \
     "customer_id": "user_xyz_123"
   }'
 ```
+
+### Bridge from reserve_template
+
+The recommend response includes a `reserve_template` object. Bot integration is a single spread regardless of which slot the customer picked:
+
+```js
+const rt = recommendResponse.reserve_template;
+const pickedIndex = 1; // 0-based: slot 1 = index 0, slot 2 = index 1, slot 3 = index 2
+
+const body = {
+  ...rt.shared,
+  ...rt.slots[pickedIndex],
+  first_name, last_name, phone, email, needed_date, expires_date,
+};
+
+fetch('/api/reservations/reserve', { method: 'POST', body: JSON.stringify(body) });
+```
+
+`rt.slots[N]` is `null` when slot N+1 was empty in the recommend response — guard before spreading. `concession_id` of `0` means standard rate; pass `0`, never `null`.
 
 ### Body fields
 
@@ -601,17 +638,20 @@ POST /api/recommendations
 
 
 // ─── Customer picks slot 1 — hold the unit ───────────────────────────
+// rt = response.reserve_template; pickedIndex = 0 (slot 1)
 POST /api/reservations/reserve
 {
-  "site_code":     "L017",
-  "unit_id":       107298,
-  "concession_id": 11872,
+  // spread: { ...reserve_template.shared, ...reserve_template.slots[0], <customer fields> }
+  "session_id":          "sess-conv-7",
+  "customer_id":         "user_xyz_123",
+  "previous_request_id": "req-bbbb-2222",
+  "site_code":           "L017",
+  "unit_id":             107298,
+  "concession_id":       11872,
+  "plan_id":             10,
   "first_name":    "Jane", "last_name": "Tan", "phone": "+6591234567",
   "email":         "jane@example.com",
-  "needed_date":   "2026-05-15",
-  "session_id":    "sess-conv-7",
-  "customer_id":   "user_xyz_123",
-  "previous_request_id": "req-bbbb-2222"
+  "needed_date":   "2026-05-15"
 }
 // → tenant_id = 1109544, waiting_id = 848757
 
@@ -709,6 +749,12 @@ Pass `concession_id` (the integer) verbatim through `/reserve`. Use `plan_name` 
 ## 13 · Changelog
 
 Versioning follows [semver](https://semver.org): MAJOR.MINOR.PATCH. **MINOR** bumps add optional response fields or new endpoints and are backwards-compatible — existing integrations keep working without changes.
+
+### 1.2.0 — 2026-05-12
+
+**Changed**
+
+- `reserve_template` restructured to a nested shape with `shared` + per-slot `slots[]` array (indexed 0-2 to mirror `slots[]`). Each slot's block now includes `quoted_rate` (= std_rate). Bot integration is now a single merge regardless of which slot the customer picked. **Note:** this is a breaking change to `reserve_template` only — all other response fields are unchanged. No partner has shipped against the old shape, so no compat shim is provided.
 
 ### 1.1.0 — 2026-05-12
 

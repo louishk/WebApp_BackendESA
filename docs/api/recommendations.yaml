@@ -30,7 +30,7 @@
 openapi: 3.0.3
 info:
   title: ESA Recommendation Engine
-  version: 1.1.0
+  version: 1.2.0
   description: |
     3-slot recommendation engine for unit-level pricing quotes. Designed for
     PandaAI chatbot integration but usable by any client with the `recommender`
@@ -356,16 +356,52 @@ components:
         reserve_template:
           type: object
           description: |
-            Hint for what to POST to /api/reservations/reserve when the
-            customer accepts a slot. Reduces bot integration surface.
+            Pre-filled booking template. `shared` fields are identical for
+            every slot; `slots[N]` mirrors the Nth entry in `slots[]` and
+            is null when that slot is empty. Bot integration:
+              { ...rt.shared, ...rt.slots[pickedIndex], <customer fields> }
           properties:
-            endpoint: { type: string, example: "POST /api/reservations/reserve" }
-            required:
+            endpoint:
+              type: string
+              example: "POST /api/reservations/reserve"
+            shared:
+              type: object
+              description: Fields echoed from the recommend request; identical for every slot.
+              properties:
+                session_id:
+                  type: string
+                  nullable: true
+                customer_id:
+                  type: string
+                  nullable: true
+                previous_request_id:
+                  type: string
+                  description: The request_id of this recommendation response.
+            slots:
               type: array
-              items: { type: string }
-            recommended:
-              type: array
-              items: { type: string }
+              description: Indexed 0-2 to mirror slots[]. null when the corresponding slot is empty.
+              items:
+                nullable: true
+                type: object
+                properties:
+                  site_code:
+                    type: string
+                    example: "L017"
+                  unit_id:
+                    type: integer
+                    example: 107197
+                  concession_id:
+                    type: integer
+                    example: 11872
+                    description: 0 = standard rate (no discount).
+                  plan_id:
+                    type: integer
+                    nullable: true
+                    example: 10
+                  quoted_rate:
+                    type: number
+                    nullable: true
+                    description: std_rate for this slot (per-month, pre-concession).
         tracking_id:
           type: integer
           description: |
@@ -913,6 +949,20 @@ paths:
                           total: 165.65
                   - null
                   - null
+                reserve_template:
+                  endpoint: "POST /api/reservations/reserve"
+                  shared:
+                    session_id: "sess-conv-7"
+                    customer_id: "user_xyz_123"
+                    previous_request_id: "550e8400-e29b-41d4-a716-446655440000"
+                  slots:
+                    - site_code: "L003"
+                      unit_id: 79215
+                      concession_id: 11878
+                      plan_id: 10
+                      quoted_rate: 149.0
+                    - null
+                    - null
                 tracking_id: 8472
         '400':
           description: Validation error
