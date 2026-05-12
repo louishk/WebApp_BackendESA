@@ -318,7 +318,7 @@
     </div>
 
     {# --- Revenue sub-navbar --- #}
-    {% set _in_revenue = request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'admin_risk' in request.endpoint) and not request.endpoint.startswith('admin.') %}
+    {% set _in_revenue = request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'admin_risk' in request.endpoint or 'pricing_anomalies' in request.endpoint) and not request.endpoint.startswith('admin.') %}
     {% if _in_revenue %}
     <div class="sub-navbar">
         {% if current_user.can_access_revenue_tools() %}
@@ -329,6 +329,9 @@
         {% endif %}
         {% if current_user.can_access_revenue_tools() and has_endpoint('admin_risk.risk_factors_page') %}
         <a href="{{ url_for('admin_risk.risk_factors_page') }}" class="{{ 'active' if request.endpoint and 'admin_risk' in request.endpoint else '' }}">Risk Factors</a>
+        {% endif %}
+        {% if current_user.can_access_pricing_anomalies_tools and current_user.can_access_pricing_anomalies_tools() and has_endpoint('tools.pricing_anomalies') %}
+        <a href="{{ url_for('tools.pricing_anomalies') }}" class="{{ 'active' if request.endpoint == 'tools.pricing_anomalies' else '' }}">Pricing Anomalies</a>
         {% endif %}
     </div>
     {% endif %}
@@ -380,6 +383,8 @@
            class="{{ 'active' if request.endpoint and 'site_distance' in request.endpoint else '' }}">Site Distance</a>
         <a href="{{ url_for('recommendation_engine.lease_followups') }}"
            class="{{ 'active' if request.endpoint and 'lease_followup' in request.endpoint else '' }}">Lease Follow-ups</a>
+        <a href="{{ url_for('recommendation_engine.marketing_feeds_list') }}"
+           class="{{ 'active' if request.endpoint and 'marketing_feeds' in request.endpoint else '' }}">Marketing Feeds</a>
     </div>
     {% endif %}
 

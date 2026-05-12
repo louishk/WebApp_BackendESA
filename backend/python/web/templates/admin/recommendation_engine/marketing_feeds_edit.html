@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit' if feed else 'New' }} Marketing Feed - Recommendation Engine{% endblock %}
+
+{% block content %}
+<style>
+.feed-form .row { display: grid; grid-template-columns: 200px 1fr; gap: 1rem; padding: 0.7rem 0; border-bottom: 1px solid #f3f4f6; align-items: start; }
+.feed-form label.field-label { font-weight: 600; font-size: 0.82rem; color: #374151; padding-top: 0.4rem; }
+.feed-form .field-hint { font-size: 0.74rem; color: #6b7280; margin-top: 0.2rem; line-height: 1.35; }
+.feed-form input[type="text"], .feed-form input[type="number"], .feed-form select, .feed-form textarea {
+    width: 100%; padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 5px; font-size: 0.85rem; font-family: inherit;
+}
+.feed-form textarea { min-height: 4em; font-family: 'Monaco', monospace; font-size: 0.78rem; }
+.feed-form fieldset { border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.4rem 1rem 1rem; margin-bottom: 1rem; }
+.feed-form legend { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--esa-navy); padding: 0 0.4rem; }
+.placeholder-list { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.3rem; }
+.placeholder-list code { background: #f3f4f6; padding: 1px 6px; border-radius: 3px; font-size: 0.72rem; cursor: pointer; }
+.feed-url-box { background: #1f2937; color: #d1fae5; padding: 0.7rem; border-radius: 5px; font-family: monospace; font-size: 0.78rem; word-break: break-all; }
+</style>
+
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <h1>{{ 'Edit' if feed else 'New' }} Marketing Feed</h1>
+    <a href="{{ url_for('recommendation_engine.marketing_feeds_list') }}" class="btn">← Back</a>
+</div>
+
+<form method="POST"
+      action="{% if feed %}{{ url_for('recommendation_engine.marketing_feeds_save', feed_id=feed.id) }}{% else %}{{ url_for('recommendation_engine.marketing_feeds_save') }}{% endif %}"
+      class="feed-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <fieldset>
+        <legend>Identity</legend>
+        <div class="row">
+            <label class="field-label" for="name">Name</label>
+            <div>
+                <input type="text" name="name" id="name" required maxlength="120"
+                       value="{{ feed.name if feed else '' }}"
+                       placeholder="e.g. FB Catalog — Korea">
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="slug">Slug</label>
+            <div>
+                <input type="text" name="slug" id="slug" required maxlength="80"
+                       pattern="[a-z0-9-]+"
+                       value="{{ feed.slug if feed else '' }}"
+                       placeholder="fb-catalog-kr">
+                <div class="field-hint">URL-safe identifier used in the public feed URL. Lowercase, digits, dashes only.</div>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="channel">Channel</label>
+            <div>
+                <select name="channel" id="channel" required>
+                    <option value="facebook" {% if feed and feed.channel == 'facebook' %}selected{% endif %}>Facebook Catalog</option>
+                    <option value="google_ads" {% if feed and feed.channel == 'google_ads' %}selected{% endif %}>Google Ads Custom Remarketing</option>
+                </select>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label">Enabled</label>
+            <div>
+                <label><input type="checkbox" name="enabled" {% if not feed or feed.enabled %}checked{% endif %}> Feed is live and reachable at the public URL</label>
+            </div>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Selection</legend>
+        <div class="row">
+            <label class="field-label" for="site_ids">Site IDs</label>
+            <div>
+                <input type="text" name="site_ids" id="site_ids"
+                       value="{{ feed.site_ids|join(', ') if feed and feed.site_ids else '' }}"
+                       placeholder="leave blank for ALL sites">
+                <div class="field-hint">Comma-separated site IDs. Empty = all sites.</div>
+                <details style="margin-top: 0.4rem;">
+                    <summary style="font-size: 0.78rem; cursor: pointer;">Browse {{ site_options|length }} sites</summary>
+                    <div style="max-height: 240px; overflow-y: auto; background: #f9fafb; padding: 0.6rem; margin-top: 0.4rem; border-radius: 5px; font-size: 0.77rem;">
+                        {% set ns = namespace(country='') %}
+                        {% for s in site_options %}
+                            {% if s.country != ns.country %}
+                                {% set ns.country = s.country %}
+                                <div style="font-weight: 700; margin-top: 0.5rem; color: var(--esa-navy);">{{ s.country }}</div>
+                            {% endif %}
+                            <div><code>{{ s.id }}</code> — {{ s.code }} — {{ s.name }}</div>
+                        {% endfor %}
+                    </div>
+                </details>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="countries">Countries</label>
+            <div>
+                <input type="text" name="countries" id="countries"
+                       value="{{ feed.countries|join(', ') if feed and feed.countries else '' }}"
+                       placeholder="Korea, Singapore — blank for ALL">
+                <div class="field-hint">
+                    Filter by site country.
+                    Available: {{ country_options|join(', ') }}
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="category_includes">Category includes</label>
+            <div>
+                <input type="text" name="category_includes" id="category_includes"
+                       value="{{ feed.category_includes|join(', ') if feed and feed.category_includes else '' }}"
+                       placeholder="e.g. SOP, COM">
+                <div class="field-hint">Keep only categories whose <code>stype_name</code> ILIKE any of these patterns. Empty = no filter.</div>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="category_excludes">Category excludes</label>
+            <div>
+                <input type="text" name="category_excludes" id="category_excludes"
+                       value="{{ feed.category_excludes|join(', ') if feed and feed.category_excludes else '' }}"
+                       placeholder="e.g. mailbox, parking">
+                <div class="field-hint">Drop categories whose <code>stype_name</code> ILIKE any of these.</div>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="unit_type_excludes">Unit-type excludes</label>
+            <div>
+                <input type="text" name="unit_type_excludes" id="unit_type_excludes"
+                       value="{{ feed.unit_type_excludes|join(', ') if feed and feed.unit_type_excludes else '' }}"
+                       placeholder="MB, BZ, PR">
+                <div class="field-hint">Parsed unit-type codes to drop (e.g. MB = mailbox, BZ = biz-plus, PR = parking).</div>
+            </div>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Pricing</legend>
+        <div class="row">
+            <label class="field-label" for="list_price_source">List price column</label>
+            <div>
+                <select name="list_price_source" id="list_price_source">
+                    {% set lps = feed.list_price_source if feed else 'std_rate' %}
+                    {% for c in ['std_rate', 'web_rate', 'push_rate', 'board_rate', 'preferred_rate'] %}
+                    <option value="{{ c }}" {% if lps == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+                <div class="field-hint">Standard/headline price — shown as <code>price</code> in the feed.</div>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="sale_price_source">Sale price column</label>
+            <div>
+                <select name="sale_price_source" id="sale_price_source">
+                    {% set sps = feed.sale_price_source if feed else 'preferred_rate' %}
+                    {% for c in ['std_rate', 'web_rate', 'push_rate', 'board_rate', 'preferred_rate'] %}
+                    <option value="{{ c }}" {% if sps == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+                <div class="field-hint">Best available rate. Used to pick the cheapest candidate per (site × category) and rendered as <code>sale_price</code>.</div>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label">Include sale_price</label>
+            <div>
+                <label><input type="checkbox" name="include_sale_price"
+                              {% if not feed or feed.include_sale_price %}checked{% endif %}>
+                    Surface <code>sale_price</code> in the feed when it's lower than list (drives strikethrough in ads)</label>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="currency_override">Currency override</label>
+            <div>
+                <input type="text" name="currency_override" id="currency_override" maxlength="3"
+                       value="{{ feed.currency_override if feed and feed.currency_override else '' }}"
+                       placeholder="leave blank to auto-derive from country (KR→KRW, SG→SGD…)">
+            </div>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Render templates</legend>
+        <div class="row">
+            <label class="field-label" for="title_template">Title</label>
+            <div>
+                <textarea name="title_template" id="title_template">{{ feed.title_template if feed else '{size_range} {climate_label} Storage at {site_name}' }}</textarea>
+                <div class="placeholder-list">
+                    {% for ph in ['site_code','site_name','country','stype_name','size_category','size_range','climate_type','climate_label','unit_type','brand'] %}
+                    <code>{{ '{' + ph + '}' }}</code>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="description_template">Description</label>
+            <div>
+                <textarea name="description_template" id="description_template">{{ feed.description_template if feed else 'Self-storage unit ({size_range}) at Extra Space Asia {site_name}. {climate_label}.' }}</textarea>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="brand">Brand</label>
+            <div>
+                <input type="text" name="brand" id="brand" maxlength="80"
+                       value="{{ feed.brand if feed else 'Extra Space Asia' }}">
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="landing_url_template">Landing URL</label>
+            <div>
+                <input type="text" name="landing_url_template" id="landing_url_template"
+                       value="{{ feed.landing_url_template if feed else 'https://www.extraspaceasia.com/?site={site_code}' }}">
+                <div class="field-hint">Click destination. Supports the same placeholders as Title.</div>
+            </div>
+        </div>
+        <div class="row">
+            <label class="field-label" for="image_url_template">Image URL</label>
+            <div>
+                <input type="text" name="image_url_template" id="image_url_template"
+                       value="{{ feed.image_url_template if feed and feed.image_url_template else '' }}"
+                       placeholder="https://cdn.extraspaceasia.com/sites/{site_code}/hero.jpg">
+                <div class="field-hint">Optional. Required by Facebook, recommended for Google Ads.</div>
+            </div>
+        </div>
+    </fieldset>
+
+    {% if feed %}
+    <fieldset>
+        <legend>Public URL</legend>
+        <div style="margin: 0.5rem 0;">
+            <div class="feed-url-box">
+                {{ request.url_root.rstrip('/') }}{{ url_for('recommendation_engine.marketing_feeds_public', slug=feed.slug) }}?token={{ feed.public_token }}
+            </div>
+            <div class="field-hint" style="margin-top: 0.4rem;">
+                Submit this URL to Facebook Catalog Manager or Google Ads data feed scheduler. Token is required.
+            </div>
+        </div>
+    </fieldset>
+    {% endif %}
+
+    <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+        <button type="submit" class="btn">{{ 'Save changes' if feed else 'Create feed' }}</button>
+        <a href="{{ url_for('recommendation_engine.marketing_feeds_list') }}" class="btn btn-secondary">Cancel</a>
+        {% if feed %}
+        <a href="{{ url_for('recommendation_engine.marketing_feeds_preview', feed_id=feed.id) }}" class="btn btn-secondary">Preview rows →</a>
+        {% endif %}
+    </div>
+</form>
+
+<script>
+document.querySelectorAll('.placeholder-list code').forEach(el => {
+    el.addEventListener('click', () => {
+        navigator.clipboard.writeText(el.textContent);
+        el.style.background = '#d1fae5';
+        setTimeout(() => { el.style.background = ''; }, 400);
+    });
+});
+// Auto-slug from name
+const nameEl = document.getElementById('name');
+const slugEl = document.getElementById('slug');
+{% if not feed %}
+if (nameEl && slugEl) {
+    nameEl.addEventListener('input', () => {
+        if (slugEl.dataset.touched) return;
+        slugEl.value = nameEl.value.toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '');
+    });
+    slugEl.addEventListener('input', () => { slugEl.dataset.touched = '1'; });
+}
+{% endif %}
+</script>
+{% endblock %}

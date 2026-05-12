@@ -852,3 +852,284 @@ def lease_followup_retry(job_id: int):
         session.close()
     return redirect(url_for('recommendation_engine.lease_followups'))
 
+
+# ---------------------------------------------------------------------------
+# Marketing feeds (Facebook Catalog / Google Ads remarketing)
+# ---------------------------------------------------------------------------
+
+def _parse_csv(value: str) -> list:
+    """Comma- or newline-separated string → list of trimmed strings."""
+    if not value:
+        return []
+    tokens = []
+    for chunk in value.replace('\r', '\n').replace(',', '\n').split('\n'):
+        t = chunk.strip()
+        if t:
+            tokens.append(t)
+    return tokens
+
+
+def _parse_int_list(value: str) -> list:
+    out = []
+    for tok in _parse_csv(value):
+        try:
+            out.append(int(tok))
+        except ValueError:
+            pass
+    return out
+
+
+@recommendation_engine_bp.route('/marketing-feeds', methods=['GET'])
+@login_required
+@_require_config_permission
+def marketing_feeds_list():
+    session = _get_session()
+    try:
+        rows = session.execute(text("""
+            SELECT id, name, slug, channel, enabled, last_built_at,
+                   last_row_count, created_at,
+                   array_length(site_ids, 1)  AS n_sites,
+                   array_length(countries, 1) AS n_countries
+            FROM mw_marketing_feeds
+            ORDER BY created_at DESC
+        """)).mappings().all()
+        return render_template(
+            'admin/recommendation_engine/marketing_feeds_list.html',
+            feeds=rows,
+        )
+    finally:
+        session.close()
+
+
+@recommendation_engine_bp.route('/marketing-feeds/new', methods=['GET'])
+@login_required
+@_require_config_permission
+def marketing_feeds_new():
+    return render_template(
+        'admin/recommendation_engine/marketing_feeds_edit.html',
+        feed=None,
+        site_options=_load_site_options(),
+        country_options=_load_country_options(),
+    )
+
+
+@recommendation_engine_bp.route('/marketing-feeds/<int:feed_id>/edit', methods=['GET'])
+@login_required
+@_require_config_permission
+def marketing_feeds_edit(feed_id: int):
+    session = _get_session()
+    try:
+        row = session.execute(text("""
+            SELECT * FROM mw_marketing_feeds WHERE id = :id
+        """), {"id": feed_id}).mappings().first()
+        if not row:
+            flash('Feed not found.', 'error')
+            return redirect(url_for('recommendation_engine.marketing_feeds_list'))
+        return render_template(
+            'admin/recommendation_engine/marketing_feeds_edit.html',
+            feed=row,
+            site_options=_load_site_options(),
+            country_options=_load_country_options(),
+        )
+    finally:
+        session.close()
+
+
+@recommendation_engine_bp.route('/marketing-feeds/save', methods=['POST'])
+@recommendation_engine_bp.route('/marketing-feeds/<int:feed_id>/save', methods=['POST'])
+@login_required
+@_require_config_permission
+def marketing_feeds_save(feed_id: int = None):
+    import re
+    from web.services.marketing_feed import (
+        generate_public_token, ALLOWED_PRICE_COLUMNS,
+    )
+    f = request.form
+    _SLUG_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,78}[a-z0-9]$')
+
+    name = (f.get('name') or '').strip()
+    slug = (f.get('slug') or '').strip().lower()
+    channel = (f.get('channel') or '').strip()
+
+    if not name or not slug or channel not in ('facebook', 'google_ads'):
+        flash('Name, slug, and channel are required.', 'error')
+        return redirect(request.referrer or url_for('recommendation_engine.marketing_feeds_list'))
+
+    if not _SLUG_RE.match(slug):
+        flash('Slug must be 2-80 chars, lowercase alphanumeric with dashes only.', 'error')
+        return redirect(request.referrer or url_for('recommendation_engine.marketing_feeds_list'))
+
+    list_col = (f.get('list_price_source') or 'std_rate').strip()
+    sale_col = (f.get('sale_price_source') or 'preferred_rate').strip()
+    if list_col not in ALLOWED_PRICE_COLUMNS or sale_col not in ALLOWED_PRICE_COLUMNS:
+        flash('Invalid price source.', 'error')
+        return redirect(request.referrer or url_for('recommendation_engine.marketing_feeds_list'))
+
+    payload = {
+        'name': name,
+        'slug': slug,
+        'channel': channel,
+        'enabled': f.get('enabled') == 'on',
+        'site_ids': _parse_int_list(f.get('site_ids', '')),
+        'countries': _parse_csv(f.get('countries', '')),
+        'category_includes': _parse_csv(f.get('category_includes', '')),
+        'category_excludes': _parse_csv(f.get('category_excludes', '')),
+        'unit_type_excludes': _parse_csv(f.get('unit_type_excludes', '')),
+        'list_price_source': list_col,
+        'sale_price_source': sale_col,
+        'include_sale_price': f.get('include_sale_price') == 'on',
+        'currency_override': (f.get('currency_override') or '').strip().upper() or None,
+        'title_template': (f.get('title_template') or '').strip(),
+        'description_template': (f.get('description_template') or '').strip(),
+        'brand': (f.get('brand') or 'Extra Space Asia').strip(),
+        'landing_url_template': (f.get('landing_url_template') or '').strip(),
+        'image_url_template': (f.get('image_url_template') or '').strip() or None,
+    }
+
+    session = _get_session()
+    try:
+        if feed_id:
+            session.execute(text("""
+                UPDATE mw_marketing_feeds SET
+                    name=:name, slug=:slug, channel=:channel, enabled=:enabled,
+                    site_ids=:site_ids, countries=:countries,
+                    category_includes=:category_includes, category_excludes=:category_excludes,
+                    unit_type_excludes=:unit_type_excludes,
+                    list_price_source=:list_price_source, sale_price_source=:sale_price_source,
+                    include_sale_price=:include_sale_price, currency_override=:currency_override,
+                    title_template=:title_template, description_template=:description_template,
+                    brand=:brand, landing_url_template=:landing_url_template,
+                    image_url_template=:image_url_template,
+                    updated_at=NOW()
+                WHERE id=:id
+            """), {**payload, 'id': feed_id})
+            audit_log(AuditEvent.SETTINGS_UPDATED, f"Marketing feed {feed_id} updated ({name})")
+        else:
+            payload['public_token'] = generate_public_token()
+            payload['created_by'] = current_user.email if current_user.is_authenticated else None
+            session.execute(text("""
+                INSERT INTO mw_marketing_feeds
+                  (name, slug, channel, enabled, site_ids, countries,
+                   category_includes, category_excludes, unit_type_excludes,
+                   list_price_source, sale_price_source, include_sale_price,
+                   currency_override, title_template, description_template,
+                   brand, landing_url_template, image_url_template,
+                   public_token, created_by)
+                VALUES
+                  (:name, :slug, :channel, :enabled, :site_ids, :countries,
+                   :category_includes, :category_excludes, :unit_type_excludes,
+                   :list_price_source, :sale_price_source, :include_sale_price,
+                   :currency_override, :title_template, :description_template,
+                   :brand, :landing_url_template, :image_url_template,
+                   :public_token, :created_by)
+            """), payload)
+            audit_log(AuditEvent.SETTINGS_UPDATED, f"Marketing feed created ({name}/{slug}/{channel})")
+        session.commit()
+        flash(f'Feed "{name}" saved.', 'success')
+    except Exception as exc:
+        session.rollback()
+        current_app.logger.error("marketing_feeds_save failed: %s", exc, exc_info=True)
+        flash('Could not save feed. A feed with that slug may already exist.', 'error')
+    finally:
+        session.close()
+    return redirect(url_for('recommendation_engine.marketing_feeds_list'))
+
+
+@recommendation_engine_bp.route('/marketing-feeds/<int:feed_id>/delete', methods=['POST'])
+@login_required
+@_require_config_permission
+def marketing_feeds_delete(feed_id: int):
+    session = _get_session()
+    try:
+        session.execute(text("DELETE FROM mw_marketing_feeds WHERE id=:id"), {"id": feed_id})
+        session.commit()
+        audit_log(AuditEvent.SETTINGS_UPDATED, f"Marketing feed {feed_id} deleted")
+        flash('Feed deleted.', 'success')
+    except Exception as exc:
+        session.rollback()
+        current_app.logger.error("marketing_feeds_delete feed_id=%s failed: %s", feed_id, exc, exc_info=True)
+        flash('Could not delete feed. Check server logs.', 'error')
+    finally:
+        session.close()
+    return redirect(url_for('recommendation_engine.marketing_feeds_list'))
+
+
+@recommendation_engine_bp.route('/marketing-feeds/<int:feed_id>/preview', methods=['GET'])
+@login_required
+@_require_config_permission
+def marketing_feeds_preview(feed_id: int):
+    """Render the feed inline for admin preview (limit 50 rows)."""
+    from web.services import marketing_feed as mf
+    session = _get_session()
+    try:
+        cfg = mf.load_feed_config(session, feed_id)
+        if not cfg:
+            return jsonify({"error": "Feed not found"}), 404
+        rows = mf.build_rows(session, cfg)
+        return render_template(
+            'admin/recommendation_engine/marketing_feeds_preview.html',
+            feed=cfg,
+            rows=rows[:50],
+            total=len(rows),
+        )
+    finally:
+        session.close()
+
+
+@recommendation_engine_bp.route('/marketing-feeds/public/<slug>.xml', methods=['GET'])
+def marketing_feeds_public(slug: str):
+    """Public XML endpoint for FB/Google to fetch. Auth via signed token."""
+    from flask import Response
+    from web.services import marketing_feed as mf
+
+    token = request.args.get('token', '')
+    if not token:
+        return Response('Unauthorized', status=401)
+
+    session = _get_session()
+    try:
+        cfg = mf.load_feed_by_slug_token(session, slug, token)
+        if not cfg:
+            return Response('Not found', status=404)
+        rows = mf.build_rows(session, cfg)
+        xml = mf.render_feed(cfg, rows)
+        try:
+            mf.mark_feed_built(session, cfg.id, len(rows))
+        except Exception:
+            session.rollback()
+            logger = __import__('logging').getLogger(__name__)
+            logger.exception("Failed to record feed build")
+        return Response(
+            xml,
+            mimetype='application/xml; charset=utf-8',
+            headers={'Cache-Control': 'public, max-age=3600'},
+        )
+    finally:
+        session.close()
+
+
+def _load_site_options() -> list:
+    session = _get_session()
+    try:
+        rows = session.execute(text("""
+            SELECT "SiteID" AS id, "SiteCode" AS code, "Name" AS name, "Country" AS country
+            FROM mw_siteinfo
+            ORDER BY "Country", "SiteCode"
+        """)).mappings().all()
+        return [dict(r) for r in rows]
+    finally:
+        session.close()
+
+
+def _load_country_options() -> list:
+    session = _get_session()
+    try:
+        rows = session.execute(text("""
+            SELECT DISTINCT "Country" AS country
+            FROM mw_siteinfo
+            WHERE "Country" IS NOT NULL
+            ORDER BY "Country"
+        """)).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        session.close()

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Preview: {{ feed.name }} - Recommendation Engine{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <h1 style="margin: 0;">Preview: {{ feed.name }}</h1>
+        <div style="font-size: 0.78rem; color: #6b7280;">
+            {{ total }} total rows · showing first {{ rows|length }}
+        </div>
+    </div>
+    <div style="display: flex; gap: 0.4rem;">
+        <a href="{{ url_for('recommendation_engine.marketing_feeds_edit', feed_id=feed.id) }}" class="btn">Edit</a>
+        <a href="{{ url_for('recommendation_engine.marketing_feeds_list') }}" class="btn btn-secondary">← Back</a>
+    </div>
+</div>
+
+{% if not rows %}
+<div class="card" style="padding: 1.25rem; text-align: center; color: #6b7280;">
+    No rows match this feed's filters.
+</div>
+{% else %}
+<table class="data-table" style="font-size: 0.78rem;">
+    <thead>
+        <tr>
+            <th>Site</th>
+            <th>Country</th>
+            <th>Category (stype_name)</th>
+            <th>Size</th>
+            <th>Climate</th>
+            <th style="text-align: right;">List</th>
+            <th style="text-align: right;">Sale</th>
+            <th>Currency</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td><strong>{{ r.site_code }}</strong> <span style="color: #6b7280;">— {{ r.site_name }}</span></td>
+            <td>{{ r.country }}</td>
+            <td><code>{{ r.stype_name }}</code></td>
+            <td>{{ r.size_range or r.size_category or '—' }}</td>
+            <td>{{ r.climate_type or '—' }}</td>
+            <td style="text-align: right;">{{ '{:,.2f}'.format(r.list_price) if r.list_price else '—' }}</td>
+            <td style="text-align: right;">
+                {% if r.list_price and r.sale_price and r.sale_price < r.list_price %}
+                <strong style="color: #16a34a;">{{ '{:,.2f}'.format(r.sale_price) }}</strong>
+                {% else %}
+                {{ '{:,.2f}'.format(r.sale_price) if r.sale_price else '—' }}
+                {% endif %}
+            </td>
+            <td>{{ r.currency }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Marketing Feeds - Recommendation Engine{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <h1 style="margin: 0;">Marketing Feeds</h1>
+        <div style="font-size: 0.78rem; color: #6b7280; margin-top: 0.15rem;">
+            Catalog + remarketing feeds built from the recommendation candidate pool.
+            One row per (site × category), best price wins.
+        </div>
+    </div>
+    <a href="{{ url_for('recommendation_engine.marketing_feeds_new') }}" class="btn">+ New Feed</a>
+</div>
+
+{% if not feeds %}
+<div class="card" style="padding: 1.25rem; text-align: center; color: #6b7280;">
+    No feeds yet. <a href="{{ url_for('recommendation_engine.marketing_feeds_new') }}">Create one →</a>
+</div>
+{% else %}
+<table class="data-table" style="font-size: 0.85rem;">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Channel</th>
+            <th>Slug</th>
+            <th>Scope</th>
+            <th>Last build</th>
+            <th>Rows</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in feeds %}
+        <tr>
+            <td><strong>{{ f.name }}</strong></td>
+            <td>
+                {% if f.channel == 'facebook' %}
+                <span style="background: #1877f2; color: white; padding: 2px 7px; border-radius: 4px; font-size: 0.7rem;">Facebook</span>
+                {% elif f.channel == 'google_ads' %}
+                <span style="background: #4285f4; color: white; padding: 2px 7px; border-radius: 4px; font-size: 0.7rem;">Google Ads</span>
+                {% endif %}
+            </td>
+            <td><code style="font-size: 0.75rem;">{{ f.slug }}</code></td>
+            <td style="font-size: 0.78rem; color: #6b7280;">
+                {{ f.n_sites or 'all' }} sites · {{ f.n_countries or 'all' }} countries
+            </td>
+            <td style="font-size: 0.78rem; white-space: nowrap;">
+                {{ f.last_built_at.strftime('%Y-%m-%d %H:%M') if f.last_built_at else '—' }}
+            </td>
+            <td>{{ f.last_row_count if f.last_row_count is not none else '—' }}</td>
+            <td>
+                {% if f.enabled %}
+                <span style="color: #16a34a; font-weight: 600;">● enabled</span>
+                {% else %}
+                <span style="color: #6b7280;">○ disabled</span>
+                {% endif %}
+            </td>
+            <td style="white-space: nowrap;">
+                <a href="{{ url_for('recommendation_engine.marketing_feeds_preview', feed_id=f.id) }}"
+                   class="btn btn-secondary" style="padding: 3px 8px; font-size: 0.75rem;">Preview</a>
+                <a href="{{ url_for('recommendation_engine.marketing_feeds_edit', feed_id=f.id) }}"
+                   class="btn" style="padding: 3px 8px; font-size: 0.75rem;">Edit</a>
+                <form method="POST"
+                      action="{{ url_for('recommendation_engine.marketing_feeds_delete', feed_id=f.id) }}"
+                      style="display: inline;"
+                      onsubmit="return confirm('Delete feed {{ f.name }}? This cannot be undone.');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-danger" style="padding: 3px 8px; font-size: 0.75rem;">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}
