@@ -30,7 +30,7 @@
 openapi: 3.0.3
 info:
   title: ESA Recommendation Engine
-  version: 1.2.0
+  version: 1.2.1
   description: |
     3-slot recommendation engine for unit-level pricing quotes. Designed for
     PandaAI chatbot integration but usable by any client with the `recommender`
@@ -384,6 +384,10 @@ components:
                 nullable: true
                 type: object
                 properties:
+                  slot:
+                    type: integer
+                    enum: [1, 2, 3]
+                    description: 1-indexed slot number, matching the top-level slots[] position.
                   site_code:
                     type: string
                     example: "L017"
@@ -956,7 +960,8 @@ paths:
                     customer_id: "user_xyz_123"
                     previous_request_id: "550e8400-e29b-41d4-a716-446655440000"
                   slots:
-                    - site_code: "L003"
+                    - slot: 1
+                      site_code: "L003"
                       unit_id: 79215
                       concession_id: 11878
                       plan_id: 10

@@ -105,7 +105,7 @@ blockquote p { margin: 0.2rem 0; }
   <h1 id="extra-space-asia-recommendation-booking-api">Extra Space Asia — Recommendation &amp; Booking API</h1>
 <p>Build chat / web / mobile experiences that quote and reserve self-storage units through Extra Space Asia.</p>
 <ul>
-<li><strong>Version</strong> — <code>1.2.0</code> (2026-05-12) — see <a href="#13--changelog">§13 · Changelog</a></li>
+<li><strong>Version</strong> — <code>1.2.1</code> (2026-05-12) — see <a href="#13--changelog">§13 · Changelog</a></li>
 <li><strong>Base URL</strong> — <code>https://backend.extraspace.com.sg</code></li>
 <li><strong>Auth</strong> — <code>X-API-Key: esa_&lt;prefix&gt;.&lt;secret&gt;</code> on every request</li>
 <li><strong>Format</strong> — JSON in/out, UTF-8, ISO dates (<code>YYYY-MM-DD</code>), decimals as numbers (<code>91.01</code>)</li>
@@ -530,6 +530,7 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="nt">&quot;slots&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;slot&quot;</span><span class="p">:</span><span class="w">          </span><span class="mi">1</span><span class="p">,</span>
 <span class="w">        </span><span class="nt">&quot;site_code&quot;</span><span class="p">:</span><span class="w">     </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span>
 <span class="w">        </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">107197</span><span class="p">,</span>
 <span class="w">        </span><span class="nt">&quot;concession_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11872</span><span class="p">,</span>
@@ -537,6 +538,7 @@ curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </spa
 <span class="w">        </span><span class="nt">&quot;quoted_rate&quot;</span><span class="p">:</span><span class="w">   </span><span class="mf">149.00</span>
 <span class="w">      </span><span class="p">},</span>
 <span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">&quot;slot&quot;</span><span class="p">:</span><span class="w">          </span><span class="mi">2</span><span class="p">,</span>
 <span class="w">        </span><span class="nt">&quot;site_code&quot;</span><span class="p">:</span><span class="w">     </span><span class="s2">&quot;L017&quot;</span><span class="p">,</span>
 <span class="w">        </span><span class="nt">&quot;unit_id&quot;</span><span class="p">:</span><span class="w">       </span><span class="mi">107298</span><span class="p">,</span>
 <span class="w">        </span><span class="nt">&quot;concession_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">11873</span><span class="p">,</span>
@@ -1207,6 +1209,8 @@ GET /api/reservations/move-in/cost
 <hr>
 <h2 id="13-changelog">13 · Changelog</h2>
 <p>Versioning follows <a href="https://semver.org">semver</a>: MAJOR.MINOR.PATCH. <strong>MINOR</strong> bumps add optional response fields or new endpoints and are backwards-compatible — existing integrations keep working without changes.</p>
+<h3 id="121-2026-05-12">1.2.1 — 2026-05-12</h3>
+<p><strong>Changed:</strong> Each non-null block in <code>reserve_template.slots[]</code> now carries a <code>slot</code> field (1, 2, or 3) matching the response's top-level <code>slots[]</code> convention. Patch-level — additive only. Empty slots still serialise as <code>null</code>.</p>
 <h3 id="120-2026-05-12">1.2.0 — 2026-05-12</h3>
 <p><strong>Changed</strong></p>
 <ul>

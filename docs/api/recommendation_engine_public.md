@@ -2,7 +2,7 @@
 
 Build chat / web / mobile experiences that quote and reserve self-storage units through Extra Space Asia.
 
-- **Version** — `1.2.0` (2026-05-12) — see [§13 · Changelog](#13--changelog)
+- **Version** — `1.2.1` (2026-05-12) — see [§13 · Changelog](#13--changelog)
 - **Base URL** — `https://backend.extraspace.com.sg`
 - **Auth** — `X-API-Key: esa_<prefix>.<secret>` on every request
 - **Format** — JSON in/out, UTF-8, ISO dates (`YYYY-MM-DD`), decimals as numbers (`91.01`)
@@ -309,6 +309,7 @@ curl -X POST https://backend.extraspace.com.sg/api/recommendations \
     },
     "slots": [
       {
+        "slot":          1,
         "site_code":     "L017",
         "unit_id":       107197,
         "concession_id": 11872,
@@ -316,6 +317,7 @@ curl -X POST https://backend.extraspace.com.sg/api/recommendations \
         "quoted_rate":   149.00
       },
       {
+        "slot":          2,
         "site_code":     "L017",
         "unit_id":       107298,
         "concession_id": 11873,
@@ -749,6 +751,10 @@ Pass `concession_id` (the integer) verbatim through `/reserve`. Use `plan_name` 
 ## 13 · Changelog
 
 Versioning follows [semver](https://semver.org): MAJOR.MINOR.PATCH. **MINOR** bumps add optional response fields or new endpoints and are backwards-compatible — existing integrations keep working without changes.
+
+### 1.2.1 — 2026-05-12
+
+**Changed:** Each non-null block in `reserve_template.slots[]` now carries a `slot` field (1, 2, or 3) matching the response's top-level `slots[]` convention. Patch-level — additive only. Empty slots still serialise as `null`.
 
 ### 1.2.0 — 2026-05-12
 

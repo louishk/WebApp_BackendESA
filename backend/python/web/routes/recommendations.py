@@ -735,13 +735,14 @@ def recommend():
                 #   { ...rt.shared, ...rt.slots[pickedIndex], <customer fields> }
                 'slots': [
                     {
+                        'slot':          i + 1,
                         'site_code':     row.site_code,
                         'unit_id':       row.unit_id,
                         'concession_id': row.concession_id,
                         'plan_id':       row.plan_id,
                         'quoted_rate':   float(row.std_rate) if row.std_rate is not None else None,
                     } if row is not None else None
-                    for row in (slot1_row, slot2_row, slot3_row)
+                    for i, row in enumerate((slot1_row, slot2_row, slot3_row))
                 ],
             },
             'tracking_id': None,  # filled after log_served
