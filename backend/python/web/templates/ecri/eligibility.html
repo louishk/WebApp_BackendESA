@@ -349,6 +349,9 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             case 'tenure_under_24mo':     return r.tenure_months != null && r.tenure_months < 24;
             case 'tenure_36mo_plus':      return r.tenure_months != null && r.tenure_months >= 36;
             case 'red_bucket':            return r.effective_bucket === 'red';
+            case 'under_bumped':          return r.bump_count != null && r.history_years != null && r.bump_count < r.history_years;
+            case 'cumul_bump_aggressive_annual':
+                return r.bump_total_pct != null && r.history_years && (r.bump_total_pct / r.history_years) >= 7;
         }
         return false;
     }

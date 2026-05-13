@@ -95,6 +95,9 @@
                 <option value="JP">JP</option>
             </select>
         </div>
+        <div><label>Prior Bumps</label><input type="number" step="1" min="0" id="p-bumps" class="form-select" value="0"></div>
+        <div><label>Cumul Bump %</label><input type="number" step="0.1" id="p-bump-pct" class="form-select" value="0"></div>
+        <div><label>History (years)</label><input type="number" step="1" min="1" max="3" id="p-history-y" class="form-select" value="2"></div>
     </div>
     <div style="margin-top:1rem; padding:0.75rem 1rem; background:#F7F7F8; border-left:4px solid var(--esa-navy); border-radius:4px;">
         <div style="font-size:1.4rem; font-weight:600;">
@@ -145,6 +148,8 @@ const PRICING_FACTOR_META = [
     {k:'tenure_under_24mo',     l:'Tenure < 24 months',    d:'tenure_months < 24 (legacy)'},
     {k:'tenure_36mo_plus',      l:'Tenure ≥ 36 months',    d:'tenure_months ≥ 36 (solid tenant)'},
     {k:'red_bucket',            l:'Red Effective Bucket',  d:'effective_bucket == "red"'},
+    {k:'under_bumped',          l:'Under-bumped',          d:'bump_count < history_years (less than 1 bump/year on record)'},
+    {k:'cumul_bump_aggressive_annual', l:'Cumul Bump Aggressive', d:'(bump_total_pct / history_years) ≥ 7 (already pumped >=7%/year)'},
 ];
 
 function factorFires(name, r) {
@@ -165,6 +170,9 @@ function factorFires(name, r) {
         case 'tenure_under_24mo':     return r.tenure_months != null && r.tenure_months < 24;
         case 'tenure_36mo_plus':      return r.tenure_months != null && r.tenure_months >= 36;
         case 'red_bucket':            return r.effective_bucket === 'red';
+        case 'under_bumped':          return r.bump_count != null && r.history_years != null && r.bump_count < r.history_years;
+        case 'cumul_bump_aggressive_annual':
+            return r.bump_total_pct != null && r.history_years && (r.bump_total_pct / r.history_years) >= 7;
     }
     return false;
 }
@@ -311,6 +319,9 @@ function refreshPreview() {
         tenure_months:   Number(document.getElementById('p-tenure').value)   || null,
         effective_bucket:document.getElementById('p-bucket').value,
         country_code:    document.getElementById('p-country-cc').value || null,
+        bump_count:      Number(document.getElementById('p-bumps').value) || 0,
+        bump_total_pct:  Number(document.getElementById('p-bump-pct').value) || 0,
+        history_years:   Number(document.getElementById('p-history-y').value) || 1,
     };
     const result = computeProposed(row, CONFIG);
     const grad = result.min != null ? ` (gradient ${result.min}–${result.max})` : '';
@@ -365,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('grad-min').addEventListener('input',  onGradientChange);
     document.getElementById('grad-max').addEventListener('change', onGradientChange);
     document.getElementById('grad-max').addEventListener('input',  onGradientChange);
-    ['p-current','p-market','p-site','p-country','p-top3','p-top1','p-risk','p-tenure','p-bucket','p-country-cc']
+    ['p-current','p-market','p-site','p-country','p-top3','p-top1','p-risk','p-tenure','p-bucket','p-country-cc','p-bumps','p-bump-pct','p-history-y']
         .forEach(id => {
             const el = document.getElementById(id);
             el.addEventListener('change', refreshPreview);

@@ -291,20 +291,29 @@ def _ledger_bump_history(session, site_ids):
         )
         SELECT "SiteID", "LedgerID",
                COUNT(*) FILTER (WHERE prev_rent IS NOT NULL AND "dcRent" > prev_rent) AS bumps,
-               MAX("dcRent") FILTER (WHERE rn_asc  = 1) AS first_rent,
-               MAX("dcRent") FILTER (WHERE rn_desc = 1) AS last_rent
+               MAX("dcRent")      FILTER (WHERE rn_asc  = 1) AS first_rent,
+               MAX("dcRent")      FILTER (WHERE rn_desc = 1) AS last_rent,
+               MAX(extract_date)  FILTER (WHERE rn_asc  = 1) AS first_seen,
+               MAX(extract_date)  FILTER (WHERE rn_desc = 1) AS last_seen
         FROM per_ledger
         GROUP BY "SiteID", "LedgerID"
     """), {'site_ids': site_ids}).fetchall()
     out = {}
-    for sid, lid, bumps, first_rent, last_rent in rows:
+    for sid, lid, bumps, first_rent, last_rent, first_seen, last_seen in rows:
         pct = None
         if first_rent and first_rent > 0 and last_rent is not None:
             pct = round((float(last_rent) - float(first_rent)) / float(first_rent) * 100, 1)
+        history_years = None
+        if first_seen and last_seen:
+            # Clamp to [1, 3]: snapshot history capped at ~3y so long-tenure
+            # tenants don't perpetually look "under-bumped".
+            days = (last_seen - first_seen).days
+            history_years = max(1, min(3, days // 365))
         out[(sid, lid)] = {
             'bump_count': int(bumps or 0),
             'bump_total_pct': pct,
             'first_rent': float(first_rent) if first_rent is not None else None,
+            'history_years': history_years,
         }
     return out
 
@@ -642,6 +651,7 @@ def api_eligible_tenants():
                 # from first observed rentroll snapshot to today)
                 'bump_count':     bump_hist.get((site_id, r['LedgerID']), {}).get('bump_count', 0),
                 'bump_total_pct': bump_hist.get((site_id, r['LedgerID']), {}).get('bump_total_pct'),
+                'history_years':  bump_hist.get((site_id, r['LedgerID']), {}).get('history_years'),
             })
 
         # Exclusion summary (run a separate query for counts).
@@ -1228,6 +1238,7 @@ def api_advance_eligible():
                 # from first observed rentroll snapshot to today)
                 'bump_count':     bump_hist.get((r.SiteID, r.LedgerID), {}).get('bump_count', 0),
                 'bump_total_pct': bump_hist.get((r.SiteID, r.LedgerID), {}).get('bump_total_pct'),
+                'history_years':  bump_hist.get((r.SiteID, r.LedgerID), {}).get('history_years'),
             }
             segments[r.segment].append(entry)
 
@@ -3186,6 +3197,7 @@ PRICING_FACTOR_NAMES = (
     'high_unit_risk', 'very_high_unit_risk',
     'tenure_under_18mo', 'tenure_under_24mo', 'tenure_36mo_plus',
     'red_bucket',
+    'under_bumped', 'cumul_bump_aggressive_annual',
 )
 
 
