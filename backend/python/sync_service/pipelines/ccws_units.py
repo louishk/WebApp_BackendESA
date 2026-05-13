@@ -178,9 +178,12 @@ class CcwsUnitsPipeline(BasePipeline):
                 )
 
                 soft_deleted = 0
+                un_deleted = 0
                 if healthy_site_ids and fetched_keys:
                     fetched_key_strs = [f"{s}|{u}" for s, u in fetched_keys]
-                    result = conn.execute(
+
+                    # Soft-delete units in healthy sites that are no longer in SOAP
+                    deleted_result = conn.execute(
                         text("""
                             UPDATE units_info
                             SET deleted_at = CURRENT_DATE,
@@ -194,12 +197,32 @@ class CcwsUnitsPipeline(BasePipeline):
                             'fetched_keys': fetched_key_strs,
                         },
                     )
-                    soft_deleted = result.rowcount or 0
+                    soft_deleted = deleted_result.rowcount or 0
+
+                    # Un-delete units that reappeared in SOAP (parity with legacy
+                    # pipeline, where the row-level upsert overwrote deleted_at
+                    # with NULL on re-appearance).
+                    undelete_result = conn.execute(
+                        text("""
+                            UPDATE units_info
+                            SET deleted_at = NULL,
+                                updated_at = NOW()
+                            WHERE deleted_at IS NOT NULL
+                              AND ("SiteID"::text || '|' || "UnitID"::text) = ANY(:fetched_keys)
+                        """),
+                        {'fetched_keys': fetched_key_strs},
+                    )
+                    un_deleted = undelete_result.rowcount or 0
 
             self.log.info(
-                f"units_info mirror: upserted {len(rows)}, soft-deleted {soft_deleted}"
+                f"units_info mirror: upserted {len(rows)}, "
+                f"soft-deleted {soft_deleted}, un-deleted {un_deleted}"
             )
-            return {'pbi_mirror_records': len(rows), 'pbi_soft_deleted': soft_deleted}
+            return {
+                'pbi_mirror_records': len(rows),
+                'pbi_soft_deleted': soft_deleted,
+                'pbi_un_deleted': un_deleted,
+            }
         except Exception as e:
             self.log.warning(
                 f"units_info mirror failed (non-fatal — middleware write already succeeded): {e}"
