@@ -3111,7 +3111,8 @@ PRICING_FACTOR_NAMES = (
     'above_market', 'above_site_median', 'above_country_median',
     'above_top3', 'above_top1',
     'high_unit_risk', 'very_high_unit_risk',
-    'tenure_under_24mo', 'red_bucket',
+    'tenure_under_18mo', 'tenure_under_24mo', 'tenure_36mo_plus',
+    'red_bucket',
 )
 
 

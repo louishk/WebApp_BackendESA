@@ -54,7 +54,7 @@
         <!-- Shared -->
         <div class="form-group">
             <label style="display:block; margin-bottom:0.5rem; font-weight:500;">Discount Ref %</label>
-            <input type="number" id="discount-ref" value="40" min="0" max="100" class="form-select" style="max-width:120px;">
+            <input type="number" id="discount-ref" value="30" min="0" max="100" class="form-select" style="max-width:120px;">
         </div>
         <div class="form-group">
             <button type="button" class="btn" onclick="runEligibility()">Load Eligible Tenants</button>
@@ -335,14 +335,16 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             case 'below_country_median':  return r.current_rent != null && r.country_rent_med != null    && r.current_rent <  r.country_rent_med;
             case 'below_top3':            return r.current_rent != null && r.top3_rent != null            && r.current_rent <  r.top3_rent;
             case 'below_top1':            return r.current_rent != null && r.top1_rent != null            && r.current_rent <  r.top1_rent;
-            case 'above_market':          return r.current_rent != null && r.market_rate != null         && r.current_rent >  r.market_rate;
+            case 'above_market':          return r.current_rent != null && r.market_rate != null         && r.current_rent >  r.market_rate * 1.15;
             case 'above_site_median':     return r.current_rent != null && r.in_place_median_site != null && r.current_rent >  r.in_place_median_site;
             case 'above_country_median':  return r.current_rent != null && r.country_rent_med != null    && r.current_rent >  r.country_rent_med;
             case 'above_top3':            return r.current_rent != null && r.top3_rent != null            && r.current_rent >  r.top3_rent;
             case 'above_top1':            return r.current_rent != null && r.top1_rent != null            && r.current_rent >  r.top1_rent;
-            case 'high_unit_risk':        return r.unit_risk_factor != null && r.unit_risk_factor > 1.10;
+            case 'high_unit_risk':        return r.unit_risk_factor != null && r.unit_risk_factor > 1.10 && r.unit_risk_factor <= 1.30;
             case 'very_high_unit_risk':   return r.unit_risk_factor != null && r.unit_risk_factor > 1.30;
+            case 'tenure_under_18mo':     return r.tenure_months != null && r.tenure_months < 18;
             case 'tenure_under_24mo':     return r.tenure_months != null && r.tenure_months < 24;
+            case 'tenure_36mo_plus':      return r.tenure_months != null && r.tenure_months >= 36;
             case 'red_bucket':            return r.effective_bucket === 'red';
         }
         return false;

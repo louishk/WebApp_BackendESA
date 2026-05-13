@@ -111,14 +111,16 @@ const PRICING_FACTOR_META = [
     {k:'below_country_median',  l:'Below Country Median',  d:'current_rent < country_median'},
     {k:'below_top3',            l:'Below Top-3',           d:'current_rent < top3_rent'},
     {k:'below_top1',            l:'Below Top-1',           d:'current_rent < top1_rent'},
-    {k:'above_market',          l:'Above Market',          d:'current_rent > market_rate'},
+    {k:'above_market',          l:'Above Market (+15%)',   d:'current_rent > market_rate × 1.15'},
     {k:'above_site_median',     l:'Above Site Median',     d:'current_rent > site_median'},
     {k:'above_country_median',  l:'Above Country Median',  d:'current_rent > country_median'},
     {k:'above_top3',            l:'Above Top-3',           d:'current_rent > top3_rent'},
     {k:'above_top1',            l:'Above Top-1',           d:'current_rent > top1_rent'},
-    {k:'high_unit_risk',        l:'High Unit Risk',        d:'unit_risk_factor > 1.10'},
+    {k:'high_unit_risk',        l:'High Unit Risk',        d:'1.10 < unit_risk_factor ≤ 1.30 (mutually exclusive)'},
     {k:'very_high_unit_risk',   l:'Very High Unit Risk',   d:'unit_risk_factor > 1.30'},
-    {k:'tenure_under_24mo',     l:'Tenure < 24 months',    d:'tenure_months < 24'},
+    {k:'tenure_under_18mo',     l:'Tenure < 18 months',    d:'tenure_months < 18'},
+    {k:'tenure_under_24mo',     l:'Tenure < 24 months',    d:'tenure_months < 24 (legacy)'},
+    {k:'tenure_36mo_plus',      l:'Tenure ≥ 36 months',    d:'tenure_months ≥ 36 (solid tenant)'},
     {k:'red_bucket',            l:'Red Effective Bucket',  d:'effective_bucket == "red"'},
 ];
 
@@ -129,14 +131,16 @@ function factorFires(name, r) {
         case 'below_country_median':  return r.current_rent != null && r.country_median != null && r.current_rent <  r.country_median;
         case 'below_top3':            return r.current_rent != null && r.top3_rent != null && r.current_rent <  r.top3_rent;
         case 'below_top1':            return r.current_rent != null && r.top1_rent != null && r.current_rent <  r.top1_rent;
-        case 'above_market':          return r.current_rent != null && r.market_rate != null && r.current_rent >  r.market_rate;
+        case 'above_market':          return r.current_rent != null && r.market_rate != null && r.current_rent >  r.market_rate * 1.15;
         case 'above_site_median':     return r.current_rent != null && r.site_median != null && r.current_rent >  r.site_median;
         case 'above_country_median':  return r.current_rent != null && r.country_median != null && r.current_rent >  r.country_median;
         case 'above_top3':            return r.current_rent != null && r.top3_rent != null && r.current_rent >  r.top3_rent;
         case 'above_top1':            return r.current_rent != null && r.top1_rent != null && r.current_rent >  r.top1_rent;
-        case 'high_unit_risk':        return r.unit_risk_factor != null && r.unit_risk_factor > 1.10;
+        case 'high_unit_risk':        return r.unit_risk_factor != null && r.unit_risk_factor > 1.10 && r.unit_risk_factor <= 1.30;
         case 'very_high_unit_risk':   return r.unit_risk_factor != null && r.unit_risk_factor > 1.30;
+        case 'tenure_under_18mo':     return r.tenure_months != null && r.tenure_months < 18;
         case 'tenure_under_24mo':     return r.tenure_months != null && r.tenure_months < 24;
+        case 'tenure_36mo_plus':      return r.tenure_months != null && r.tenure_months >= 36;
         case 'red_bucket':            return r.effective_bucket === 'red';
     }
     return false;
