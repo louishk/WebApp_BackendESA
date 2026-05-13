@@ -1,5 +1,5 @@
 """
-Register sync_service.pipelines.sugarcrm.SugarCrmPipeline in
+Register sync_service.pipelines.sugarcrm_leads.SugarCrmLeadsPipeline in
 mw_sync_pipelines so the orchestrator picks it up.
 
 Replaces the legacy APScheduler entry `sugarcrm` from config/pipelines.yaml.
@@ -7,7 +7,7 @@ Watermark/checkpoint config from the YAML sync: block is intentionally NOT
 forwarded — the datalayer module manages its own per-module watermark.
 
 Run from backend/python:
-    python3 migrations/mw_seed_sugarcrm.py
+    python3 migrations/mw_seed_sugarcrm_leads.py
 """
 import sys
 from pathlib import Path
@@ -21,7 +21,7 @@ from common.config_loader import get_database_url
 def main():
     mw_engine = create_engine(get_database_url('middleware'))
 
-    print('[1] Seeding mw_sync_pipelines row for sugarcrm...')
+    print('[1] Seeding mw_sync_pipelines row for sugarcrm_leads...')
     with mw_engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO mw_sync_pipelines (
@@ -59,13 +59,13 @@ def main():
                 enabled = TRUE,
                 updated_at = NOW()
         """), {
-            'name': 'sugarcrm',
-            'display': 'SugarCRM',
+            'name': 'sugarcrm_leads',
+            'display': 'SugarCRM Leads',
             'desc': 'Sync CRM data (Leads, Contacts, Accounts, etc.) from SugarCRM. '
                     'Wraps datalayer.sugarcrm_to_sql via subprocess. The datalayer '
                     'module manages its own per-module watermark, so checkpoint '
                     'config from the legacy YAML is not forwarded.',
-            'cls': 'sync_service.pipelines.sugarcrm.SugarCrmPipeline',
+            'cls': 'sync_service.pipelines.sugarcrm_leads.SugarCrmLeadsPipeline',
             'sched': '{"cron": "0 */3 * * *"}',
             'ttl': 4 * 3600,
             'args': '{"mode": "auto"}',

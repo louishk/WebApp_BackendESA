@@ -1,5 +1,5 @@
 """
-SugarCrmPipeline — sync CRM data (Leads, Contacts, Accounts, etc.) from
+SugarCrmLeadsPipeline — sync CRM data (Leads, Contacts, Accounts, etc.) from
 SugarCRM.
 
 Thin wrapper around datalayer.sugarcrm_to_sql. The legacy module manages
@@ -24,7 +24,7 @@ from sync_service.pipelines.base import BasePipeline, RunResult
 logger = logging.getLogger(__name__)
 
 
-class SugarCrmPipeline(BasePipeline):
+class SugarCrmLeadsPipeline(BasePipeline):
 
     def _execute(self, scope: Dict[str, Any]) -> RunResult:
         mode = scope.get('mode', 'auto')
@@ -46,7 +46,7 @@ class SugarCrmPipeline(BasePipeline):
         env.setdefault('PYTHONUNBUFFERED', '1')
         env['PYTHONPATH'] = backend_python + os.pathsep + env.get('PYTHONPATH', '')
 
-        self.log.info(f"sugarcrm invoking: {' '.join(cmd)} (cwd={backend_python})")
+        self.log.info(f"sugarcrm_leads invoking: {' '.join(cmd)} (cwd={backend_python})")
 
         try:
             proc = subprocess.run(
@@ -74,7 +74,7 @@ class SugarCrmPipeline(BasePipeline):
                     pass
 
         if proc.returncode != 0:
-            self.log.error(f"sugarcrm exited {proc.returncode}; stderr tail:\n{(proc.stderr or '')[-2000:]}")
+            self.log.error(f"sugarcrm_leads exited {proc.returncode}; stderr tail:\n{(proc.stderr or '')[-2000:]}")
             return RunResult(
                 status='failed',
                 records=records,
@@ -83,7 +83,7 @@ class SugarCrmPipeline(BasePipeline):
                 metadata={'returncode': proc.returncode},
             )
 
-        self.log.info(f"sugarcrm complete: records={records} returncode=0")
+        self.log.info(f"sugarcrm_leads complete: records={records} returncode=0")
         return RunResult(
             status='refreshed',
             records=records,
