@@ -699,12 +699,12 @@ function applyConfigToEditForm(p) {
     // Resolved destination + category chip
     const destStr = initialDests.map(d => `${d.database}.${d.table || '—'}`).join(' + ') || '—';
     document.getElementById('resolved-destination-text').textContent = destStr;
-    const resolved = p.resolved_frequency_category;
+    const resolvedCat = p.resolved_frequency_category;
     const chip = document.getElementById('resolved-frequency-chip');
-    if (resolved) {
-        const tag = p.frequency_category ? `${resolved} (override)` : `${resolved} (auto)`;
+    if (resolvedCat) {
+        const tag = p.frequency_category ? `${resolvedCat} (override)` : `${resolvedCat} (auto)`;
         chip.textContent = tag;
-        const bg = {high: '#dceefb', med: '#fff4d6', low: '#f0f0f0'}[resolved] || '#dde6f5';
+        const bg = {high: '#dceefb', med: '#fff4d6', low: '#f0f0f0'}[resolvedCat] || '#dde6f5';
         chip.style.background = bg;
     } else {
         chip.textContent = 'on-demand';
