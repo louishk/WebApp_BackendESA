@@ -59,6 +59,7 @@ def compute_country_baseline(session: Session,
         SELECT COUNT(*) FROM mimo m
         JOIN siteinfo s ON s."SiteID" = m."SiteID"
         WHERE m."MoveOut" = 1
+          AND COALESCE(m."Transfer", 0) = 0
           AND m."MoveDate" >= :ws AND m."MoveDate" < :we_next
           AND s."Country" = :country
     """), {"ws": window_start,
@@ -169,6 +170,7 @@ def compute_cell_factors(session: Session,
           JOIN siteinfo s ON s."SiteID" = m."SiteID"
           JOIN latest   l ON l."SiteID" = m."SiteID" AND l."sUnit" = m."UnitName"
          WHERE m."MoveOut" = 1
+           AND COALESCE(m."Transfer", 0) = 0
            AND m."MoveDate" >= :ws AND m."MoveDate" < :we_next
            AND s."Country" = :country
          GROUP BY l."sTypeName"
