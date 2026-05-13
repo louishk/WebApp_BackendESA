@@ -83,6 +83,46 @@
 </div>
 {% endif %}
 
+{% if user %}
+<details class="card" style="margin-top: 1.5rem;" open>
+    <summary style="font-size: 1.1rem; font-weight: 600; cursor: pointer; padding: 0.25rem 0;">Access</summary>
+    <div style="margin-top: 1rem;">
+        <p style="color: #666; font-size: 0.85rem; margin-bottom: 1rem;">
+            Restrict this user to specific sites and set ECRI approval limits. Leave sites empty for unrestricted access.
+        </p>
+
+        <div style="margin-bottom: 1.25rem;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Allowed Sites</label>
+            <select id="access-site-select" multiple
+                    style="width: 100%; max-width: 500px; padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.95rem; min-height: 120px;">
+                <option disabled>Loading sites…</option>
+            </select>
+            <p style="color: #666; font-size: 0.85rem; margin-top: 0.4rem;">Hold Ctrl (or Cmd) to select multiple. Empty = unrestricted.</p>
+        </div>
+
+        <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
+            <div>
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Max % Reduction (ECRI)</label>
+                <input type="number" id="access-max-pct" min="0" max="100" step="0.01"
+                       value="{{ ecri_max_pct_reduction }}"
+                       style="width: 140px; padding: 0.65rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
+            </div>
+            <div>
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Max Abs Reduction (ECRI)</label>
+                <input type="number" id="access-max-abs" min="0" step="0.01"
+                       value="{{ ecri_max_abs_reduction }}"
+                       style="width: 160px; padding: 0.65rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 1rem;">
+            </div>
+        </div>
+
+        <div>
+            <button type="button" onclick="saveAccess()" class="btn">Save Access</button>
+            <span id="access-feedback" style="margin-left: 1rem; font-size: 0.9rem;"></span>
+        </div>
+    </div>
+</details>
+{% endif %}
+
 {% if user and user.roles %}
 <div class="card" style="margin-top: 1.5rem;">
     <h2>Combined Role Permissions</h2>
@@ -181,5 +221,73 @@
         </tbody>
     </table>
 </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if user %}
+<script>
+(function () {
+    const currentSiteIds = {{ allowed_site_ids | tojson }};
+
+    fetch('/api/me/sites')
+        .then(r => r.json())
+        .then(data => {
+            const sites = data.sites || [];
+            const sel = document.getElementById('access-site-select');
+            sel.innerHTML = '';
+            if (!sites.length) {
+                sel.innerHTML = '<option disabled>No sites available</option>';
+                return;
+            }
+            sites.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.site_id;
+                opt.textContent = s.site_code + ' — ' + s.name;
+                if (currentSiteIds.includes(s.site_id)) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        })
+        .catch(() => {
+            document.getElementById('access-site-select').innerHTML = '<option disabled>Failed to load sites</option>';
+        });
+
+    window.saveAccess = function () {
+        const sel = document.getElementById('access-site-select');
+        const siteIds = Array.from(sel.selectedOptions).map(o => parseInt(o.value, 10));
+        const maxPct = parseFloat(document.getElementById('access-max-pct').value) || 0;
+        const maxAbs = parseFloat(document.getElementById('access-max-abs').value) || 0;
+        const feedback = document.getElementById('access-feedback');
+
+        feedback.style.color = '#666';
+        feedback.textContent = 'Saving…';
+
+        fetch('/admin/api/users/{{ user.id }}/ecri-settings', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                allowed_site_ids: siteIds,
+                ecri_max_pct_reduction: maxPct,
+                ecri_max_abs_reduction: maxAbs,
+            }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                feedback.style.color = '#dc2626';
+                feedback.textContent = 'Error: ' + data.error;
+            } else {
+                feedback.style.color = '#059669';
+                feedback.textContent = 'Saved.';
+                setTimeout(() => { feedback.textContent = ''; }, 3000);
+            }
+        })
+        .catch(() => {
+            feedback.style.color = '#dc2626';
+            feedback.textContent = 'Request failed.';
+        });
+    };
+}());
+</script>
 {% endif %}
 {% endblock %}

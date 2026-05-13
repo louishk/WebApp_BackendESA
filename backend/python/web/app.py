@@ -299,6 +299,7 @@ def create_app(config=None, db_url=None):
         )
     from web.routes.visits import visits_bp
     from web.routes.revenue import revenue_bp
+    from web.routes.pricing_anomalies import pricing_anomalies_bp
     # tenants, reservation_fees, orchestrator_ui — same VM-only pattern.
     try:
         from web.routes.tenants import tenants_bp
@@ -324,6 +325,7 @@ def create_app(config=None, db_url=None):
     from web.routes.recommendation_engine import recommendation_engine_bp
     from web.routes.recommendations import recommendations_bp
     from web.routes.risk import bp as risk_bp
+    from web.routes.smart_lock_refresh import smart_lock_refresh_bp
     # sync_service.api blueprint — same VM-only pattern as ecri/stripe.
     try:
         from sync_service.api import sync_service_bp
@@ -353,6 +355,7 @@ def create_app(config=None, db_url=None):
         app.register_blueprint(stripe_bp)
     app.register_blueprint(visits_bp)
     app.register_blueprint(revenue_bp)
+    app.register_blueprint(pricing_anomalies_bp)
     if tenants_bp is not None:
         app.register_blueprint(tenants_bp)
     app.register_blueprint(billing_bp)
@@ -366,6 +369,7 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(recommendation_engine_bp)
     app.register_blueprint(recommendations_bp)
     app.register_blueprint(risk_bp)
+    app.register_blueprint(smart_lock_refresh_bp)
     if sync_service_bp is not None:
         app.register_blueprint(sync_service_bp)
 

@@ -1947,6 +1947,38 @@ def api_list_sites():
         session.close()
 
 
+@api_bp.route('/me/sites')
+def api_me_sites():
+    """Caller's effective allowed sites. Empty allowed_site_ids = all sites."""
+    from flask_login import current_user
+    if not current_user.is_authenticated:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    from common.models import SiteInfo
+    session = get_pbi_session()
+    try:
+        sites = session.query(SiteInfo).order_by(SiteInfo.Country, SiteInfo.SiteCode).all()
+        all_sites = [
+            {
+                'site_id': s.SiteID,
+                'site_code': s.SiteCode,
+                'name': s.Name,
+                'country': s.Country,
+            }
+            for s in sites
+        ]
+    finally:
+        session.close()
+
+    if not current_user.allowed_site_ids:
+        return jsonify({'sites': all_sites, 'unrestricted': True})
+    s = set(current_user.allowed_site_ids)
+    return jsonify({
+        'sites': [x for x in all_sites if x['site_id'] in s],
+        'unrestricted': False,
+    })
+
+
 # =============================================================================
 # Inventory Checker
 # =============================================================================
@@ -4056,6 +4088,10 @@ def _sl_audit(session, action, entity_type, entity_id=None, site_id=None, unit_i
 def api_sl_keypads_list():
     """List keypads, optionally filtered by site_id."""
     site_id = request.args.get('site_id')
+    if site_id is not None:
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(int(site_id)):
+            return jsonify({'error': 'forbidden'}), 403
     session = current_app.get_middleware_session()
     try:
         from web.models.smart_lock import SmartLockKeypad, SmartLockUnitAssignment
@@ -4140,6 +4176,10 @@ def api_sl_keypads_create():
     except (ValueError, TypeError):
         return jsonify({'error': 'site_id must be an integer'}), 400
 
+    from flask_login import current_user
+    if current_user.is_authenticated and not current_user.can_see_site(site_id):
+        return jsonify({'error': 'forbidden'}), 403
+
     session = current_app.get_middleware_session()
     try:
         existing = session.query(SmartLockKeypad).filter_by(keypad_id=keypad_id).first()
@@ -4180,6 +4220,18 @@ def api_sl_keypads_batch():
     items = data['items']
     if len(items) > MAX_SL_BATCH_SIZE:
         return jsonify({'error': f'Batch size cannot exceed {MAX_SL_BATCH_SIZE} items'}), 400
+
+    from flask_login import current_user
+    if current_user.is_authenticated:
+        for item in items:
+            sid = item.get('site_id')
+            if sid is not None:
+                try:
+                    sid = int(sid)
+                except (ValueError, TypeError):
+                    continue
+                if not current_user.can_see_site(sid):
+                    return jsonify({'error': 'forbidden'}), 403
 
     username = _sl_username()
     session = current_app.get_middleware_session()
@@ -4237,6 +4289,10 @@ def api_sl_keypads_update(pk):
         if not keypad:
             return jsonify({'error': 'Keypad not found'}), 404
 
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(keypad.site_id):
+            return jsonify({'error': 'forbidden'}), 403
+
         changes = []
         if 'site_id' in data and int(data['site_id']) != keypad.site_id:
             changes.append(f'site {keypad.site_id}->{data["site_id"]}')
@@ -4273,6 +4329,10 @@ def api_sl_keypads_delete(pk):
         if not keypad:
             return jsonify({'error': 'Keypad not found'}), 404
 
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(keypad.site_id):
+            return jsonify({'error': 'forbidden'}), 403
+
         kid = keypad.keypad_id
         sid = keypad.site_id
         session.delete(keypad)
@@ -4298,6 +4358,10 @@ def api_sl_bridges_list():
     """List bridges, optionally filtered by site_id. Includes the linked
     keypad/lock device (from igloo_devices.linkedDevices) for each bridge."""
     site_id = request.args.get('site_id')
+    if site_id is not None:
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(int(site_id)):
+            return jsonify({'error': 'forbidden'}), 403
     session = current_app.get_middleware_session()
     try:
         from web.models.smart_lock import SmartLockBridge
@@ -4354,6 +4418,10 @@ def api_sl_bridges_list():
 def api_sl_padlocks_list():
     """List padlocks, optionally filtered by site_id."""
     site_id = request.args.get('site_id')
+    if site_id is not None:
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(int(site_id)):
+            return jsonify({'error': 'forbidden'}), 403
     session = current_app.get_middleware_session()
     try:
         from web.models.smart_lock import SmartLockPadlock, SmartLockUnitAssignment
@@ -4437,6 +4505,10 @@ def api_sl_padlocks_create():
     except (ValueError, TypeError):
         return jsonify({'error': 'site_id must be an integer'}), 400
 
+    from flask_login import current_user
+    if current_user.is_authenticated and not current_user.can_see_site(site_id):
+        return jsonify({'error': 'forbidden'}), 403
+
     session = current_app.get_middleware_session()
     try:
         existing = session.query(SmartLockPadlock).filter_by(padlock_id=padlock_id).first()
@@ -4477,6 +4549,18 @@ def api_sl_padlocks_batch():
     items = data['items']
     if len(items) > MAX_SL_BATCH_SIZE:
         return jsonify({'error': f'Batch size cannot exceed {MAX_SL_BATCH_SIZE} items'}), 400
+
+    from flask_login import current_user
+    if current_user.is_authenticated:
+        for item in items:
+            sid = item.get('site_id')
+            if sid is not None:
+                try:
+                    sid = int(sid)
+                except (ValueError, TypeError):
+                    continue
+                if not current_user.can_see_site(sid):
+                    return jsonify({'error': 'forbidden'}), 403
 
     username = _sl_username()
     session = current_app.get_middleware_session()
@@ -4534,6 +4618,10 @@ def api_sl_padlocks_update(pk):
         if not padlock:
             return jsonify({'error': 'Padlock not found'}), 404
 
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(padlock.site_id):
+            return jsonify({'error': 'forbidden'}), 403
+
         changes = []
         if 'site_id' in data and int(data['site_id']) != padlock.site_id:
             changes.append(f'site {padlock.site_id}->{data["site_id"]}')
@@ -4570,6 +4658,10 @@ def api_sl_padlocks_delete(pk):
         if not padlock:
             return jsonify({'error': 'Padlock not found'}), 404
 
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(padlock.site_id):
+            return jsonify({'error': 'forbidden'}), 403
+
         pid = padlock.padlock_id
         sid = padlock.site_id
         session.delete(padlock)
@@ -4602,6 +4694,12 @@ def api_sl_units():
         site_ids = parse_site_ids(site_ids_param)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+
+    from flask_login import current_user
+    if current_user.is_authenticated:
+        for sid in site_ids:
+            if not current_user.can_see_site(sid):
+                return jsonify({'error': 'forbidden'}), 403
 
     # Fetch units + assignments + keypads/padlocks from middleware (single session)
     from web.models.smart_lock import SmartLockUnitAssignment, SmartLockKeypad, SmartLockPadlock, GateAccessData
@@ -4790,6 +4888,12 @@ def api_sl_assignments_upsert():
         except (ValueError, TypeError):
             return jsonify({'error': 'site_id and unit_id must be integers'}), 400
 
+    from flask_login import current_user
+    if current_user.is_authenticated:
+        for sid in site_ids_set:
+            if not current_user.can_see_site(sid):
+                return jsonify({'error': 'forbidden'}), 403
+
     # Validate unit_ids exist in ccws_units (esa_middleware)
     if parsed_items:
         mw_session = current_app.get_middleware_session()
@@ -4954,6 +5058,10 @@ def api_sl_assignments_list():
     except (ValueError, TypeError):
         return jsonify({'error': 'site_id must be an integer'}), 400
 
+    from flask_login import current_user
+    if current_user.is_authenticated and not current_user.can_see_site(site_id):
+        return jsonify({'error': 'forbidden'}), 403
+
     unit_ids_param = request.args.get('unit_ids', '')
 
     session = current_app.get_middleware_session()
@@ -5022,6 +5130,10 @@ def api_sl_audit_log():
     """Get recent smart lock audit log entries."""
     from web.models.smart_lock import SmartLockAuditLog
     site_id = request.args.get('site_id')
+    if site_id is not None:
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(int(site_id)):
+            return jsonify({'error': 'forbidden'}), 403
     try:
         limit = min(int(request.args.get('limit', 100)), 500)
     except (ValueError, TypeError):
@@ -5050,6 +5162,11 @@ def api_sl_audit_log():
 def api_sl_config_list():
     """List smart lock site configurations."""
     from web.models.smart_lock import SmartLockSiteConfig
+    sid = request.args.get('site_id', type=int)
+    if sid is not None:
+        from flask_login import current_user
+        if current_user.is_authenticated and not current_user.can_see_site(sid):
+            return jsonify({'error': 'forbidden'}), 403
     session = current_app.get_middleware_session()
     try:
         configs = session.query(SmartLockSiteConfig).order_by(
@@ -5109,6 +5226,10 @@ def api_sl_config_upsert():
         site_id = int(site_id)
     except (ValueError, TypeError):
         return jsonify({'error': 'site_id must be an integer'}), 400
+
+    from flask_login import current_user
+    if current_user.is_authenticated and not current_user.can_see_site(site_id):
+        return jsonify({'error': 'forbidden'}), 403
 
     session = current_app.get_middleware_session()
     try:
@@ -5183,6 +5304,10 @@ def api_sl_gate_code():
 
     if not unit_id or not location_code or not site_id:
         return jsonify({'error': 'unit_id, location_code, and site_id are required'}), 400
+
+    from flask_login import current_user
+    if current_user.is_authenticated and not current_user.can_see_site(site_id):
+        return jsonify({'error': 'forbidden'}), 403
 
     session = current_app.get_middleware_session()
     try:

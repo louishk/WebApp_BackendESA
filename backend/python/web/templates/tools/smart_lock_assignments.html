@@ -43,16 +43,23 @@
         </div>
     </div>
 
-    <!-- Action buttons row (refresh + sync + audit). Pushed below the
-         freshness tiles so the metric grid has horizontal room. -->
+    <!-- Action buttons row. Single "Refresh" chain replaces the four
+         individual pipeline buttons. Audit Pins stays as a separate
+         non-chain action. -->
     <div id="refresh-info-wrapper" style="display: none; margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid #f1f5f9; font-size: 0.8rem; color: #666;">
-        <button class="btn btn-secondary" id="refresh-btn" onclick="refreshUnitData()" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">Refresh Unit Data</button>
-        <button id="refresh-gate-btn" class="btn btn-secondary" onclick="refreshGateData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #f59e0b; color: #d97706;"><i class="bi bi-shield-lock"></i> Refresh Gate Data</button>
-        <button id="refresh-igloo-btn" class="btn btn-secondary" onclick="refreshIglooData()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Refresh Igloo Data</button>
-        <button id="sync-pins-btn" class="btn btn-secondary" onclick="syncPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #059669; color: #047857;" title="Reconcile Igloo PINs with SiteLink gate codes (push new / revoke on move-out)"><i class="bi bi-key-fill"></i> Sync PINs</button>
+        <button class="btn btn-secondary" id="btn-refresh-site" onclick="refreshThisSite()" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;" title="Run full chain (igloo → units → gate → PIN sync) for the currently selected site"><i class="bi bi-arrow-repeat"></i> Refresh This Site</button>
+        <button class="btn btn-secondary" id="btn-refresh-all" onclick="refreshAllMySites()" style="margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem;" title="Run full chain for every site you have access to"><i class="bi bi-arrow-repeat"></i> Refresh All My Sites</button>
         <button id="audit-pins-btn" class="btn btn-secondary" onclick="auditPins()" style="display:none; margin-left: 0.5rem; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-color: #8b5cf6; color: #7c3aed;"><i class="bi bi-key"></i> Audit PINs</button>
         <span id="last-audit-info" style="display: none; margin-left: 0.5rem; font-size: 0.75rem; color: #6b7280;" title=""></span>
-        <span id="refresh-status" style="display: none; margin-left: 0.5rem;"></span>
+        <span id="refresh-cooldown-hint" style="margin-left: 0.5rem; font-size: 0.75rem; color: #b45309;"></span>
+    </div>
+    <div id="refresh-chain-status" style="display:none; margin-top: 0.6rem; padding: 0.5rem 0.7rem; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;">
+        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem;">
+            <strong style="font-size:0.8rem; color:#111827;">Refresh in progress</strong>
+            <span id="chain-overall-status" style="font-size:0.72rem; padding: 1px 8px; border-radius: 10px; background:#dbeafe; color:#1e40af;">pending</span>
+            <span id="chain-id-tag" style="font-size:0.7rem; color:#9ca3af; font-family: monospace;"></span>
+        </div>
+        <ul id="chain-pipeline-list" style="list-style:none; padding:0; margin:0; font-size:0.78rem; display:flex; flex-wrap:wrap; gap:0.5rem;"></ul>
     </div>
 </div>
 
@@ -326,9 +333,6 @@
             }
             document.getElementById('freshness-tiles').style.display = 'grid';
             document.getElementById('refresh-info-wrapper').style.display = 'block';
-            document.getElementById('refresh-gate-btn').style.display = '';
-            document.getElementById('refresh-igloo-btn').style.display = '';
-            document.getElementById('sync-pins-btn').style.display = '';
             document.getElementById('audit-pins-btn').style.display = '';
             pinAuditMap = {};  // reset on reload
 
@@ -644,38 +648,173 @@
         } catch (e) { console.error('Audit log error:', e); }
     }
 
-    // Refresh Unit Data via orchestrator pipeline (units)
-    async function refreshUnitData() {
-        const btn = document.getElementById('refresh-btn');
-        const statusEl = document.getElementById('refresh-status');
-        btn.disabled = true;
-        statusEl.textContent = 'Running (this may take 1-2 minutes)...';
-        statusEl.style.display = 'inline';
-        statusEl.style.color = '#2563eb';
+    // -------- Refresh chain (Section 2 of the smart-lock spec) --------
+    //
+    // POST /api/smart-lock/refresh with {site_ids} → kicks off the full
+    // igloo → ccws_units → ccws_gate_access → igloo_pin_sync chain in a
+    // background thread on the server. Returns a chain_id immediately.
+    // We poll GET /api/smart-lock/refresh/<chain_id> every 2s for status.
 
-        try {
-            const res = await fetch('/api/orchestrator/pipelines/ccws_units/run', {
-                method: 'POST', headers: apiHeaders(),
-                body: JSON.stringify({timeout: 300}),
-            });
-            if (!res.ok) {
-                const errData = await res.json().catch(() => ({}));
-                throw new Error(errData.error || `HTTP ${res.status}`);
-            }
-            const data = await res.json();
-            if (data.status === 'failed') {
-                throw new Error(data.error || 'Pipeline failed');
-            }
-            statusEl.textContent = 'Done! Reloading units...';
-            statusEl.style.color = '#059669';
-            btn.disabled = false;
-            loadUnits(loadedSiteIds);
-            setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
-        } catch (e) {
-            statusEl.textContent = 'Failed: ' + e.message;
-            statusEl.style.color = '#dc2626';
-            btn.disabled = false;
+    const _CHAIN_PIPELINES = ['igloo', 'ccws_units', 'ccws_gate_access', 'igloo_pin_sync'];
+    const _PIPELINE_LABELS = {
+        'igloo': 'Igloo',
+        'ccws_units': 'Units',
+        'ccws_gate_access': 'Gate codes',
+        'igloo_pin_sync': 'PIN sync',
+    };
+    let _chainPollHandle = null;
+    let _cooldownTickHandle = null;
+
+    async function refreshThisSite() {
+        const sel = SiteFilter.getSelected('site-filter');
+        if (!sel || sel.length === 0) {
+            showStatus('Select a site first', false);
+            return;
         }
+        return _startChain(sel);
+    }
+
+    async function refreshAllMySites() {
+        try {
+            const res = await fetch('/api/me/sites', { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const ids = (data.sites || []).map(s => s.site_id);
+            if (ids.length === 0) {
+                showStatus('No accessible sites', false);
+                return;
+            }
+            return _startChain(ids);
+        } catch (e) {
+            showStatus('Could not list your sites: ' + e.message, false);
+        }
+    }
+
+    async function _startChain(siteIds) {
+        _disableRefreshButtons(true);
+        _clearCooldownHint();
+        try {
+            const res = await fetch('/api/smart-lock/refresh', {
+                method: 'POST', headers: apiHeaders(),
+                body: JSON.stringify({ site_ids: siteIds }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.status === 409) {
+                _renderCooldownHint(data.blocked || []);
+                _disableRefreshButtons(false);
+                return;
+            }
+            if (!res.ok) {
+                throw new Error(data.error || `HTTP ${res.status}`);
+            }
+            _initChainStatus(data.chain_id);
+            _chainPollHandle = setInterval(() => _pollChain(data.chain_id), 2000);
+        } catch (e) {
+            _disableRefreshButtons(false);
+            showStatus('Refresh failed to start: ' + e.message, false);
+        }
+    }
+
+    function _initChainStatus(chainId) {
+        const panel = document.getElementById('refresh-chain-status');
+        const list = document.getElementById('chain-pipeline-list');
+        const tag = document.getElementById('chain-id-tag');
+        const status = document.getElementById('chain-overall-status');
+        panel.style.display = 'block';
+        tag.textContent = chainId.slice(0, 8);
+        status.textContent = 'pending';
+        status.style.background = '#dbeafe';
+        status.style.color = '#1e40af';
+        list.innerHTML = _CHAIN_PIPELINES.map(p =>
+            `<li id="chain-pl-${p}" style="padding: 2px 8px; border-radius: 4px; background: #e5e7eb; color: #4b5563;">${_PIPELINE_LABELS[p]} · pending</li>`
+        ).join('');
+    }
+
+    async function _pollChain(chainId) {
+        try {
+            const res = await fetch(`/api/smart-lock/refresh/${encodeURIComponent(chainId)}`, { headers: apiHeaders() });
+            if (!res.ok) return;
+            const data = await res.json();
+            _renderChainStatus(data);
+            if (['completed', 'partial_failure', 'failed'].includes(data.status)) {
+                clearInterval(_chainPollHandle);
+                _chainPollHandle = null;
+                _disableRefreshButtons(false);
+                const ok = data.status === 'completed';
+                showStatus(
+                    ok ? 'Refresh complete — reloading data…' :
+                    data.status === 'partial_failure' ? 'Refresh finished with some pipeline failures' :
+                    'Refresh failed',
+                    ok
+                );
+                if (ok && loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
+            }
+        } catch (e) { /* ignore poll error, will retry */ }
+    }
+
+    function _renderChainStatus(data) {
+        const overall = document.getElementById('chain-overall-status');
+        overall.textContent = data.status;
+        const colors = {
+            pending: ['#dbeafe', '#1e40af'],
+            running: ['#fef3c7', '#92400e'],
+            completed: ['#d1fae5', '#065f46'],
+            partial_failure: ['#fee2e2', '#b91c1c'],
+            failed: ['#fee2e2', '#b91c1c'],
+        };
+        const [bg, fg] = colors[data.status] || ['#e5e7eb', '#374151'];
+        overall.style.background = bg;
+        overall.style.color = fg;
+
+        (data.pipelines || []).forEach(pl => {
+            const li = document.getElementById(`chain-pl-${pl.name}`);
+            if (!li) return;
+            const label = _PIPELINE_LABELS[pl.name] || pl.name;
+            li.textContent = `${label} · ${pl.status}`;
+            const bgs = {
+                pending: '#e5e7eb',
+                running: '#fef3c7',
+                completed: '#d1fae5',
+                failed: '#fee2e2',
+            };
+            li.style.background = bgs[pl.status] || '#e5e7eb';
+            li.style.color = pl.status === 'failed' ? '#b91c1c' : '#1f2937';
+        });
+    }
+
+    function _disableRefreshButtons(disabled) {
+        document.getElementById('btn-refresh-site').disabled = disabled;
+        document.getElementById('btn-refresh-all').disabled = disabled;
+    }
+
+    function _renderCooldownHint(blocked) {
+        const hint = document.getElementById('refresh-cooldown-hint');
+        if (!blocked || blocked.length === 0) { hint.textContent = ''; return; }
+        if (_cooldownTickHandle) clearInterval(_cooldownTickHandle);
+
+        const update = () => {
+            const now = Date.now();
+            const fmts = blocked.map(b => {
+                const ms = new Date(b.available_at).getTime() - now;
+                if (ms <= 0) return `${b.site_id}: ready`;
+                const mm = Math.floor(ms / 60000);
+                const ss = Math.floor((ms % 60000) / 1000).toString().padStart(2, '0');
+                return `${b.site_id}: ${mm}:${ss}`;
+            });
+            hint.textContent = `On cooldown — available in ${fmts.join(', ')}`;
+            if (blocked.every(b => new Date(b.available_at).getTime() <= now)) {
+                clearInterval(_cooldownTickHandle);
+                _cooldownTickHandle = null;
+                hint.textContent = '';
+            }
+        };
+        update();
+        _cooldownTickHandle = setInterval(update, 1000);
+    }
+
+    function _clearCooldownHint() {
+        if (_cooldownTickHandle) { clearInterval(_cooldownTickHandle); _cooldownTickHandle = null; }
+        document.getElementById('refresh-cooldown-hint').textContent = '';
     }
 
     // Auto-assign padlocks
@@ -792,94 +931,6 @@
             span.textContent = 'Error';
             setTimeout(() => { span.textContent = '••••••••'; }, 3000);
         } finally {
-            btn.disabled = false;
-        }
-    }
-
-    // Refresh gate access data via orchestrator pipeline (ccws_gate_access)
-    async function refreshGateData() {
-        const btn = document.getElementById('refresh-gate-btn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Refreshing...';
-
-        try {
-            const res = await fetch('/api/orchestrator/pipelines/ccws_gate_access/run', {
-                method: 'POST',
-                headers: apiHeaders(),
-                body: JSON.stringify({timeout: 300}),
-            });
-            const data = await res.json();
-            if (!res.ok || data.status === 'failed') {
-                throw new Error(data.error || `HTTP ${res.status}`);
-            }
-            btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
-            btn.disabled = false;
-            showStatus('Gate access data refreshed', true);
-            if (loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
-        } catch (e) {
-            btn.innerHTML = '<i class="bi bi-shield-lock"></i> Refresh Gate Data';
-            btn.disabled = false;
-            showStatus('Gate data refresh failed: ' + e.message, false);
-        }
-    }
-
-    // Refresh Igloo device data via orchestrator pipeline (igloo)
-    async function refreshIglooData() {
-        const btn = document.getElementById('refresh-igloo-btn');
-        btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Refreshing...';
-        try {
-            const res = await fetch('/api/orchestrator/pipelines/igloo/run', {
-                method: 'POST',
-                headers: apiHeaders(),
-                body: JSON.stringify({timeout: 300}),
-            });
-            const data = await res.json();
-            if (!res.ok || data.status === 'failed') {
-                throw new Error(data.error || `HTTP ${res.status}`);
-            }
-            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
-            btn.disabled = false;
-            showStatus('Igloo data refreshed', true);
-            if (loadedSiteIds && loadedSiteIds.length) loadUnits(loadedSiteIds);
-        } catch (e) {
-            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Refresh Igloo Data';
-            btn.disabled = false;
-            showStatus('Igloo refresh failed: ' + e.message, false);
-        }
-    }
-
-    // Trigger PIN auto-sync (igloo_pin_sync) via orchestrator — pushes new PINs / revokes on move-out
-    async function syncPins() {
-        const btn = document.getElementById('sync-pins-btn');
-        if (!confirm('Run PIN sync now? This will push new PINs for rented units without a matching Igloo PIN, and revoke ESA-tagged PINs for units that are no longer rented.')) return;
-        btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Syncing...';
-        try {
-            const scope = { timeout: 600 };
-            if (loadedSiteIds && loadedSiteIds.length) {
-                scope.scope = { site_ids: loadedSiteIds };
-            }
-            const res = await fetch('/api/orchestrator/pipelines/igloo_pin_sync/run', {
-                method: 'POST',
-                headers: apiHeaders(),
-                body: JSON.stringify(scope),
-            });
-            const data = await res.json();
-            if (!res.ok || data.status === 'failed') {
-                throw new Error(data.error || `HTTP ${res.status}`);
-            }
-            const m = data.metadata || {};
-            const msg = `PIN sync complete — pushed: ${m.pushed || 0}, revoked: ${m.revoked || 0}, skipped: ${(m.skipped_pending_job || 0) + (m.skipped_no_gate_code || 0)}, errors: ${m.errors || 0}`;
-            showStatus(msg, (m.errors || 0) === 0);
-            // Re-run audit so the Match/Mismatch column reflects the push
-            if (loadedSiteIds && loadedSiteIds.length) {
-                setTimeout(() => auditPins(), 1500);
-            }
-        } catch (e) {
-            showStatus('PIN sync failed: ' + e.message, false);
-        } finally {
-            btn.innerHTML = '<i class="bi bi-key-fill"></i> Sync PINs';
             btn.disabled = false;
         }
     }
@@ -1018,8 +1069,9 @@
         }
     }
 
-    // Init
-    SiteFilter.init('site-filter', { mode: 'multi' });
+    // Init — use /api/me/sites so the dropdown is filtered to the user's
+    // allowed_site_ids (empty allowed_site_ids = all sites).
+    SiteFilter.init('site-filter', { mode: 'multi', endpoint: '/api/me/sites' });
     loadAuditLog();
 </script>
 {% endblock %}

@@ -36,6 +36,7 @@ class IglooPipeline(BasePipeline):
         from common.secrets_vault import vault_config
 
         property_site_map: Dict[str, int] = scope.get('property_site_map') or {}
+        site_ids_filter = scope.get('site_ids')  # list[int] or None
 
         client_id = vault_config('IGLOO_CLIENT_ID')
         client_secret = vault_config('IGLOO_CLIENT_SECRET')
@@ -80,6 +81,12 @@ class IglooPipeline(BasePipeline):
         device_records = [
             transform_device(d, departments, property_site_map) for d in detailed_devices
         ]
+
+        # Filter to requested sites only (when scope carries site_ids)
+        if site_ids_filter:
+            site_ids_set = set(site_ids_filter)
+            property_records = [r for r in property_records if r.get('site_id') in site_ids_set]
+            device_records = [r for r in device_records if r.get('site_id') in site_ids_set]
 
         # Dedup
         property_records = list({r['propertyId']: r for r in property_records}.values())

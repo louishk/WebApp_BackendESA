@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sync_service.pipelines.base import BasePipeline, RunResult
 from sync_service.config import get_engine
 from sync_service.pipelines._ccws_utils import (
-    NAMESPACE, build_soap_client, resolve_site_codes,
+    NAMESPACE, build_soap_client, resolve_site_codes, site_ids_to_codes,
     to_int, to_bool, build_upsert_sql, parallel_fetch,
 )
 
@@ -96,7 +96,11 @@ class CcwsGateAccessPipeline(BasePipeline):
     def _execute(self, scope: Dict[str, Any]) -> RunResult:
         from common.gate_access_crypto import get_gate_crypto
 
-        site_codes = resolve_site_codes(scope)
+        site_ids = scope.get('site_ids')
+        if site_ids:
+            site_codes = site_ids_to_codes(site_ids)
+        else:
+            site_codes = resolve_site_codes(scope)
         if not site_codes:
             return RunResult(status='failed', scope=scope, error='No site_codes resolved')
 

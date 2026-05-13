@@ -233,8 +233,7 @@ def delete_role(role_id):
 @login_required
 @admin_required
 def ecri_user_limits():
-    """Per-user ECRI approval limits + site restrictions (lives under User Management)."""
-    return render_template('admin/ecri_user_limits.html')
+    return redirect(url_for('admin.list_users'), code=302)
 
 
 @admin_bp.route('/api/users')
@@ -550,13 +549,19 @@ def edit_user(user_id):
 
             if not role_ids:
                 flash('At least one role is required.', 'error')
-                return render_template('admin/users/edit.html', user=user, roles=roles)
+                return render_template('admin/users/edit.html', user=user, roles=roles,
+                    allowed_site_ids=user.allowed_site_ids or [],
+                    ecri_max_pct_reduction=float(user.ecri_max_pct_reduction or 0),
+                    ecri_max_abs_reduction=float(user.ecri_max_abs_reduction or 0))
 
             # Verify all roles exist
             selected_roles = db_session.query(Role).filter(Role.id.in_(role_ids)).all()
             if len(selected_roles) != len(role_ids):
                 flash('One or more invalid roles.', 'error')
-                return render_template('admin/users/edit.html', user=user, roles=roles)
+                return render_template('admin/users/edit.html', user=user, roles=roles,
+                    allowed_site_ids=user.allowed_site_ids or [],
+                    ecri_max_pct_reduction=float(user.ecri_max_pct_reduction or 0),
+                    ecri_max_abs_reduction=float(user.ecri_max_abs_reduction or 0))
 
             user.roles = selected_roles
 
@@ -567,7 +572,10 @@ def edit_user(user_id):
                 is_valid, message = validate_password(new_password)
                 if not is_valid:
                     flash(message, 'error')
-                    return render_template('admin/users/edit.html', user=user, roles=roles)
+                    return render_template('admin/users/edit.html', user=user, roles=roles,
+                        allowed_site_ids=user.allowed_site_ids or [],
+                        ecri_max_pct_reduction=float(user.ecri_max_pct_reduction or 0),
+                        ecri_max_abs_reduction=float(user.ecri_max_abs_reduction or 0))
                 user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
                 password_changed = True
 
@@ -586,7 +594,14 @@ def edit_user(user_id):
             flash('User updated successfully.', 'success')
             return redirect(url_for('admin.list_users'))
 
-        return render_template('admin/users/edit.html', user=user, roles=roles)
+        return render_template(
+            'admin/users/edit.html',
+            user=user,
+            roles=roles,
+            allowed_site_ids=user.allowed_site_ids or [],
+            ecri_max_pct_reduction=float(user.ecri_max_pct_reduction or 0),
+            ecri_max_abs_reduction=float(user.ecri_max_abs_reduction or 0),
+        )
     except Exception as e:
         db_session.rollback()
         current_app.logger.error(f"Error editing user: {e}")

@@ -15,7 +15,6 @@
 window.SiteFilter = (function () {
     'use strict';
 
-    let _sitesCache = null;
     let _instances = {};
 
     function _esc(str) {
@@ -33,12 +32,15 @@ window.SiteFilter = (function () {
         return headers;
     }
 
-    async function _fetchSites() {
-        if (_sitesCache) return _sitesCache;
-        const res = await fetch('/api/sites', { headers: _apiHeaders() });
+    const _sitesCacheByEndpoint = {};
+
+    async function _fetchSites(endpoint) {
+        endpoint = endpoint || '/api/sites';
+        if (_sitesCacheByEndpoint[endpoint]) return _sitesCacheByEndpoint[endpoint];
+        const res = await fetch(endpoint, { headers: _apiHeaders() });
         const data = await res.json();
-        _sitesCache = data.sites || [];
-        return _sitesCache;
+        _sitesCacheByEndpoint[endpoint] = data.sites || [];
+        return _sitesCacheByEndpoint[endpoint];
     }
 
     function _groupByCountry(sites) {
@@ -259,7 +261,7 @@ window.SiteFilter = (function () {
         _instances[elementId] = inst;
 
         try {
-            inst.sites = await _fetchSites();
+            inst.sites = await _fetchSites(options.endpoint);
             _renderList(inst);
             _bindEvents(inst);
         } catch (e) {

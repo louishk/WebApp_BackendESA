@@ -27,6 +27,20 @@ def build_soap_client(timeout: int = 120, retries: int = 3):
     )
 
 
+def site_ids_to_codes(site_ids: List[int]) -> List[str]:
+    """Query siteinfo for SiteCode where SiteID IN (site_ids)."""
+    if not site_ids:
+        return []
+    from sync_service.config import get_engine
+    from sqlalchemy import text
+    with get_engine('pbi').connect() as conn:
+        rows = conn.execute(
+            text('SELECT "SiteCode" FROM siteinfo WHERE "SiteID" = ANY(:ids) AND "SiteCode" IS NOT NULL'),
+            {'ids': list(site_ids)},
+        ).fetchall()
+    return [r[0] for r in rows if r[0]]
+
+
 def resolve_site_codes(scope: Dict[str, Any]) -> List[str]:
     if 'site_codes' in scope:
         v = scope['site_codes']
