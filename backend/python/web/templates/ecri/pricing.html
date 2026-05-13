@@ -98,6 +98,7 @@
         <div><label>Prior Bumps</label><input type="number" step="1" min="0" id="p-bumps" class="form-select" value="0"></div>
         <div><label>Cumul Bump %</label><input type="number" step="0.1" id="p-bump-pct" class="form-select" value="0"></div>
         <div><label>History (years)</label><input type="number" step="1" min="1" max="3" id="p-history-y" class="form-select" value="2"></div>
+        <div><label>Tenant Ledger Count</label><input type="number" step="1" min="1" id="p-tenant-ledgers" class="form-select" value="1"></div>
     </div>
     <div style="margin-top:1rem; padding:0.75rem 1rem; background:#F7F7F8; border-left:4px solid var(--esa-navy); border-radius:4px;">
         <div style="font-size:1.4rem; font-weight:600;">
@@ -144,12 +145,15 @@ const PRICING_FACTOR_META = [
     {k:'above_top1',            l:'Above Top-1',           d:'current_rent > top1_rent'},
     {k:'high_unit_risk',        l:'High Unit Risk',        d:'1.10 < unit_risk_factor ≤ 1.30 (mutually exclusive)'},
     {k:'very_high_unit_risk',   l:'Very High Unit Risk',   d:'unit_risk_factor > 1.30'},
+    {k:'low_unit_risk',         l:'Low Unit Risk',         d:'0.70 ≤ unit_risk_factor < 0.90 (good category)'},
+    {k:'very_low_unit_risk',    l:'Very Low Unit Risk',    d:'unit_risk_factor < 0.70 (great category)'},
     {k:'tenure_under_18mo',     l:'Tenure < 18 months',    d:'tenure_months < 18'},
     {k:'tenure_under_24mo',     l:'Tenure < 24 months',    d:'tenure_months < 24 (legacy)'},
     {k:'tenure_36mo_plus',      l:'Tenure ≥ 36 months',    d:'tenure_months ≥ 36 (solid tenant)'},
     {k:'red_bucket',            l:'Red Effective Bucket',  d:'effective_bucket == "red"'},
     {k:'under_bumped',          l:'Under-bumped',          d:'bump_count < history_years (less than 1 bump/year on record)'},
     {k:'cumul_bump_aggressive_annual', l:'Cumul Bump Aggressive', d:'(bump_total_pct / history_years) ≥ 7 (already pumped >=7%/year)'},
+    {k:'multitenant',           l:'Multitenant',           d:'tenant_ledger_count ≥ 2 (concentration risk: one tenant, multiple units)'},
 ];
 
 function factorFires(name, r) {
@@ -166,6 +170,8 @@ function factorFires(name, r) {
         case 'above_top1':            return r.current_rent != null && r.top1_rent != null && r.current_rent >  r.top1_rent;
         case 'high_unit_risk':        return r.unit_risk_factor != null && r.unit_risk_factor > 1.10 && r.unit_risk_factor <= 1.30;
         case 'very_high_unit_risk':   return r.unit_risk_factor != null && r.unit_risk_factor > 1.30;
+        case 'low_unit_risk':         return r.unit_risk_factor != null && r.unit_risk_factor >= 0.70 && r.unit_risk_factor < 0.90;
+        case 'very_low_unit_risk':    return r.unit_risk_factor != null && r.unit_risk_factor < 0.70;
         case 'tenure_under_18mo':     return r.tenure_months != null && r.tenure_months < 18;
         case 'tenure_under_24mo':     return r.tenure_months != null && r.tenure_months < 24;
         case 'tenure_36mo_plus':      return r.tenure_months != null && r.tenure_months >= 36;
@@ -173,6 +179,7 @@ function factorFires(name, r) {
         case 'under_bumped':          return r.bump_count != null && r.history_years != null && r.bump_count < r.history_years;
         case 'cumul_bump_aggressive_annual':
             return r.bump_total_pct != null && r.history_years && (r.bump_total_pct / r.history_years) >= 7;
+        case 'multitenant':           return r.tenant_ledger_count != null && r.tenant_ledger_count >= 2;
     }
     return false;
 }
@@ -322,6 +329,7 @@ function refreshPreview() {
         bump_count:      Number(document.getElementById('p-bumps').value) || 0,
         bump_total_pct:  Number(document.getElementById('p-bump-pct').value) || 0,
         history_years:   Number(document.getElementById('p-history-y').value) || 1,
+        tenant_ledger_count: Number(document.getElementById('p-tenant-ledgers').value) || 1,
     };
     const result = computeProposed(row, CONFIG);
     const grad = result.min != null ? ` (gradient ${result.min}–${result.max})` : '';
@@ -376,7 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('grad-min').addEventListener('input',  onGradientChange);
     document.getElementById('grad-max').addEventListener('change', onGradientChange);
     document.getElementById('grad-max').addEventListener('input',  onGradientChange);
-    ['p-current','p-market','p-site','p-country','p-top3','p-top1','p-risk','p-tenure','p-bucket','p-country-cc','p-bumps','p-bump-pct','p-history-y']
+    ['p-current','p-market','p-site','p-country','p-top3','p-top1','p-risk','p-tenure','p-bucket','p-country-cc','p-bumps','p-bump-pct','p-history-y','p-tenant-ledgers']
         .forEach(id => {
             const el = document.getElementById(id);
             el.addEventListener('change', refreshPreview);

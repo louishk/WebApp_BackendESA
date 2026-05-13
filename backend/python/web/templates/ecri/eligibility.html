@@ -345,6 +345,8 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             case 'above_top1':            return r.current_rent != null && r.top1_rent != null            && r.current_rent >  r.top1_rent;
             case 'high_unit_risk':        return r.unit_risk_factor != null && r.unit_risk_factor > 1.10 && r.unit_risk_factor <= 1.30;
             case 'very_high_unit_risk':   return r.unit_risk_factor != null && r.unit_risk_factor > 1.30;
+            case 'low_unit_risk':         return r.unit_risk_factor != null && r.unit_risk_factor >= 0.70 && r.unit_risk_factor < 0.90;
+            case 'very_low_unit_risk':    return r.unit_risk_factor != null && r.unit_risk_factor < 0.70;
             case 'tenure_under_18mo':     return r.tenure_months != null && r.tenure_months < 18;
             case 'tenure_under_24mo':     return r.tenure_months != null && r.tenure_months < 24;
             case 'tenure_36mo_plus':      return r.tenure_months != null && r.tenure_months >= 36;
@@ -352,6 +354,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             case 'under_bumped':          return r.bump_count != null && r.history_years != null && r.bump_count < r.history_years;
             case 'cumul_bump_aggressive_annual':
                 return r.bump_total_pct != null && r.history_years && (r.bump_total_pct / r.history_years) >= 7;
+            case 'multitenant':           return r.tenant_ledger_count != null && r.tenant_ledger_count >= 2;
         }
         return false;
     }
@@ -444,6 +447,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         {k: 'proposed_pct',             l: 'Proposed %'},
         {k: 'bump_count',               l: 'Prior Bumps'},
         {k: 'bump_total_pct',           l: 'Cumul Bump %'},
+        {k: 'tenant_ledger_count',      l: 'Tenant Ledger Count'},
         {k: 'next_effective_date',      l: 'Next Effective',     t: 'date'},
         {k: 'paid_thru',                l: 'Paid Thru',          t: 'date'},
         {k: 'projected_paid_thru',      l: 'Projected PT',       t: 'date'},

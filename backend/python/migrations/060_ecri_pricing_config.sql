@@ -34,12 +34,15 @@ VALUES (
             'above_top1',            jsonb_build_object('enabled', true,  'weight', -0.9),
             'high_unit_risk',        jsonb_build_object('enabled', true,  'weight', -0.5),
             'very_high_unit_risk',   jsonb_build_object('enabled', true,  'weight', -0.8),
+            'low_unit_risk',         jsonb_build_object('enabled', true,  'weight',  0.5),
+            'very_low_unit_risk',    jsonb_build_object('enabled', true,  'weight',  0.8),
             'tenure_under_18mo',     jsonb_build_object('enabled', true,  'weight', -0.5),
             'tenure_under_24mo',     jsonb_build_object('enabled', false, 'weight', -0.3),
             'tenure_36mo_plus',      jsonb_build_object('enabled', true,  'weight',  0.4),
             'red_bucket',            jsonb_build_object('enabled', true,  'weight', -0.4),
             'under_bumped',          jsonb_build_object('enabled', true,  'weight',  0.3),
-            'cumul_bump_aggressive_annual', jsonb_build_object('enabled', true,  'weight', -0.4)
+            'cumul_bump_aggressive_annual', jsonb_build_object('enabled', true,  'weight', -0.4),
+            'multitenant',           jsonb_build_object('enabled', true,  'weight', -0.3)
         ),
         'country_overrides', jsonb_build_object(
             'SG', jsonb_build_object('gradient_min_pct',  7, 'gradient_max_pct', 22),

@@ -318,6 +318,24 @@ def _ledger_bump_history(session, site_ids):
     return out
 
 
+def _tenant_ledger_counts(session, site_ids):
+    """Return {tenant_id: active_ledger_count} across the requested sites.
+
+    Used to flag multitenants (>=2 active ledgers) as a concentration-risk
+    factor in the pricing algorithm.
+    """
+    rows = session.execute(text("""
+        SELECT "TenantID", COUNT(*) AS n
+        FROM vw_ecri_eligible_ledgers
+        WHERE "SiteID" = ANY(:site_ids)
+          AND "TenantID" IS NOT NULL
+          AND "dMovedIn" IS NOT NULL
+          AND "dcRent" > 0
+        GROUP BY "TenantID"
+    """), {'site_ids': site_ids}).fetchall()
+    return {int(r[0]): int(r[1]) for r in rows}
+
+
 def _site_country_lookup(session, site_ids):
     """Return {site_id: (country_name, country_code_or_None)} for the requested sites."""
     out = {}
@@ -533,6 +551,7 @@ def api_eligible_tenants():
         unit_risk_resolve = _ecri_unit_risk_resolver(session, site_ids)
         site_country_map = _site_country_lookup(session, site_ids)
         bump_hist = _ledger_bump_history(session, site_ids)
+        tenant_ledger_n = _tenant_ledger_counts(session, site_ids)
 
         # Build final list
         for row in rows:
@@ -652,6 +671,9 @@ def api_eligible_tenants():
                 'bump_count':     bump_hist.get((site_id, r['LedgerID']), {}).get('bump_count', 0),
                 'bump_total_pct': bump_hist.get((site_id, r['LedgerID']), {}).get('bump_total_pct'),
                 'history_years':  bump_hist.get((site_id, r['LedgerID']), {}).get('history_years'),
+                # Multitenants: how many active ledgers this tenant holds
+                # across the requested sites (>=2 = concentration risk)
+                'tenant_ledger_count': tenant_ledger_n.get(int(r['TenantID']), 1) if r.get('TenantID') else 1,
             })
 
         # Exclusion summary (run a separate query for counts).
@@ -1119,6 +1141,7 @@ def api_advance_eligible():
         unit_risk_resolve = _ecri_unit_risk_resolver(session, site_ids)
         site_country_map = _site_country_lookup(session, site_ids)
         bump_hist = _ledger_bump_history(session, site_ids)
+        tenant_ledger_n = _tenant_ledger_counts(session, site_ids)
 
         segments: dict[str, list[dict]] = {
             'recent_movein': [],
@@ -1239,6 +1262,7 @@ def api_advance_eligible():
                 'bump_count':     bump_hist.get((r.SiteID, r.LedgerID), {}).get('bump_count', 0),
                 'bump_total_pct': bump_hist.get((r.SiteID, r.LedgerID), {}).get('bump_total_pct'),
                 'history_years':  bump_hist.get((r.SiteID, r.LedgerID), {}).get('history_years'),
+                'tenant_ledger_count': tenant_ledger_n.get(int(r.TenantID), 1) if r.TenantID else 1,
             }
             segments[r.segment].append(entry)
 
@@ -3195,9 +3219,11 @@ PRICING_FACTOR_NAMES = (
     'above_market', 'above_site_median', 'above_country_median',
     'above_top3', 'above_top1',
     'high_unit_risk', 'very_high_unit_risk',
+    'low_unit_risk', 'very_low_unit_risk',
     'tenure_under_18mo', 'tenure_under_24mo', 'tenure_36mo_plus',
     'red_bucket',
     'under_bumped', 'cumul_bump_aggressive_annual',
+    'multitenant',
 )
 
 
