@@ -122,6 +122,7 @@
                         <th title="Median rent across all sites in country for same size & climate">Country Med</th>
                         <th title="Average of the 3 highest-rent sites in country for same size & climate">Top-3</th>
                         <th title="Highest-rent site in country for same size & climate">Top-1</th>
+                        <th title="Closest LAD a rate change can land on (green=this cycle, amber=locked but unlocks before LAD, red=missed this cycle)">Next Effective</th>
                     </tr>
                 </thead>
                 <tbody id="eligible-tbody"></tbody>
@@ -156,6 +157,7 @@
                         <th title="Median rent across all sites in country for same size &amp; climate">Country Med</th>
                         <th title="Average of the 3 highest-rent sites in country for same size &amp; climate">Top-3</th>
                         <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
+                        <th title="Closest LAD a rate change can land on, after projected paid_thru + buffer">Next Effective</th>
                         <th>Moved In</th><th>Disc. Expires</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
                     </tr>
@@ -188,6 +190,7 @@
                         <th title="Median rent across all sites in country for same size &amp; climate">Country Med</th>
                         <th title="Average of the 3 highest-rent sites in country for same size &amp; climate">Top-3</th>
                         <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
+                        <th title="Closest LAD a rate change can land on, after projected paid_thru + buffer">Next Effective</th>
                         <th>Moved In</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
                     </tr>
@@ -303,6 +306,12 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         return rentLine + psfLine;
     }
     function rowKey(t) { return `${t.site_id}:${t.ledger_id}`; }
+    function effDateCell(t) {
+        if (!t.next_effective_date) return '-';
+        const color = {green:'#28A745', amber:'#E0A800', red:'#C41230', unknown:'#666'}[t.effective_bucket] || '#333';
+        const dot = `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:4px;"></span>`;
+        return `${dot}${t.next_effective_date.substring(0,10)}`;
+    }
 
     // -------- Variance filters --------
     const FILTER_FIELDS = [
@@ -531,7 +540,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         const tbody = document.getElementById('eligible-tbody');
         document.getElementById('eligible-count').textContent = tenants.length;
         if (tenants.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; color:#666;">No eligible tenants found for selected criteria.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; color:#666;">No eligible tenants found for selected criteria.</td></tr>';
             document.getElementById('standard-results').style.display = 'block';
             return;
         }
@@ -552,6 +561,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${benchCell(t.country_rent_med, t.variance_vs_country, t.country_psf_med, t.variance_psf_vs_country)}</td>
                 <td>${benchCell(t.top3_rent, t.variance_vs_top3, t.top3_psf, t.variance_psf_vs_top3)}</td>
                 <td>${benchCell(t.top1_rent, t.variance_vs_top1, t.top1_psf, t.variance_psf_vs_top1)}</td>
+                <td>${effDateCell(t)}</td>
             </tr>
         `;
         }).join('');
@@ -605,6 +615,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${benchCell(t.country_rent_med, t.variance_vs_country, t.country_psf_med, t.variance_psf_vs_country)}</td>
                 <td>${benchCell(t.top3_rent, t.variance_vs_top3, t.top3_psf, t.variance_psf_vs_top3)}</td>
                 <td>${benchCell(t.top1_rent, t.variance_vs_top1, t.top1_psf, t.variance_psf_vs_top1)}</td>
+                <td>${effDateCell(t)}</td>
                 <td>${fmtDate(t.moved_in_date)}</td>
                 ${discCell}
                 <td>${fmtDate(t.paid_thru)}</td>

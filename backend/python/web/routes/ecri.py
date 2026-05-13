@@ -310,6 +310,8 @@ def api_eligible_tenants():
                 l."sUnit" AS unit_name,
                 l."sTypeName" AS unit_type,
                 l."dcStdRate" AS std_rate,
+                l."dAnniv",
+                l.paid_thru,
                 u.label_size_range AS size_range,
                 u.label_climate_code AS climate_code,
                 u.dcarea_fixed AS sqft
@@ -406,6 +408,11 @@ def api_eligible_tenants():
             if moved_in:
                 tenure_months = (today.year - moved_in.year) * 12 + (today.month - moved_in.month)
 
+            # Closest effective date (next LAD honoring paid_thru lock)
+            anniv = r.get('dAnniv')
+            pt = r.get('paid_thru')
+            next_eff_date, _, eff_bucket = compute_effective_date(anniv, pt, today)
+
             eligible.append({
                 'site_id': site_id,
                 'ledger_id': r['LedgerID'],
@@ -444,6 +451,10 @@ def api_eligible_tenants():
                 'variance_psf_vs_country': variance_pct(current_psf, country_psf_med),
                 'variance_psf_vs_top3': variance_pct(current_psf, top3_psf),
                 'variance_psf_vs_top1': variance_pct(current_psf, top1_psf),
+                # Closest effective date / bucket
+                'next_effective_date': next_eff_date.isoformat() if next_eff_date else None,
+                'effective_bucket': eff_bucket,
+                'paid_thru': pt.isoformat() if pt else None,
             })
 
         # Exclusion summary (run a separate query for counts).
@@ -934,6 +945,12 @@ def api_advance_eligible():
             if moved_in:
                 tenure_months = (today.year - moved_in.year) * 12 + (today.month - moved_in.month)
 
+            # Closest effective date for Pre-Load: must land after
+            # projected_paid_thru + prepay buffer (default 7 days)
+            next_eff_date, _, eff_bucket = compute_advance_effective_date(
+                r.dAnniv, r.projected_paid_thru, today,
+            )
+
             entry = {
                 'site_id': r.SiteID,
                 'ledger_id': r.LedgerID,
@@ -980,6 +997,9 @@ def api_advance_eligible():
                 'projected_paid_thru': r.projected_paid_thru.isoformat() if r.projected_paid_thru else None,
                 'discount_expires': r.discount_expires.isoformat() if r.discount_expires else None,
                 'segment': r.segment,
+                # Closest effective date / bucket
+                'next_effective_date': next_eff_date.isoformat() if next_eff_date else None,
+                'effective_bucket': eff_bucket,
             }
             segments[r.segment].append(entry)
 
