@@ -1,9 +1,20 @@
 """
-CcwsUnitsPipeline — full unit catalog from UnitsInformation_v3 → esa_middleware.ccws_units.
+CcwsUnitsPipeline — full unit catalog from UnitsInformation_v3.
+
+Dual-writes:
+  - esa_middleware.ccws_units (primary; powers smart lock, recommendations)
+  - esa_pbi.units_info        (mirror; powers pricing reports, PBI dashboards)
+
+The PBI write is best-effort: a failure logs a warning but does not fail
+the run. Middleware is the live consumer; PBI is reporting-only.
+
+Replaces the legacy weekly `unitsinfo` APScheduler pipeline, which fetched
+the same data via the same SOAP call into units_info. By running every
+15 minutes here, PBI gets fresh data for free instead of weekly.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import text
 
@@ -123,9 +134,74 @@ class CcwsUnitsPipeline(BasePipeline):
             with get_engine('middleware').begin() as conn:
                 conn.execute(sql, deduped)
 
+            pbi_meta = self._mirror_to_units_info(deduped, cols, per_site)
+
             return RunResult(status='refreshed', records=len(deduped), scope=scope,
                              metadata={'per_site_counts': per_site,
-                                       'sites_queried': len(site_codes)})
+                                       'sites_queried': len(site_codes),
+                                       **pbi_meta})
         finally:
             try: soap.close()
             except Exception: pass
+
+    def _mirror_to_units_info(
+        self,
+        rows: List[Dict[str, Any]],
+        cols: List[str],
+        per_site: Dict[str, int],
+    ) -> Dict[str, Any]:
+        """Best-effort dual-write to esa_pbi.units_info.
+
+        Upserts the same payload into units_info (47 shared columns) and
+        soft-deletes any units_info rows that belong to sites we successfully
+        fetched but are no longer in the result set.
+
+        Sites that returned 0 rows in this run are EXCLUDED from soft-delete
+        scope to avoid wiping a site's catalog on a transient SOAP error.
+
+        Failures are logged at WARNING but do not fail the run; middleware
+        is the live consumer and has already been written by the caller.
+        """
+        try:
+            fetched_keys: Set[Tuple[int, int]] = {(r['SiteID'], r['UnitID']) for r in rows}
+            healthy_site_ids: Set[int] = {
+                r['SiteID'] for r in rows if r.get('SiteID') is not None
+            }
+
+            pbi = get_engine('pbi')
+            with pbi.begin() as conn:
+                conn.execute(
+                    text(build_upsert_sql(
+                        'units_info', cols, conflict_cols=['SiteID', 'UnitID'],
+                    )),
+                    rows,
+                )
+
+                soft_deleted = 0
+                if healthy_site_ids and fetched_keys:
+                    fetched_key_strs = [f"{s}|{u}" for s, u in fetched_keys]
+                    result = conn.execute(
+                        text("""
+                            UPDATE units_info
+                            SET deleted_at = CURRENT_DATE,
+                                updated_at = NOW()
+                            WHERE deleted_at IS NULL
+                              AND "SiteID" = ANY(:site_ids)
+                              AND ("SiteID"::text || '|' || "UnitID"::text) <> ALL(:fetched_keys)
+                        """),
+                        {
+                            'site_ids': list(healthy_site_ids),
+                            'fetched_keys': fetched_key_strs,
+                        },
+                    )
+                    soft_deleted = result.rowcount or 0
+
+            self.log.info(
+                f"units_info mirror: upserted {len(rows)}, soft-deleted {soft_deleted}"
+            )
+            return {'pbi_mirror_records': len(rows), 'pbi_soft_deleted': soft_deleted}
+        except Exception as e:
+            self.log.warning(
+                f"units_info mirror failed (non-fatal — middleware write already succeeded): {e}"
+            )
+            return {'pbi_mirror_error': str(e)[:200]}
