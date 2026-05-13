@@ -162,6 +162,98 @@ def api_data_freshness():
 # API: Eligibility
 # =============================================================================
 
+
+def _variance_pct(actual, ref):
+    """Percent variance of actual vs ref, rounded to 1 dp. None-safe."""
+    if actual is None or ref is None or ref <= 0:
+        return None
+    return round((actual - ref) / ref * 100, 1)
+
+
+def _median(values):
+    if not values:
+        return None
+    s = sorted(values)
+    n = len(s)
+    if n % 2 == 0:
+        return (s[n // 2 - 1] + s[n // 2]) / 2
+    return s[n // 2]
+
+
+def _country_size_climate_benchmarks(session, site_ids):
+    """Country / Top-N benchmarks per (size_range, climate_code).
+
+    Picks the most-represented Country across the requested sites, then computes
+    country median rent + $/sqft and Top-1 / Top-3 site medians (rent + $/sqft)
+    for each (size_range, climate_code) cell using vw_ecri_eligible_ledgers joined
+    to units_info_enriched. Returns {} if no country can be resolved.
+    """
+    country_row = session.execute(text("""
+        SELECT "Country", COUNT(*) AS n
+        FROM siteinfo
+        WHERE "SiteID" = ANY(:site_ids) AND "Country" IS NOT NULL
+        GROUP BY "Country"
+        ORDER BY n DESC
+        LIMIT 1
+    """), {'site_ids': site_ids}).fetchone()
+    country = country_row[0] if country_row else None
+    if not country:
+        return {}
+
+    bench_sql = text("""
+        WITH base AS (
+            SELECT l."SiteID", l."dcRent", u.dcarea_fixed AS sqft,
+                   u.label_size_range AS sz, u.label_climate_code AS cc,
+                   CASE WHEN u.dcarea_fixed > 0 THEN l."dcRent" / u.dcarea_fixed END AS psf
+            FROM vw_ecri_eligible_ledgers l
+            JOIN units_info_enriched u ON u."UnitID" = l."UnitID"
+            JOIN siteinfo s ON s."SiteID" = l."SiteID"
+            WHERE s."Country" = :country
+              AND s."SiteCode" <> 'LSETUP'
+              AND l."dcRent" > 0
+              AND u.label_size_range IS NOT NULL
+              AND u.label_climate_code IS NOT NULL
+        ),
+        sm AS (
+            SELECT "SiteID", sz, cc,
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "dcRent") AS rent_med,
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY psf)
+                       FILTER (WHERE psf IS NOT NULL) AS psf_med,
+                   COUNT(*) AS n
+            FROM base GROUP BY "SiteID", sz, cc HAVING COUNT(*) >= 5
+        ),
+        rk AS (
+            SELECT sz, cc, "SiteID", rent_med, psf_med,
+                   ROW_NUMBER() OVER (PARTITION BY sz, cc ORDER BY rent_med DESC) AS rent_rk,
+                   ROW_NUMBER() OVER (PARTITION BY sz, cc ORDER BY psf_med DESC NULLS LAST) AS psf_rk
+            FROM sm
+        )
+        SELECT b.sz, b.cc,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b."dcRent") AS country_rent_med,
+               PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b.psf)
+                   FILTER (WHERE b.psf IS NOT NULL) AS country_psf_med,
+               (SELECT rent_med FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.rent_rk=1) AS top1_rent,
+               (SELECT AVG(rent_med) FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.rent_rk<=3) AS top3_rent,
+               (SELECT psf_med FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.psf_rk=1) AS top1_psf,
+               (SELECT AVG(psf_med) FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.psf_rk<=3) AS top3_psf,
+               COUNT(DISTINCT b."SiteID") AS n_sites
+        FROM base b
+        GROUP BY b.sz, b.cc
+    """)
+    out = {}
+    for br in session.execute(bench_sql, {'country': country}).fetchall():
+        out[(br[0], br[1])] = {
+            'country_rent_med': float(br[2]) if br[2] is not None else None,
+            'country_psf_med':  float(br[3]) if br[3] is not None else None,
+            'top1_rent':        float(br[4]) if br[4] is not None else None,
+            'top3_rent':        float(br[5]) if br[5] is not None else None,
+            'top1_psf':         float(br[6]) if br[6] is not None else None,
+            'top3_psf':         float(br[7]) if br[7] is not None else None,
+            'n_sites':          int(br[8]) if br[8] is not None else 0,
+        }
+    return out
+
+
 @ecri_bp.route('/api/eligible-tenants')
 @login_required
 @ecri_access_required
@@ -261,88 +353,11 @@ def api_eligible_tenants():
             if sqft_v and sqft_v > 0 and current_rent:
                 site_type_psfs.setdefault(key, []).append(current_rent / sqft_v)
 
-        # Calculate medians
-        def median(values):
-            if not values:
-                return None
-            s = sorted(values)
-            n = len(s)
-            if n % 2 == 0:
-                return (s[n // 2 - 1] + s[n // 2]) / 2
-            return s[n // 2]
+        site_type_medians = {k: _median(v) for k, v in site_type_rents.items()}
+        site_type_psf_medians = {k: _median(v) for k, v in site_type_psfs.items()}
 
-        site_type_medians = {k: median(v) for k, v in site_type_rents.items()}
-        site_type_psf_medians = {k: median(v) for k, v in site_type_psfs.items()}
-
-        # Cross-site (country) benchmarks per (size_range, climate_code) cell.
-        # Country derived from the most common country across the requested sites.
-        country_row = session.execute(text("""
-            SELECT "Country", COUNT(*) AS n
-            FROM siteinfo
-            WHERE "SiteID" = ANY(:site_ids) AND "Country" IS NOT NULL
-            GROUP BY "Country"
-            ORDER BY n DESC
-            LIMIT 1
-        """), {'site_ids': site_ids}).fetchone()
-        country = country_row[0] if country_row else None
-
-        country_benchmarks = {}
-        if country:
-            bench_sql = text("""
-                WITH base AS (
-                    SELECT l."SiteID", l."dcRent", u.dcarea_fixed AS sqft,
-                           u.label_size_range AS sz, u.label_climate_code AS cc,
-                           CASE WHEN u.dcarea_fixed > 0 THEN l."dcRent" / u.dcarea_fixed END AS psf
-                    FROM vw_ecri_eligible_ledgers l
-                    JOIN units_info_enriched u ON u."UnitID" = l."UnitID"
-                    JOIN siteinfo s ON s."SiteID" = l."SiteID"
-                    WHERE s."Country" = :country
-                      AND s."SiteCode" <> 'LSETUP'
-                      AND l."dcRent" > 0
-                      AND u.label_size_range IS NOT NULL
-                      AND u.label_climate_code IS NOT NULL
-                ),
-                sm AS (
-                    SELECT "SiteID", sz, cc,
-                           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "dcRent") AS rent_med,
-                           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY psf)
-                               FILTER (WHERE psf IS NOT NULL) AS psf_med,
-                           COUNT(*) AS n
-                    FROM base GROUP BY "SiteID", sz, cc HAVING COUNT(*) >= 5
-                ),
-                rk AS (
-                    SELECT sz, cc, "SiteID", rent_med, psf_med,
-                           ROW_NUMBER() OVER (PARTITION BY sz, cc ORDER BY rent_med DESC) AS rent_rk,
-                           ROW_NUMBER() OVER (PARTITION BY sz, cc ORDER BY psf_med DESC NULLS LAST) AS psf_rk
-                    FROM sm
-                )
-                SELECT b.sz, b.cc,
-                       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b."dcRent") AS country_rent_med,
-                       PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b.psf)
-                           FILTER (WHERE b.psf IS NOT NULL) AS country_psf_med,
-                       (SELECT rent_med FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.rent_rk=1) AS top1_rent,
-                       (SELECT AVG(rent_med) FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.rent_rk<=3) AS top3_rent,
-                       (SELECT psf_med FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.psf_rk=1) AS top1_psf,
-                       (SELECT AVG(psf_med) FROM rk r WHERE r.sz=b.sz AND r.cc=b.cc AND r.psf_rk<=3) AS top3_psf,
-                       COUNT(DISTINCT b."SiteID") AS n_sites
-                FROM base b
-                GROUP BY b.sz, b.cc
-            """)
-            for br in session.execute(bench_sql, {'country': country}).fetchall():
-                country_benchmarks[(br[0], br[1])] = {
-                    'country_rent_med': float(br[2]) if br[2] is not None else None,
-                    'country_psf_med': float(br[3]) if br[3] is not None else None,
-                    'top1_rent': float(br[4]) if br[4] is not None else None,
-                    'top3_rent': float(br[5]) if br[5] is not None else None,
-                    'top1_psf': float(br[6]) if br[6] is not None else None,
-                    'top3_psf': float(br[7]) if br[7] is not None else None,
-                    'n_sites': int(br[8]) if br[8] is not None else 0,
-                }
-
-        def variance_pct(actual, ref):
-            if actual is None or ref is None or ref <= 0:
-                return None
-            return round((actual - ref) / ref * 100, 1)
+        country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
+        variance_pct = _variance_pct
 
         # Build final list
         for row in rows:
@@ -847,36 +862,38 @@ def api_advance_eligible():
 
         rows = session.execute(text("""
             SELECT
-                "SiteID", "LedgerID", "TenantID", "UnitID",
-                "TenantName", unit_name, unit_type,
-                "dMovedIn", paid_thru, "dAnniv",
-                current_rent, std_rate,
-                "dRentLastChanged",
-                segment, discount_expires, projected_paid_thru
-            FROM vw_ecri_advance_eligible_ledgers
-            WHERE "SiteID" = ANY(:site_ids)
-            ORDER BY segment, "SiteID", "LedgerID"
+                v."SiteID", v."LedgerID", v."TenantID", v."UnitID",
+                v."TenantName", v.unit_name, v.unit_type,
+                v."dMovedIn", v.paid_thru, v."dAnniv",
+                v.current_rent, v.std_rate,
+                v."dRentLastChanged",
+                v.segment, v.discount_expires, v.projected_paid_thru,
+                u.dcarea_fixed AS sqft,
+                u.label_size_range AS size_range,
+                u.label_climate_code AS climate_code
+            FROM vw_ecri_advance_eligible_ledgers v
+            LEFT JOIN units_info_enriched u ON u."UnitID" = v."UnitID"
+            WHERE v."SiteID" = ANY(:site_ids)
+            ORDER BY v.segment, v."SiteID", v."LedgerID"
         """), {'site_ids': site_ids}).fetchall()
 
-        # Median site rent by unit_type (for variance_vs_site benchmark)
+        # Site medians by (site_id, unit_type) — rent and $/sqft
         site_type_rents: dict[tuple[int, str], list[float]] = {}
+        site_type_psfs: dict[tuple[int, str], list[float]] = {}
         for r in rows:
             cr = float(r.current_rent) if r.current_rent else 0
+            sq = float(r.sqft) if r.sqft else None
+            key = (r.SiteID, r.unit_type or 'Unknown')
             if cr:
-                site_type_rents.setdefault(
-                    (r.SiteID, r.unit_type or 'Unknown'), []
-                ).append(cr)
+                site_type_rents.setdefault(key, []).append(cr)
+                if sq and sq > 0:
+                    site_type_psfs.setdefault(key, []).append(cr / sq)
 
-        def median(values):
-            if not values:
-                return None
-            s = sorted(values)
-            n = len(s)
-            if n % 2 == 0:
-                return (s[n // 2 - 1] + s[n // 2]) / 2
-            return s[n // 2]
+        site_medians = {k: _median(v) for k, v in site_type_rents.items()}
+        site_psf_medians = {k: _median(v) for k, v in site_type_psfs.items()}
 
-        medians = {k: median(v) for k, v in site_type_rents.items()}
+        # Country / Top-N benchmarks per (size_range, climate_code)
+        country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
 
         segments: dict[str, list[dict]] = {
             'recent_movein': [],
@@ -888,18 +905,28 @@ def api_advance_eligible():
             std = float(r.std_rate) if r.std_rate else None
             unit_type = r.unit_type or 'Unknown'
             moved_in = r.dMovedIn
+            sqft = float(r.sqft) if r.sqft else None
+            sz = r.size_range
+            cc = r.climate_code
+            current_psf = round(cr / sqft, 3) if sqft and sqft > 0 and cr else None
 
-            ipm = medians.get((r.SiteID, unit_type))
-            var_site = None
-            if ipm and cr and ipm > 0:
-                var_site = round((cr - ipm) / ipm * 100, 1)
+            ipm = site_medians.get((r.SiteID, unit_type))
+            ipm_psf = site_psf_medians.get((r.SiteID, unit_type))
 
             market_rate = None
-            var_market = None
+            market_psf = None
             if std and std > 0:
                 market_rate = round(std * (1 - discount_ref_pct / 100), 2)
-                if cr and market_rate > 0:
-                    var_market = round((cr - market_rate) / market_rate * 100, 1)
+                if sqft and sqft > 0:
+                    market_psf = round(market_rate / sqft, 3)
+
+            bench = country_benchmarks.get((sz, cc)) if sz and cc else None
+            country_rent_med = bench['country_rent_med'] if bench else None
+            country_psf_med  = bench['country_psf_med']  if bench else None
+            top1_rent = bench['top1_rent'] if bench else None
+            top3_rent = bench['top3_rent'] if bench else None
+            top1_psf  = bench['top1_psf']  if bench else None
+            top3_psf  = bench['top3_psf']  if bench else None
 
             tenure_months = None
             if moved_in:
@@ -918,10 +945,35 @@ def api_advance_eligible():
                 'moved_in_date': moved_in.isoformat() if moved_in else None,
                 'last_increase_date': r.dRentLastChanged.isoformat() if r.dRentLastChanged else None,
                 'tenure_months': tenure_months,
+                # Identity / shape for cross-site benchmarks
+                'size_range': sz,
+                'climate_code': cc,
+                'sqft': sqft,
+                'current_psf': current_psf,
+                # In-place benchmark (rent + $/sqft)
                 'in_place_median_site': round(ipm, 2) if ipm else None,
+                'in_place_psf_site':    round(ipm_psf, 3) if ipm_psf else None,
+                'variance_vs_site':     _variance_pct(cr, ipm),
+                'variance_psf_vs_site': _variance_pct(current_psf, ipm_psf),
+                # Market benchmark (rent + $/sqft)
                 'market_rate': market_rate,
-                'variance_vs_site': var_site,
-                'variance_vs_market': var_market,
+                'market_psf':  market_psf,
+                'variance_vs_market':     _variance_pct(cr, market_rate),
+                'variance_psf_vs_market': _variance_pct(current_psf, market_psf),
+                # Country / Top-N benchmarks
+                'country_rent_med': round(country_rent_med, 2) if country_rent_med else None,
+                'country_psf_med':  round(country_psf_med, 3) if country_psf_med else None,
+                'top3_rent': round(top3_rent, 2) if top3_rent else None,
+                'top1_rent': round(top1_rent, 2) if top1_rent else None,
+                'top3_psf':  round(top3_psf, 3)  if top3_psf  else None,
+                'top1_psf':  round(top1_psf, 3)  if top1_psf  else None,
+                'variance_vs_country':     _variance_pct(cr, country_rent_med),
+                'variance_psf_vs_country': _variance_pct(current_psf, country_psf_med),
+                'variance_vs_top3':        _variance_pct(cr, top3_rent),
+                'variance_psf_vs_top3':    _variance_pct(current_psf, top3_psf),
+                'variance_vs_top1':        _variance_pct(cr, top1_rent),
+                'variance_psf_vs_top1':    _variance_pct(current_psf, top1_psf),
+                # Pre-Load specific
                 'paid_thru': r.paid_thru.isoformat() if r.paid_thru else None,
                 'projected_paid_thru': r.projected_paid_thru.isoformat() if r.projected_paid_thru else None,
                 'discount_expires': r.discount_expires.isoformat() if r.discount_expires else None,

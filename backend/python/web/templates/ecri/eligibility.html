@@ -81,6 +81,22 @@
     </div>
 </div>
 
+<!-- Shared variance filter panel (applies to whichever mode is active) -->
+<div id="filter-panel-card" class="card" style="display:none;">
+    <div id="filter-panel" style="background:#F7F7F8; border:1px solid var(--esa-gray-dark); border-radius:4px; padding:0.75rem 1rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+            <strong style="font-size:0.9rem;">Variance Filters</strong>
+            <span id="filter-result-count" style="color:#666; font-size:0.85rem;"></span>
+        </div>
+        <div id="filter-rows"></div>
+        <div style="margin-top:0.5rem;">
+            <button type="button" class="btn btn-sm btn-secondary" onclick="addFilterRow()">+ Add condition</button>
+            <button type="button" class="btn btn-sm" onclick="applyFilters()">Apply</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="clearFilters()">Clear</button>
+        </div>
+    </div>
+</div>
+
 <!-- Results: Standard (flat list) -->
 <div id="standard-results" style="display:none;">
     <div class="card">
@@ -90,19 +106,6 @@
         <div style="margin-bottom:0.75rem;">
             <button type="button" class="btn btn-secondary btn-sm" onclick="selectAllEligible()">Select All</button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="selectNoneEligible()">Select None</button>
-        </div>
-        <!-- Variance filter -->
-        <div id="filter-panel" style="background:#F7F7F8; border:1px solid var(--esa-gray-dark); border-radius:4px; padding:0.75rem 1rem; margin-bottom:0.75rem;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
-                <strong style="font-size:0.9rem;">Variance Filters</strong>
-                <span id="filter-result-count" style="color:#666; font-size:0.85rem;"></span>
-            </div>
-            <div id="filter-rows"></div>
-            <div style="margin-top:0.5rem;">
-                <button type="button" class="btn btn-sm btn-secondary" onclick="addFilterRow()">+ Add condition</button>
-                <button type="button" class="btn btn-sm" onclick="applyFilters()">Apply</button>
-                <button type="button" class="btn btn-sm btn-secondary" onclick="clearFilters()">Clear</button>
-            </div>
         </div>
         <div style="max-height:600px; overflow-y:auto;">
             <table>
@@ -141,13 +144,19 @@
             Move-in tenure &lt; 12 months with move-in discount expiring in next 90 days.
             Locks in the post-discount rate before tenant can prepay to dodge it.
         </p>
-        <div style="max-height:360px; overflow:auto;">
+        <div style="max-height:420px; overflow:auto;">
             <table>
                 <thead style="position:sticky; top:0; background:var(--esa-gray); z-index:5;">
                     <tr>
                         <th style="width:40px;"><input type="checkbox" id="selall-movein" onchange="toggleAllSeg('movein', this.checked)"></th>
                         <th>Site</th><th>Unit</th><th>Tenant</th>
-                        <th>Current Rent</th><th>Moved In</th><th>Disc. Expires</th>
+                        <th title="Current rent &amp; $/sqft">Current Rent</th>
+                        <th title="Median rent for same unit type at this site">Site Median</th>
+                        <th title="Std rate × (1 − discount reference)">Market Rate</th>
+                        <th title="Median rent across all sites in country for same size &amp; climate">Country Med</th>
+                        <th title="Average of the 3 highest-rent sites in country for same size &amp; climate">Top-3</th>
+                        <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
+                        <th>Moved In</th><th>Disc. Expires</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
                     </tr>
                 </thead>
@@ -173,7 +182,13 @@
                     <tr>
                         <th style="width:40px;"><input type="checkbox" id="selall-prepayer" onchange="toggleAllSeg('prepayer', this.checked)"></th>
                         <th>Site</th><th>Unit</th><th>Tenant</th>
-                        <th>Current Rent</th><th>Moved In</th>
+                        <th title="Current rent &amp; $/sqft">Current Rent</th>
+                        <th title="Median rent for same unit type at this site">Site Median</th>
+                        <th title="Std rate × (1 − discount reference)">Market Rate</th>
+                        <th title="Median rent across all sites in country for same size &amp; climate">Country Med</th>
+                        <th title="Average of the 3 highest-rent sites in country for same size &amp; climate">Top-3</th>
+                        <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
+                        <th>Moved In</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
                     </tr>
                 </thead>
@@ -352,8 +367,13 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
     }
     function clearFilters() {
         document.getElementById('filter-rows').innerHTML = '';
-        renderEligibleTable(eligibleData);
         document.getElementById('filter-result-count').textContent = '';
+        if (mode === 'standard') {
+            renderEligibleTable(eligibleData);
+        } else {
+            renderSegment('movein', 'recent_movein', advData.recent_movein);
+            renderSegment('prepayer', 'heavy_prepayer', advData.heavy_prepayer);
+        }
     }
     function evalCondition(t, field, op, value) {
         const v = t[field];
@@ -370,17 +390,9 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         }
         return true;
     }
-    function applyFilters() {
-        const rows = Array.from(document.querySelectorAll('#filter-rows .filter-row'));
-        if (rows.length === 0) { renderEligibleTable(eligibleData); return; }
-        const conds = rows.map((el, i) => ({
-            field: el.querySelector('.filter-field').value,
-            op:    el.querySelector('.filter-op').value,
-            value: el.querySelector('.filter-value').value,
-            comb:  i === 0 ? null : (el.querySelector('.filter-combinator')?.value || 'AND'),
-        }));
-        // Left-to-right evaluation respecting per-row combinator
-        const filtered = eligibleData.filter(t => {
+    function filterRows(data, conds) {
+        if (!conds.length) return data;
+        return data.filter(t => {
             let acc = evalCondition(t, conds[0].field, conds[0].op, conds[0].value);
             for (let i = 1; i < conds.length; i++) {
                 const cur = evalCondition(t, conds[i].field, conds[i].op, conds[i].value);
@@ -388,9 +400,40 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             }
             return acc;
         });
-        renderEligibleTable(filtered);
-        document.getElementById('filter-result-count').textContent =
-            `${filtered.length} of ${eligibleData.length} shown`;
+    }
+
+    function applyFilters() {
+        const rows = Array.from(document.querySelectorAll('#filter-rows .filter-row'));
+        const countEl = document.getElementById('filter-result-count');
+        if (rows.length === 0) {
+            countEl.textContent = '';
+            if (mode === 'standard') {
+                renderEligibleTable(eligibleData);
+            } else {
+                renderSegment('movein', 'recent_movein', advData.recent_movein);
+                renderSegment('prepayer', 'heavy_prepayer', advData.heavy_prepayer);
+            }
+            return;
+        }
+        const conds = rows.map((el, i) => ({
+            field: el.querySelector('.filter-field').value,
+            op:    el.querySelector('.filter-op').value,
+            value: el.querySelector('.filter-value').value,
+            comb:  i === 0 ? null : (el.querySelector('.filter-combinator')?.value || 'AND'),
+        }));
+        if (mode === 'standard') {
+            const filtered = filterRows(eligibleData, conds);
+            renderEligibleTable(filtered);
+            countEl.textContent = `${filtered.length} of ${eligibleData.length} shown`;
+        } else {
+            const mv = filterRows(advData.recent_movein, conds);
+            const hp = filterRows(advData.heavy_prepayer, conds);
+            renderSegment('movein', 'recent_movein', mv);
+            renderSegment('prepayer', 'heavy_prepayer', hp);
+            countEl.textContent =
+                `Move-ins ${mv.length}/${advData.recent_movein.length} · ` +
+                `Prepayers ${hp.length}/${advData.heavy_prepayer.length}`;
+        }
     }
 
     // -------- Mode switch --------
@@ -403,6 +446,9 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         document.getElementById('segment-summary-section').style.display = 'none';
         document.getElementById('standard-results').style.display = 'none';
         document.getElementById('advance-results').style.display = 'none';
+        document.getElementById('filter-panel-card').style.display = 'none';
+        document.getElementById('filter-rows').innerHTML = '';
+        document.getElementById('filter-result-count').textContent = '';
         const cs = document.getElementById('create-section');
         if (cs) cs.style.display = 'none';
     }
@@ -434,6 +480,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             eligibleData = data.eligible;
             renderExclusionSummary(data.exclusion_summary);
             renderEligibleTable(data.eligible);
+            document.getElementById('filter-panel-card').style.display = 'block';
             const cs = document.getElementById('create-section');
             if (cs) { cs.style.display = 'block'; loadDraftBatches(); }
         } catch (e) {
@@ -457,6 +504,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             renderAdvance();
             document.getElementById('segment-summary-section').style.display = 'block';
             document.getElementById('advance-results').style.display = 'block';
+            document.getElementById('filter-panel-card').style.display = 'block';
             const cs = document.getElementById('create-section');
             if (cs) { cs.style.display = 'block'; loadDraftBatches(); }
         } catch (e) {
@@ -551,7 +599,12 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${t.site_id}</td>
                 <td>${t.unit_name || '-'}</td>
                 <td>${t.tenant_name || '-'}</td>
-                <td>${formatCurrency(t.current_rent)}</td>
+                <td>${benchCell(t.current_rent, null, t.current_psf, null)}</td>
+                <td>${benchCell(t.in_place_median_site, t.variance_vs_site, t.in_place_psf_site, t.variance_psf_vs_site)}</td>
+                <td>${benchCell(t.market_rate, t.variance_vs_market, t.market_psf, t.variance_psf_vs_market)}</td>
+                <td>${benchCell(t.country_rent_med, t.variance_vs_country, t.country_psf_med, t.variance_psf_vs_country)}</td>
+                <td>${benchCell(t.top3_rent, t.variance_vs_top3, t.top3_psf, t.variance_psf_vs_top3)}</td>
+                <td>${benchCell(t.top1_rent, t.variance_vs_top1, t.top1_psf, t.variance_psf_vs_top1)}</td>
                 <td>${fmtDate(t.moved_in_date)}</td>
                 ${discCell}
                 <td>${fmtDate(t.paid_thru)}</td>
