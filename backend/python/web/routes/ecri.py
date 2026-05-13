@@ -186,7 +186,9 @@ def _country_size_climate_benchmarks(session, site_ids):
     Picks the most-represented Country across the requested sites, then computes
     country median rent + $/sqft and Top-1 / Top-3 site medians (rent + $/sqft)
     for each (size_range, climate_code) cell using vw_ecri_eligible_ledgers joined
-    to units_info_enriched. Returns {} if no country can be resolved.
+    to units_info_enriched.
+
+    Returns (country_name_or_None, {(sz, cc): {...}}).
     """
     country_row = session.execute(text("""
         SELECT "Country", COUNT(*) AS n
@@ -198,7 +200,7 @@ def _country_size_climate_benchmarks(session, site_ids):
     """), {'site_ids': site_ids}).fetchone()
     country = country_row[0] if country_row else None
     if not country:
-        return {}
+        return None, {}
 
     bench_sql = text("""
         WITH base AS (
@@ -251,7 +253,7 @@ def _country_size_climate_benchmarks(session, site_ids):
             'top3_psf':         float(br[7]) if br[7] is not None else None,
             'n_sites':          int(br[8]) if br[8] is not None else 0,
         }
-    return out
+    return country, out
 
 
 @ecri_bp.route('/api/eligible-tenants')
@@ -356,7 +358,7 @@ def api_eligible_tenants():
         site_type_medians = {k: _median(v) for k, v in site_type_rents.items()}
         site_type_psf_medians = {k: _median(v) for k, v in site_type_psfs.items()}
 
-        country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
+        country, country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
         variance_pct = _variance_pct
 
         # Build final list
@@ -893,7 +895,7 @@ def api_advance_eligible():
         site_psf_medians = {k: _median(v) for k, v in site_type_psfs.items()}
 
         # Country / Top-N benchmarks per (size_range, climate_code)
-        country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
+        _, country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
 
         segments: dict[str, list[dict]] = {
             'recent_movein': [],
