@@ -411,7 +411,9 @@ def api_eligible_tenants():
             # Closest effective date (next LAD honoring paid_thru lock)
             anniv = r.get('dAnniv')
             pt = r.get('paid_thru')
-            next_eff_date, _, eff_bucket = compute_effective_date(anniv, pt, today)
+            anniv_d = anniv.date() if hasattr(anniv, 'date') else anniv
+            pt_d = pt.date() if hasattr(pt, 'date') else pt
+            next_eff_date, _, eff_bucket = compute_effective_date(anniv_d, pt_d, today)
 
             eligible.append({
                 'site_id': site_id,
@@ -947,8 +949,10 @@ def api_advance_eligible():
 
             # Closest effective date for Pre-Load: must land after
             # projected_paid_thru + prepay buffer (default 7 days)
+            anniv_d = r.dAnniv.date() if hasattr(r.dAnniv, 'date') else r.dAnniv
+            ppt_d = r.projected_paid_thru.date() if hasattr(r.projected_paid_thru, 'date') else r.projected_paid_thru
             next_eff_date, _, eff_bucket = compute_advance_effective_date(
-                r.dAnniv, r.projected_paid_thru, today,
+                anniv_d, ppt_d, today,
             )
 
             entry = {
