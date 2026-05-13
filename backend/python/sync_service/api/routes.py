@@ -319,63 +319,79 @@ def status_endpoint():
 
 # ----- Dashboard helpers -----
 
+def _query_destination_freshness(db_name: str, table: str, col: str, ttl_seconds: int, now):
+    """Run MAX(date_column) against (db_name.table) and return a freshness entry."""
+    from sqlalchemy import text as _text
+    from sync_service.config import get_engine
+    from datetime import date as _date, time as _time
+    entry = {'latest_date': None, 'age_seconds': None, 'status': 'unknown'}
+    if not table:
+        return entry
+    try:
+        eng = get_engine(db_name)
+        with eng.connect() as conn:
+            row = conn.execute(_text(
+                f'SELECT MAX("{col}") FROM "{table}"'
+            )).first()
+            latest = row[0] if row else None
+        if latest is not None:
+            if not isinstance(latest, datetime) and isinstance(latest, _date):
+                latest = datetime.combine(latest, _time.min)
+            if latest.tzinfo is None:
+                latest = latest.replace(tzinfo=timezone.utc)
+            age = (now - latest).total_seconds()
+            entry['latest_date'] = latest.isoformat()
+            entry['age_seconds'] = int(age)
+            entry['status'] = 'fresh' if age <= ttl_seconds else 'stale'
+    except Exception as e:
+        logger.warning(f"freshness query failed for {db_name}.{table}: {e}")
+    return entry
+
+
 @sync_service_bp.route('/data-freshness')
 @require_auth
 @require_api_scope('sync:read')
 def data_freshness_endpoint():
-    """Return {pipeline_name: {latest_date, age_seconds, ttl_seconds, status}}."""
-    from sqlalchemy import text as _text
-    from sync_service.config import get_engine
-    from datetime import date as _date, time as _time
+    """Return per-pipeline freshness, with one entry per destination.
 
+    Shape (per pipeline):
+        {
+            display_name, ttl_seconds, schedule_type,
+            frequency_category, resolved_frequency_category,
+            destinations: [
+                {database, table, column, latest_date, age_seconds, status},
+                ...
+            ],
+        }
+    """
     out = {}
     now = datetime.now(timezone.utc)
     with session_scope() as session:
         pipelines = session.query(SyncPipeline).all()
         for p in pipelines:
-            table = (p.freshness_table or '').strip()
-            col = (p.freshness_column or 'updated_at').strip()
-            db_name = p.freshness_database or 'middleware'
-            entry = {
-                'latest_date': None,
-                'age_seconds': None,
-                'ttl_seconds': p.freshness_ttl_seconds,
-                'status': 'unknown',
+            ttl = p.freshness_ttl_seconds
+            destinations = []
+            for d in p.resolved_destinations:
+                db_name = d.get('database') or 'middleware'
+                table = (d.get('table') or '').strip()
+                col = (d.get('column') or 'updated_at').strip()
+                fresh = _query_destination_freshness(db_name, table, col, ttl, now)
+                destinations.append({
+                    'database': db_name,
+                    'table': table,
+                    'column': col,
+                    'destination': f"{db_name}.{table}".rstrip('.'),
+                    **fresh,
+                })
+
+            out[p.pipeline_name] = {
                 'display_name': p.display_name,
-                'destination': f"{p.freshness_database or 'middleware'}.{p.freshness_table or ''}".rstrip('.'),
-                'freshness_database': p.freshness_database,
-                'freshness_table': p.freshness_table,
+                'ttl_seconds': ttl,
+                'schedule_type': p.schedule_type,
                 'frequency_category': p.frequency_category,
                 'resolved_frequency_category': p.resolved_frequency_category,
-                'schedule_type': p.schedule_type,
+                'destinations': destinations,
             }
-
-            if not table:
-                out[p.pipeline_name] = entry
-                continue
-
-            try:
-                eng = get_engine(db_name)
-                with eng.connect() as conn:
-                    row = conn.execute(_text(
-                        f'SELECT MAX("{col}") FROM "{table}"'
-                    )).first()
-                    latest = row[0] if row else None
-
-                if latest is not None:
-                    # Normalize date → datetime (some columns are DATE not TIMESTAMP)
-                    if not isinstance(latest, datetime) and isinstance(latest, _date):
-                        latest = datetime.combine(latest, _time.min)
-                    if latest.tzinfo is None:
-                        latest = latest.replace(tzinfo=timezone.utc)
-                    age = (now - latest).total_seconds()
-                    entry['latest_date'] = latest.isoformat()
-                    entry['age_seconds'] = int(age)
-                    entry['status'] = 'fresh' if age <= p.freshness_ttl_seconds else 'stale'
-            except Exception as e:
-                logger.warning(f"freshness query failed for {p.pipeline_name}: {e}")
-
-            out[p.pipeline_name] = entry
     return jsonify(out)
 
 
@@ -454,6 +470,7 @@ def update_pipeline_endpoint(name):
         'frequency_category',
         'freshness_table', 'freshness_column', 'freshness_database',
         'max_retries', 'retry_delay_seconds', 'timeout_seconds',
+        'destinations',
     }
     unknown = set(payload.keys()) - allowed
     if unknown:
@@ -508,6 +525,32 @@ def update_pipeline_endpoint(name):
             v = payload[f]
             if not isinstance(v, int) or isinstance(v, bool) or v < lo or v > hi:
                 return jsonify({'error': f'{f} must be an integer in [{lo}, {hi}]'}), 400
+
+    # destinations: list of {database, table, column}. '' or [] or None → NULL (use legacy fields)
+    if 'destinations' in payload:
+        dests = payload['destinations']
+        if dests in (None, '', []):
+            payload['destinations'] = None
+        else:
+            if not isinstance(dests, list):
+                return jsonify({'error': 'destinations must be an array'}), 400
+            if len(dests) > 8:
+                return jsonify({'error': 'destinations supports at most 8 entries'}), 400
+            cleaned = []
+            for i, d in enumerate(dests):
+                if not isinstance(d, dict):
+                    return jsonify({'error': f'destinations[{i}] must be an object'}), 400
+                db = d.get('database')
+                tbl = d.get('table')
+                col = d.get('column') or 'updated_at'
+                if db not in ('middleware', 'pbi', 'backend'):
+                    return jsonify({'error': f'destinations[{i}].database must be middleware|pbi|backend'}), 400
+                if not isinstance(tbl, str) or not _IDENT.match(tbl) or len(tbl) > 100:
+                    return jsonify({'error': f'destinations[{i}].table must be a valid SQL identifier (≤100)'}), 400
+                if not isinstance(col, str) or not _IDENT.match(col) or len(col) > 100:
+                    return jsonify({'error': f'destinations[{i}].column must be a valid SQL identifier (≤100)'}), 400
+                cleaned.append({'database': db, 'table': tbl, 'column': col})
+            payload['destinations'] = cleaned
 
     with session_scope() as session:
         row = session.query(SyncPipeline).filter_by(pipeline_name=name).first()

@@ -49,6 +49,11 @@ class SyncPipeline(Base):
     # See sync_service.cadence.derive_frequency_category.
     frequency_category = Column(String(10))
 
+    # Multi-destination write targets. NULL = derive from freshness_* fields.
+    # Each entry: {"database": "middleware|pbi|backend", "table": "...", "column": "..."}.
+    # Observability-only — pipeline code still writes wherever it was hardcoded.
+    destinations = Column(JSONB)
+
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), nullable=False,
@@ -61,6 +66,20 @@ class SyncPipeline(Base):
             return self.frequency_category
         from sync_service.cadence import derive_frequency_category
         return derive_frequency_category(self.schedule_config)
+
+    @property
+    def resolved_destinations(self) -> list:
+        """Return destinations list, falling back to a 1-item list synthesised
+        from the legacy freshness_* fields if `destinations` is NULL/empty."""
+        if self.destinations:
+            return self.destinations
+        if self.freshness_table:
+            return [{
+                'database': self.freshness_database or 'middleware',
+                'table': self.freshness_table,
+                'column': self.freshness_column or 'updated_at',
+            }]
+        return []
 
     def to_dict(self) -> dict:
         return {
@@ -89,6 +108,8 @@ class SyncPipeline(Base):
             'default_args': self.default_args or {},
             'frequency_category': self.frequency_category,
             'resolved_frequency_category': self.resolved_frequency_category,
+            'destinations': self.destinations,
+            'resolved_destinations': self.resolved_destinations,
         }
 
 

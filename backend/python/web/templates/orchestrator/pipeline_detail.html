@@ -111,24 +111,13 @@
             </div>
         </div>
 
-        <h4 style="margin-top:1.2rem;margin-bottom:0.5rem;color:#555;font-size:0.95rem;">Destination</h4>
-        <div class="edit-grid">
-            <div>
-                <label>Database</label>
-                <select id="edit-freshness-database">
-                    <option value="middleware">middleware (esa_middleware)</option>
-                    <option value="pbi">pbi (esa_pbi)</option>
-                    <option value="backend">backend (esa_backend)</option>
-                </select>
-            </div>
-            <div>
-                <label>Table</label>
-                <input type="text" id="edit-freshness-table" maxlength="100" placeholder="ccws_units">
-            </div>
-            <div>
-                <label>Date Column</label>
-                <input type="text" id="edit-freshness-column" maxlength="100" placeholder="updated_at">
-            </div>
+        <h4 style="margin-top:1.2rem;margin-bottom:0.5rem;color:#555;font-size:0.95rem;">
+            Destinations
+            <button type="button" onclick="addDestinationRow()" class="btn btn-secondary" style="float:right;padding:2px 10px;font-size:0.8rem;">+ Add destination</button>
+        </h4>
+        <div id="destinations-list" style="display:flex;flex-direction:column;gap:0.5rem;"></div>
+        <div style="font-size:0.75rem;color:#888;margin-top:0.4rem;">
+            One row per write target. First row is the primary (used as freshness fallback if column is empty).
         </div>
 
         <h4 style="margin-top:1.2rem;margin-bottom:0.5rem;color:#555;font-size:0.95rem;">Operational</h4>
@@ -635,6 +624,51 @@ function onScheduleTypeChange() {
     document.getElementById('interval-row').style.display = t === 'interval' ? 'block' : 'none';
 }
 
+const DB_ALIASES = [['middleware','middleware (esa_middleware)'], ['pbi','pbi (esa_pbi)'], ['backend','backend (esa_backend)']];
+
+function destinationRowHtml(d) {
+    const opts = DB_ALIASES.map(([k, label]) =>
+        `<option value="${k}" ${d.database === k ? 'selected' : ''}>${label}</option>`).join('');
+    const esc = s => String(s == null ? '' : s).replace(/"/g, '&quot;');
+    return `
+        <div class="dest-row" style="display:grid;grid-template-columns: 1.2fr 1.4fr 1fr auto;gap:0.5rem;align-items:end;">
+            <div><label style="font-size:0.78rem;">Database</label>
+                <select class="dest-db">${opts}</select></div>
+            <div><label style="font-size:0.78rem;">Table</label>
+                <input type="text" class="dest-table" maxlength="100" value="${esc(d.table)}" placeholder="my_table"></div>
+            <div><label style="font-size:0.78rem;">Date Column</label>
+                <input type="text" class="dest-column" maxlength="100" value="${esc(d.column || 'updated_at')}" placeholder="updated_at"></div>
+            <div><button type="button" onclick="this.closest('.dest-row').remove()" class="btn btn-secondary" style="padding:6px 10px;" title="Remove">×</button></div>
+        </div>
+    `;
+}
+
+function renderDestinationRows(dests) {
+    const root = document.getElementById('destinations-list');
+    if (!dests || dests.length === 0) {
+        root.innerHTML = destinationRowHtml({database: 'middleware', table: '', column: 'updated_at'});
+        return;
+    }
+    root.innerHTML = dests.map(destinationRowHtml).join('');
+}
+
+function addDestinationRow() {
+    const root = document.getElementById('destinations-list');
+    root.insertAdjacentHTML('beforeend', destinationRowHtml({database: 'middleware', table: '', column: 'updated_at'}));
+}
+
+function collectDestinationsFromForm() {
+    const rows = document.querySelectorAll('#destinations-list .dest-row');
+    const out = [];
+    rows.forEach(r => {
+        const db = r.querySelector('.dest-db').value;
+        const tbl = r.querySelector('.dest-table').value.trim();
+        const col = r.querySelector('.dest-column').value.trim() || 'updated_at';
+        if (tbl) out.push({database: db, table: tbl, column: col});
+    });
+    return out;
+}
+
 function applyConfigToEditForm(p) {
     document.getElementById('edit-enabled').checked = !!p.enabled;
     document.getElementById('edit-display-name').value = p.display_name || '';
@@ -642,9 +676,13 @@ function applyConfigToEditForm(p) {
     document.getElementById('edit-frequency-category').value = p.frequency_category || '';
 
     const fr = p.freshness || {};
-    document.getElementById('edit-freshness-database').value = fr.database || 'middleware';
-    document.getElementById('edit-freshness-table').value = fr.table || '';
-    document.getElementById('edit-freshness-column').value = fr.column || '';
+    const resolved = p.resolved_destinations || [];
+    const initialDests = resolved.length > 0 ? resolved : [{
+        database: fr.database || 'middleware',
+        table: fr.table || '',
+        column: fr.column || 'updated_at',
+    }];
+    renderDestinationRows(initialDests);
     document.getElementById('edit-ttl').value = fr.ttl_seconds ?? '';
 
     const ex = p.execution || {};
@@ -659,7 +697,7 @@ function applyConfigToEditForm(p) {
     document.getElementById('edit-default-args').value = JSON.stringify(p.default_args || {}, null, 2);
 
     // Resolved destination + category chip
-    const destStr = `${fr.database || 'middleware'}.${fr.table || '—'}${fr.column ? '.' + fr.column : ''}`;
+    const destStr = initialDests.map(d => `${d.database}.${d.table || '—'}`).join(' + ') || '—';
     document.getElementById('resolved-destination-text').textContent = destStr;
     const resolved = p.resolved_frequency_category;
     const chip = document.getElementById('resolved-frequency-chip');
@@ -683,14 +721,25 @@ async function saveEdits() {
     status.style.color = '#666';
 
     const stype = document.getElementById('edit-schedule-type').value;
+    const dests = collectDestinationsFromForm();
+    if (dests.length === 0) {
+        status.textContent = 'Add at least one destination (table required).';
+        status.style.color = '#c41230';
+        return;
+    }
+    const primary = dests[0];
     const payload = {
         enabled: document.getElementById('edit-enabled').checked,
         display_name: document.getElementById('edit-display-name').value.trim(),
         description: document.getElementById('edit-description').value.trim(),
         frequency_category: document.getElementById('edit-frequency-category').value,
-        freshness_database: document.getElementById('edit-freshness-database').value,
-        freshness_table: document.getElementById('edit-freshness-table').value.trim() || null,
-        freshness_column: document.getElementById('edit-freshness-column').value.trim() || null,
+        // Primary destination doubles as the legacy single freshness_* (used by
+        // sync_service.freshness for ensure-fresh gating). Extra destinations
+        // live in `destinations` for observability.
+        freshness_database: primary.database,
+        freshness_table: primary.table,
+        freshness_column: primary.column,
+        destinations: dests.length > 1 ? dests : null,
         freshness_ttl_seconds: parseInt(document.getElementById('edit-ttl').value) || 0,
         timeout_seconds: parseInt(document.getElementById('edit-timeout').value) || 600,
         max_retries: parseInt(document.getElementById('edit-max-retries').value) || 0,

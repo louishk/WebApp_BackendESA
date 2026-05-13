@@ -290,15 +290,15 @@ async function updateStatusAndRuns() {
     }
 }
 
-function renderFreshnessCard(p, f) {
+function renderFreshnessCard(p, d) {
     let cls = '';
-    if (f.status === 'stale') cls = 'stale';
-    else if (f.age_seconds && f.age_seconds > 604800) cls = 'old';
-    const dateDisplay = f.latest_date
-        ? new Date(f.latest_date).toLocaleDateString('en-SG', { timeZone: 'Asia/Singapore', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+    if (d.status === 'stale') cls = 'stale';
+    else if (d.age_seconds && d.age_seconds > 604800) cls = 'old';
+    const dateDisplay = d.latest_date
+        ? new Date(d.latest_date).toLocaleDateString('en-SG', { timeZone: 'Asia/Singapore', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
         : '—';
-    const ago = formatAgeSec(f.age_seconds);
-    const dest = f.destination || '—';
+    const ago = formatAgeSec(d.age_seconds);
+    const dest = d.destination || `${d.database || '?'}.${d.table || '?'}`;
     const href = `/orchestrator/pipelines/${encodeURIComponent(p.pipeline_name)}`;
     return `
         <a class="freshness-card ${cls}" href="${href}">
@@ -330,23 +330,30 @@ async function updateFreshness() {
             return;
         }
 
+        // One card per (pipeline, destination). Pipelines with multi-destinations
+        // (e.g. ccws_units → middleware + pbi) render twice.
         const buckets = {high: [], med: [], low: [], on_demand: []};
         for (const p of pipes) {
             const f = freshRes[p.pipeline_name] || {};
             const cat = f.resolved_frequency_category || 'on_demand';
-            (buckets[cat] || buckets.on_demand).push({p, f});
+            const dests = (f.destinations && f.destinations.length > 0)
+                ? f.destinations
+                : [{database: '?', table: '?', column: null, status: 'unknown', latest_date: null, age_seconds: null}];
+            for (const d of dests) {
+                (buckets[cat] || buckets.on_demand).push({p, d});
+            }
         }
 
         const sectionsHtml = FRESH_BUCKETS.filter(b => buckets[b.key].length > 0).map(b => {
             // Sort by age_seconds desc (most stale first), nulls last
             buckets[b.key].sort((a, x) => {
-                const av = a.f.age_seconds, xv = x.f.age_seconds;
+                const av = a.d.age_seconds, xv = x.d.age_seconds;
                 if (av == null && xv == null) return 0;
                 if (av == null) return 1;
                 if (xv == null) return -1;
                 return xv - av;
             });
-            const cards = buckets[b.key].map(({p, f}) => renderFreshnessCard(p, f)).join('');
+            const cards = buckets[b.key].map(({p, d}) => renderFreshnessCard(p, d)).join('');
             return `
                 <div class="fresh-section">
                     <div class="fresh-section-head">
