@@ -270,6 +270,27 @@ _COUNTRY_NAME_TO_CC = {
 }
 
 
+def _ledger_bump_counts(session, site_ids):
+    """Return {(site_id, ledger_id): rent_bump_count} computed from rentroll
+    snapshots. A "bump" is a snapshot where dcRent strictly increased vs the
+    previous snapshot for the same (site_id, ledger_id). Decreases are ignored.
+    """
+    rows = session.execute(text("""
+        WITH per_ledger AS (
+            SELECT "SiteID", "LedgerID", extract_date, "dcRent",
+                   LAG("dcRent") OVER (PARTITION BY "SiteID", "LedgerID" ORDER BY extract_date) AS prev_rent
+            FROM rentroll
+            WHERE "SiteID" = ANY(:site_ids)
+              AND "bRented" AND "LedgerID" IS NOT NULL AND "dcRent" > 0
+        )
+        SELECT "SiteID", "LedgerID",
+               COUNT(*) FILTER (WHERE prev_rent IS NOT NULL AND "dcRent" > prev_rent) AS bumps
+        FROM per_ledger
+        GROUP BY "SiteID", "LedgerID"
+    """), {'site_ids': site_ids}).fetchall()
+    return {(r[0], r[1]): int(r[2]) for r in rows}
+
+
 def _site_country_lookup(session, site_ids):
     """Return {site_id: (country_name, country_code_or_None)} for the requested sites."""
     out = {}
@@ -484,6 +505,7 @@ def api_eligible_tenants():
         variance_pct = _variance_pct
         unit_risk_resolve = _ecri_unit_risk_resolver(session, site_ids)
         site_country_map = _site_country_lookup(session, site_ids)
+        bump_counts = _ledger_bump_counts(session, site_ids)
 
         # Build final list
         for row in rows:
@@ -598,6 +620,8 @@ def api_eligible_tenants():
                 'unit_risk_band':       risk.get('unit_risk_band'),
                 'unit_risk_band_color': risk.get('unit_risk_band_color'),
                 'unit_risk_delta_pct':  risk.get('unit_risk_delta_pct'),
+                # Rent-bump history (count of strict increases in rentroll snapshots)
+                'bump_count':           bump_counts.get((site_id, r['LedgerID']), 0),
             })
 
         # Exclusion summary (run a separate query for counts).
@@ -1064,6 +1088,7 @@ def api_advance_eligible():
         _, country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
         unit_risk_resolve = _ecri_unit_risk_resolver(session, site_ids)
         site_country_map = _site_country_lookup(session, site_ids)
+        bump_counts = _ledger_bump_counts(session, site_ids)
 
         segments: dict[str, list[dict]] = {
             'recent_movein': [],
@@ -1179,6 +1204,8 @@ def api_advance_eligible():
                 'unit_risk_band':       risk.get('unit_risk_band'),
                 'unit_risk_band_color': risk.get('unit_risk_band_color'),
                 'unit_risk_delta_pct':  risk.get('unit_risk_delta_pct'),
+                # Rent-bump history (count of strict increases in rentroll snapshots)
+                'bump_count':           bump_counts.get((r.SiteID, r.LedgerID), 0),
             }
             segments[r.segment].append(entry)
 

@@ -124,6 +124,7 @@
                         <th title="Highest-rent site in country for same size & climate">Top-1</th>
                         <th title="Closest LAD a rate change can land on (green=this cycle, amber=locked but unlocks before LAD, red=missed this cycle)">Next Effective</th>
                         <th title="Proposed increase % computed from /ecri/pricing weights. Hover to see which factors fired.">Proposed %</th>
+                        <th title="Number of prior rent bumps observed in rentroll snapshots (covers ~3 years of history)">Bumps</th>
                     </tr>
                 </thead>
                 <tbody id="eligible-tbody"></tbody>
@@ -160,6 +161,7 @@
                         <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
                         <th title="Closest LAD a rate change can land on, after projected paid_thru + buffer">Next Effective</th>
                         <th title="Proposed increase % computed from /ecri/pricing weights. Hover to see which factors fired.">Proposed %</th>
+                        <th title="Number of prior rent bumps observed in rentroll snapshots (covers ~3 years of history)">Bumps</th>
                         <th title="Composite unit-category risk factor (≈1.0 = average; lower = greener; based on country baseline + size/range/type/climate/shape/pillar factors)">Unit Risk</th>
                         <th>Moved In</th><th>Disc. Expires</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
@@ -195,6 +197,7 @@
                         <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
                         <th title="Closest LAD a rate change can land on, after projected paid_thru + buffer">Next Effective</th>
                         <th title="Proposed increase % computed from /ecri/pricing weights. Hover to see which factors fired.">Proposed %</th>
+                        <th title="Number of prior rent bumps observed in rentroll snapshots (covers ~3 years of history)">Bumps</th>
                         <th title="Composite unit-category risk factor (≈1.0 = average; lower = greener; based on country baseline + size/range/type/climate/shape/pillar factors)">Unit Risk</th>
                         <th>Moved In</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
@@ -398,6 +401,13 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         const fired = (t.proposed_fired || []).join(', ') || '(none)';
         return `<span title="Fired: ${fired}" style="font-weight:600;">${t.proposed_pct}%</span>`;
     }
+    function bumpCell(t) {
+        const n = t.bump_count;
+        if (n == null) return '<span style="color:#999;">—</span>';
+        if (n === 0)  return '<span style="color:#888;">0</span>';
+        const bg = n >= 3 ? '#C41230' : (n >= 2 ? '#E0A800' : '#666');
+        return `<span style="display:inline-block; padding:1px 6px; background:${bg}; color:#fff; border-radius:3px; font-size:0.75rem; font-weight:600;" title="${n} prior rent bump${n>1?'s':''} in rentroll history">${n}</span>`;
+    }
 
     async function ensurePricingConfig() {
         if (PRICING_CONFIG) return PRICING_CONFIG;
@@ -427,6 +437,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         {k: 'unit_risk_factor',         l: 'Unit Risk Factor'},
         {k: 'unit_risk_delta_pct',      l: 'Unit Risk Δ (%)'},
         {k: 'proposed_pct',             l: 'Proposed %'},
+        {k: 'bump_count',               l: 'Prior Bumps'},
         {k: 'next_effective_date',      l: 'Next Effective',     t: 'date'},
         {k: 'paid_thru',                l: 'Paid Thru',          t: 'date'},
         {k: 'projected_paid_thru',      l: 'Projected PT',       t: 'date'},
@@ -675,7 +686,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         const tbody = document.getElementById('eligible-tbody');
         document.getElementById('eligible-count').textContent = tenants.length;
         if (tenants.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="15" style="text-align:center; color:#666;">No eligible tenants found for selected criteria.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="16" style="text-align:center; color:#666;">No eligible tenants found for selected criteria.</td></tr>';
             document.getElementById('standard-results').style.display = 'block';
             return;
         }
@@ -698,6 +709,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${benchCell(t.top1_rent, t.variance_vs_top1, t.top1_psf, t.variance_psf_vs_top1)}</td>
                 <td>${effDateCell(t)}</td>
                 <td>${proposedCell(t)}</td>
+                <td>${bumpCell(t)}</td>
             </tr>
         `;
         }).join('');
@@ -753,6 +765,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${benchCell(t.top1_rent, t.variance_vs_top1, t.top1_psf, t.variance_psf_vs_top1)}</td>
                 <td>${effDateCell(t)}</td>
                 <td>${proposedCell(t)}</td>
+                <td>${bumpCell(t)}</td>
                 <td>${riskCell(t)}</td>
                 <td>${fmtDate(t.moved_in_date)}</td>
                 ${discCell}
