@@ -328,9 +328,22 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         {k: 'current_rent',             l: 'Current Rent ($)'},
         {k: 'current_psf',              l: 'Current $/sqft'},
         {k: 'tenure_months',            l: 'Tenure (mo)'},
+        {k: 'next_effective_date',      l: 'Next Effective',     t: 'date'},
+        {k: 'paid_thru',                l: 'Paid Thru',          t: 'date'},
+        {k: 'projected_paid_thru',      l: 'Projected PT',       t: 'date'},
+        {k: 'moved_in_date',            l: 'Moved In',           t: 'date'},
+        {k: 'discount_expires',         l: 'Discount Expires',   t: 'date'},
     ];
     const FILTER_OPS = ['<', '<=', '>', '>=', '=', '!='];
+    const FIELD_TYPE = Object.fromEntries(FILTER_FIELDS.map(f => [f.k, f.t || 'number']));
 
+    function filterValueInputHtml(fieldKey, currentVal) {
+        const isDate = FIELD_TYPE[fieldKey] === 'date';
+        const val = currentVal != null ? `value="${currentVal}"` : '';
+        return isDate
+            ? `<input type="date" class="filter-value" style="width:150px; padding:0.3rem;" ${val}>`
+            : `<input type="number" class="filter-value" step="0.1" placeholder="value" style="width:100px; padding:0.3rem;" ${val}>`;
+    }
     function filterRowHtml(idx, isFirst) {
         const fieldOpts = FILTER_FIELDS.map(f => `<option value="${f.k}">${f.l}</option>`).join('');
         const opOpts = FILTER_OPS.map(op => `<option value="${op}">${op}</option>`).join('');
@@ -339,13 +352,24 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             : `<select class="filter-combinator" style="width:60px; padding:0.3rem;">
                    <option value="AND">AND</option><option value="OR">OR</option>
                </select>`;
+        // Default value-input type matches the first field in FILTER_FIELDS
+        const defaultField = FILTER_FIELDS[0].k;
         return `<div class="filter-row" data-idx="${idx}" style="display:flex; gap:0.5rem; margin-bottom:0.4rem; align-items:center;">
             ${combinator}
-            <select class="filter-field" style="padding:0.3rem;">${fieldOpts}</select>
+            <select class="filter-field" style="padding:0.3rem;" onchange="onFilterFieldChange(this)">${fieldOpts}</select>
             <select class="filter-op" style="width:70px; padding:0.3rem;">${opOpts}</select>
-            <input type="number" class="filter-value" step="0.1" placeholder="value" style="width:100px; padding:0.3rem;">
+            ${filterValueInputHtml(defaultField, null)}
             <button type="button" class="btn btn-sm btn-secondary" onclick="removeFilterRow(${idx})">×</button>
         </div>`;
+    }
+    function onFilterFieldChange(selectEl) {
+        const row = selectEl.closest('.filter-row');
+        const oldInput = row.querySelector('.filter-value');
+        const wantsDate = FIELD_TYPE[selectEl.value] === 'date';
+        const isDate = oldInput.type === 'date';
+        if (wantsDate === isDate) return;
+        // Swap input element preserving any existing value (best-effort)
+        oldInput.outerHTML = filterValueInputHtml(selectEl.value, null);
     }
     function addFilterRow() {
         const container = document.getElementById('filter-rows');
@@ -369,7 +393,8 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             const row = container.lastElementChild;
             row.querySelector('.filter-field').value = r.field;
             row.querySelector('.filter-op').value = r.op;
-            row.querySelector('.filter-value').value = r.value;
+            // Re-create the value input matching the (possibly non-default) field type
+            row.querySelector('.filter-value').outerHTML = filterValueInputHtml(r.field, r.value || null);
             const cb = row.querySelector('.filter-combinator');
             if (cb) cb.value = r.comb;
         });
@@ -386,16 +411,24 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
     }
     function evalCondition(t, field, op, value) {
         const v = t[field];
-        if (v === null || v === undefined) return false;
-        const n = Number(value);
-        if (Number.isNaN(n)) return true;
+        if (v === null || v === undefined || value === '' || value == null) return false;
+        let lhs, rhs;
+        if (FIELD_TYPE[field] === 'date') {
+            // Compare ISO date prefix (YYYY-MM-DD) lexicographically
+            lhs = String(v).substring(0, 10);
+            rhs = String(value).substring(0, 10);
+        } else {
+            lhs = v;
+            rhs = Number(value);
+            if (Number.isNaN(rhs)) return true;
+        }
         switch (op) {
-            case '<':  return v <  n;
-            case '<=': return v <= n;
-            case '>':  return v >  n;
-            case '>=': return v >= n;
-            case '=':  return v === n;
-            case '!=': return v !== n;
+            case '<':  return lhs <  rhs;
+            case '<=': return lhs <= rhs;
+            case '>':  return lhs >  rhs;
+            case '>=': return lhs >= rhs;
+            case '=':  return lhs === rhs;
+            case '!=': return lhs !== rhs;
         }
         return true;
     }
