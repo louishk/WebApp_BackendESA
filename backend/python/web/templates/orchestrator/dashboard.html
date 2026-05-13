@@ -71,7 +71,7 @@
 
 <div class="card">
     <h2>Data Freshness</h2>
-    <div class="freshness-grid" id="freshness-grid">
+    <div id="freshness-sections">
         <div style="text-align:center;color:#666;">Loading...</div>
     </div>
 </div>
@@ -125,13 +125,21 @@
 .refresh-notice { font-size: 0.8rem; color: #888; text-align: right; margin-top: 1rem; }
 .execution-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 1200px) { .execution-grid { grid-template-columns: 1fr; } }
-.freshness-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; }
-.freshness-card { background: #f8f9fa; border-radius: 8px; padding: 15px; text-align: center; border-left: 4px solid #28a745; }
+.freshness-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; }
+.freshness-card { display:block; text-decoration:none; color:inherit; background: #f8f9fa; border-radius: 8px; padding: 15px; text-align: center; border-left: 4px solid #28a745; transition: transform 0.15s, box-shadow 0.15s; }
+.freshness-card:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,0.08); }
 .freshness-card.stale { border-left-color: #ffc107; }
 .freshness-card.old { border-left-color: #dc3545; }
 .freshness-card .pipeline { font-weight: 600; color: #1A2E5A; margin-bottom: 8px; font-size: 14px; }
 .freshness-card .date { font-size: 16px; font-weight: 500; }
 .freshness-card .ago { font-size: 12px; color: #666; margin-top: 4px; }
+.freshness-card .dest { font-size: 11px; color: #888; margin-top: 6px; font-family: monospace; word-break: break-all; }
+.fresh-section { margin-bottom: 1.5rem; }
+.fresh-section:last-child { margin-bottom: 0; }
+.fresh-section-head { display:flex; align-items:baseline; gap:0.6rem; margin-bottom: 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid #e5e9f0; }
+.fresh-section-title { font-weight: 600; color: #1A2E5A; font-size: 0.95rem; }
+.fresh-section-sub { font-size: 0.75rem; color: #888; }
+.fresh-section-count { margin-left:auto; background:#1A2E5A; color:#fff; padding:1px 8px; border-radius:10px; font-size:0.75rem; }
 .countdown { font-family: monospace; font-weight: 600; }
 .countdown.soon { color: #C41230; }
 .countdown.near { color: #ffc107; }
@@ -282,39 +290,79 @@ async function updateStatusAndRuns() {
     }
 }
 
+function renderFreshnessCard(p, f) {
+    let cls = '';
+    if (f.status === 'stale') cls = 'stale';
+    else if (f.age_seconds && f.age_seconds > 604800) cls = 'old';
+    const dateDisplay = f.latest_date
+        ? new Date(f.latest_date).toLocaleDateString('en-SG', { timeZone: 'Asia/Singapore', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+        : '—';
+    const ago = formatAgeSec(f.age_seconds);
+    const dest = f.destination || '—';
+    const href = `/orchestrator/pipelines/${encodeURIComponent(p.pipeline_name)}`;
+    return `
+        <a class="freshness-card ${cls}" href="${href}">
+            <div class="pipeline">${escHtml(p.display_name || p.pipeline_name)}</div>
+            <div class="date">${dateDisplay}</div>
+            <div class="ago">${ago}</div>
+            <div class="dest">${escHtml(dest)}</div>
+        </a>
+    `;
+}
+
+const FRESH_BUCKETS = [
+    {key: 'high',      label: 'High Frequency',   sub: '≤ 1 hour'},
+    {key: 'med',       label: 'Medium Frequency', sub: '≤ 1 day'},
+    {key: 'low',       label: 'Low Frequency',    sub: 'weekly+'},
+    {key: 'on_demand', label: 'On-Demand',        sub: 'manual trigger only'},
+];
+
 async function updateFreshness() {
     try {
         const [pipesRes, freshRes] = await Promise.all([
             fetch('/api/orchestrator/pipelines').then(r => r.json()),
             fetch('/api/orchestrator/data-freshness').then(r => r.json()),
         ]);
-        const grid = document.getElementById('freshness-grid');
+        const root = document.getElementById('freshness-sections');
         const pipes = pipesRes.pipelines || [];
         if (pipes.length === 0) {
-            grid.innerHTML = '<div style="text-align:center;color:#666;">No pipelines configured</div>';
+            root.innerHTML = '<div style="text-align:center;color:#666;">No pipelines configured</div>';
             return;
         }
-        grid.innerHTML = pipes.map(p => {
-            const f = freshRes[p.pipeline_name] || {};
-            let cls = '';
-            if (f.status === 'stale') cls = 'stale';
-            else if (f.age_seconds && f.age_seconds > 604800) cls = 'old';
 
-            const dateDisplay = f.latest_date
-                ? new Date(f.latest_date).toLocaleDateString('en-SG', { timeZone: 'Asia/Singapore', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-                : '—';
-            const ago = formatAgeSec(f.age_seconds);
+        const buckets = {high: [], med: [], low: [], on_demand: []};
+        for (const p of pipes) {
+            const f = freshRes[p.pipeline_name] || {};
+            const cat = f.resolved_frequency_category || 'on_demand';
+            (buckets[cat] || buckets.on_demand).push({p, f});
+        }
+
+        const sectionsHtml = FRESH_BUCKETS.filter(b => buckets[b.key].length > 0).map(b => {
+            // Sort by age_seconds desc (most stale first), nulls last
+            buckets[b.key].sort((a, x) => {
+                const av = a.f.age_seconds, xv = x.f.age_seconds;
+                if (av == null && xv == null) return 0;
+                if (av == null) return 1;
+                if (xv == null) return -1;
+                return xv - av;
+            });
+            const cards = buckets[b.key].map(({p, f}) => renderFreshnessCard(p, f)).join('');
             return `
-                <div class="freshness-card ${cls}">
-                    <div class="pipeline">${escHtml(p.display_name || p.pipeline_name)}</div>
-                    <div class="date">${dateDisplay}</div>
-                    <div class="ago">${ago}</div>
+                <div class="fresh-section">
+                    <div class="fresh-section-head">
+                        <span class="fresh-section-title">${b.label}</span>
+                        <span class="fresh-section-sub">${b.sub}</span>
+                        <span class="fresh-section-count">${buckets[b.key].length}</span>
+                    </div>
+                    <div class="freshness-grid">${cards}</div>
                 </div>
             `;
         }).join('');
+
+        root.innerHTML = sectionsHtml || '<div style="text-align:center;color:#666;">No pipelines configured</div>';
     } catch (err) {
         console.error('Freshness error:', err);
-        document.getElementById('freshness-grid').innerHTML = '<div style="color:#dc3545;">Error loading data</div>';
+        document.getElementById('freshness-sections').innerHTML = '<div style="color:#dc3545;">Error loading data</div>';
     }
 }
 

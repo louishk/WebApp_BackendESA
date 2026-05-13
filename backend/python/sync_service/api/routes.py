@@ -336,8 +336,19 @@ def data_freshness_endpoint():
             table = (p.freshness_table or '').strip()
             col = (p.freshness_column or 'updated_at').strip()
             db_name = p.freshness_database or 'middleware'
-            entry = {'latest_date': None, 'age_seconds': None,
-                     'ttl_seconds': p.freshness_ttl_seconds, 'status': 'unknown'}
+            entry = {
+                'latest_date': None,
+                'age_seconds': None,
+                'ttl_seconds': p.freshness_ttl_seconds,
+                'status': 'unknown',
+                'display_name': p.display_name,
+                'destination': f"{p.freshness_database or 'middleware'}.{p.freshness_table or ''}".rstrip('.'),
+                'freshness_database': p.freshness_database,
+                'freshness_table': p.freshness_table,
+                'frequency_category': p.frequency_category,
+                'resolved_frequency_category': p.resolved_frequency_category,
+                'schedule_type': p.schedule_type,
+            }
 
             if not table:
                 out[p.pipeline_name] = entry
@@ -440,6 +451,9 @@ def update_pipeline_endpoint(name):
     allowed = {
         'enabled', 'schedule_type', 'schedule_config',
         'default_args', 'freshness_ttl_seconds', 'display_name', 'description',
+        'frequency_category',
+        'freshness_table', 'freshness_column', 'freshness_database',
+        'max_retries', 'retry_delay_seconds', 'timeout_seconds',
     }
     unknown = set(payload.keys()) - allowed
     if unknown:
@@ -460,6 +474,40 @@ def update_pipeline_endpoint(name):
                 return jsonify({'error': f'Invalid cron: {e}'}), 400
     if 'default_args' in payload and not isinstance(payload['default_args'], dict):
         return jsonify({'error': 'default_args must be an object'}), 400
+
+    # frequency_category: '' or 'auto' → NULL (auto-derive from cron)
+    if 'frequency_category' in payload:
+        fc = payload['frequency_category']
+        if fc in (None, '', 'auto'):
+            payload['frequency_category'] = None
+        elif fc not in ('high', 'med', 'low'):
+            return jsonify({'error': 'frequency_category must be one of: high, med, low, auto'}), 400
+
+    if 'freshness_database' in payload and payload['freshness_database'] not in ('middleware', 'pbi', 'backend'):
+        return jsonify({'error': 'freshness_database must be middleware|pbi|backend'}), 400
+
+    import re
+    _IDENT = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+    for ident_field in ('freshness_table', 'freshness_column'):
+        if ident_field in payload:
+            v = payload[ident_field]
+            if v in (None, ''):
+                payload[ident_field] = None
+                continue
+            if not isinstance(v, str) or len(v) > 100 or not _IDENT.match(v):
+                return jsonify({'error': f'{ident_field} must be a valid SQL identifier (≤100 char)'}), 400
+
+    _NUMERIC_BOUNDS = {
+        'freshness_ttl_seconds': (0, 7 * 86400),
+        'timeout_seconds': (1, 86400),
+        'max_retries': (0, 10),
+        'retry_delay_seconds': (0, 3600),
+    }
+    for f, (lo, hi) in _NUMERIC_BOUNDS.items():
+        if f in payload:
+            v = payload[f]
+            if not isinstance(v, int) or isinstance(v, bool) or v < lo or v > hi:
+                return jsonify({'error': f'{f} must be an integer in [{lo}, {hi}]'}), 400
 
     with session_scope() as session:
         row = session.query(SyncPipeline).filter_by(pipeline_name=name).first()

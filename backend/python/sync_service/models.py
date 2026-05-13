@@ -5,6 +5,7 @@ Own declarative_base — no shared metadata with scheduler/ or sync/.
 """
 
 from datetime import datetime
+from typing import Optional
 from sqlalchemy import (
     Column, Integer, BigInteger, String, Boolean, DateTime, Text,
     ForeignKey, Index, CheckConstraint
@@ -44,11 +45,22 @@ class SyncPipeline(Base):
 
     default_args = Column(JSONB, default=dict)
 
+    # Manual frequency-bucket override (high|med|low). NULL = auto-derive from cron.
+    # See sync_service.cadence.derive_frequency_category.
+    frequency_category = Column(String(10))
+
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), nullable=False,
         server_default=func.now(), onupdate=func.now()
     )
+
+    @property
+    def resolved_frequency_category(self) -> Optional[str]:
+        if self.frequency_category:
+            return self.frequency_category
+        from sync_service.cadence import derive_frequency_category
+        return derive_frequency_category(self.schedule_config)
 
     def to_dict(self) -> dict:
         return {
@@ -75,6 +87,8 @@ class SyncPipeline(Base):
                 'retry_delay_seconds': self.retry_delay_seconds,
             },
             'default_args': self.default_args or {},
+            'frequency_category': self.frequency_category,
+            'resolved_frequency_category': self.resolved_frequency_category,
         }
 
 

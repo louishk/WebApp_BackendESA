@@ -66,6 +66,24 @@
 
     <h3 style="margin-top:2rem;">Edit Pipeline</h3>
     <div class="panel edit-panel">
+        <div id="resolved-destination" style="margin-bottom:1rem;padding:0.6rem 0.8rem;background:#f5f9ff;border-left:3px solid #1A2E5A;border-radius:4px;font-size:0.9rem;color:#1A2E5A;">
+            Destination: <code id="resolved-destination-text">—</code>
+            &nbsp;·&nbsp; Frequency: <span id="resolved-frequency-chip" style="display:inline-block;padding:1px 8px;border-radius:10px;background:#dde6f5;font-size:0.78rem;">—</span>
+        </div>
+
+        <h4 style="margin-top:0;margin-bottom:0.5rem;color:#555;font-size:0.95rem;">Identity</h4>
+        <div class="edit-grid">
+            <div style="grid-column:1 / -1;">
+                <label>Display Name</label>
+                <input type="text" id="edit-display-name" maxlength="200">
+            </div>
+            <div style="grid-column:1 / -1;">
+                <label>Description</label>
+                <textarea id="edit-description" rows="2"></textarea>
+            </div>
+        </div>
+
+        <h4 style="margin-top:1.2rem;margin-bottom:0.5rem;color:#555;font-size:0.95rem;">Status</h4>
         <div class="edit-grid">
             <div>
                 <label>Enabled</label>
@@ -75,8 +93,13 @@
                 </label>
             </div>
             <div>
-                <label>Freshness TTL (seconds)</label>
-                <input type="number" id="edit-ttl" min="0" step="60">
+                <label>Frequency Category</label>
+                <select id="edit-frequency-category">
+                    <option value="">Auto (cron-derived)</option>
+                    <option value="high">High (≤ 1 hour)</option>
+                    <option value="med">Med (≤ 1 day)</option>
+                    <option value="low">Low (weekly+)</option>
+                </select>
             </div>
             <div>
                 <label>Schedule Type</label>
@@ -85,6 +108,46 @@
                     <option value="cron">cron</option>
                     <option value="interval">interval</option>
                 </select>
+            </div>
+        </div>
+
+        <h4 style="margin-top:1.2rem;margin-bottom:0.5rem;color:#555;font-size:0.95rem;">Destination</h4>
+        <div class="edit-grid">
+            <div>
+                <label>Database</label>
+                <select id="edit-freshness-database">
+                    <option value="middleware">middleware (esa_middleware)</option>
+                    <option value="pbi">pbi (esa_pbi)</option>
+                    <option value="backend">backend (esa_backend)</option>
+                </select>
+            </div>
+            <div>
+                <label>Table</label>
+                <input type="text" id="edit-freshness-table" maxlength="100" placeholder="ccws_units">
+            </div>
+            <div>
+                <label>Date Column</label>
+                <input type="text" id="edit-freshness-column" maxlength="100" placeholder="updated_at">
+            </div>
+        </div>
+
+        <h4 style="margin-top:1.2rem;margin-bottom:0.5rem;color:#555;font-size:0.95rem;">Operational</h4>
+        <div class="edit-grid">
+            <div>
+                <label>Freshness TTL (sec)</label>
+                <input type="number" id="edit-ttl" min="0" step="60">
+            </div>
+            <div>
+                <label>Timeout (sec)</label>
+                <input type="number" id="edit-timeout" min="1" max="86400" step="60">
+            </div>
+            <div>
+                <label>Max Retries</label>
+                <input type="number" id="edit-max-retries" min="0" max="10">
+            </div>
+            <div>
+                <label>Retry Delay (sec)</label>
+                <input type="number" id="edit-retry-delay" min="0" max="3600" step="30">
             </div>
         </div>
 
@@ -574,12 +637,42 @@ function onScheduleTypeChange() {
 
 function applyConfigToEditForm(p) {
     document.getElementById('edit-enabled').checked = !!p.enabled;
-    document.getElementById('edit-ttl').value = p.freshness?.ttl_seconds ?? '';
+    document.getElementById('edit-display-name').value = p.display_name || '';
+    document.getElementById('edit-description').value = p.description || '';
+    document.getElementById('edit-frequency-category').value = p.frequency_category || '';
+
+    const fr = p.freshness || {};
+    document.getElementById('edit-freshness-database').value = fr.database || 'middleware';
+    document.getElementById('edit-freshness-table').value = fr.table || '';
+    document.getElementById('edit-freshness-column').value = fr.column || '';
+    document.getElementById('edit-ttl').value = fr.ttl_seconds ?? '';
+
+    const ex = p.execution || {};
+    document.getElementById('edit-timeout').value = ex.timeout_seconds ?? '';
+    document.getElementById('edit-max-retries').value = ex.max_retries ?? '';
+    document.getElementById('edit-retry-delay').value = ex.retry_delay_seconds ?? '';
+
     document.getElementById('edit-schedule-type').value = p.schedule_type || 'on_demand';
     const sc = p.schedule_config || {};
     parseCronToUI(sc.cron || '');
     document.getElementById('edit-interval').value = sc.interval_seconds || '';
     document.getElementById('edit-default-args').value = JSON.stringify(p.default_args || {}, null, 2);
+
+    // Resolved destination + category chip
+    const destStr = `${fr.database || 'middleware'}.${fr.table || '—'}${fr.column ? '.' + fr.column : ''}`;
+    document.getElementById('resolved-destination-text').textContent = destStr;
+    const resolved = p.resolved_frequency_category;
+    const chip = document.getElementById('resolved-frequency-chip');
+    if (resolved) {
+        const tag = p.frequency_category ? `${resolved} (override)` : `${resolved} (auto)`;
+        chip.textContent = tag;
+        const bg = {high: '#dceefb', med: '#fff4d6', low: '#f0f0f0'}[resolved] || '#dde6f5';
+        chip.style.background = bg;
+    } else {
+        chip.textContent = 'on-demand';
+        chip.style.background = '#eee';
+    }
+
     onScheduleTypeChange();
     updateSchedulePreview();
 }
@@ -592,7 +685,16 @@ async function saveEdits() {
     const stype = document.getElementById('edit-schedule-type').value;
     const payload = {
         enabled: document.getElementById('edit-enabled').checked,
+        display_name: document.getElementById('edit-display-name').value.trim(),
+        description: document.getElementById('edit-description').value.trim(),
+        frequency_category: document.getElementById('edit-frequency-category').value,
+        freshness_database: document.getElementById('edit-freshness-database').value,
+        freshness_table: document.getElementById('edit-freshness-table').value.trim() || null,
+        freshness_column: document.getElementById('edit-freshness-column').value.trim() || null,
         freshness_ttl_seconds: parseInt(document.getElementById('edit-ttl').value) || 0,
+        timeout_seconds: parseInt(document.getElementById('edit-timeout').value) || 600,
+        max_retries: parseInt(document.getElementById('edit-max-retries').value) || 0,
+        retry_delay_seconds: parseInt(document.getElementById('edit-retry-delay').value) || 0,
         schedule_type: stype,
     };
 
