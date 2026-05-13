@@ -311,7 +311,7 @@ def api_eligible_tenants():
                 l."sTypeName" AS unit_type,
                 l."dcStdRate" AS std_rate,
                 l."dAnniv",
-                l.paid_thru,
+                l."dPaidThru" AS paid_thru,
                 u.label_size_range AS size_range,
                 u.label_climate_code AS climate_code,
                 u.dcarea_fixed AS sqft
