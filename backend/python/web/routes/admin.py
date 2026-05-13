@@ -338,6 +338,22 @@ def list_users():
         departments = sorted(set(u.department for u in all_users if u.department))
         offices = sorted(set(u.office_location for u in all_users if u.office_location))
 
+        # Build site_id → SiteCode map so the "Site Access" column can render
+        # short codes instead of raw integer IDs. esa_pbi.siteinfo.
+        site_code_by_id = {}
+        try:
+            from common.models import SiteInfo
+            from web.routes.api import get_pbi_session as _get_pbi
+            _pbi = _get_pbi()
+            try:
+                for s in _pbi.query(SiteInfo.SiteID, SiteInfo.SiteCode).all():
+                    site_code_by_id[int(s.SiteID)] = s.SiteCode
+            finally:
+                _pbi.close()
+        except Exception:
+            # Non-fatal — column will fall back to raw ids if siteinfo unreachable
+            pass
+
         return render_template('admin/users/list.html',
                                users=users,
                                total=total,
@@ -346,6 +362,7 @@ def list_users():
                                per_page=PER_PAGE,
                                departments=departments,
                                offices=offices,
+                               site_code_by_id=site_code_by_id,
                                search=search,
                                dept_filter=dept_filter,
                                office_filter=office_filter,

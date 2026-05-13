@@ -113,6 +113,8 @@
                 {{ sort_header('job_title', 'Job Title') }}
                 {{ sort_header('office', 'Office') }}
                 {{ sort_header('role', 'Role') }}
+                <th>Site Access</th>
+                <th>ECRI Max</th>
                 {{ sort_header('auth', 'Auth') }}
                 {{ sort_header('created', 'Created') }}
                 <th>Actions</th>
@@ -139,6 +141,31 @@
                         {% endfor %}
                     {% else %}
                         <span style="color: #888;">None</span>
+                    {% endif %}
+                </td>
+                <td style="white-space: nowrap; font-size: 0.78rem;">
+                    {% if not user.allowed_site_ids %}
+                        <span style="background:#d1fae5; color:#065f46; padding:1px 8px; border-radius:10px;">All sites</span>
+                    {% else %}
+                        {% set _codes = [] %}
+                        {% for sid in user.allowed_site_ids %}
+                            {% if site_code_by_id.get(sid) %}{% set _ = _codes.append(site_code_by_id.get(sid)) %}{% else %}{% set _ = _codes.append(sid|string) %}{% endif %}
+                        {% endfor %}
+                        {% if _codes|length <= 3 %}
+                            <span style="background:#dbeafe; color:#1e40af; padding:1px 8px; border-radius:10px;">{{ _codes|join(', ') }}</span>
+                        {% else %}
+                            <span style="background:#dbeafe; color:#1e40af; padding:1px 8px; border-radius:10px;" title="{{ _codes|join(', ') }}">{{ _codes|length }} sites</span>
+                        {% endif %}
+                    {% endif %}
+                </td>
+                <td style="white-space: nowrap; font-size: 0.78rem;">
+                    {% set _pct = (user.ecri_max_pct_reduction or 0)|float %}
+                    {% set _abs = (user.ecri_max_abs_reduction or 0)|float %}
+                    {% if _pct > 0 or _abs > 0 %}
+                        {% if _pct > 0 %}<span style="background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:10px;">{{ '%.0f'|format(_pct) }}%</span>{% endif %}
+                        {% if _abs > 0 %}<span style="background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:10px; margin-left:2px;" title="Max absolute reduction">${{ '%.0f'|format(_abs) }}</span>{% endif %}
+                    {% else %}
+                        <span style="color:#888;">—</span>
                     {% endif %}
                 </td>
                 <td>{{ user.auth_provider }}</td>
