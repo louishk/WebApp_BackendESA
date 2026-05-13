@@ -364,34 +364,50 @@ def data_freshness_endpoint():
             ],
         }
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     out = {}
     now = datetime.now(timezone.utc)
+
+    # Build the full list of (pipeline_name, ttl, destination_dict) jobs first
+    # so we can fan them out in parallel. With 18 pipelines × up to 2
+    # destinations, a serial loop becomes ~10s if any single MAX() is slow.
+    jobs = []
     with session_scope() as session:
         pipelines = session.query(SyncPipeline).all()
         for p in pipelines:
             ttl = p.freshness_ttl_seconds
-            destinations = []
-            for d in p.resolved_destinations:
-                db_name = d.get('database') or 'middleware'
-                table = (d.get('table') or '').strip()
-                col = (d.get('column') or 'updated_at').strip()
-                fresh = _query_destination_freshness(db_name, table, col, ttl, now)
-                destinations.append({
-                    'database': db_name,
-                    'table': table,
-                    'column': col,
-                    'destination': f"{db_name}.{table}".rstrip('.'),
-                    **fresh,
-                })
-
             out[p.pipeline_name] = {
                 'display_name': p.display_name,
                 'ttl_seconds': ttl,
                 'schedule_type': p.schedule_type,
                 'frequency_category': p.frequency_category,
                 'resolved_frequency_category': p.resolved_frequency_category,
-                'destinations': destinations,
+                'destinations': [],
             }
+            for d in p.resolved_destinations:
+                db_name = d.get('database') or 'middleware'
+                table = (d.get('table') or '').strip()
+                col = (d.get('column') or 'updated_at').strip()
+                jobs.append((p.pipeline_name, ttl, db_name, table, col))
+
+    def _worker(job):
+        pname, ttl, db_name, table, col = job
+        fresh = _query_destination_freshness(db_name, table, col, ttl, now)
+        return pname, {
+            'database': db_name,
+            'table': table,
+            'column': col,
+            'destination': f"{db_name}.{table}".rstrip('.'),
+            **fresh,
+        }
+
+    # Cap concurrency at ~8 — most queries are 5-20ms; the bottleneck is the
+    # slowest, not throughput.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for pname, entry in pool.map(_worker, jobs):
+            out[pname]['destinations'].append(entry)
+
     return jsonify(out)
 
 
