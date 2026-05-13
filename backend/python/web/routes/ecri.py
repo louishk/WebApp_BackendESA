@@ -859,6 +859,10 @@ def api_advance_eligible():
     Query params:
       - site_ids (required): comma-separated site IDs
       - discount_reference_pct (optional): default 40
+      - prepay_buffer_days (optional): safety margin past projected paid_thru
+        when computing the effective LAD. Default 0 — the scheduled increase
+        persists in SMD even if the tenant later prepays, so by-design Pre-Load
+        does not need a buffer.
     """
     site_ids_param = request.args.get('site_ids', '')
     if not site_ids_param:
@@ -870,6 +874,10 @@ def api_advance_eligible():
         return jsonify({'error': 'site_ids must be comma-separated integers'}), 400
 
     discount_ref_pct = float(request.args.get('discount_reference_pct', 40))
+    try:
+        prepay_buffer_days = max(0, int(request.args.get('prepay_buffer_days', 0)))
+    except ValueError:
+        prepay_buffer_days = 0
 
     session = get_pbi_session()
     try:
@@ -947,12 +955,13 @@ def api_advance_eligible():
             if moved_in:
                 tenure_months = (today.year - moved_in.year) * 12 + (today.month - moved_in.month)
 
-            # Closest effective date for Pre-Load: must land after
-            # projected_paid_thru + prepay buffer (default 7 days)
+            # Closest effective date for Pre-Load: next LAD strictly after
+            # projected_paid_thru + prepay_buffer_days (default 0).
             anniv_d = r.dAnniv.date() if hasattr(r.dAnniv, 'date') else r.dAnniv
             ppt_d = r.projected_paid_thru.date() if hasattr(r.projected_paid_thru, 'date') else r.projected_paid_thru
             next_eff_date, _, eff_bucket = compute_advance_effective_date(
                 anniv_d, ppt_d, today,
+                prepay_buffer_days=prepay_buffer_days,
             )
 
             entry = {
@@ -1013,6 +1022,7 @@ def api_advance_eligible():
             'parameters': {
                 'site_ids': site_ids,
                 'discount_reference_pct': discount_ref_pct,
+                'prepay_buffer_days': prepay_buffer_days,
             },
         })
 

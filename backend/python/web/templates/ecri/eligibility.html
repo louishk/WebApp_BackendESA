@@ -46,10 +46,10 @@
         <!-- Advance-only filters -->
         <div class="form-group filter-advance" style="display:none;">
             <label style="display:block; margin-bottom:0.5rem; font-weight:500;"
-                   title="Days added to projected paid_thru before scheduling the rate change.">
+                   title="Safety margin past projected paid_thru. 0 = schedule at the next LAD after paid_thru (the scheduled increase persists in SMD even if the tenant later prepays, so a buffer is usually unnecessary).">
                 Prepay Buffer (days)
             </label>
-            <input type="number" id="prepay-buffer" value="7" min="0" max="60" class="form-select" style="max-width:120px;">
+            <input type="number" id="prepay-buffer" value="0" min="0" max="60" class="form-select" style="max-width:120px;">
         </div>
         <!-- Shared -->
         <div class="form-group">
@@ -534,6 +534,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         const params = new URLSearchParams({
             site_ids: sites.join(','),
             discount_reference_pct: document.getElementById('discount-ref').value,
+            prepay_buffer_days: document.getElementById('prepay-buffer').value || '0',
         });
         try {
             const res = await fetch(`/ecri/api/advance-eligible?${params}`, {headers: apiHeaders()});
