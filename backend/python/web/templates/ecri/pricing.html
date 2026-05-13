@@ -30,6 +30,18 @@
 </div>
 
 <div class="card">
+    <h2>Per-Country Gradient Overrides</h2>
+    <p style="color:#666; font-size:0.85rem; margin-top:0;">
+        Optional. When set, tenants in this country use the override instead of the global gradient.
+        Required when budgets and churn rates differ by market (e.g. SG needs a higher mean ECRI than KR).
+    </p>
+    <table>
+        <thead><tr><th style="width:120px;">Country</th><th style="width:160px;">Min %</th><th style="width:160px;">Max %</th><th>Notes</th></tr></thead>
+        <tbody id="country-tbody"></tbody>
+    </table>
+</div>
+
+<div class="card">
     <h2>Factors</h2>
     <table>
         <thead>
@@ -70,6 +82,17 @@
                 <option value="amber">amber</option>
                 <option value="red">red</option>
                 <option value="unknown">unknown</option>
+            </select>
+        </div>
+        <div>
+            <label>Country (gradient pick)</label>
+            <select id="p-country-cc" class="form-select">
+                <option value="">(global)</option>
+                <option value="SG">SG</option>
+                <option value="MY">MY</option>
+                <option value="HK">HK</option>
+                <option value="KR">KR</option>
+                <option value="JP">JP</option>
             </select>
         </div>
     </div>
@@ -146,8 +169,16 @@ function factorFires(name, r) {
     return false;
 }
 
+function pickGradient(config, countryCode) {
+    const override = config.country_overrides && countryCode ? config.country_overrides[countryCode] : null;
+    if (override && override.gradient_min_pct != null && override.gradient_max_pct != null) {
+        return [Number(override.gradient_min_pct), Number(override.gradient_max_pct)];
+    }
+    return [Number(config.gradient_min_pct), Number(config.gradient_max_pct)];
+}
+
 function computeProposed(row, config) {
-    if (!config) return { proposed_pct: null, fired: [], raw: 0, pos: 0, neg: 0 };
+    if (!config) return { proposed_pct: null, fired: [], raw: 0, pos: 0, neg: 0, min: null, max: null };
     let positive = 0, negative = 0, maxPos = 0, maxNeg = 0;
     const fired = [];
     for (const [name, f] of Object.entries(config.factors || {})) {
@@ -164,10 +195,9 @@ function computeProposed(row, config) {
     const posNorm = maxPos > 0 ? positive / maxPos : 0;
     const negNorm = maxNeg > 0 ? negative / maxNeg : 0;
     const raw = posNorm - negNorm;
-    const minP = Number(config.gradient_min_pct);
-    const maxP = Number(config.gradient_max_pct);
+    const [minP, maxP] = pickGradient(config, row.country_code);
     const pct = minP + (maxP - minP) * Math.max(0, raw);
-    return { proposed_pct: Math.round(pct * 10) / 10, fired, raw, pos: posNorm, neg: negNorm };
+    return { proposed_pct: Math.round(pct * 10) / 10, fired, raw, pos: posNorm, neg: negNorm, min: minP, max: maxP };
 }
 
 // --- Page state + bindings ---
@@ -179,6 +209,52 @@ function getCSRFToken() {
 }
 function apiHeaders() {
     return { 'Content-Type': 'application/json', 'X-CSRFToken': getCSRFToken() };
+}
+
+const COUNTRY_OPTIONS = [
+    {cc:'SG', label:'Singapore'},
+    {cc:'MY', label:'Malaysia'},
+    {cc:'HK', label:'Hong Kong'},
+    {cc:'KR', label:'South Korea'},
+    {cc:'JP', label:'Japan'},
+];
+
+function renderCountryOverrides() {
+    const tbody = document.getElementById('country-tbody');
+    const overrides = (CONFIG && CONFIG.country_overrides) || {};
+    tbody.innerHTML = COUNTRY_OPTIONS.map(c => {
+        const o = overrides[c.cc] || {};
+        const minV = o.gradient_min_pct != null ? o.gradient_min_pct : '';
+        const maxV = o.gradient_max_pct != null ? o.gradient_max_pct : '';
+        return `<tr>
+            <td><strong>${c.label}</strong> <span style="color:#888;">(${c.cc})</span></td>
+            <td><input type="number" step="0.5" min="0" max="50" class="form-select country-min" data-cc="${c.cc}" style="max-width:120px;" value="${minV}" placeholder="(global)"></td>
+            <td><input type="number" step="0.5" min="0" max="50" class="form-select country-max" data-cc="${c.cc}" style="max-width:120px;" value="${maxV}" placeholder="(global)"></td>
+            <td style="color:#666; font-size:0.85rem;">Leave blank to use global gradient.</td>
+        </tr>`;
+    }).join('');
+    // Bind preview refresh
+    tbody.querySelectorAll('input').forEach(el => {
+        el.addEventListener('input',  onFactorChange);
+        el.addEventListener('change', onFactorChange);
+    });
+}
+
+function readCountryOverridesFromUI() {
+    const out = {};
+    document.querySelectorAll('#country-tbody tr').forEach(tr => {
+        const minIn = tr.querySelector('.country-min');
+        const maxIn = tr.querySelector('.country-max');
+        const cc = minIn.dataset.cc;
+        const minV = minIn.value.trim();
+        const maxV = maxIn.value.trim();
+        if (minV === '' && maxV === '') return;          // not set
+        const mn = Number(minV), mx = Number(maxV);
+        if (Number.isNaN(mn) || Number.isNaN(mx)) return; // partial / invalid
+        if (!(mn >= 0 && mn < mx && mx <= 50)) return;
+        out[cc] = { gradient_min_pct: mn, gradient_max_pct: mx };
+    });
+    return out;
 }
 
 function renderFactors() {
@@ -204,11 +280,14 @@ function readConfigFromUI() {
             weight: Number(wIn.value) || 0,
         };
     });
-    return {
+    const overrides = readCountryOverridesFromUI();
+    const cfg = {
         gradient_min_pct: Number(document.getElementById('grad-min').value),
         gradient_max_pct: Number(document.getElementById('grad-max').value),
         factors,
     };
+    if (Object.keys(overrides).length) cfg.country_overrides = overrides;
+    return cfg;
 }
 
 function onFactorChange() {
@@ -231,10 +310,12 @@ function refreshPreview() {
         unit_risk_factor:Number(document.getElementById('p-risk').value)     || null,
         tenure_months:   Number(document.getElementById('p-tenure').value)   || null,
         effective_bucket:document.getElementById('p-bucket').value,
+        country_code:    document.getElementById('p-country-cc').value || null,
     };
     const result = computeProposed(row, CONFIG);
+    const grad = result.min != null ? ` (gradient ${result.min}–${result.max})` : '';
     document.getElementById('preview-pct').textContent =
-        result.proposed_pct == null ? '—' : result.proposed_pct + '%';
+        result.proposed_pct == null ? '—' : result.proposed_pct + '%' + grad;
     document.getElementById('preview-fired').textContent =
         result.fired.length ? result.fired.join(', ') : '(none)';
     document.getElementById('preview-raw').textContent = result.raw.toFixed(3);
@@ -250,6 +331,7 @@ async function loadConfig() {
         CONFIG = data.config;
         document.getElementById('grad-min').value = CONFIG.gradient_min_pct;
         document.getElementById('grad-max').value = CONFIG.gradient_max_pct;
+        renderCountryOverrides();
         renderFactors();
         refreshPreview();
     } catch (e) { alert('Load failed: ' + e.message); }
@@ -283,7 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('grad-min').addEventListener('input',  onGradientChange);
     document.getElementById('grad-max').addEventListener('change', onGradientChange);
     document.getElementById('grad-max').addEventListener('input',  onGradientChange);
-    ['p-current','p-market','p-site','p-country','p-top3','p-top1','p-risk','p-tenure','p-bucket']
+    ['p-current','p-market','p-site','p-country','p-top3','p-top1','p-risk','p-tenure','p-bucket','p-country-cc']
         .forEach(id => {
             const el = document.getElementById(id);
             el.addEventListener('change', refreshPreview);

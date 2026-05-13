@@ -38,6 +38,12 @@ VALUES (
             'tenure_under_24mo',     jsonb_build_object('enabled', false, 'weight', -0.3),
             'tenure_36mo_plus',      jsonb_build_object('enabled', true,  'weight',  0.4),
             'red_bucket',            jsonb_build_object('enabled', true,  'weight', -0.4)
+        ),
+        'country_overrides', jsonb_build_object(
+            'SG', jsonb_build_object('gradient_min_pct',  7, 'gradient_max_pct', 22),
+            'MY', jsonb_build_object('gradient_min_pct',  6, 'gradient_max_pct', 20),
+            'HK', jsonb_build_object('gradient_min_pct',  5, 'gradient_max_pct', 18),
+            'KR', jsonb_build_object('gradient_min_pct',  1, 'gradient_max_pct',  5)
         )
     ),
     'system'

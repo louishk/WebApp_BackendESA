@@ -264,6 +264,22 @@ def _country_size_climate_benchmarks(session, site_ids):
     return country, out
 
 
+_COUNTRY_NAME_TO_CC = {
+    'Singapore': 'SG', 'Malaysia': 'MY', 'Hong Kong': 'HK',
+    'South Korea': 'KR', 'Japan': 'JP',
+}
+
+
+def _site_country_lookup(session, site_ids):
+    """Return {site_id: (country_name, country_code_or_None)} for the requested sites."""
+    out = {}
+    for sid, cname in session.execute(text(
+        'SELECT "SiteID", "Country" FROM siteinfo WHERE "SiteID" = ANY(:site_ids)'
+    ), {'site_ids': site_ids}).fetchall():
+        out[sid] = (cname, _COUNTRY_NAME_TO_CC.get(cname))
+    return out
+
+
 def _ecri_unit_risk_resolver(session, site_ids):
     """Build a per-(site, label-tuple) unit-risk composer.
 
@@ -467,6 +483,7 @@ def api_eligible_tenants():
         country, country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
         variance_pct = _variance_pct
         unit_risk_resolve = _ecri_unit_risk_resolver(session, site_ids)
+        site_country_map = _site_country_lookup(session, site_ids)
 
         # Build final list
         for row in rows:
@@ -530,8 +547,11 @@ def api_eligible_tenants():
                 'pillar':        r.get('pillar'),
             }) or {}
 
+            cname, ccode = site_country_map.get(site_id, (None, None))
             eligible.append({
                 'site_id': site_id,
+                'country': cname,
+                'country_code': ccode,
                 'ledger_id': r['LedgerID'],
                 'tenant_id': r['TenantID'],
                 'unit_id': r['UnitID'],
@@ -1043,6 +1063,7 @@ def api_advance_eligible():
         # Country / Top-N benchmarks per (size_range, climate_code)
         _, country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
         unit_risk_resolve = _ecri_unit_risk_resolver(session, site_ids)
+        site_country_map = _site_country_lookup(session, site_ids)
 
         segments: dict[str, list[dict]] = {
             'recent_movein': [],
@@ -1100,8 +1121,11 @@ def api_advance_eligible():
                 'pillar':        r.pillar,
             }) or {}
 
+            cname, ccode = site_country_map.get(r.SiteID, (None, None))
             entry = {
                 'site_id': r.SiteID,
+                'country': cname,
+                'country_code': ccode,
                 'ledger_id': r.LedgerID,
                 'tenant_id': r.TenantID,
                 'unit_id': r.UnitID,
@@ -3116,6 +3140,9 @@ PRICING_FACTOR_NAMES = (
 )
 
 
+PRICING_COUNTRY_CODES = ('SG', 'MY', 'HK', 'KR', 'JP')
+
+
 def _validate_pricing_config(cfg):
     """Return (cleaned_config, error_str_or_None)."""
     if not isinstance(cfg, dict):
@@ -3147,11 +3174,38 @@ def _validate_pricing_config(cfg):
             'enabled': bool(f.get('enabled', True)),
             'weight':  round(weight, 4),
         }
-    return {
+
+    # Optional per-country gradient overrides
+    cleaned_overrides = {}
+    raw_overrides = cfg.get('country_overrides') or {}
+    if not isinstance(raw_overrides, dict):
+        return None, 'country_overrides must be an object'
+    for cc in PRICING_COUNTRY_CODES:
+        co = raw_overrides.get(cc)
+        if co is None:
+            continue
+        if not isinstance(co, dict):
+            return None, f'country_overrides.{cc} must be an object'
+        try:
+            cmin = float(co.get('gradient_min_pct'))
+            cmax = float(co.get('gradient_max_pct'))
+        except (TypeError, ValueError):
+            return None, f'country_overrides.{cc} gradients must be numeric'
+        if not (0 <= cmin < cmax <= 50):
+            return None, f'country_overrides.{cc} require 0 <= min < max <= 50'
+        cleaned_overrides[cc] = {
+            'gradient_min_pct': round(cmin, 2),
+            'gradient_max_pct': round(cmax, 2),
+        }
+
+    out = {
         'gradient_min_pct': round(gmin, 2),
         'gradient_max_pct': round(gmax, 2),
         'factors': cleaned_factors,
-    }, None
+    }
+    if cleaned_overrides:
+        out['country_overrides'] = cleaned_overrides
+    return out, None
 
 
 @ecri_bp.route('/api/pricing-config', methods=['GET'])

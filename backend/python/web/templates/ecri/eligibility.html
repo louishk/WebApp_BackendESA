@@ -350,6 +350,14 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         return false;
     }
 
+    function _pickGradient(config, countryCode) {
+        const override = config.country_overrides && countryCode ? config.country_overrides[countryCode] : null;
+        if (override && override.gradient_min_pct != null && override.gradient_max_pct != null) {
+            return [Number(override.gradient_min_pct), Number(override.gradient_max_pct)];
+        }
+        return [Number(config.gradient_min_pct), Number(config.gradient_max_pct)];
+    }
+
     function computeProposed(row, config) {
         if (!config) return null;
         let positive = 0, negative = 0, maxPos = 0, maxNeg = 0;
@@ -368,8 +376,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         const posNorm = maxPos > 0 ? positive / maxPos : 0;
         const negNorm = maxNeg > 0 ? negative / maxNeg : 0;
         const raw = posNorm - negNorm;
-        const minP = Number(config.gradient_min_pct);
-        const maxP = Number(config.gradient_max_pct);
+        const [minP, maxP] = _pickGradient(config, row.country_code);
         const pct = minP + (maxP - minP) * Math.max(0, raw);
         return { proposed_pct: Math.round(pct * 10) / 10, fired };
     }
