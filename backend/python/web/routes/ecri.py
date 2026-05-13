@@ -256,6 +256,98 @@ def _country_size_climate_benchmarks(session, site_ids):
     return country, out
 
 
+def _ecri_unit_risk_resolver(session, site_ids):
+    """Build a per-(site, label-tuple) unit-risk composer.
+
+    Returns a callable ``resolve(site_id, labels_dict)`` that yields a dict with
+    composite factor / band / delta-pct, or None when the site's country has
+    no baseline configured. Factor rows are pre-fetched once per call so the
+    per-row work is pure dict lookups.
+    """
+    from common.config_loader import get_config
+    from common.risk_lookup import FactorRow, compute_risk, resolve_effective_factor
+
+    try:
+        risk_cfg = get_config().get_section("risk").to_dict()
+    except Exception:
+        return lambda *_a, **_kw: None
+    bands = risk_cfg.get("gradient_bands", [])
+    country_name_to_code = {v: k for k, v in risk_cfg.get("countries", {}).items()}
+    if not bands or not country_name_to_code:
+        return lambda *_a, **_kw: None
+
+    # site_id -> ISO 2-letter country code (only sites we know about)
+    site_to_cc = {}
+    for sid, cname in session.execute(text(
+        'SELECT "SiteID", "Country" FROM siteinfo WHERE "SiteID" = ANY(:site_ids)'
+    ), {'site_ids': site_ids}).fetchall():
+        cc = country_name_to_code.get(cname)
+        if cc:
+            site_to_cc[sid] = cc
+
+    countries = sorted(set(site_to_cc.values()))
+    if not countries:
+        return lambda *_a, **_kw: None
+
+    baselines = {}
+    for cc, rate in session.execute(text("""
+        SELECT country_code, baseline_rate
+          FROM unit_category_risk_baseline
+         WHERE country_code = ANY(:codes)
+    """), {'codes': countries}).fetchall():
+        baselines[cc] = float(rate)
+
+    factor_map = {}
+    for cc, dim, val, emp, ovr, thin, n in session.execute(text("""
+        SELECT country_code, dimension, value, empirical_factor, override_factor,
+               is_thin_data, sample_size
+          FROM unit_category_risk_factor
+         WHERE country_code = ANY(:codes)
+    """), {'codes': countries}).fetchall():
+        emp_f = float(emp) if emp is not None else None
+        ovr_f = float(ovr) if ovr is not None else None
+        eff, src = resolve_effective_factor(emp_f, ovr_f, bool(thin))
+        factor_map[(cc, dim, val)] = FactorRow(
+            value=val, effective=eff, source=src,
+            is_thin=bool(thin), sample_size=int(n) if n is not None else 0,
+        )
+
+    DIM_KEYS = (
+        ('size',    'size_category'),
+        ('range',   'size_range'),
+        ('type',    'type_code'),
+        ('climate', 'climate_code'),
+        ('shape',   'shape'),
+        ('pillar',  'pillar'),
+    )
+
+    def resolve(site_id, labels):
+        cc = site_to_cc.get(site_id)
+        if not cc or cc not in baselines:
+            return None
+        factors = {}
+        for dim, label_key in DIM_KEYS:
+            v = labels.get(label_key)
+            if not v:
+                continue
+            fr = factor_map.get((cc, dim, v))
+            if fr is None:
+                fr = FactorRow(value=v, effective=1.0, source='missing',
+                               is_thin=True, sample_size=0)
+            factors[dim] = fr
+        if not factors:
+            return None
+        r = compute_risk(baselines[cc], factors, bands)
+        return {
+            'unit_risk_factor':     round(r.composite_factor, 4),
+            'unit_risk_band':       r.band.get('label'),
+            'unit_risk_band_color': r.band.get('color'),
+            'unit_risk_delta_pct':  round(r.delta_vs_baseline_pct, 1),
+        }
+
+    return resolve
+
+
 @ecri_bp.route('/api/eligible-tenants')
 @login_required
 @ecri_access_required
@@ -312,8 +404,12 @@ def api_eligible_tenants():
                 l."dcStdRate" AS std_rate,
                 l."dAnniv",
                 l."dPaidThru" AS paid_thru,
+                u.label_size_category AS size_category,
                 u.label_size_range AS size_range,
+                u.label_type_code AS type_code,
                 u.label_climate_code AS climate_code,
+                u.label_shape AS shape,
+                u.label_pillar AS pillar,
                 u.dcarea_fixed AS sqft
             FROM vw_ecri_eligible_ledgers l
             LEFT JOIN units_info_enriched u ON u."UnitID" = l."UnitID"
@@ -362,6 +458,7 @@ def api_eligible_tenants():
 
         country, country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
         variance_pct = _variance_pct
+        unit_risk_resolve = _ecri_unit_risk_resolver(session, site_ids)
 
         # Build final list
         for row in rows:
@@ -415,6 +512,16 @@ def api_eligible_tenants():
             pt_d = pt.date() if hasattr(pt, 'date') else pt
             next_eff_date, _, eff_bucket = compute_effective_date(anniv_d, pt_d, today)
 
+            # Unit risk factor (None when country/baseline isn't configured)
+            risk = unit_risk_resolve(site_id, {
+                'size_category': r.get('size_category'),
+                'size_range':    sz,
+                'type_code':     r.get('type_code'),
+                'climate_code':  cc,
+                'shape':         r.get('shape'),
+                'pillar':        r.get('pillar'),
+            }) or {}
+
             eligible.append({
                 'site_id': site_id,
                 'ledger_id': r['LedgerID'],
@@ -457,6 +564,12 @@ def api_eligible_tenants():
                 'next_effective_date': next_eff_date.isoformat() if next_eff_date else None,
                 'effective_bucket': eff_bucket,
                 'paid_thru': pt.isoformat() if pt else None,
+                # Unit risk factor (composite × baseline). Missing when site
+                # country isn't configured in risk.yaml.
+                'unit_risk_factor':     risk.get('unit_risk_factor'),
+                'unit_risk_band':       risk.get('unit_risk_band'),
+                'unit_risk_band_color': risk.get('unit_risk_band_color'),
+                'unit_risk_delta_pct':  risk.get('unit_risk_delta_pct'),
             })
 
         # Exclusion summary (run a separate query for counts).
@@ -892,8 +1005,12 @@ def api_advance_eligible():
                 v."dRentLastChanged",
                 v.segment, v.discount_expires, v.projected_paid_thru,
                 u.dcarea_fixed AS sqft,
+                u.label_size_category AS size_category,
                 u.label_size_range AS size_range,
-                u.label_climate_code AS climate_code
+                u.label_type_code AS type_code,
+                u.label_climate_code AS climate_code,
+                u.label_shape AS shape,
+                u.label_pillar AS pillar
             FROM vw_ecri_advance_eligible_ledgers v
             LEFT JOIN units_info_enriched u ON u."UnitID" = v."UnitID"
             WHERE v."SiteID" = ANY(:site_ids)
@@ -917,6 +1034,7 @@ def api_advance_eligible():
 
         # Country / Top-N benchmarks per (size_range, climate_code)
         _, country_benchmarks = _country_size_climate_benchmarks(session, site_ids)
+        unit_risk_resolve = _ecri_unit_risk_resolver(session, site_ids)
 
         segments: dict[str, list[dict]] = {
             'recent_movein': [],
@@ -963,6 +1081,16 @@ def api_advance_eligible():
                 anniv_d, ppt_d, today,
                 prepay_buffer_days=prepay_buffer_days,
             )
+
+            # Unit risk factor (None when country/baseline isn't configured)
+            risk = unit_risk_resolve(r.SiteID, {
+                'size_category': r.size_category,
+                'size_range':    sz,
+                'type_code':     r.type_code,
+                'climate_code':  cc,
+                'shape':         r.shape,
+                'pillar':        r.pillar,
+            }) or {}
 
             entry = {
                 'site_id': r.SiteID,
@@ -1013,6 +1141,12 @@ def api_advance_eligible():
                 # Closest effective date / bucket
                 'next_effective_date': next_eff_date.isoformat() if next_eff_date else None,
                 'effective_bucket': eff_bucket,
+                # Unit risk factor (composite × baseline). Missing when site
+                # country isn't configured in risk.yaml.
+                'unit_risk_factor':     risk.get('unit_risk_factor'),
+                'unit_risk_band':       risk.get('unit_risk_band'),
+                'unit_risk_band_color': risk.get('unit_risk_band_color'),
+                'unit_risk_delta_pct':  risk.get('unit_risk_delta_pct'),
             }
             segments[r.segment].append(entry)
 

@@ -115,7 +115,7 @@
                         <th>Site</th><th>Unit</th><th>Tenant</th>
                         <th>Tenure (mo)</th>
                         <th title="Tenant payment / objection risk score (future)">Tenant Risk</th>
-                        <th title="Unit churn / re-letability risk (future)">Unit Risk</th>
+                        <th title="Composite unit-category risk factor (≈1.0 = average; lower = greener; based on country baseline + size/range/type/climate/shape/pillar factors)">Unit Risk</th>
                         <th title="Current rent &amp; $/sqft">Current Rent</th>
                         <th title="Median rent for same unit type at this site">Site Median</th>
                         <th title="Std rate × (1 − discount reference)">Market Rate</th>
@@ -158,6 +158,7 @@
                         <th title="Average of the 3 highest-rent sites in country for same size &amp; climate">Top-3</th>
                         <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
                         <th title="Closest LAD a rate change can land on, after projected paid_thru + buffer">Next Effective</th>
+                        <th title="Composite unit-category risk factor (≈1.0 = average; lower = greener; based on country baseline + size/range/type/climate/shape/pillar factors)">Unit Risk</th>
                         <th>Moved In</th><th>Disc. Expires</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
                     </tr>
@@ -191,6 +192,7 @@
                         <th title="Average of the 3 highest-rent sites in country for same size &amp; climate">Top-3</th>
                         <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
                         <th title="Closest LAD a rate change can land on, after projected paid_thru + buffer">Next Effective</th>
+                        <th title="Composite unit-category risk factor (≈1.0 = average; lower = greener; based on country baseline + size/range/type/climate/shape/pillar factors)">Unit Risk</th>
                         <th>Moved In</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
                     </tr>
@@ -312,6 +314,13 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         const dot = `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:4px;"></span>`;
         return `${dot}${t.next_effective_date.substring(0,10)}`;
     }
+    function riskCell(t) {
+        if (t.unit_risk_factor == null) return '<span style="color:#999;">—</span>';
+        const color = t.unit_risk_band_color || '#666';
+        const delta = t.unit_risk_delta_pct;
+        const deltaStr = delta == null ? '' : ` (${delta > 0 ? '+' : ''}${delta}%)`;
+        return `<span style="display:inline-block; padding:2px 6px; background:${color}; color:#fff; border-radius:3px; font-size:0.75rem; font-weight:600;" title="${t.unit_risk_band || ''} · factor ${t.unit_risk_factor}">${t.unit_risk_factor}${deltaStr}</span>`;
+    }
 
     // -------- Variance filters --------
     const FILTER_FIELDS = [
@@ -328,6 +337,8 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         {k: 'current_rent',             l: 'Current Rent ($)'},
         {k: 'current_psf',              l: 'Current $/sqft'},
         {k: 'tenure_months',            l: 'Tenure (mo)'},
+        {k: 'unit_risk_factor',         l: 'Unit Risk Factor'},
+        {k: 'unit_risk_delta_pct',      l: 'Unit Risk Δ (%)'},
         {k: 'next_effective_date',      l: 'Next Effective',     t: 'date'},
         {k: 'paid_thru',                l: 'Paid Thru',          t: 'date'},
         {k: 'projected_paid_thru',      l: 'Projected PT',       t: 'date'},
@@ -588,7 +599,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${t.tenant_name || '-'}</td>
                 <td>${t.tenure_months !== null ? t.tenure_months : '-'}</td>
                 <td style="color:#999;">${t.tenant_risk ?? '—'}</td>
-                <td style="color:#999;">${t.unit_risk ?? '—'}</td>
+                <td>${riskCell(t)}</td>
                 <td>${benchCell(t.current_rent, null, t.current_psf, null)}</td>
                 <td>${benchCell(t.in_place_median_site, t.variance_vs_site, t.in_place_psf_site, t.variance_psf_vs_site)}</td>
                 <td>${benchCell(t.market_rate, t.variance_vs_market, t.market_psf, t.variance_psf_vs_market)}</td>
@@ -650,6 +661,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${benchCell(t.top3_rent, t.variance_vs_top3, t.top3_psf, t.variance_psf_vs_top3)}</td>
                 <td>${benchCell(t.top1_rent, t.variance_vs_top1, t.top1_psf, t.variance_psf_vs_top1)}</td>
                 <td>${effDateCell(t)}</td>
+                <td>${riskCell(t)}</td>
                 <td>${fmtDate(t.moved_in_date)}</td>
                 ${discCell}
                 <td>${fmtDate(t.paid_thru)}</td>
