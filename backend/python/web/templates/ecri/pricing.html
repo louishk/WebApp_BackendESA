@@ -42,7 +42,8 @@
 </div>
 
 <div class="card">
-    <h2>Factors</h2>
+    <h2 style="color:#28A745;">Positive Factors</h2>
+    <p style="color:#666; font-size:0.85rem; margin-top:0;">Push the proposed % toward the gradient <strong>Maximum</strong>.</p>
     <table>
         <thead>
             <tr>
@@ -52,11 +53,27 @@
                 <th>Predicate</th>
             </tr>
         </thead>
-        <tbody id="factor-tbody"></tbody>
+        <tbody id="factor-tbody-pos"></tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h2 style="color:#C41230;">Negative Factors</h2>
+    <p style="color:#666; font-size:0.85rem; margin-top:0;">Pull the proposed % toward the gradient <strong>Minimum</strong>.</p>
+    <table>
+        <thead>
+            <tr>
+                <th style="width:50px;">On</th>
+                <th>Factor</th>
+                <th style="width:140px;">Weight</th>
+                <th>Predicate</th>
+            </tr>
+        </thead>
+        <tbody id="factor-tbody-neg"></tbody>
     </table>
     <p style="margin-top:0.75rem; color:#666; font-size:0.85rem;">
-        Weights are signed floats in [-3, +3]. Positive weights pull the proposed %
-        toward Maximum; negative weights pull toward Minimum.
+        Weights are signed floats in [-3, +3]. Convention: positive factors carry
+        a positive weight, negative factors a negative weight.
     </p>
 </div>
 
@@ -133,27 +150,30 @@
 <script>
 // --- Pricing logic shared with eligibility.html (kept in sync manually) ---
 const PRICING_FACTOR_META = [
-    {k:'below_market',          l:'Below Market',          d:'current_rent < market_rate'},
-    {k:'below_site_median',     l:'Below Site Median',     d:'current_rent < site_median'},
-    {k:'below_country_median',  l:'Below Country Median',  d:'current_rent < country_median'},
-    {k:'below_top3',            l:'Below Top-3',           d:'current_rent < top3_rent'},
-    {k:'below_top1',            l:'Below Top-1',           d:'current_rent < top1_rent'},
-    {k:'above_market',          l:'Above Market (+15%)',   d:'current_rent > market_rate × 1.15'},
-    {k:'above_site_median',     l:'Above Site Median',     d:'current_rent > site_median'},
-    {k:'above_country_median',  l:'Above Country Median',  d:'current_rent > country_median'},
-    {k:'above_top3',            l:'Above Top-3',           d:'current_rent > top3_rent'},
-    {k:'above_top1',            l:'Above Top-1',           d:'current_rent > top1_rent'},
-    {k:'high_unit_risk',        l:'High Unit Risk',        d:'1.10 < unit_risk_factor ≤ 1.30 (mutually exclusive)'},
-    {k:'very_high_unit_risk',   l:'Very High Unit Risk',   d:'unit_risk_factor > 1.30'},
-    {k:'low_unit_risk',         l:'Low Unit Risk',         d:'0.70 ≤ unit_risk_factor < 0.90 (good category)'},
-    {k:'very_low_unit_risk',    l:'Very Low Unit Risk',    d:'unit_risk_factor < 0.70 (great category)'},
-    {k:'tenure_under_18mo',     l:'Tenure < 18 months',    d:'tenure_months < 18'},
-    {k:'tenure_under_24mo',     l:'Tenure < 24 months',    d:'tenure_months < 24 (legacy)'},
-    {k:'tenure_36mo_plus',      l:'Tenure ≥ 36 months',    d:'tenure_months ≥ 36 (solid tenant)'},
-    {k:'red_bucket',            l:'Red Effective Bucket',  d:'effective_bucket == "red"'},
-    {k:'under_bumped',          l:'Under-bumped',          d:'bump_count < history_years (less than 1 bump/year on record)'},
-    {k:'cumul_bump_aggressive_annual', l:'Cumul Bump Aggressive', d:'(bump_total_pct / history_years) ≥ 7 (already pumped >=7%/year)'},
-    {k:'multitenant',           l:'Multitenant',           d:'tenant_ledger_count ≥ 2 (concentration risk: one tenant, multiple units)'},
+    // Positive (push proposed % UP toward gradient max)
+    {k:'below_market',          l:'Below Market',          d:'current_rent < market_rate', sign:'pos'},
+    {k:'below_site_median',     l:'Below Site Median',     d:'current_rent < site_median', sign:'pos'},
+    {k:'below_country_median',  l:'Below Country Median',  d:'current_rent < country_median', sign:'pos'},
+    {k:'below_top3',            l:'Below Top-3',           d:'current_rent < top3_rent', sign:'pos'},
+    {k:'below_top1',            l:'Below Top-1',           d:'current_rent < top1_rent', sign:'pos'},
+    {k:'tenure_36mo_plus',      l:'Tenure ≥ 36 months',    d:'tenure_months ≥ 36 (solid tenant)', sign:'pos'},
+    {k:'low_unit_risk',         l:'Low Unit Risk',         d:'0.70 ≤ unit_risk_factor < 0.90 (good category)', sign:'pos'},
+    {k:'very_low_unit_risk',    l:'Very Low Unit Risk',    d:'unit_risk_factor < 0.70 (great category)', sign:'pos'},
+    {k:'under_bumped',          l:'Under-bumped',          d:'bump_count < history_years (less than 1 bump/year on record)', sign:'pos'},
+
+    // Negative (pull proposed % DOWN toward gradient min)
+    {k:'above_market',          l:'Above Market (+15%)',   d:'current_rent > market_rate × 1.15', sign:'neg'},
+    {k:'above_site_median',     l:'Above Site Median',     d:'current_rent > site_median', sign:'neg'},
+    {k:'above_country_median',  l:'Above Country Median',  d:'current_rent > country_median', sign:'neg'},
+    {k:'above_top3',            l:'Above Top-3',           d:'current_rent > top3_rent', sign:'neg'},
+    {k:'above_top1',            l:'Above Top-1',           d:'current_rent > top1_rent', sign:'neg'},
+    {k:'high_unit_risk',        l:'High Unit Risk',        d:'1.10 < unit_risk_factor ≤ 1.30 (mutually exclusive)', sign:'neg'},
+    {k:'very_high_unit_risk',   l:'Very High Unit Risk',   d:'unit_risk_factor > 1.30', sign:'neg'},
+    {k:'tenure_under_18mo',     l:'Tenure < 18 months',    d:'tenure_months < 18', sign:'neg'},
+    {k:'tenure_under_24mo',     l:'Tenure < 24 months',    d:'tenure_months < 24 (legacy)', sign:'neg'},
+    {k:'red_bucket',            l:'Red Effective Bucket',  d:'effective_bucket == "red"', sign:'neg'},
+    {k:'cumul_bump_aggressive_annual', l:'Cumul Bump Aggressive', d:'(bump_total_pct / history_years) ≥ 7 (already pumped >=7%/year)', sign:'neg'},
+    {k:'multitenant',           l:'Multitenant',           d:'tenant_ledger_count ≥ 2 (concentration risk: one tenant, multiple units)', sign:'neg'},
 ];
 
 function factorFires(name, r) {
@@ -272,17 +292,20 @@ function readCountryOverridesFromUI() {
     return out;
 }
 
+function _factorRowHtml(m) {
+    const f = CONFIG.factors[m.k] || { enabled: true, weight: 0 };
+    return `<tr>
+        <td><input type="checkbox" data-factor="${m.k}" class="factor-enabled" ${f.enabled ? 'checked' : ''} onchange="onFactorChange()"></td>
+        <td><strong>${m.l}</strong></td>
+        <td><input type="number" step="0.1" min="-3" max="3" class="factor-weight" data-factor="${m.k}" value="${f.weight}" onchange="onFactorChange()" oninput="onFactorChange()"></td>
+        <td style="color:#666; font-size:0.85rem; font-family:monospace;">${m.d}</td>
+    </tr>`;
+}
 function renderFactors() {
-    const tbody = document.getElementById('factor-tbody');
-    tbody.innerHTML = PRICING_FACTOR_META.map(m => {
-        const f = CONFIG.factors[m.k] || { enabled: true, weight: 0 };
-        return `<tr>
-            <td><input type="checkbox" data-factor="${m.k}" class="factor-enabled" ${f.enabled ? 'checked' : ''} onchange="onFactorChange()"></td>
-            <td><strong>${m.l}</strong></td>
-            <td><input type="number" step="0.1" min="-3" max="3" class="factor-weight" data-factor="${m.k}" value="${f.weight}" onchange="onFactorChange()" oninput="onFactorChange()"></td>
-            <td style="color:#666; font-size:0.85rem; font-family:monospace;">${m.d}</td>
-        </tr>`;
-    }).join('');
+    document.getElementById('factor-tbody-pos').innerHTML =
+        PRICING_FACTOR_META.filter(m => m.sign === 'pos').map(_factorRowHtml).join('');
+    document.getElementById('factor-tbody-neg').innerHTML =
+        PRICING_FACTOR_META.filter(m => m.sign === 'neg').map(_factorRowHtml).join('');
 }
 
 function readConfigFromUI() {
