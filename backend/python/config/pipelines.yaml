@@ -112,32 +112,6 @@ pipelines:
     data_freshness:
       table: mimo
       date_column: extract_date
-  sugarcrm:
-    display_name: SugarCRM
-    description: Fetch CRM data (Leads, Contacts, Accounts)
-    module_path: datalayer.sugarcrm_to_sql
-    enabled: true
-    schedule:
-      type: cron
-      cron: 0 */3 * * *
-    default_args:
-      mode: auto
-    priority: 4
-    resource_group: http_api
-    max_db_connections: 3
-    estimated_duration_seconds: 10800
-    retry:
-      max_attempts: 5
-      delay_seconds: 600
-      backoff_multiplier: 2
-    timeout_seconds: 14400
-    data_freshness:
-      table: sugarcrm_leads
-      date_column: synced_at
-    sync:
-      strategy: watermark
-      watermark_field: date_modified
-      checkpoint_interval: 1000
   embedsocial:
     display_name: EmbedSocial Reviews
     description: Sync Google reviews from EmbedSocial API for review score tracking
@@ -159,49 +133,6 @@ pipelines:
     timeout_seconds: 600
     data_freshness:
       table: embedsocial_reviews
-      date_column: synced_at
-  google_ads:
-    display_name: Google Ads
-    description: Extract Google Ads data from BigQuery (esa_google_ads) into PostgreSQL for PBI reporting
-    module_path: datalayer.google_ads_to_sql
-    enabled: true
-    schedule:
-      type: cron
-      cron: 0 8 * * *
-    default_args:
-      mode: auto
-    priority: 5
-    resource_group: http_api
-    max_db_connections: 2
-    estimated_duration_seconds: 300
-    retry:
-      max_attempts: 3
-      delay_seconds: 300
-      backoff_multiplier: 2
-    timeout_seconds: 1800
-    data_freshness:
-      table: gads_campaign_daily
-      date_column: segments_date
-  calendar:
-    display_name: Outlook Calendar
-    description: Extract calendar events from configured Outlook mailboxes via Microsoft Graph
-    module_path: datalayer.calendar_to_sql
-    enabled: true
-    schedule:
-      type: manual
-    default_args:
-      mode: auto
-    priority: 8
-    resource_group: http_api
-    max_db_connections: 2
-    estimated_duration_seconds: 300
-    retry:
-      max_attempts: 3
-      delay_seconds: 300
-      backoff_multiplier: 2
-    timeout_seconds: 1200
-    data_freshness:
-      table: calendar_events
       date_column: synced_at
   zoom_contacts_sync:
     display_name: Zoom Contacts Sync
