@@ -177,7 +177,7 @@
             container.innerHTML = `<div style="overflow-x:auto;"><table>
                 <thead><tr>
                     <th>Site</th><th>Unit</th><th>Ledger</th><th>Tenant</th>
-                    <th>Old → New Rent</th><th>Pushed</th><th>Objection</th><th></th>
+                    <th>Old → New Rent</th><th>Pushed</th><th>Batch</th><th>Objection</th><th></th>
                 </tr></thead><tbody>` +
                 data.results.map(r => {
                     const objBadge = r.active_objection_count > 0
@@ -195,6 +195,7 @@
                         <td>${r.tenant_name || '-'}</td>
                         <td>${formatCurrency(r.old_rent)} → ${formatCurrency(r.new_rent)} <span style="color:#888; font-size:0.75rem;">${r.currency || ''} (+${r.increase_pct}%)</span></td>
                         <td style="font-size:0.8rem;">${formatDate(r.pushed_at)}</td>
+                        <td style="font-size:0.8rem;">${r.batch_name || '-'}</td>
                         <td>${objBadge}</td>
                         <td>${actionBtn}</td>
                     </tr>`;
