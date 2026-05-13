@@ -3494,6 +3494,22 @@ class ECRIObjection(Base, BaseModel):
         }
 
 
+class ECRIPricingConfig(Base, BaseModel):
+    """
+    Singleton (id=1) row holding the active ECRI Pricing tool config:
+    gradient bounds + per-factor enabled/weight definitions.
+
+    See docs/superpowers/specs/2026-05-13-ecri-pricing-proposal-algo-design.md.
+    """
+    __tablename__ = 'ecri_pricing_config'
+
+    id = Column(Integer, primary_key=True)
+    config = Column(JSONB, nullable=False)
+    updated_by = Column(String(255), nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
+
+
 # ============================================================================
 # EmbedSocial Reviews Model
 # ============================================================================

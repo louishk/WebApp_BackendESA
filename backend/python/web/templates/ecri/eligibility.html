@@ -123,6 +123,7 @@
                         <th title="Average of the 3 highest-rent sites in country for same size & climate">Top-3</th>
                         <th title="Highest-rent site in country for same size & climate">Top-1</th>
                         <th title="Closest LAD a rate change can land on (green=this cycle, amber=locked but unlocks before LAD, red=missed this cycle)">Next Effective</th>
+                        <th title="Proposed increase % computed from /ecri/pricing weights. Hover to see which factors fired.">Proposed %</th>
                     </tr>
                 </thead>
                 <tbody id="eligible-tbody"></tbody>
@@ -158,6 +159,7 @@
                         <th title="Average of the 3 highest-rent sites in country for same size &amp; climate">Top-3</th>
                         <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
                         <th title="Closest LAD a rate change can land on, after projected paid_thru + buffer">Next Effective</th>
+                        <th title="Proposed increase % computed from /ecri/pricing weights. Hover to see which factors fired.">Proposed %</th>
                         <th title="Composite unit-category risk factor (≈1.0 = average; lower = greener; based on country baseline + size/range/type/climate/shape/pillar factors)">Unit Risk</th>
                         <th>Moved In</th><th>Disc. Expires</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
@@ -192,6 +194,7 @@
                         <th title="Average of the 3 highest-rent sites in country for same size &amp; climate">Top-3</th>
                         <th title="Highest-rent site in country for same size &amp; climate">Top-1</th>
                         <th title="Closest LAD a rate change can land on, after projected paid_thru + buffer">Next Effective</th>
+                        <th title="Proposed increase % computed from /ecri/pricing weights. Hover to see which factors fired.">Proposed %</th>
                         <th title="Composite unit-category risk factor (≈1.0 = average; lower = greener; based on country baseline + size/range/type/climate/shape/pillar factors)">Unit Risk</th>
                         <th>Moved In</th>
                         <th>Paid Thru</th><th>Projected PT</th><th>Tenure (mo)</th>
@@ -322,6 +325,81 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         return `<span style="display:inline-block; padding:2px 6px; background:${color}; color:#fff; border-radius:3px; font-size:0.75rem; font-weight:600;" title="${t.unit_risk_band || ''} · factor ${t.unit_risk_factor}">${t.unit_risk_factor}${deltaStr}</span>`;
     }
 
+    // -------- Pricing / Proposed % (mirrors templates/ecri/pricing.html logic) --------
+    let PRICING_CONFIG = null;
+
+    function _proposedFires(name, r) {
+        switch (name) {
+            case 'below_market':          return r.current_rent != null && r.market_rate != null         && r.current_rent <  r.market_rate;
+            case 'below_site_median':     return r.current_rent != null && r.in_place_median_site != null && r.current_rent <  r.in_place_median_site;
+            case 'below_country_median':  return r.current_rent != null && r.country_rent_med != null    && r.current_rent <  r.country_rent_med;
+            case 'below_top3':            return r.current_rent != null && r.top3_rent != null            && r.current_rent <  r.top3_rent;
+            case 'below_top1':            return r.current_rent != null && r.top1_rent != null            && r.current_rent <  r.top1_rent;
+            case 'above_market':          return r.current_rent != null && r.market_rate != null         && r.current_rent >  r.market_rate;
+            case 'above_site_median':     return r.current_rent != null && r.in_place_median_site != null && r.current_rent >  r.in_place_median_site;
+            case 'above_country_median':  return r.current_rent != null && r.country_rent_med != null    && r.current_rent >  r.country_rent_med;
+            case 'above_top3':            return r.current_rent != null && r.top3_rent != null            && r.current_rent >  r.top3_rent;
+            case 'above_top1':            return r.current_rent != null && r.top1_rent != null            && r.current_rent >  r.top1_rent;
+            case 'high_unit_risk':        return r.unit_risk_factor != null && r.unit_risk_factor > 1.10;
+            case 'very_high_unit_risk':   return r.unit_risk_factor != null && r.unit_risk_factor > 1.30;
+            case 'tenure_under_24mo':     return r.tenure_months != null && r.tenure_months < 24;
+            case 'red_bucket':            return r.effective_bucket === 'red';
+        }
+        return false;
+    }
+
+    function computeProposed(row, config) {
+        if (!config) return null;
+        let positive = 0, negative = 0, maxPos = 0, maxNeg = 0;
+        const fired = [];
+        for (const [name, f] of Object.entries(config.factors || {})) {
+            if (!f.enabled) continue;
+            const w = Number(f.weight);
+            if (w > 0) maxPos += w;
+            else if (w < 0) maxNeg += -w;
+            if (_proposedFires(name, row)) {
+                fired.push(name);
+                if (w > 0) positive += w;
+                else if (w < 0) negative += -w;
+            }
+        }
+        const posNorm = maxPos > 0 ? positive / maxPos : 0;
+        const negNorm = maxNeg > 0 ? negative / maxNeg : 0;
+        const raw = posNorm - negNorm;
+        const minP = Number(config.gradient_min_pct);
+        const maxP = Number(config.gradient_max_pct);
+        const pct = minP + (maxP - minP) * Math.max(0, raw);
+        return { proposed_pct: Math.round(pct * 10) / 10, fired };
+    }
+
+    function decorateProposed(rows) {
+        if (!PRICING_CONFIG) return rows;
+        for (const r of rows) {
+            const p = computeProposed(r, PRICING_CONFIG);
+            if (p) {
+                r.proposed_pct = p.proposed_pct;
+                r.proposed_fired = p.fired;
+            }
+        }
+        return rows;
+    }
+
+    function proposedCell(t) {
+        if (t.proposed_pct == null) return '<span style="color:#999;">—</span>';
+        const fired = (t.proposed_fired || []).join(', ') || '(none)';
+        return `<span title="Fired: ${fired}" style="font-weight:600;">${t.proposed_pct}%</span>`;
+    }
+
+    async function ensurePricingConfig() {
+        if (PRICING_CONFIG) return PRICING_CONFIG;
+        try {
+            const res = await fetch('/ecri/api/pricing-config', { headers: apiHeaders() });
+            const data = await res.json();
+            if (!data.error) PRICING_CONFIG = data.config;
+        } catch (e) { /* leave PRICING_CONFIG null; proposed cell renders — */ }
+        return PRICING_CONFIG;
+    }
+
     // -------- Variance filters --------
     const FILTER_FIELDS = [
         {k: 'variance_vs_site',         l: 'Var vs Site (rent)'},
@@ -339,6 +417,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         {k: 'tenure_months',            l: 'Tenure (mo)'},
         {k: 'unit_risk_factor',         l: 'Unit Risk Factor'},
         {k: 'unit_risk_delta_pct',      l: 'Unit Risk Δ (%)'},
+        {k: 'proposed_pct',             l: 'Proposed %'},
         {k: 'next_effective_date',      l: 'Next Effective',     t: 'date'},
         {k: 'paid_thru',                l: 'Paid Thru',          t: 'date'},
         {k: 'projected_paid_thru',      l: 'Projected PT',       t: 'date'},
@@ -530,9 +609,10 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             const res = await fetch(`/ecri/api/eligible-tenants?${params}`, {headers: apiHeaders()});
             const data = await res.json();
             if (data.error) { alert('Error: ' + data.error); return; }
-            eligibleData = data.eligible;
+            await ensurePricingConfig();
+            eligibleData = decorateProposed(data.eligible);
             renderExclusionSummary(data.exclusion_summary);
-            renderEligibleTable(data.eligible);
+            renderEligibleTable(eligibleData);
             document.getElementById('filter-panel-card').style.display = 'block';
             const cs = document.getElementById('create-section');
             if (cs) { cs.style.display = 'block'; loadDraftBatches(); }
@@ -551,8 +631,9 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             const res = await fetch(`/ecri/api/advance-eligible?${params}`, {headers: apiHeaders()});
             const data = await res.json();
             if (data.error) { alert('Error: ' + data.error); return; }
-            advData.recent_movein  = data.segments.recent_movein  || [];
-            advData.heavy_prepayer = data.segments.heavy_prepayer || [];
+            await ensurePricingConfig();
+            advData.recent_movein  = decorateProposed(data.segments.recent_movein  || []);
+            advData.heavy_prepayer = decorateProposed(data.segments.heavy_prepayer || []);
             advSel.recent_movein.clear();
             advSel.heavy_prepayer.clear();
             renderAdvance();
@@ -585,7 +666,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
         const tbody = document.getElementById('eligible-tbody');
         document.getElementById('eligible-count').textContent = tenants.length;
         if (tenants.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; color:#666;">No eligible tenants found for selected criteria.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="15" style="text-align:center; color:#666;">No eligible tenants found for selected criteria.</td></tr>';
             document.getElementById('standard-results').style.display = 'block';
             return;
         }
@@ -607,6 +688,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${benchCell(t.top3_rent, t.variance_vs_top3, t.top3_psf, t.variance_psf_vs_top3)}</td>
                 <td>${benchCell(t.top1_rent, t.variance_vs_top1, t.top1_psf, t.variance_psf_vs_top1)}</td>
                 <td>${effDateCell(t)}</td>
+                <td>${proposedCell(t)}</td>
             </tr>
         `;
         }).join('');
@@ -661,6 +743,7 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
                 <td>${benchCell(t.top3_rent, t.variance_vs_top3, t.top3_psf, t.variance_psf_vs_top3)}</td>
                 <td>${benchCell(t.top1_rent, t.variance_vs_top1, t.top1_psf, t.variance_psf_vs_top1)}</td>
                 <td>${effDateCell(t)}</td>
+                <td>${proposedCell(t)}</td>
                 <td>${riskCell(t)}</td>
                 <td>${fmtDate(t.moved_in_date)}</td>
                 ${discCell}

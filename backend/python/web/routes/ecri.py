@@ -117,6 +117,14 @@ def batch_analytics(batch_id):
     return render_template('ecri/analytics.html', batch_id=batch_id)
 
 
+@ecri_bp.route('/pricing')
+@login_required
+@ecri_manage_required
+def pricing_page():
+    """Gradient + factor-weight config used to derive per-ledger Proposed %."""
+    return render_template('ecri/pricing.html')
+
+
 def get_app_db_session():
     """Get esa_backend (app) DB session — for reasons tables, users, roles."""
     return current_app.get_db_session()
@@ -3091,6 +3099,122 @@ def api_update_user_ecri_settings(user_id):
         return jsonify({'error': 'An internal error occurred'}), 500
     finally:
         db.close()
+
+
+# =============================================================================
+# API: Pricing Config (singleton ecri_pricing_config row, id=1)
+# =============================================================================
+
+PRICING_FACTOR_NAMES = (
+    'below_market', 'below_site_median', 'below_country_median',
+    'below_top3', 'below_top1',
+    'above_market', 'above_site_median', 'above_country_median',
+    'above_top3', 'above_top1',
+    'high_unit_risk', 'very_high_unit_risk',
+    'tenure_under_24mo', 'red_bucket',
+)
+
+
+def _validate_pricing_config(cfg):
+    """Return (cleaned_config, error_str_or_None)."""
+    if not isinstance(cfg, dict):
+        return None, 'config must be an object'
+    try:
+        gmin = float(cfg.get('gradient_min_pct'))
+        gmax = float(cfg.get('gradient_max_pct'))
+    except (TypeError, ValueError):
+        return None, 'gradient_min_pct and gradient_max_pct must be numeric'
+    if not (0 <= gmin < gmax <= 50):
+        return None, 'require 0 <= gradient_min_pct < gradient_max_pct <= 50'
+
+    raw_factors = cfg.get('factors') or {}
+    if not isinstance(raw_factors, dict):
+        return None, 'factors must be an object'
+
+    cleaned_factors = {}
+    for name in PRICING_FACTOR_NAMES:
+        f = raw_factors.get(name) or {}
+        if not isinstance(f, dict):
+            return None, f'factor {name} must be an object'
+        try:
+            weight = float(f.get('weight', 0))
+        except (TypeError, ValueError):
+            return None, f'factor {name} weight must be numeric'
+        if not (-3.0 <= weight <= 3.0):
+            return None, f'factor {name} weight must be between -3 and +3'
+        cleaned_factors[name] = {
+            'enabled': bool(f.get('enabled', True)),
+            'weight':  round(weight, 4),
+        }
+    return {
+        'gradient_min_pct': round(gmin, 2),
+        'gradient_max_pct': round(gmax, 2),
+        'factors': cleaned_factors,
+    }, None
+
+
+@ecri_bp.route('/api/pricing-config', methods=['GET'])
+@login_required
+@ecri_access_required
+def api_get_pricing_config():
+    """Return the active pricing config (singleton row id=1)."""
+    from common.models import ECRIPricingConfig
+    session = get_pbi_session()
+    try:
+        row = session.query(ECRIPricingConfig).filter_by(id=1).first()
+        if not row:
+            return jsonify({'error': 'Pricing config not initialised'}), 404
+        return jsonify({
+            'config': row.config,
+            'updated_by': row.updated_by,
+            'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+        })
+    except Exception as e:
+        current_app.logger.error(f"ECRI pricing config GET error: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+    finally:
+        session.close()
+
+
+@ecri_bp.route('/api/pricing-config', methods=['PUT'])
+@login_required
+@ecri_manage_required
+def api_put_pricing_config():
+    """Replace the active pricing config. Manager role required."""
+    from common.models import ECRIPricingConfig
+    from web.utils.audit import audit_log, AuditEvent
+
+    data = request.get_json() or {}
+    cleaned, err = _validate_pricing_config(data.get('config'))
+    if err:
+        return jsonify({'error': err}), 400
+
+    session = get_pbi_session()
+    try:
+        row = session.query(ECRIPricingConfig).filter_by(id=1).first()
+        if not row:
+            row = ECRIPricingConfig(id=1, config=cleaned)
+            session.add(row)
+        else:
+            row.config = cleaned
+            row.updated_by = current_user.username if current_user.is_authenticated else None
+        if current_user.is_authenticated:
+            row.updated_by = current_user.username
+        session.commit()
+        audit_log(AuditEvent.ECRI_PRICING_CONFIG_UPDATED,
+                  f"Pricing config updated by {row.updated_by}")
+        return jsonify({
+            'success': True,
+            'config': row.config,
+            'updated_by': row.updated_by,
+            'updated_at': row.updated_at.isoformat() if row.updated_at else None,
+        })
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"ECRI pricing config PUT error: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+    finally:
+        session.close()
 
 
 # =============================================================================

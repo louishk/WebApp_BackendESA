@@ -445,6 +445,9 @@
         <a href="{{ url_for('ecri.batches_list') }}" class="{{ 'active' if request.endpoint in ('ecri.batches_list','ecri.batch_review','ecri.batch_analytics','ecri.batch_create') else '' }}">Batches</a>
         <a href="{{ url_for('ecri.objections_dashboard') }}" class="{{ 'active' if request.endpoint == 'ecri.objections_dashboard' else '' }}">Objections</a>
         {% endif %}
+        {% if current_user.can_manage_ecri() %}
+        <a href="{{ url_for('ecri.pricing_page') }}" class="{{ 'active' if request.endpoint == 'ecri.pricing_page' else '' }}">Pricing</a>
+        {% endif %}
         {% if current_user.can_manage_ecri_reasons() %}
         <a href="{{ url_for('ecri.admin_ecri_reasons') }}" class="{{ 'active' if request.endpoint == 'ecri.admin_ecri_reasons' else '' }}">Reasons</a>
         {% endif %}
