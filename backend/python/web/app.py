@@ -126,8 +126,8 @@ def create_app(config=None, db_url=None):
                 if _pbi_engine is None:
                     _pbi_engine = create_engine(
                         get_database_url('pbi'),
-                        pool_size=3,
-                        max_overflow=5,
+                        pool_size=5,
+                        max_overflow=10,
                         pool_pre_ping=True,
                         pool_recycle=300,
                     )
