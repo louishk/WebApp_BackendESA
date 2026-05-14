@@ -39,7 +39,7 @@ def risk_inventory_json():
     from common.risk_lookup import (
         FactorRow, compute_risk, resolve_effective_factor,
     )
-    from datalayer.unit_category_risk import _explode_dims
+    from sync_service.pipelines.unit_category_risk import _explode_dims
 
     country_code = (request.args.get("country") or "").strip().upper()
     cfg = get_config().get_section("risk").to_dict()

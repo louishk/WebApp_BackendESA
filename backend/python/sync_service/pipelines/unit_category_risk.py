@@ -1,10 +1,14 @@
-"""Unit-category risk pipeline — computes country baseline + per-dimension factors.
+"""
+UnitCategoryRiskPipeline — compute country-scoped move-out risk factors.
 
 Reads from esa_pbi: rentroll (occupancy), mimo (move-outs), siteinfo (country).
 Writes to esa_pbi: unit_category_risk_baseline, unit_category_risk_factor,
 unit_category_risk_history.
 
 Spec: docs/superpowers/specs/2026-05-04-unit-category-risk-design.md
+
+Scope keys honoured (all optional):
+  - country_code: 'SG' | 'MY' | 'HK' | 'KR'  → recompute one country only
 """
 from __future__ import annotations
 
@@ -12,14 +16,17 @@ import datetime as dt
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from sync_service.pipelines.base import BasePipeline, RunResult
+
 logger = logging.getLogger(__name__)
 
 DAYS_PER_MONTH = Decimal("30.4375")
+DIMENSIONS = ("size", "range", "type", "climate", "shape", "pillar")
 
 
 @dataclass
@@ -30,6 +37,34 @@ class BaselineResult:
     moveout_count: int
     unit_months_occupied: Decimal
     baseline_rate: Decimal
+
+
+@dataclass
+class CellFactor:
+    dimension: str
+    value: str
+    sample_size: int
+    unit_months_occupied: Decimal
+    empirical_factor: Optional[Decimal]
+    is_thin_data: bool
+
+
+def _explode_dims(s_type_name: str) -> dict[str, str]:
+    """Parse sTypeName via SOP parser; return {dim: value}, empty on failure."""
+    from common.stype_name_parser import parse_stype_name
+    if not s_type_name:
+        return {}
+    parsed = parse_stype_name(s_type_name)
+    if not parsed.parse_ok:
+        return {}
+    return {
+        "size":    parsed.size_category or "",
+        "range":   parsed.size_range or "",
+        "type":    parsed.unit_type or "",
+        "climate": parsed.climate_type or "",
+        "shape":   parsed.unit_shape or "",
+        "pillar":  parsed.pillar or "",
+    }
 
 
 def compute_country_baseline(session: Session,
@@ -81,38 +116,6 @@ def compute_country_baseline(session: Session,
     )
 
 
-from common.stype_name_parser import parse_stype_name
-
-DIMENSIONS = ("size", "range", "type", "climate", "shape", "pillar")
-
-
-@dataclass
-class CellFactor:
-    dimension: str
-    value: str
-    sample_size: int
-    unit_months_occupied: Decimal
-    empirical_factor: Optional[Decimal]
-    is_thin_data: bool
-
-
-def _explode_dims(s_type_name: str) -> dict[str, str]:
-    """Parse sTypeName via SOP parser; return {dim: value}, empty on failure."""
-    if not s_type_name:
-        return {}
-    parsed = parse_stype_name(s_type_name)
-    if not parsed.parse_ok:
-        return {}
-    return {
-        "size":    parsed.size_category or "",
-        "range":   parsed.size_range or "",
-        "type":    parsed.unit_type or "",
-        "climate": parsed.climate_type or "",
-        "shape":   parsed.unit_shape or "",
-        "pillar":  parsed.pillar or "",
-    }
-
-
 def compute_cell_factors(session: Session,
                          country_name: str,
                          window_start: dt.date,
@@ -132,8 +135,6 @@ def compute_cell_factors(session: Session,
 
     # Backfill historical events with each unit's CURRENT sTypeName, since SOP
     # naming is recent in SiteLink and most legacy events carry pre-SOP names.
-    # Assumption: a unit's physical attributes (size/type/climate/...) don't
-    # meaningfully change after rename, so today's parsed dimensions apply.
     occ_rows = session.execute(text("""
         WITH latest AS (
             SELECT "SiteID", "sUnit", "sTypeName" FROM (
@@ -219,9 +220,6 @@ def compute_cell_factors(session: Session,
     return cells
 
 
-from common.risk_lookup import resolve_effective_factor
-
-
 def upsert_baseline(session: Session, country_code: str, baseline: BaselineResult) -> None:
     session.execute(text("""
         INSERT INTO unit_category_risk_baseline
@@ -244,12 +242,8 @@ def upsert_baseline(session: Session, country_code: str, baseline: BaselineResul
 
 
 def upsert_factors(session: Session, country_code: str, cells: list[CellFactor]) -> None:
-    """UPSERT cells; preserve override_*; recompute effective_factor.
-
-    Reads existing override (if any) per cell, computes effective via
-    resolve_effective_factor, and writes that. Override columns themselves
-    are not touched in the UPDATE branch.
-    """
+    """UPSERT cells; preserve override_*; recompute effective_factor."""
+    from common.risk_lookup import resolve_effective_factor
     for c in cells:
         existing = session.execute(text("""
             SELECT override_factor FROM unit_category_risk_factor
@@ -301,7 +295,7 @@ def snapshot_history(session: Session, country_code: str,
 
 
 def run(country_code: Optional[str] = None) -> dict:
-    """Pipeline entry point. Called by APScheduler and by /api/risk/recompute.
+    """Public entry point. Called by /api/risk/recompute and by the pipeline class.
 
     If country_code is given, only that country is recomputed; otherwise all
     countries listed in risk.yaml are processed.
@@ -327,7 +321,7 @@ def run(country_code: Optional[str] = None) -> dict:
     window_end = today
     window_start = today.replace(year=today.year - window_years)
     snapshot_month = today.replace(day=1)
-    summary = {"countries": [], "errors": []}
+    summary: dict = {"countries": [], "errors": []}
 
     try:
         for code, name in targets.items():
@@ -351,7 +345,6 @@ def run(country_code: Optional[str] = None) -> dict:
                         f"moveouts={baseline.moveout_count}",
                     )
                 except RuntimeError:
-                    # Outside Flask request context (cron/CLI run); log to module logger instead
                     logger.info(
                         "RISK_RECOMPUTE country=%s factors=%d baseline_rate=%.6f moveouts=%d",
                         code, len(cells), float(baseline.baseline_rate),
@@ -373,6 +366,32 @@ def run(country_code: Optional[str] = None) -> dict:
     return summary
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    print(run())
+class UnitCategoryRiskPipeline(BasePipeline):
+
+    def _execute(self, scope: Dict[str, Any]) -> RunResult:
+        country_code = scope.get('country_code')
+        summary = run(country_code=country_code)
+
+        countries = summary.get('countries', []) or []
+        errors = summary.get('errors', []) or []
+        records = sum(c.get('factors_written', 0) for c in countries)
+
+        if errors and not countries:
+            return RunResult(
+                status='failed',
+                records=records,
+                scope=scope,
+                error=f"{len(errors)} country recompute(s) failed: {errors[0].get('error', '')[:200]}",
+                metadata={'errors': errors},
+            )
+
+        self.log.info(
+            f"unit_category_risk complete: countries={len(countries)} "
+            f"factors={records} errors={len(errors)}"
+        )
+        return RunResult(
+            status='refreshed',
+            records=records,
+            scope=scope,
+            metadata={'countries': countries, 'errors': errors},
+        )

@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import create_engine, Column, Integer, Date, Boolean, String, DateTime
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-from datalayer.unit_category_risk import compute_country_baseline
+from sync_service.pipelines.unit_category_risk import compute_country_baseline
 
 Base = declarative_base()
 
@@ -79,7 +79,7 @@ def test_baseline_rate_korea(session):
     assert float(result.baseline_rate) == pytest.approx(12 / expected_um, rel=1e-3)
 
 
-from datalayer.unit_category_risk import compute_cell_factors
+from sync_service.pipelines.unit_category_risk import compute_cell_factors
 
 
 def test_cell_factors_size_S(session):
@@ -102,7 +102,7 @@ def test_cell_factors_size_S(session):
     assert not any(c for c in cells if c.dimension == "size" and c.value == "M")
 
 
-from datalayer.unit_category_risk import upsert_factors, upsert_baseline
+from sync_service.pipelines.unit_category_risk import upsert_factors, upsert_baseline
 from sqlalchemy import text
 
 

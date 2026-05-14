@@ -234,7 +234,7 @@ def post_recompute():
     if country and not isinstance(country, str):
         return jsonify({"error": "country must be a string"}), 400
     try:
-        from datalayer.unit_category_risk import run as run_pipeline
+        from sync_service.pipelines.unit_category_risk import run as run_pipeline
         summary = run_pipeline(country_code=country.upper() if country else None)
         return jsonify({"status": "success", "data": summary})
     except Exception:
