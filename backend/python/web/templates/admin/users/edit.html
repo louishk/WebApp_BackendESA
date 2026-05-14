@@ -88,16 +88,27 @@
     <summary style="font-size: 1.1rem; font-weight: 600; cursor: pointer; padding: 0.25rem 0;">Access</summary>
     <div style="margin-top: 1rem;">
         <p style="color: #666; font-size: 0.85rem; margin-bottom: 1rem;">
-            Restrict this user to specific sites and set ECRI approval limits. Leave sites empty for unrestricted access.
+            Restrict this user to specific sites and set ECRI approval limits.
         </p>
 
         <div style="margin-bottom: 1.25rem;">
-            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Allowed Sites</label>
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 500;">Site Access Mode</label>
+            <div style="display: flex; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                <label style="font-weight: normal; cursor: pointer;">
+                    <input type="radio" name="access-mode" value="all" id="access-mode-all"> All sites (unrestricted)
+                </label>
+                <label style="font-weight: normal; cursor: pointer;">
+                    <input type="radio" name="access-mode" value="restricted" id="access-mode-restricted"> Specific sites
+                </label>
+                <label style="font-weight: normal; cursor: pointer;">
+                    <input type="radio" name="access-mode" value="none" id="access-mode-none"> No sites (blocked)
+                </label>
+            </div>
             <select id="access-site-select" multiple
-                    style="width: 100%; max-width: 500px; padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.95rem; min-height: 120px;">
+                    style="width: 100%; max-width: 500px; padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.95rem; min-height: 120px; display: none;">
                 <option disabled>Loading sites…</option>
             </select>
-            <p style="color: #666; font-size: 0.85rem; margin-top: 0.4rem;">Hold Ctrl (or Cmd) to select multiple. Empty = unrestricted.</p>
+            <p id="access-site-hint" style="color: #666; font-size: 0.85rem; margin-top: 0.4rem;">Hold Ctrl (or Cmd) to select multiple.</p>
         </div>
 
         <div style="display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
@@ -229,33 +240,78 @@
 {% if user %}
 <script>
 (function () {
+    // null → unrestricted, [] → blocked, [...] → restricted (tri-state).
     const currentSiteIds = {{ allowed_site_ids | tojson }};
+
+    const sel = document.getElementById('access-site-select');
+    const hint = document.getElementById('access-site-hint');
+    const radioAll = document.getElementById('access-mode-all');
+    const radioRestricted = document.getElementById('access-mode-restricted');
+    const radioNone = document.getElementById('access-mode-none');
+
+    // Initialise radio from current value.
+    if (currentSiteIds === null) {
+        radioAll.checked = true;
+    } else if (Array.isArray(currentSiteIds) && currentSiteIds.length === 0) {
+        radioNone.checked = true;
+    } else {
+        radioRestricted.checked = true;
+    }
+
+    function applyMode() {
+        const mode = document.querySelector('input[name="access-mode"]:checked').value;
+        if (mode === 'restricted') {
+            sel.style.display = '';
+            hint.textContent = 'Hold Ctrl (or Cmd) to select multiple.';
+        } else if (mode === 'none') {
+            sel.style.display = 'none';
+            hint.textContent = 'User will see no sites.';
+        } else {
+            sel.style.display = 'none';
+            hint.textContent = 'User can see every site.';
+        }
+    }
+    [radioAll, radioRestricted, radioNone].forEach(r => r.addEventListener('change', applyMode));
+    applyMode();
 
     fetch('/api/me/sites')
         .then(r => r.json())
         .then(data => {
             const sites = data.sites || [];
-            const sel = document.getElementById('access-site-select');
             sel.innerHTML = '';
             if (!sites.length) {
                 sel.innerHTML = '<option disabled>No sites available</option>';
                 return;
             }
+            const current = new Set(Array.isArray(currentSiteIds) ? currentSiteIds : []);
             sites.forEach(s => {
                 const opt = document.createElement('option');
                 opt.value = s.site_id;
                 opt.textContent = s.site_code + ' — ' + s.name;
-                if (currentSiteIds.includes(s.site_id)) opt.selected = true;
+                if (current.has(s.site_id)) opt.selected = true;
                 sel.appendChild(opt);
             });
         })
         .catch(() => {
-            document.getElementById('access-site-select').innerHTML = '<option disabled>Failed to load sites</option>';
+            sel.innerHTML = '<option disabled>Failed to load sites</option>';
         });
 
     window.saveAccess = function () {
-        const sel = document.getElementById('access-site-select');
-        const siteIds = Array.from(sel.selectedOptions).map(o => parseInt(o.value, 10));
+        const mode = document.querySelector('input[name="access-mode"]:checked').value;
+        let payloadSiteIds;
+        if (mode === 'all') {
+            payloadSiteIds = null;
+        } else if (mode === 'none') {
+            payloadSiteIds = [];
+        } else {
+            payloadSiteIds = Array.from(sel.selectedOptions).map(o => parseInt(o.value, 10));
+            if (payloadSiteIds.length === 0) {
+                const feedback = document.getElementById('access-feedback');
+                feedback.style.color = '#dc2626';
+                feedback.textContent = 'Pick at least one site, or switch to All / No sites.';
+                return;
+            }
+        }
         const maxPct = parseFloat(document.getElementById('access-max-pct').value) || 0;
         const maxAbs = parseFloat(document.getElementById('access-max-abs').value) || 0;
         const feedback = document.getElementById('access-feedback');
@@ -267,7 +323,7 @@
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                allowed_site_ids: siteIds,
+                allowed_site_ids: payloadSiteIds,
                 ecri_max_pct_reduction: maxPct,
                 ecri_max_abs_reduction: maxAbs,
             }),

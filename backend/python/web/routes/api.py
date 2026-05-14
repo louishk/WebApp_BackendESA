@@ -701,7 +701,8 @@ def api_me_sites():
         # display something more useful than an empty dropdown.
         return jsonify({'error': 'Site list temporarily unavailable', 'sites': []}), 503
 
-    if not current_user.allowed_site_ids:
+    # Semantics: NULL = unrestricted, [] = blocked, [...] = restricted.
+    if current_user.allowed_site_ids is None:
         return jsonify({'sites': all_sites, 'unrestricted': True})
     s = set(current_user.allowed_site_ids)
     return jsonify({

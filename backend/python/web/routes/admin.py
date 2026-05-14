@@ -567,7 +567,7 @@ def edit_user(user_id):
             if not role_ids:
                 flash('At least one role is required.', 'error')
                 return render_template('admin/users/edit.html', user=user, roles=roles,
-                    allowed_site_ids=user.allowed_site_ids or [],
+                    allowed_site_ids=(list(user.allowed_site_ids) if user.allowed_site_ids is not None else None),
                     ecri_max_pct_reduction=float(user.ecri_max_pct_reduction or 0),
                     ecri_max_abs_reduction=float(user.ecri_max_abs_reduction or 0))
 
@@ -576,7 +576,7 @@ def edit_user(user_id):
             if len(selected_roles) != len(role_ids):
                 flash('One or more invalid roles.', 'error')
                 return render_template('admin/users/edit.html', user=user, roles=roles,
-                    allowed_site_ids=user.allowed_site_ids or [],
+                    allowed_site_ids=(list(user.allowed_site_ids) if user.allowed_site_ids is not None else None),
                     ecri_max_pct_reduction=float(user.ecri_max_pct_reduction or 0),
                     ecri_max_abs_reduction=float(user.ecri_max_abs_reduction or 0))
 
@@ -590,7 +590,7 @@ def edit_user(user_id):
                 if not is_valid:
                     flash(message, 'error')
                     return render_template('admin/users/edit.html', user=user, roles=roles,
-                        allowed_site_ids=user.allowed_site_ids or [],
+                        allowed_site_ids=(list(user.allowed_site_ids) if user.allowed_site_ids is not None else None),
                         ecri_max_pct_reduction=float(user.ecri_max_pct_reduction or 0),
                         ecri_max_abs_reduction=float(user.ecri_max_abs_reduction or 0))
                 user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -615,7 +615,7 @@ def edit_user(user_id):
             'admin/users/edit.html',
             user=user,
             roles=roles,
-            allowed_site_ids=user.allowed_site_ids or [],
+            allowed_site_ids=(list(user.allowed_site_ids) if user.allowed_site_ids is not None else None),
             ecri_max_pct_reduction=float(user.ecri_max_pct_reduction or 0),
             ecri_max_abs_reduction=float(user.ecri_max_abs_reduction or 0),
         )

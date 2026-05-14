@@ -144,8 +144,10 @@
                     {% endif %}
                 </td>
                 <td style="white-space: nowrap; font-size: 0.78rem;">
-                    {% if not user.allowed_site_ids %}
+                    {% if user.allowed_site_ids is none %}
                         <span style="background:#d1fae5; color:#065f46; padding:1px 8px; border-radius:10px;">All sites</span>
+                    {% elif user.allowed_site_ids|length == 0 %}
+                        <span style="background:#fee2e2; color:#b91c1c; padding:1px 8px; border-radius:10px;">No access</span>
                     {% else %}
                         {% set _codes = [] %}
                         {% for sid in user.allowed_site_ids %}

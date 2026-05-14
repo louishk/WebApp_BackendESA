@@ -1969,10 +1969,13 @@ def api_objections_search():
         """)
         rows = session.execute(sql, {'like_q': f'%{q}%', 'exact_q': q}).fetchall()
 
-        allowed = set(getattr(current_user, 'allowed_site_ids', None) or [])
+        # NULL = unrestricted; [] = blocked (no rows visible); [...] = restricted.
+        raw = getattr(current_user, 'allowed_site_ids', None)
+        unrestricted = raw is None
+        allowed = set(raw or [])
         results = []
         for r in rows:
-            if allowed and r.site_id not in allowed:
+            if not unrestricted and r.site_id not in allowed:
                 continue
             results.append({
                 'batch_ledger_id': r.batch_ledger_id,
@@ -2596,8 +2599,9 @@ def api_batch_exclusions(batch_id):
             ECRIBatchLedger.batch_id == batch_id,
             ECRIBatchLedger.exclusion_status != 'none',
         )
-        # Site scoping for ops
-        if current_user.allowed_site_ids:
+        # Site scoping for ops. NULL = unrestricted; [] = blocked (no rows);
+        # [...] = restricted to listed sites.
+        if current_user.allowed_site_ids is not None:
             q = q.filter(ECRIBatchLedger.site_id.in_(current_user.allowed_site_ids))
 
         rows = q.order_by(ECRIBatchLedger.site_id, ECRIBatchLedger.ledger_id).all()
@@ -2738,7 +2742,8 @@ def api_list_objections():
     try:
         q = session.query(ECRIObjection)
 
-        if current_user.allowed_site_ids:
+        # NULL = unrestricted; [] = blocked; [...] = restricted.
+        if current_user.allowed_site_ids is not None:
             q = q.filter(ECRIObjection.site_id.in_(current_user.allowed_site_ids))
         if site_filter:
             try:
@@ -3187,7 +3192,15 @@ def api_update_user_ecri_settings(user_id):
             user.ecri_max_abs_reduction = float(data['ecri_max_abs_reduction'])
         if 'allowed_site_ids' in data:
             site_ids = data['allowed_site_ids']
-            user.allowed_site_ids = [int(x) for x in site_ids] if site_ids else None
+            # Semantics: None → unrestricted; [] → blocked; [...] → restricted.
+            # The empty-list / None distinction is intentional and must be
+            # preserved end-to-end.
+            if site_ids is None:
+                user.allowed_site_ids = None
+            elif isinstance(site_ids, list):
+                user.allowed_site_ids = [int(x) for x in site_ids]
+            else:
+                return jsonify({'error': 'allowed_site_ids must be a list or null'}), 400
             audit_log(AuditEvent.ECRI_USER_SITES_CHANGED,
                       f"User {user_id} allowed_site_ids set to {user.allowed_site_ids}")
         audit_log(AuditEvent.ECRI_USER_LIMITS_CHANGED,

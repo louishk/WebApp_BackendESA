@@ -128,10 +128,19 @@ class User(Base, UserMixin):
         return any(r.can_manage_ecri_reasons for r in self.roles)
 
     def can_see_site(self, site_id):
-        """True if user has no site restriction, or site_id is in their allowed list."""
-        if not self.allowed_site_ids:
+        """Site-access gate.
+
+        Semantics of `allowed_site_ids`:
+          - NULL  → unrestricted (all sites)
+          - []    → blocked (no sites)
+          - [...] → restricted to listed sites
+        """
+        if self.allowed_site_ids is None:
             return True
-        return site_id in self.allowed_site_ids
+        try:
+            return int(site_id) in self.allowed_site_ids
+        except (TypeError, ValueError):
+            return False
 
     def ecri_limits(self):
         """Return (max_pct_reduction, max_abs_reduction) as floats."""
