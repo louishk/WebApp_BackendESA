@@ -16,10 +16,8 @@ from web.models.base import Base
 API_SCOPES = {
     'discount_plans:read': 'Read discount plans',
     'discount_plans:write': 'Create / update discount plans',
-    'scheduler:read': 'Read scheduler jobs and history',
-    'scheduler:write': 'Trigger and manage scheduler jobs',
-    'sync:read': 'Read sync orchestrator pipelines and state',
-    'sync:write': 'Manage sync orchestrator pipelines, trigger runs, reset state',
+    'sync:read': 'Read sync orchestrator pipelines, runs, and history',
+    'sync:write': 'Trigger pipeline runs, manage config, restart services',
     'ecri:read': 'Read ECRI batches and eligibility',
     'statistics:read': 'Read API usage statistics',
     'inventory:read': 'Read unit inventory data',

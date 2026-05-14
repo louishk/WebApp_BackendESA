@@ -138,7 +138,7 @@ def get_pbi_session():
 
 @api_bp.route('/status')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 @cached(ttl_seconds=10)
 def api_status():
     """Get scheduler status."""
@@ -202,7 +202,7 @@ def health():
 
 @api_bp.route('/jobs')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_list_jobs():
     """List all scheduled jobs."""
     from scheduler.utils import cron_to_human
@@ -231,7 +231,7 @@ def api_list_jobs():
 
 @api_bp.route('/jobs/<pipeline>')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_get_job(pipeline):
     """Get job details."""
     from scheduler.utils import cron_to_human
@@ -264,7 +264,7 @@ def api_get_job(pipeline):
 
 @api_bp.route('/jobs/<pipeline>', methods=['PUT'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_update_job(pipeline):
     """Update pipeline schedule/settings."""
@@ -329,7 +329,7 @@ def api_update_job(pipeline):
 
 @api_bp.route('/jobs/<pipeline>/enable', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_enable_job(pipeline):
     """Enable a pipeline."""
@@ -353,7 +353,7 @@ def api_enable_job(pipeline):
 
 @api_bp.route('/jobs/<pipeline>/disable', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_disable_job(pipeline):
     """Disable a pipeline."""
@@ -377,7 +377,7 @@ def api_disable_job(pipeline):
 
 @api_bp.route('/schedules/presets')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_schedule_presets():
     """Get available schedule presets."""
     from scheduler.utils import SCHEDULE_PRESETS
@@ -386,7 +386,7 @@ def api_schedule_presets():
 
 @api_bp.route('/jobs/upcoming')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_upcoming_jobs():
     """Get upcoming scheduled executions."""
     from scheduler.utils import cron_to_human
@@ -489,7 +489,7 @@ def _validate_pipeline_specific_args(args):
 
 @api_bp.route('/data-freshness')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 @cached(ttl_seconds=60)
 def api_data_freshness():
     """Get latest data dates for all pipelines."""
@@ -575,7 +575,7 @@ def api_data_freshness():
 
 @api_bp.route('/jobs/<pipeline>/run-async', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_run_job_async(pipeline):
     """Trigger job execution asynchronously."""
@@ -671,7 +671,7 @@ def api_run_job_async(pipeline):
 
 @api_bp.route('/executions/<execution_id>/output')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_get_execution_output(execution_id):
     """Get current output for a running execution."""
     from scheduler.executor import get_execution_output
@@ -685,7 +685,7 @@ def api_get_execution_output(execution_id):
 
 @api_bp.route('/executions/<execution_id>/stream')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_stream_execution(execution_id):
     """Server-Sent Events stream of execution output."""
     from scheduler.executor import get_execution_output
@@ -731,7 +731,7 @@ def api_stream_execution(execution_id):
 
 @api_bp.route('/jobs/<pipeline>/run', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_run_job(pipeline):
     """Trigger job execution (synchronous)."""
@@ -776,7 +776,7 @@ def api_run_job(pipeline):
 
 @api_bp.route('/history')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 @cached(ttl_seconds=15)
 def api_list_history():
     """List execution history with pagination."""
@@ -827,7 +827,7 @@ def api_list_history():
 
 @api_bp.route('/history/<execution_id>')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_get_execution(execution_id):
     """Get execution details by execution ID."""
     from scheduler.models import JobHistory
@@ -856,7 +856,7 @@ def api_get_execution(execution_id):
 
 @api_bp.route('/history/stats')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 @cached(ttl_seconds=30)
 def api_history_stats():
     """Get execution statistics."""
@@ -903,7 +903,7 @@ def api_history_stats():
 
 @api_bp.route('/history/<int:history_id>')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_get_history_detail(history_id):
     """Get detailed execution record."""
     from scheduler.models import JobHistory
@@ -937,7 +937,7 @@ def api_get_history_detail(history_id):
 
 @api_bp.route('/history/cleanup-stale', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 def api_cleanup_stale():
     """Mark stale running jobs as failed."""
     from scheduler.models import JobHistory
@@ -971,7 +971,7 @@ def api_cleanup_stale():
 
 @api_bp.route('/resources')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_resources():
     """Get current resource usage."""
     from scheduler.resource_manager import get_resource_manager
@@ -986,7 +986,7 @@ def api_resources():
 
 @api_bp.route('/config')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_config():
     """Get scheduler configuration."""
     config = _get_scheduler_config()
@@ -1017,7 +1017,7 @@ _scheduler_process = None
 
 @api_bp.route('/services/status')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_services_status():
     """Get status of scheduler services."""
     from scheduler.models import SchedulerState
@@ -1137,191 +1137,56 @@ def api_services_status():
         session.close()
 
 
-@api_bp.route('/services/scheduler/start', methods=['POST'])
+# Systemd units exposed for remote control via /api/services/<svc>/<action>.
+# esa-backend is deliberately excluded (can't restart yourself); backend-scheduler
+# stays in the allowlist only until the daemon is fully retired (PR D).
+_SERVICE_ALLOWLIST = {'backend-mcp', 'backend-orchestrator', 'backend-scheduler'}
+_ACTION_ALLOWLIST = {'start', 'stop', 'restart'}
+
+
+@api_bp.route('/services/<service>/<action>', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=5, window_seconds=60)
-def api_start_scheduler():
-    """Start the scheduler daemon as a background process."""
+def api_service_action(service, action):
+    """Generic systemctl-backed service control.
+
+    POST /api/services/<service>/<action>
+      service: backend-mcp | backend-orchestrator | backend-scheduler
+      action:  start | stop | restart
+    """
     import subprocess
-    import os
-    from pathlib import Path
 
-    # Check if already running
-    from scheduler.models import SchedulerState
-    session = get_session()
-    try:
-        state = session.query(SchedulerState).filter_by(id=1).first()
-        if state and state.pid:
-            try:
-                os.kill(state.pid, 0)
-                if state.status == 'running':
-                    return jsonify({
-                        'success': False,
-                        'error': f'Scheduler already running (PID {state.pid})'
-                    }), 400
-            except (OSError, ProcessLookupError):
-                pass  # Process not running, ok to start
-    finally:
-        session.close()
-
-    # Start scheduler daemon
-    working_dir = Path(__file__).parent.parent.parent
-    log_file = working_dir / 'logs' / 'scheduler.log'
-    log_file.parent.mkdir(exist_ok=True)
+    if service not in _SERVICE_ALLOWLIST:
+        return jsonify({'success': False, 'error': f'Unknown service: {service}'}), 400
+    if action not in _ACTION_ALLOWLIST:
+        return jsonify({'success': False, 'error': f'Unknown action: {action}'}), 400
 
     try:
-        # Start as background process
-        with open(log_file, 'a') as log:
-            process = subprocess.Popen(
-                ['python3.12', '-m', 'scheduler.cli.main', 'daemon', 'start', '--foreground'],
-                cwd=str(working_dir),
-                stdout=log,
-                stderr=log,
-                start_new_session=True,  # Detach from parent
-            )
-
-        return jsonify({
-            'success': True,
-            'message': 'Scheduler daemon starting...',
-            'pid': process.pid,
-            'log_file': str(log_file)
-        })
-
-    except Exception as e:
-        current_app.logger.error(f"Failed to start scheduler: {e}")
+        result = subprocess.run(
+            ['sudo', 'systemctl', action, service],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'message': f'{service}: {action} dispatched',
+            })
+        current_app.logger.error(
+            "systemctl %s %s failed: %s", action, service, result.stderr,
+        )
         return jsonify({
             'success': False,
-            'error': 'Failed to start scheduler service'
+            'error': f'Failed to {action} {service}',
         }), 500
-
-
-@api_bp.route('/services/scheduler/stop', methods=['POST'])
-@require_auth
-@require_api_scope('scheduler:write')
-@rate_limit_api(max_requests=5, window_seconds=60)
-def api_stop_scheduler():
-    """Stop the scheduler daemon."""
-    import os
-    import signal
-    from scheduler.models import SchedulerState
-
-    session = get_session()
-    try:
-        state = session.query(SchedulerState).filter_by(id=1).first()
-
-        if not state or not state.pid:
-            return jsonify({
-                'success': False,
-                'error': 'No scheduler process found'
-            }), 400
-
-        pid = state.pid
-
-        try:
-            # Send SIGTERM for graceful shutdown
-            os.kill(pid, signal.SIGTERM)
-
-            # Update state
-            state.status = 'stopping'
-            session.commit()
-
-            return jsonify({
-                'success': True,
-                'message': f'Stop signal sent to scheduler (PID {pid})',
-                'pid': pid
-            })
-
-        except ProcessLookupError:
-            # Process already dead, clean up state
-            state.status = 'stopped'
-            session.commit()
-            return jsonify({
-                'success': True,
-                'message': 'Scheduler was not running, state cleaned up'
-            })
-
-        except PermissionError:
-            current_app.logger.error(f"Permission denied to stop scheduler process {pid}")
-            return jsonify({
-                'success': False,
-                'error': 'Permission denied to stop scheduler'
-            }), 403
-
-    finally:
-        session.close()
-
-
-@api_bp.route('/services/mcp/start', methods=['POST'])
-@require_auth
-@require_api_scope('scheduler:write')
-@rate_limit_api(max_requests=5, window_seconds=60)
-def api_start_mcp():
-    """Start the MCP server via systemctl."""
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ['sudo', 'systemctl', 'start', 'backend-mcp'],
-            capture_output=True, text=True, timeout=15
+    except Exception:
+        current_app.logger.exception(
+            "Exception running systemctl %s %s", action, service,
         )
-        if result.returncode == 0:
-            return jsonify({'success': True, 'message': 'MCP server starting...'})
-        else:
-            current_app.logger.error(f"Failed to start MCP: {result.stderr}")
-            return jsonify({'success': False, 'error': 'Failed to start MCP server'}), 500
-    except Exception as e:
-        current_app.logger.error(f"Failed to start MCP: {e}")
-        return jsonify({'success': False, 'error': 'Failed to start MCP server'}), 500
-
-
-@api_bp.route('/services/mcp/stop', methods=['POST'])
-@require_auth
-@require_api_scope('scheduler:write')
-@rate_limit_api(max_requests=5, window_seconds=60)
-def api_stop_mcp():
-    """Stop the MCP server via systemctl."""
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ['sudo', 'systemctl', 'stop', 'backend-mcp'],
-            capture_output=True, text=True, timeout=15
-        )
-        if result.returncode == 0:
-            return jsonify({'success': True, 'message': 'MCP server stopped'})
-        else:
-            current_app.logger.error(f"Failed to stop MCP: {result.stderr}")
-            return jsonify({'success': False, 'error': 'Failed to stop MCP server'}), 500
-    except Exception as e:
-        current_app.logger.error(f"Failed to stop MCP: {e}")
-        return jsonify({'success': False, 'error': 'Failed to stop MCP server'}), 500
-
-
-@api_bp.route('/services/<service>/restart', methods=['POST'])
-@require_auth
-@require_api_scope('scheduler:write')
-@rate_limit_api(max_requests=5, window_seconds=60)
-def api_restart_service(service):
-    """Restart a scheduler service."""
-    if service == 'scheduler':
-        # Stop then start
-        stop_result = api_stop_scheduler()
-        if stop_result[1] if isinstance(stop_result, tuple) else 200 >= 400:
-            pass  # Ignore stop errors, try to start anyway
-
-        import time
-        time.sleep(2)  # Wait for graceful shutdown
-
-        return api_start_scheduler()
-
-    elif service == 'web_ui':
         return jsonify({
             'success': False,
-            'error': 'Cannot restart web UI from within itself. Use systemctl or restart the process manually.'
-        }), 400
-
-    return jsonify({'error': f'Unknown service: {service}'}), 400
+            'error': f'Failed to {action} {service}',
+        }), 500
 
 
 # =============================================================================
@@ -1330,7 +1195,7 @@ def api_restart_service(service):
 
 @api_bp.route('/pipelines')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_list_pipelines():
     """List scheduler-owned pipelines (managed_by='scheduler').
 
@@ -1351,7 +1216,7 @@ def api_list_pipelines():
 
 @api_bp.route('/pipelines/<name>')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_get_pipeline(name):
     """Get a scheduler-owned pipeline configuration."""
     from scheduler.models import PipelineConfig
@@ -1369,7 +1234,7 @@ def api_get_pipeline(name):
 
 @api_bp.route('/pipelines', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_create_pipeline():
     """Create a new pipeline."""
@@ -1449,7 +1314,7 @@ def api_create_pipeline():
 
 @api_bp.route('/pipelines/<name>', methods=['PUT'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=20, window_seconds=60)
 def api_update_pipeline(name):
     """Update a scheduler-owned pipeline configuration.
@@ -1523,7 +1388,7 @@ def api_update_pipeline(name):
 
 @api_bp.route('/pipelines/<name>', methods=['DELETE'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_delete_pipeline(name):
     """Delete a scheduler-owned pipeline."""
@@ -1549,7 +1414,7 @@ def api_delete_pipeline(name):
 
 @api_bp.route('/pipelines/ownership')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_pipelines_ownership():
     """Cross-cutting view: who handles each pipeline (scheduler or orchestrator).
 
@@ -1576,7 +1441,7 @@ def api_pipelines_ownership():
 
 @api_bp.route('/pipelines/<name>/transfer', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=10, window_seconds=60)
 def api_transfer_pipeline(name):
     """Transfer a pipeline between scheduler and sync orchestrator.
@@ -1617,7 +1482,7 @@ def api_transfer_pipeline(name):
 
 @api_bp.route('/modules')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_list_modules():
     """List available Python modules in datalayer."""
     datalayer_path = Path(__file__).parent.parent.parent / 'datalayer'
@@ -1643,7 +1508,7 @@ def api_list_modules():
 
 @api_bp.route('/billing-day/<int:site_id>')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 @cached(ttl_seconds=300)
 def api_get_billing_day_status(site_id):
     """
@@ -1740,7 +1605,7 @@ def api_get_billing_day_status(site_id):
 
 @api_bp.route('/billing-day/update', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_update_billing_day():
     """
@@ -3400,7 +3265,7 @@ def api_discount_plans_update(plan_id):
 
 @api_bp.route('/ccws-discount-plans/<int:site_id>')
 @require_auth
-@require_api_scope('scheduler:read')
+@require_api_scope('sync:read')
 def api_ccws_discount_plans(site_id):
     """
     Get discount/concession plans from ccws_discount table for a site.
@@ -3468,7 +3333,7 @@ def api_ccws_discount_plans(site_id):
 
 @api_bp.route('/ccws-discount-plans/update-simple', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_ccws_discount_plans_update_simple():
     """
@@ -3583,7 +3448,7 @@ def api_ccws_discount_plans_update_simple():
 
 @api_bp.route('/ccws-discount-plans/update', methods=['POST'])
 @require_auth
-@require_api_scope('scheduler:write')
+@require_api_scope('sync:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_ccws_discount_plans_update():
     """

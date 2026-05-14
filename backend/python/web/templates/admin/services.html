@@ -176,7 +176,7 @@ function startMcp() {
     statusEl.textContent = 'starting...';
     statusEl.className = 'service-status unknown';
 
-    fetch('/api/services/mcp/start', {
+    fetch('/api/services/backend-mcp/start', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'}
     })
@@ -207,7 +207,7 @@ function stopMcp() {
     statusEl.textContent = 'stopping...';
     statusEl.className = 'service-status unknown';
 
-    fetch('/api/services/mcp/stop', {
+    fetch('/api/services/backend-mcp/stop', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'}
     })
