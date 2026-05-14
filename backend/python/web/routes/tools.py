@@ -7,7 +7,7 @@ from flask_login import login_required
 
 from web.auth.decorators import (
     billing_tools_access_required, inventory_tools_access_required,
-    discount_tools_access_required, smart_lock_access_required,
+    discount_tools_access_required, smart_lock_access_required, smart_lock_admin_required,
     sync_access_required, pricing_anomalies_tools_access_required,
 )
 
@@ -56,25 +56,25 @@ def visit_workflow():
 
 @tools_bp.route('/smart-lock/keypads')
 @login_required
-@smart_lock_access_required
+@smart_lock_admin_required
 def smart_lock_keypads():
-    """Smart Lock — keypad management page."""
+    """Smart Lock — keypad management page (admin only)."""
     return render_template('tools/smart_lock_keypads.html')
 
 
 @tools_bp.route('/smart-lock/padlocks')
 @login_required
-@smart_lock_access_required
+@smart_lock_admin_required
 def smart_lock_padlocks():
-    """Smart Lock — padlock management page."""
+    """Smart Lock — padlock management page (admin only)."""
     return render_template('tools/smart_lock_padlocks.html')
 
 
 @tools_bp.route('/smart-lock/bridges')
 @login_required
-@smart_lock_access_required
+@smart_lock_admin_required
 def smart_lock_bridges():
-    """Smart Lock — bridge inventory page (read-only, auto-populated from Igloo)."""
+    """Smart Lock — bridge inventory page (admin only; read-only, auto-populated from Igloo)."""
     return render_template('tools/smart_lock_bridges.html')
 
 
@@ -82,15 +82,15 @@ def smart_lock_bridges():
 @login_required
 @smart_lock_access_required
 def smart_lock_assignments():
-    """Smart Lock — unit assignment page."""
+    """Smart Lock — unit assignment page (ops + admin)."""
     return render_template('tools/smart_lock_assignments.html')
 
 
 @tools_bp.route('/smart-lock/config')
 @login_required
-@smart_lock_access_required
+@smart_lock_admin_required
 def smart_lock_config():
-    """Smart Lock — site configuration page."""
+    """Smart Lock — site configuration page (admin only)."""
     return render_template('tools/smart_lock_config.html')
 
 

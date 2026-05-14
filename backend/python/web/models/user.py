@@ -95,6 +95,10 @@ class User(Base, UserMixin):
         """Check if user can access API statistics dashboard."""
         return any(r.can_access_statistics for r in self.roles)
 
+    def can_admin_smart_lock(self):
+        """True if user can manage bridges/keypads/padlocks + site config."""
+        return any(r.can_admin_smart_lock for r in self.roles)
+
     def can_access_smart_lock(self):
         """Check if user can access smart lock management tools."""
         return any(r.can_access_smart_lock for r in self.roles)

@@ -2796,6 +2796,20 @@ def _require_sl_session_access(f):
     return decorated
 
 
+def _require_sl_session_admin(f):
+    """Stricter RBAC guard: requires can_admin_smart_lock (manage bridges /
+    keypads / padlocks / site config). Ops users hit this with 403.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        from flask_login import current_user
+        if current_user and current_user.is_authenticated:
+            if not current_user.can_admin_smart_lock():
+                return jsonify({'error': 'Forbidden'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
 def _sl_audit(session, action, entity_type, entity_id=None, site_id=None, unit_id=None, detail=None):
     """Write a smart lock audit log entry."""
     from web.models.smart_lock import SmartLockAuditLog
@@ -2883,7 +2897,7 @@ def api_sl_keypads_list():
 
 @api_bp.route('/smart-lock/keypads', methods=['POST'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_keypads_create():
@@ -2939,7 +2953,7 @@ def api_sl_keypads_create():
 
 @api_bp.route('/smart-lock/keypads/batch', methods=['POST'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_keypads_batch():
@@ -3005,7 +3019,7 @@ def api_sl_keypads_batch():
 
 @api_bp.route('/smart-lock/keypads/<int:pk>', methods=['PUT'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_keypads_update(pk):
@@ -3049,7 +3063,7 @@ def api_sl_keypads_update(pk):
 
 @api_bp.route('/smart-lock/keypads/<int:pk>', methods=['DELETE'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_keypads_delete(pk):
@@ -3084,7 +3098,7 @@ def api_sl_keypads_delete(pk):
 
 @api_bp.route('/smart-lock/bridges')
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:read')
 def api_sl_bridges_list():
     """List bridges, optionally filtered by site_id. Includes the linked
@@ -3212,7 +3226,7 @@ def api_sl_padlocks_list():
 
 @api_bp.route('/smart-lock/padlocks', methods=['POST'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_padlocks_create():
@@ -3268,7 +3282,7 @@ def api_sl_padlocks_create():
 
 @api_bp.route('/smart-lock/padlocks/batch', methods=['POST'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_padlocks_batch():
@@ -3334,7 +3348,7 @@ def api_sl_padlocks_batch():
 
 @api_bp.route('/smart-lock/padlocks/<int:pk>', methods=['PUT'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_padlocks_update(pk):
@@ -3378,7 +3392,7 @@ def api_sl_padlocks_update(pk):
 
 @api_bp.route('/smart-lock/padlocks/<int:pk>', methods=['DELETE'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_padlocks_delete(pk):
@@ -3889,10 +3903,10 @@ def api_sl_audit_log():
 
 @api_bp.route('/smart-lock/config')
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:read')
 def api_sl_config_list():
-    """List smart lock site configurations."""
+    """List smart lock site configurations (admin-only)."""
     from web.models.smart_lock import SmartLockSiteConfig
     sid = request.args.get('site_id', type=int)
     if sid is not None:
@@ -3940,7 +3954,7 @@ def api_sl_config_enabled():
 
 @api_bp.route('/smart-lock/config', methods=['PUT'])
 @require_auth
-@_require_sl_session_access
+@_require_sl_session_admin
 @require_api_scope('smart_lock:write')
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_sl_config_upsert():

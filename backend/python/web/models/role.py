@@ -31,6 +31,9 @@ class Role(Base):
     can_manage_ecri = Column(Boolean, default=False)
     can_access_statistics = Column(Boolean, default=False)
     can_access_smart_lock = Column(Boolean, default=False)
+    # Admin-tier smart lock: manage bridges/keypads/padlocks + site config.
+    # can_access_smart_lock is the basic gate (assignments + refresh).
+    can_admin_smart_lock = Column(Boolean, default=False)
     can_access_revenue_tools = Column(Boolean, default=False)
     can_access_pricing_anomalies_tools = Column(Boolean, default=False)
     # ECRI workflow permissions (migration 042)
@@ -61,6 +64,7 @@ class Role(Base):
             'can_manage_ecri': True,
             'can_access_statistics': True,
             'can_access_smart_lock': True,
+            'can_admin_smart_lock': True,
             'can_access_revenue_tools': True,
             'can_access_pricing_anomalies_tools': True,
             'is_system': True
@@ -127,6 +131,8 @@ class Role(Base):
             permissions.append('Statistics')
         if self.can_access_smart_lock:
             permissions.append('Smart Lock')
+        if self.can_admin_smart_lock:
+            permissions.append('Smart Lock Admin')
         if self.can_access_revenue_tools:
             permissions.append('Revenue Tools')
         if self.can_access_pricing_anomalies_tools:
@@ -163,6 +169,7 @@ class Role(Base):
             'can_manage_ecri': self.can_manage_ecri,
             'can_access_statistics': self.can_access_statistics,
             'can_access_smart_lock': self.can_access_smart_lock,
+            'can_admin_smart_lock': self.can_admin_smart_lock,
             'can_access_revenue_tools': self.can_access_revenue_tools,
             'can_access_pricing_anomalies_tools': self.can_access_pricing_anomalies_tools,
             'can_request_ecri_exclusion': self.can_request_ecri_exclusion,

@@ -148,8 +148,18 @@ def statistics_access_required(f):
 
 
 def smart_lock_access_required(f):
-    """Decorator to require smart lock tools access permission."""
+    """Decorator to require smart lock tools access permission.
+
+    Grants entry to the assignment + refresh workflow. For inventory
+    management (bridges/keypads/padlocks/site config) use
+    smart_lock_admin_required instead.
+    """
     return require_permission('can_access_smart_lock')(f)
+
+
+def smart_lock_admin_required(f):
+    """Decorator to require smart lock ADMIN permission (inventory + config)."""
+    return require_permission('can_admin_smart_lock')(f)
 
 
 def revenue_tools_access_required(f):
