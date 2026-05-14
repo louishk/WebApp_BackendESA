@@ -1,17 +1,15 @@
 """
-sync_service — Standalone, on-demand ETL orchestrator.
+sync_service — Standalone ETL orchestrator (cron + on-demand).
 
-Independent from scheduler/ and sync/. Provides:
-  - On-demand pipeline execution with scope (site, entity, date range)
+Provides:
+  - Pipeline execution with scope (site, entity, date range)
   - Per-scope freshness checks (query target tables directly)
   - In-flight deduplication + per-pipeline concurrency limits
   - Parallel execution with shared resource pool (SOAP/HTTP/DB slots)
-  - Scheduled execution via its own internal scheduler
+  - APScheduler-driven cron triggers from mw_sync_pipelines
   - REST API for middleware/chatbot callers
 
-Only depends on common/ (config_loader, db_secrets_vault, soap_client) —
-truly shared infrastructure. No imports from scheduler/, sync/, datalayer/,
-or web/routes/.
+Only depends on common/ — no imports from web/routes/.
 """
 
 __version__ = '0.1.0'

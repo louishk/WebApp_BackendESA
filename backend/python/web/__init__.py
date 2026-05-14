@@ -1,5 +1,5 @@
-"""Web UI package for scheduler dashboard."""
+"""Web (Flask) package — entry via web.app.create_app()."""
 
-from scheduler.web.app import create_app
+from web.app import create_app
 
 __all__ = ['create_app']

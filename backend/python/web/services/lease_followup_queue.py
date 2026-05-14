@@ -5,9 +5,9 @@ Two callers:
   - /api/reservations/move-in handler — enqueues jobs after SOAP MoveIn
     succeeds, then attempts to execute pending jobs for THIS lease inline
     before responding to the bot. Bot waits ~2-3s on the happy path.
-  - backend-scheduler worker — every 10s, drains pending jobs across all
-    leases, retrying with exponential backoff. After 5 attempts, marks
-    status='failed_permanent' and alerts ops via alert_manager.
+  - A background worker — every 10s, drains pending jobs across all leases,
+    retrying with exponential backoff. After 5 attempts marks
+    status='failed_permanent' and logs the failure for ops review.
 
 SOAP calls are dispatched via _execute_action(), keyed on action_type:
   - 'prepayment'             → PaymentSimpleCash
@@ -399,23 +399,8 @@ def _dispatch_soap_call(action_type: str, payload: Dict[str, Any], client: SOAPC
 
 
 def _alert_ops(action_type: str, ledger_id: int, site_code: str, err: str) -> None:
-    """Best-effort alert via the existing alert manager."""
-    try:
-        from scheduler.alert_manager import alert_manager
-        alert_manager.alert(
-            level='error',
-            source='lease_followup_queue',
-            title=f'Lease follow-up failed permanently: {action_type}',
-            message=(
-                f"Action {action_type!r} for ledger {ledger_id} at {site_code} "
-                f"failed after {_MAX_ATTEMPTS} attempts. Manual review required.\n"
-                f"Last error: {err[:500]}"
-            ),
-            metadata={'ledger_id': ledger_id, 'site_code': site_code, 'action_type': action_type},
-        )
-    except ImportError:
-        # Alert manager not available — log only
-        logger.error(
-            "Lease follow-up failed permanently action=%s ledger=%s site=%s err=%s",
-            action_type, ledger_id, site_code, err[:200],
-        )
+    """Log permanent failure for ops review. Wire to an alerter when one exists."""
+    logger.error(
+        "Lease follow-up failed permanently action=%s ledger=%s site=%s err=%s",
+        action_type, ledger_id, site_code, err[:200],
+    )

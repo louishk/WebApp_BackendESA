@@ -1,13 +1,8 @@
 """
-PBI Datalayer Pipeline Scheduler
+ESA Backend — Flask web app + sync orchestrator daemon.
 
-A robust job scheduler for data pipelines with:
-- Priority-based queue management
-- Conflict resolution to prevent deadlocks
-- Resource semaphores for connection pooling
-- Retry with exponential backoff
-- Slack/email alerts
-- CLI and web UI interfaces
+(Legacy APScheduler daemon was decommissioned; pipelines run on the
+orchestrator at sync_service/.)
 """
 
 from pathlib import Path
@@ -19,29 +14,10 @@ if _version_file.exists():
 else:
     __version__ = '1.0.0'
 
+
 def get_version():
-    """Return the current scheduler version."""
+    """Return the current backend version."""
     return __version__
 
-from scheduler.config import SchedulerConfig
-from scheduler.models import JobHistory, PipelineConfig, ResourceLock, SchedulerState
-from scheduler.resource_manager import ResourceManager
-from scheduler.conflict_resolver import ConflictResolver, JobContext
-from scheduler.executor import PipelineExecutor
-from scheduler.alert_manager import AlertManager, AlertContext
 
-__all__ = [
-    '__version__',
-    'get_version',
-    'SchedulerConfig',
-    'JobHistory',
-    'PipelineConfig',
-    'ResourceLock',
-    'SchedulerState',
-    'ResourceManager',
-    'ConflictResolver',
-    'JobContext',
-    'PipelineExecutor',
-    'AlertManager',
-    'AlertContext',
-]
+__all__ = ['__version__', 'get_version']

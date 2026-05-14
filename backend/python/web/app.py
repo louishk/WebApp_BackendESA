@@ -408,10 +408,7 @@ def run_app(host='0.0.0.0', port=5000, debug=False, db_url=None):
     # Initialize unified config (loads YAML + vault)
     app_config = get_config()
 
-    from scheduler.config import SchedulerConfig
-    config = SchedulerConfig.from_yaml()
-
-    app = create_app(config, db_url)
+    app = create_app(db_url=db_url)
 
     # Get server settings from config
     flask_settings = app_config.app.flask

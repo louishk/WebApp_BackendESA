@@ -1,5 +1,5 @@
 """
-REST API routes for scheduler.
+REST API routes.
 Refactored from app.py to use blueprint pattern.
 """
 
@@ -7,7 +7,6 @@ import os
 from datetime import datetime, timedelta
 import pytz
 from pathlib import Path
-from uuid import uuid4, UUID
 import threading
 
 import re
@@ -19,8 +18,7 @@ from sqlalchemy import desc, func, case, text
 from web.auth.jwt_auth import require_auth, require_api_scope
 from web.utils.rate_limit import rate_limit_api
 from web.utils.validators import (
-    parse_site_ids, parse_pagination, parse_date_param, validate_array_size,
-    MAX_SITE_IDS, MAX_ARRAY_SIZE,
+    parse_site_ids, validate_array_size,
 )
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -116,15 +114,6 @@ def get_session():
     return current_app.get_db_session()
 
 
-def _get_scheduler_config():
-    """Load scheduler config from DB (source of truth), falling back to YAML."""
-    from scheduler.config import SchedulerConfig
-    session = current_app.get_db_session()
-    try:
-        return SchedulerConfig.from_db(session)
-    finally:
-        session.close()
-
 
 def get_pbi_session():
     """Get PBI database session — delegates to the app-level shared pool."""
@@ -136,56 +125,6 @@ def get_pbi_session():
 # Status & Health
 # =============================================================================
 
-@api_bp.route('/status')
-@require_auth
-@require_api_scope('sync:read')
-@cached(ttl_seconds=10)
-def api_status():
-    """Get scheduler status."""
-    from scheduler import __version__
-    from scheduler.models import SchedulerState, JobHistory
-    from scheduler.resource_manager import get_resource_manager
-
-    session = get_session()
-    try:
-        state = session.query(SchedulerState).filter_by(id=1).first()
-
-        rm = get_resource_manager()
-        resources = rm.get_all_usage_dict()
-
-        running_count = session.query(JobHistory).filter_by(status='running').count()
-
-        if state and state.status == 'running':
-            uptime = None
-            if state.started_at:
-                uptime = (datetime.now() - state.started_at.replace(tzinfo=None)).total_seconds()
-
-            return jsonify({
-                'status': state.status,
-                'mode': 'scheduler',
-                'started_at': state.started_at.isoformat() if state.started_at else None,
-                'uptime_seconds': uptime,
-                'host_name': state.host_name,
-                'pid': state.pid,
-                'last_heartbeat': state.last_heartbeat.isoformat() if state.last_heartbeat else None,
-                'version': state.version,
-                'resources': resources,
-                'running_jobs': running_count,
-            })
-        else:
-            web_uptime = (datetime.now() - current_app.web_started_at).total_seconds()
-            return jsonify({
-                'status': 'web_ui_only',
-                'mode': 'standalone',
-                'started_at': current_app.web_started_at.isoformat(),
-                'uptime_seconds': web_uptime,
-                'version': __version__,
-                'resources': resources,
-                'running_jobs': running_count,
-            })
-    finally:
-        session.close()
-
 
 @api_bp.route('/health')
 @rate_limit_api(max_requests=30, window_seconds=60)
@@ -196,945 +135,96 @@ def health():
     return jsonify(body), status
 
 
-# =============================================================================
-# Jobs
-# =============================================================================
 
-@api_bp.route('/jobs')
-@require_auth
-@require_api_scope('sync:read')
-def api_list_jobs():
-    """List all scheduled jobs."""
-    from scheduler.utils import cron_to_human
 
-    config = _get_scheduler_config()
 
-    jobs = []
-    for name, pipeline in config.pipelines.items():
-        cron_expr = pipeline.schedule_config.get('cron', 'N/A')
-        jobs.append({
-            'pipeline_name': name,
-            'display_name': pipeline.display_name,
-            'schedule': cron_expr,
-            'schedule_human': cron_to_human(cron_expr),
-            'enabled': pipeline.enabled,
-            'priority': pipeline.priority,
-            'resource_group': pipeline.resource_group,
-            'timeout_seconds': pipeline.timeout_seconds,
-            'freshness_table': pipeline.data_freshness.table,
-            'freshness_column': pipeline.data_freshness.date_column,
-        })
 
-    jobs.sort(key=lambda x: x['priority'])
-    return jsonify({'jobs': jobs})
 
 
-@api_bp.route('/jobs/<pipeline>')
-@require_auth
-@require_api_scope('sync:read')
-def api_get_job(pipeline):
-    """Get job details."""
-    from scheduler.utils import cron_to_human
 
-    config = _get_scheduler_config()
 
-    if pipeline not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
 
-    p = config.pipelines[pipeline]
-    cron_expr = p.schedule_config.get('cron', 'N/A')
 
-    return jsonify({
-        'pipeline_name': pipeline,
-        'display_name': p.display_name,
-        'module_path': p.module_path,
-        'schedule_type': p.schedule_type,
-        'schedule_config': p.schedule_config,
-        'schedule_human': cron_to_human(cron_expr),
-        'enabled': p.enabled,
-        'priority': p.priority,
-        'depends_on': p.depends_on,
-        'conflicts_with': p.conflicts_with,
-        'resource_group': p.resource_group,
-        'max_db_connections': p.max_db_connections,
-        'max_retries': p.retry.max_attempts,
-        'timeout_seconds': p.timeout_seconds,
-    })
-
-
-@api_bp.route('/jobs/<pipeline>', methods=['PUT'])
-@require_auth
-@require_api_scope('sync:write')
-@rate_limit_api(max_requests=20, window_seconds=60)
-def api_update_job(pipeline):
-    """Update pipeline schedule/settings."""
-    from scheduler.models import PipelineConfig
-    from scheduler.utils import cron_to_human
-
-    session = get_session()
-    try:
-        row = session.query(PipelineConfig).filter_by(pipeline_name=pipeline).first()
-        if not row:
-            return jsonify({'error': 'Pipeline not found'}), 404
-
-        data = request.get_json() or {}
-
-        cron = data.get('cron')
-        enabled = data.get('enabled')
-        priority = data.get('priority')
-
-        if priority is not None:
-            try:
-                priority = int(priority)
-                if not 1 <= priority <= 10:
-                    return jsonify({'error': 'Priority must be between 1 and 10'}), 400
-            except (ValueError, TypeError):
-                return jsonify({'error': 'Priority must be an integer'}), 400
-
-        if cron:
-            try:
-                from croniter import croniter
-                croniter(cron)
-            except Exception as e:
-                current_app.logger.warning(f"Invalid cron expression '{cron}': {e}")
-                return jsonify({'error': 'Invalid cron expression'}), 400
-
-        if cron is not None:
-            schedule_config = dict(row.schedule_config or {})
-            schedule_config['cron'] = cron
-            row.schedule_config = schedule_config
-        if enabled is not None:
-            row.enabled = enabled
-        if priority is not None:
-            row.priority = priority
-
-        session.commit()
-
-        cron_expr = (row.schedule_config or {}).get('cron', 'N/A')
-        return jsonify({
-            'success': True,
-            'pipeline_name': pipeline,
-            'schedule': cron_expr,
-            'schedule_human': cron_to_human(cron_expr),
-            'enabled': row.enabled,
-            'priority': row.priority,
-        })
-    except Exception as e:
-        session.rollback()
-        current_app.logger.error(f"Failed to update job {pipeline}: {e}")
-        return jsonify({'error': 'Failed to update pipeline'}), 500
-    finally:
-        session.close()
-
-
-@api_bp.route('/jobs/<pipeline>/enable', methods=['POST'])
-@require_auth
-@require_api_scope('sync:write')
-@rate_limit_api(max_requests=10, window_seconds=60)
-def api_enable_job(pipeline):
-    """Enable a pipeline."""
-    from scheduler.models import PipelineConfig
-
-    session = get_session()
-    try:
-        row = session.query(PipelineConfig).filter_by(pipeline_name=pipeline).first()
-        if not row:
-            return jsonify({'error': 'Pipeline not found'}), 404
-        row.enabled = True
-        session.commit()
-        return jsonify({'success': True, 'enabled': True})
-    except Exception as e:
-        session.rollback()
-        current_app.logger.error(f"Failed to enable job {pipeline}: {e}")
-        return jsonify({'error': 'Failed to enable pipeline'}), 500
-    finally:
-        session.close()
-
-
-@api_bp.route('/jobs/<pipeline>/disable', methods=['POST'])
-@require_auth
-@require_api_scope('sync:write')
-@rate_limit_api(max_requests=10, window_seconds=60)
-def api_disable_job(pipeline):
-    """Disable a pipeline."""
-    from scheduler.models import PipelineConfig
-
-    session = get_session()
-    try:
-        row = session.query(PipelineConfig).filter_by(pipeline_name=pipeline).first()
-        if not row:
-            return jsonify({'error': 'Pipeline not found'}), 404
-        row.enabled = False
-        session.commit()
-        return jsonify({'success': True, 'enabled': False})
-    except Exception as e:
-        session.rollback()
-        current_app.logger.error(f"Failed to disable job {pipeline}: {e}")
-        return jsonify({'error': 'Failed to disable pipeline'}), 500
-    finally:
-        session.close()
-
-
-@api_bp.route('/schedules/presets')
-@require_auth
-@require_api_scope('sync:read')
-def api_schedule_presets():
-    """Get available schedule presets."""
-    from scheduler.utils import SCHEDULE_PRESETS
-    return jsonify({'presets': SCHEDULE_PRESETS})
-
-
-@api_bp.route('/jobs/upcoming')
-@require_auth
-@require_api_scope('sync:read')
-def api_upcoming_jobs():
-    """Get upcoming scheduled executions."""
-    from scheduler.utils import cron_to_human
-    import pytz
-
-    config = _get_scheduler_config()
-
-    sg_tz = pytz.timezone('Asia/Singapore')
-    now = datetime.now(sg_tz)
-
-    upcoming = []
-    for name, pipeline in config.pipelines.items():
-        if not pipeline.enabled:
-            continue
-
-        cron_expr = pipeline.schedule_config.get('cron')
-        if not cron_expr:
-            continue
-
-        try:
-            from croniter import croniter
-            cron = croniter(cron_expr, now)
-            next_run = cron.get_next(datetime)
-            seconds_until = (next_run - now).total_seconds()
-
-            upcoming.append({
-                'pipeline_name': name,
-                'display_name': pipeline.display_name,
-                'schedule': cron_expr,
-                'schedule_human': cron_to_human(cron_expr),
-                'next_run': next_run.isoformat(),
-                'seconds_until': int(seconds_until),
-            })
-        except Exception:
-            continue
-
-    upcoming.sort(key=lambda x: x['seconds_until'])
-    return jsonify({'upcoming': upcoming})
-
-
-def _is_valid_sql_identifier(name):
-    """Validate that a string is a safe SQL identifier (table/column name)."""
-    import re
-    if not name or not isinstance(name, str):
-        return False
-    # Allow alphanumeric, underscores, and dots (for schema.table)
-    # Must start with letter or underscore
-    return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?$', name))
-
-
-def _validate_module_path(module_path):
-    """Validate module_path is a safe Python module reference within datalayer."""
-    if not module_path or not isinstance(module_path, str):
-        return False, 'module_path is required'
-    if not module_path.startswith('datalayer.'):
-        return False, 'module_path must start with "datalayer."'
-    if not re.match(r'^datalayer(\.[a-zA-Z_][a-zA-Z0-9_]*)+$', module_path):
-        return False, 'module_path contains invalid characters'
-    return True, 'valid'
-
-
-_SYNC_CONFIG_ALLOWED_KEYS = frozenset({
-    'strategy', 'watermark_field', 'phases', 'validation',
-    'checkpoint_interval', 'lookback_window',
-})
-
-
-def _validate_sync_config(sc):
-    """Validate sync_config JSONB shape. Returns (is_valid, error_msg)."""
-    if sc is None:
-        return True, None
-    if not isinstance(sc, dict):
-        return False, 'sync_config must be an object'
-    unknown = set(sc.keys()) - _SYNC_CONFIG_ALLOWED_KEYS
-    if unknown:
-        return False, f'Unknown sync_config keys: {", ".join(sorted(unknown))}'
-    if 'strategy' in sc and sc['strategy'] not in ('watermark', 'lookback', 'full'):
-        return False, 'sync_config.strategy must be watermark, lookback, or full'
-    return True, None
-
-
-def _validate_pipeline_specific_args(args):
-    """Validate pipeline_specific_args JSONB — must be a flat dict with scalar/list values."""
-    if args is None:
-        return True, None
-    if not isinstance(args, dict):
-        return False, 'pipeline_specific_args must be an object'
-    for k, v in args.items():
-        if not isinstance(k, str):
-            return False, 'pipeline_specific_args keys must be strings'
-        if isinstance(v, dict):
-            # Allow one level of nesting (e.g., property_site_map)
-            for sk, sv in v.items():
-                if isinstance(sv, (dict, list)):
-                    return False, f'pipeline_specific_args.{k} has too-deep nesting'
-        elif not isinstance(v, (str, int, float, bool, list, type(None))):
-            return False, f'pipeline_specific_args.{k} has unsupported type'
-    return True, None
-
-
-@api_bp.route('/data-freshness')
-@require_auth
-@require_api_scope('sync:read')
-@cached(ttl_seconds=60)
-def api_data_freshness():
-    """Get latest data dates for all pipelines."""
-    config = _get_scheduler_config()
-    freshness = {}
-
-    # Tables allowed for freshness queries on the backend DB (allowlist).
-    # Empty — all active pipelines read from pbi/middleware. Leave the guard
-    # in place so any future backend-DB pipeline must be explicitly allowlisted.
-    BACKEND_FRESHNESS_TABLES = frozenset()
-
-    # Separate queries by database
-    pbi_queries = []
-    backend_queries = []
-    for name, pipeline in config.pipelines.items():
-        table = pipeline.data_freshness.table
-        column = pipeline.data_freshness.date_column
-        db = pipeline.data_freshness.database
-
-        if not table:
-            freshness[name] = {'latest_date': None, 'error': 'No table configured'}
-        elif not _is_valid_sql_identifier(table) or not _is_valid_sql_identifier(column):
-            freshness[name] = {'latest_date': None, 'error': 'Invalid table or column name'}
-        elif db == 'backend':
-            if table not in BACKEND_FRESHNESS_TABLES:
-                freshness[name] = {'latest_date': None, 'error': 'Table not permitted'}
-            else:
-                backend_queries.append((name, table, column))
-        else:
-            pbi_queries.append((name, table, column))
-
-    def _run_freshness_queries(engine, queries):
-        """Run freshness queries against an engine, rolling back on per-query errors."""
-        try:
-            with engine.connect() as conn:
-                for name, table, column in queries:
-                    try:
-                        query = text(f'SELECT MAX("{column}") as max_date FROM "{table}"')
-                        result = conn.execute(query).fetchone()
-
-                        if result and result[0]:
-                            max_date = result[0]
-                            if hasattr(max_date, 'isoformat'):
-                                freshness[name] = {'latest_date': max_date.isoformat()}
-                            else:
-                                freshness[name] = {'latest_date': str(max_date)}
-                        else:
-                            freshness[name] = {'latest_date': None}
-                    except Exception as e:
-                        try:
-                            conn.rollback()
-                        except Exception:
-                            pass
-                        current_app.logger.error(f"Data freshness query error for {name}: {e}")
-                        freshness[name] = {'latest_date': None, 'error': 'Query failed'}
-        except Exception as e:
-            current_app.logger.error(f"Data freshness connection error: {e}")
-            for name, _, _ in queries:
-                freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
-
-    # Both databases served through the canonical common.db engine cache —
-    # no per-request engine creation, no leaked pools.
-    from common.db import get_engine as _get_engine
-
-    if pbi_queries:
-        try:
-            _run_freshness_queries(_get_engine('pbi'), pbi_queries)
-        except Exception as e:
-            current_app.logger.error(f"Could not connect to PBI database: {e}")
-            for name, _, _ in pbi_queries:
-                freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
-
-    if backend_queries:
-        try:
-            _run_freshness_queries(_get_engine('backend'), backend_queries)
-        except Exception as e:
-            current_app.logger.error(f"Could not connect to backend database: {e}")
-            for name, _, _ in backend_queries:
-                freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
-
-    return jsonify(freshness)
-
-
-@api_bp.route('/jobs/<pipeline>/run-async', methods=['POST'])
-@require_auth
-@require_api_scope('sync:write')
-@rate_limit_api(max_requests=10, window_seconds=60)
-def api_run_job_async(pipeline):
-    """Trigger job execution asynchronously."""
-    from scheduler.executor import PipelineExecutor
-    from scheduler.models import JobHistory
-
-    config = _get_scheduler_config()
-
-    if pipeline not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
-
-    data = request.get_json() or {}
-    mode = data.get('mode', 'auto')
-    args = data.get('args', {})
-    args['mode'] = mode
-
-    p = config.pipelines[pipeline]
-    execution_id = uuid4()
-
-    final_args = dict(p.default_args)
-    final_args.update(args)
-
-    def run_pipeline():
-        from scheduler.resource_manager import get_resource_manager
-        from common.db import get_session
-
-        session = get_session('backend')
-        try:
-            job_history = JobHistory(
-                job_id=f"{pipeline}_{execution_id}",
-                pipeline_name=pipeline,
-                execution_id=execution_id,
-                status='running',
-                priority=p.priority,
-                scheduled_at=now_utc(),
-                started_at=now_utc(),
-                mode=mode,
-                parameters=final_args,
-                triggered_by='web'
-            )
-            session.add(job_history)
-            session.commit()
-
-            rm = get_resource_manager()
-            resource_group = p.resource_group
-            db_slots = p.max_db_connections
-
-            try:
-                with rm.acquire(resource_group, count=1, timeout=300, job_id=str(execution_id)):
-                    with rm.acquire('db_pool', count=db_slots, timeout=300, job_id=str(execution_id)):
-                        executor = PipelineExecutor()
-                        result = executor.execute_streaming(
-                            module_path=p.module_path,
-                            args=final_args,
-                            execution_id=execution_id,
-                            timeout_seconds=p.timeout_seconds
-                        )
-            except TimeoutError as e:
-                from scheduler.executor import ExecutionResult
-                result = ExecutionResult(
-                    success=False,
-                    exit_code=-1,
-                    stdout='',
-                    stderr=str(e),
-                    duration_seconds=0,
-                    error_message=f"Resource acquisition timeout: {e}"
-                )
-
-            job_history.completed_at = now_utc()
-            job_history.duration_seconds = result.duration_seconds
-            job_history.records_processed = result.records_processed
-            job_history.status = 'completed' if result.success else 'failed'
-            if not result.success:
-                job_history.error_message = result.error_message
-                job_history.error_traceback = result.stderr[:5000] if result.stderr else None
-            session.commit()
-        finally:
-            session.close()
-
-        # Clear cache so dashboard shows fresh data
-        clear_cache('data-freshness')
-        clear_cache('history')
-
-    thread = threading.Thread(target=run_pipeline, daemon=True)
-    thread.start()
-
-    return jsonify({
-        'execution_id': str(execution_id),
-        'pipeline': pipeline,
-        'status': 'started',
-    })
-
-
-@api_bp.route('/executions/<execution_id>/output')
-@require_auth
-@require_api_scope('sync:read')
-def api_get_execution_output(execution_id):
-    """Get current output for a running execution."""
-    from scheduler.executor import get_execution_output
-    output, status = get_execution_output(execution_id)
-    return jsonify({
-        'execution_id': execution_id,
-        'output': output,
-        'status': status,
-    })
-
-
-@api_bp.route('/executions/<execution_id>/stream')
-@require_auth
-@require_api_scope('sync:read')
-def api_stream_execution(execution_id):
-    """Server-Sent Events stream of execution output."""
-    from scheduler.executor import get_execution_output
-    import time
-
-    def generate():
-        last_index = 0
-        wait_count = 0
-        max_wait = 60
-
-        while True:
-            output, status = get_execution_output(execution_id)
-            current_status = status.get('status', 'unknown')
-
-            if len(output) > last_index:
-                for line in output[last_index:]:
-                    yield f"data: {line}\n\n"
-                last_index = len(output)
-                wait_count = 0
-
-            if current_status in ('completed', 'failed', 'error', 'timeout'):
-                yield f"event: done\ndata: {current_status}\n\n"
-                break
-
-            if current_status == 'unknown':
-                wait_count += 1
-                if wait_count > max_wait:
-                    yield f"data: [ERROR] Timed out waiting for execution\n\n"
-                    yield f"event: done\ndata: timeout\n\n"
-                    break
-
-            time.sleep(0.5)
-
-    return current_app.response_class(
-        generate(),
-        mimetype='text/event-stream',
-        headers={
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no',
-        }
-    )
-
-
-@api_bp.route('/jobs/<pipeline>/run', methods=['POST'])
-@require_auth
-@require_api_scope('sync:write')
-@rate_limit_api(max_requests=10, window_seconds=60)
-def api_run_job(pipeline):
-    """Trigger job execution (synchronous)."""
-    from scheduler.executor import PipelineExecutor
-
-    config = _get_scheduler_config()
-
-    if pipeline not in config.pipelines:
-        return jsonify({'error': 'Pipeline not found'}), 404
-
-    data = request.get_json() or {}
-    mode = data.get('mode', 'auto')
-    args = data.get('args', {})
-    args['mode'] = mode
-
-    p = config.pipelines[pipeline]
-    execution_id = uuid4()
-
-    final_args = dict(p.default_args)
-    final_args.update(args)
-
-    executor = PipelineExecutor()
-    result = executor.execute(
-        module_path=p.module_path,
-        args=final_args,
-        execution_id=execution_id,
-        timeout_seconds=p.timeout_seconds
-    )
-
-    return jsonify({
-        'execution_id': str(execution_id),
-        'success': result.success,
-        'duration_seconds': result.duration_seconds,
-        'records_processed': result.records_processed,
-        'error_message': result.error_message,
-    })
-
-
-# =============================================================================
-# History
-# =============================================================================
-
-@api_bp.route('/history')
-@require_auth
-@require_api_scope('sync:read')
-@cached(ttl_seconds=15)
-def api_list_history():
-    """List execution history with pagination."""
-    from scheduler.models import JobHistory
-
-    pipeline = request.args.get('pipeline')
-    status = request.args.get('status')
-
-    try:
-        limit, offset = parse_pagination(request.args)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 400
-
-    since = request.args.get('since')
-    since_date = None
-    if since:
-        try:
-            since_date = parse_date_param(since, 'since')
-        except ValueError as e:
-            return jsonify({'error': str(e)}), 400
-
-    session = get_session()
-    try:
-        query = session.query(JobHistory)
-
-        if pipeline:
-            query = query.filter(JobHistory.pipeline_name == pipeline)
-        if status:
-            query = query.filter(JobHistory.status == status)
-        if since_date:
-            query = query.filter(JobHistory.scheduled_at >= since_date)
-
-        total = query.count()
-
-        results = query.order_by(
-            desc(JobHistory.scheduled_at)
-        ).offset(offset).limit(limit).all()
-
-        return jsonify({
-            'total': total,
-            'offset': offset,
-            'limit': limit,
-            'results': [r.to_dict() for r in results]
-        })
-    finally:
-        session.close()
-
-
-@api_bp.route('/history/<execution_id>')
-@require_auth
-@require_api_scope('sync:read')
-def api_get_execution(execution_id):
-    """Get execution details by execution ID."""
-    from scheduler.models import JobHistory
-
-    session = get_session()
-    try:
-        record = session.query(JobHistory).filter_by(
-            execution_id=UUID(execution_id)
-        ).first()
-
-        if not record:
-            return jsonify({'error': 'Execution not found'}), 404
-
-        data = record.to_dict()
-        # Redact internal error details for API key consumers
-        is_api_key = g.current_user.get('auth_method') == 'api_key'
-        if is_api_key:
-            if data.get('error_message'):
-                data['error_message'] = 'Pipeline execution failed'
-        else:
-            data['error_traceback'] = record.error_traceback
-        return jsonify(data)
-    finally:
-        session.close()
-
-
-@api_bp.route('/history/stats')
-@require_auth
-@require_api_scope('sync:read')
-@cached(ttl_seconds=30)
-def api_history_stats():
-    """Get execution statistics."""
-    from scheduler.models import JobHistory
-
-    period = request.args.get('period', '7d')
-    days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
-    since_date = now_sgt() - timedelta(days=days)
-
-    session = get_session()
-    try:
-        stats = session.query(
-            JobHistory.pipeline_name,
-            func.count(JobHistory.id).label('total'),
-            func.sum(case((JobHistory.status == 'completed', 1), else_=0)).label('success'),
-            func.sum(case((JobHistory.status == 'failed', 1), else_=0)).label('failed'),
-            func.avg(JobHistory.duration_seconds).label('avg_duration'),
-            func.avg(JobHistory.records_processed).label('avg_records')
-        ).filter(
-            JobHistory.scheduled_at >= since_date
-        ).group_by(
-            JobHistory.pipeline_name
-        ).all()
-
-        return jsonify({
-            'period': period,
-            'since': since_date.isoformat(),
-            'pipelines': [
-                {
-                    'pipeline_name': s.pipeline_name,
-                    'total': s.total,
-                    'success': int(s.success or 0),
-                    'failed': int(s.failed or 0),
-                    'success_rate': round(int(s.success or 0) / s.total * 100, 1) if s.total > 0 else 0,
-                    'avg_duration': round(float(s.avg_duration or 0), 1),
-                    'avg_records': int(s.avg_records or 0),
-                }
-                for s in stats
-            ]
-        })
-    finally:
-        session.close()
-
-
-@api_bp.route('/history/<int:history_id>')
-@require_auth
-@require_api_scope('sync:read')
-def api_get_history_detail(history_id):
-    """Get detailed execution record."""
-    from scheduler.models import JobHistory
-
-    session = get_session()
-    try:
-        job = session.query(JobHistory).filter_by(id=history_id).first()
-        if not job:
-            return jsonify({'error': 'Execution not found'}), 404
-
-        return jsonify({
-            'id': job.id,
-            'pipeline_name': job.pipeline_name,
-            'execution_id': str(job.execution_id),
-            'status': job.status,
-            'started_at': job.started_at.isoformat() if job.started_at else None,
-            'completed_at': job.completed_at.isoformat() if job.completed_at else None,
-            'duration_seconds': job.duration_seconds,
-            'records_processed': job.records_processed,
-            'error_message': ('Pipeline execution failed' if job.error_message else None) if g.current_user.get('auth_method') == 'api_key' else job.error_message,
-            'error_traceback': None if g.current_user.get('auth_method') == 'api_key' else job.error_traceback,
-            'mode': job.mode,
-            'parameters': job.parameters,
-            'triggered_by': job.triggered_by,
-            'attempt_number': job.attempt_number,
-            'max_retries': job.max_retries,
-        })
-    finally:
-        session.close()
-
-
-@api_bp.route('/history/cleanup-stale', methods=['POST'])
-@require_auth
-@require_api_scope('sync:write')
-def api_cleanup_stale():
-    """Mark stale running jobs as failed."""
-    from scheduler.models import JobHistory
-
-    session = get_session()
-    try:
-        stale = session.query(JobHistory).filter_by(status='running').all()
-        fixed = []
-        for job in stale:
-            job.status = 'failed'
-            job.error_message = 'Interrupted - server restarted'
-            job.completed_at = now_utc()
-            fixed.append({
-                'pipeline_name': job.pipeline_name,
-                'execution_id': str(job.execution_id),
-            })
-
-        session.commit()
-        return jsonify({
-            'success': True,
-            'fixed_count': len(fixed),
-            'fixed_jobs': fixed,
-        })
-    finally:
-        session.close()
-
-
-# =============================================================================
-# Resources
-# =============================================================================
-
-@api_bp.route('/resources')
-@require_auth
-@require_api_scope('sync:read')
-def api_resources():
-    """Get current resource usage."""
-    from scheduler.resource_manager import get_resource_manager
-
-    rm = get_resource_manager()
-    return jsonify(rm.get_all_usage_dict())
-
-
-# =============================================================================
-# Config
-# =============================================================================
-
-@api_bp.route('/config')
-@require_auth
-@require_api_scope('sync:read')
-def api_config():
-    """Get scheduler configuration."""
-    config = _get_scheduler_config()
-
-    return jsonify({
-        'timezone': config.timezone,
-        'max_workers': config.executor_max_workers,
-        'pipeline_count': len(config.pipelines),
-        'resources': {
-            'db_pool': config.resources.db_pool,
-            'soap_api': config.resources.soap_api,
-            'http_api': config.resources.http_api,
-        },
-        'alerts': {
-            'slack_enabled': config.alerts.slack.enabled,
-            'email_enabled': config.alerts.email.enabled,
-        }
-    })
 
 
 # =============================================================================
 # Service Management
 # =============================================================================
 
-# Store scheduler process reference
-_scheduler_process = None
-
 
 @api_bp.route('/services/status')
 @require_auth
 @require_api_scope('sync:read')
 def api_services_status():
-    """Get status of scheduler services."""
-    from scheduler.models import SchedulerState
+    """Get status of running services."""
     import os
 
-    session = get_session()
+    # MCP server status (via health endpoint)
+    mcp_port = os.environ.get('MCP_SERVER_PORT', '8002')
+    mcp_status = 'stopped'
+    mcp_info = {}
     try:
-        # Check scheduler daemon status from database
-        state = session.query(SchedulerState).filter_by(id=1).first()
-
-        scheduler_status = 'stopped'
-        scheduler_info = {}
-
-        if state:
-            # Check if the process is actually running
-            if state.pid:
-                try:
-                    os.kill(state.pid, 0)  # Check if process exists
-                    if state.status == 'running':
-                        # Verify heartbeat is recent (within 2 minutes)
-                        if state.last_heartbeat:
-                            # Handle timezone-aware and naive datetimes
-                            now = datetime.now()
-                            hb = state.last_heartbeat
-                            if hb.tzinfo is not None:
-                                hb = hb.replace(tzinfo=None)
-                            heartbeat_age = (now - hb).total_seconds()
-                            if heartbeat_age < 120:
-                                scheduler_status = 'running'
-                            else:
-                                scheduler_status = 'stale'
-                        else:
-                            scheduler_status = 'running'
-                except (OSError, ProcessLookupError):
-                    scheduler_status = 'stopped'
-
-            scheduler_info = {
-                'pid': state.pid,
-                'host': state.host_name,
-                'started_at': state.started_at.isoformat() if state.started_at else None,
-                'last_heartbeat': state.last_heartbeat.isoformat() if state.last_heartbeat else None,
-            }
-
-        # MCP server status (via health endpoint)
-        mcp_port = os.environ.get('MCP_SERVER_PORT', '8002')
+        import urllib.request
+        req = urllib.request.Request(f'http://127.0.0.1:{mcp_port}/health', method='GET')
+        req.add_header('User-Agent', 'esa-backend-status-check')
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            if resp.status == 200:
+                mcp_data = json.loads(resp.read())
+                mcp_status = 'running'
+                mcp_info = {
+                    'transport': mcp_data.get('transport', 'streamable-http'),
+                }
+    except Exception:
         mcp_status = 'stopped'
-        mcp_info = {}
-        try:
-            import urllib.request
-            req = urllib.request.Request(f'http://127.0.0.1:{mcp_port}/health', method='GET')
-            req.add_header('User-Agent', 'esa-backend-status-check')
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                if resp.status == 200:
-                    mcp_data = json.loads(resp.read())
-                    mcp_status = 'running'
-                    mcp_info = {
-                        'transport': mcp_data.get('transport', 'streamable-http'),
-                    }
-        except Exception:
-            mcp_status = 'stopped'
 
-        # Orchestrator status — read directly from sync_service
-        orchestrator_status = 'stopped'
-        orchestrator_info = {}
-        try:
-            from sync_service.models import SyncPipeline, SyncServiceState
-            from sync_service.config import session_scope as sync_session
-            from sync_service.executor import get_executor
+    # Orchestrator status — read directly from sync_service
+    orchestrator_status = 'stopped'
+    orchestrator_info = {}
+    try:
+        from sync_service.models import SyncPipeline, SyncServiceState
+        from sync_service.config import session_scope as sync_session
+        from sync_service.executor import get_executor
 
-            with sync_session() as s:
-                pipeline_count = s.query(SyncPipeline).count()
-                enabled_count = s.query(SyncPipeline).filter_by(enabled=True).count()
+        with sync_session() as s:
+            pipeline_count = s.query(SyncPipeline).count()
+            enabled_count = s.query(SyncPipeline).filter_by(enabled=True).count()
 
-            # In-process API means if Flask is up, orchestrator API is up
-            orchestrator_status = 'running'
-            exec_stats = get_executor().stats()
-            orchestrator_info = {
-                'pid': os.getpid(),
-                'pipelines_total': pipeline_count,
-                'pipelines_enabled': enabled_count,
-                'in_flight': exec_stats.get('in_flight', 0),
-            }
-        except Exception as e:
-            current_app.logger.debug(f"Orchestrator status check failed: {e}")
-            orchestrator_status = 'stopped'
-
-        # Web UI is always running if we're responding
-        result = {
-            'web_ui': {
-                'service': 'Flask Web UI',
-                'active': True,
-                'status': 'running',
-                'pid': os.getpid(),
-            },
-            'scheduler': {
-                'service': 'Scheduler Daemon',
-                'active': scheduler_status == 'running',
-                'status': scheduler_status,
-                **scheduler_info
-            },
-            'mcp_server': {
-                'service': 'MCP Server',
-                'active': mcp_status == 'running',
-                'status': mcp_status,
-                **mcp_info
-            },
-            'orchestrator': {
-                'service': 'Sync Orchestrator',
-                'active': orchestrator_status == 'running',
-                'status': orchestrator_status,
-                **orchestrator_info,
-            },
+        # In-process API means if Flask is up, orchestrator API is up
+        orchestrator_status = 'running'
+        exec_stats = get_executor().stats()
+        orchestrator_info = {
+            'pid': os.getpid(),
+            'pipelines_total': pipeline_count,
+            'pipelines_enabled': enabled_count,
+            'in_flight': exec_stats.get('in_flight', 0),
         }
+    except Exception as e:
+        current_app.logger.debug(f"Orchestrator status check failed: {e}")
+        orchestrator_status = 'stopped'
 
-        return jsonify(result)
-    finally:
-        session.close()
+    # Web UI is always running if we're responding
+    result = {
+        'web_ui': {
+            'service': 'Flask Web UI',
+            'active': True,
+            'status': 'running',
+            'pid': os.getpid(),
+        },
+        'mcp_server': {
+            'service': 'MCP Server',
+            'active': mcp_status == 'running',
+            'status': mcp_status,
+            **mcp_info
+        },
+        'orchestrator': {
+            'service': 'Sync Orchestrator',
+            'active': orchestrator_status == 'running',
+            'status': orchestrator_status,
+            **orchestrator_info,
+        },
+    }
+
+    return jsonify(result)
 
 
 # Systemd units exposed for remote control via /api/services/<svc>/<action>.
@@ -1192,224 +282,6 @@ def api_service_action(service, action):
 # =============================================================================
 # Pipeline Management
 # =============================================================================
-
-@api_bp.route('/pipelines')
-@require_auth
-@require_api_scope('sync:read')
-def api_list_pipelines():
-    """List scheduler-owned pipelines (managed_by='scheduler').
-
-    Sync orchestrator pipelines are served via /api/sync/pipelines.
-    """
-    from scheduler.models import PipelineConfig
-
-    session = get_session()
-    try:
-        rows = (session.query(PipelineConfig)
-                .filter(PipelineConfig.managed_by == 'scheduler')
-                .order_by(PipelineConfig.priority).all())
-        pipelines = [row.to_dict() for row in rows]
-        return jsonify({'pipelines': pipelines})
-    finally:
-        session.close()
-
-
-@api_bp.route('/pipelines/<name>')
-@require_auth
-@require_api_scope('sync:read')
-def api_get_pipeline(name):
-    """Get a scheduler-owned pipeline configuration."""
-    from scheduler.models import PipelineConfig
-
-    session = get_session()
-    try:
-        row = (session.query(PipelineConfig)
-               .filter_by(pipeline_name=name, managed_by='scheduler').first())
-        if not row:
-            return jsonify({'error': 'Pipeline not found'}), 404
-        return jsonify(row.to_dict())
-    finally:
-        session.close()
-
-
-@api_bp.route('/pipelines', methods=['POST'])
-@require_auth
-@require_api_scope('sync:write')
-@rate_limit_api(max_requests=20, window_seconds=60)
-def api_create_pipeline():
-    """Create a new pipeline."""
-    from scheduler.models import PipelineConfig
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'No data provided'}), 400
-
-    name = data.get('name')
-    if not name:
-        return jsonify({'error': 'Pipeline name is required'}), 400
-
-    if not name.replace('_', '').replace('-', '').isalnum():
-        return jsonify({'error': 'Pipeline name must be alphanumeric with underscores/hyphens'}), 400
-
-    module_path = data.get('module_path', f'datalayer.{name}')
-    is_valid, msg = _validate_module_path(module_path)
-    if not is_valid:
-        return jsonify({'error': msg}), 400
-
-    # This endpoint is scheduler-only. Sync pipelines are created via /api/sync/pipelines.
-    managed_by = 'scheduler'
-
-    valid, err = _validate_pipeline_specific_args(data.get('pipeline_specific_args'))
-    if not valid:
-        return jsonify({'error': err}), 400
-
-    session = get_session()
-    try:
-        existing = session.query(PipelineConfig).filter_by(pipeline_name=name).first()
-        if existing:
-            return jsonify({'error': f'Pipeline {name} already exists'}), 400
-
-        row = PipelineConfig(
-            pipeline_name=name,
-            display_name=data.get('display_name', name.replace('_', ' ').title()),
-            description=data.get('description', ''),
-            module_path=module_path,
-            schedule_type='cron',
-            schedule_config={'type': 'cron', 'cron': data.get('cron', '0 6 * * *')},
-            enabled=data.get('enabled', False),
-            priority=data.get('priority', 5),
-            depends_on=data.get('depends_on', []),
-            conflicts_with=data.get('conflicts_with', []),
-            resource_group=data.get('resource_group', 'http_api'),
-            max_db_connections=data.get('max_db_connections', 2),
-            estimated_duration_seconds=data.get('estimated_duration_seconds', 600),
-            max_retries=data.get('max_retries', 3),
-            retry_delay_seconds=data.get('retry_delay', 300),
-            retry_backoff_multiplier=data.get('backoff_multiplier', 2),
-            timeout_seconds=data.get('timeout_seconds', 3600),
-            default_args=data.get('default_args', {'mode': 'auto'}),
-            data_freshness_config={
-                'table': data.get('freshness_table', ''),
-                'date_column': data.get('freshness_column', ''),
-            },
-            sync_config=None,
-            pipeline_specific_args=data.get('pipeline_specific_args'),
-            managed_by=managed_by,
-        )
-        session.add(row)
-        session.commit()
-
-        return jsonify({
-            'success': True,
-            'message': f'Pipeline {name} created',
-            'pipeline': row.to_dict()
-        })
-    except Exception as e:
-        session.rollback()
-        current_app.logger.error(f"Failed to create pipeline {name}: {e}")
-        return jsonify({'error': 'Failed to create pipeline'}), 500
-    finally:
-        session.close()
-
-
-@api_bp.route('/pipelines/<name>', methods=['PUT'])
-@require_auth
-@require_api_scope('sync:write')
-@rate_limit_api(max_requests=20, window_seconds=60)
-def api_update_pipeline(name):
-    """Update a scheduler-owned pipeline configuration.
-
-    Sync orchestrator pipelines are managed via /api/sync/pipelines/<name>.
-    To transfer a pipeline between engines, use /api/pipelines/<name>/transfer.
-    """
-    from scheduler.models import PipelineConfig
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'No data provided'}), 400
-
-    session = get_session()
-    try:
-        row = (session.query(PipelineConfig)
-               .filter_by(pipeline_name=name, managed_by='scheduler').first())
-        if not row:
-            return jsonify({'error': 'Pipeline not found'}), 404
-
-        if 'display_name' in data:
-            row.display_name = data['display_name']
-        if 'description' in data:
-            row.description = data['description']
-        if 'module_path' in data:
-            is_valid, msg = _validate_module_path(data['module_path'])
-            if not is_valid:
-                return jsonify({'error': msg}), 400
-            row.module_path = data['module_path']
-        if 'enabled' in data:
-            row.enabled = data['enabled']
-        if 'cron' in data:
-            row.schedule_config = {'type': 'cron', 'cron': data['cron']}
-        if 'priority' in data:
-            row.priority = data['priority']
-        if 'depends_on' in data:
-            row.depends_on = data['depends_on']
-        if 'conflicts_with' in data:
-            row.conflicts_with = data['conflicts_with']
-        if 'resource_group' in data:
-            row.resource_group = data['resource_group']
-        if 'max_db_connections' in data:
-            row.max_db_connections = data['max_db_connections']
-        if 'timeout_seconds' in data:
-            row.timeout_seconds = data['timeout_seconds']
-        if 'max_retries' in data:
-            row.max_retries = data['max_retries']
-        if 'freshness_table' in data:
-            fc = dict(row.data_freshness_config or {})
-            fc['table'] = data['freshness_table']
-            row.data_freshness_config = fc
-        if 'freshness_column' in data:
-            fc = dict(row.data_freshness_config or {})
-            fc['date_column'] = data['freshness_column']
-            row.data_freshness_config = fc
-        if 'pipeline_specific_args' in data:
-            valid, err = _validate_pipeline_specific_args(data['pipeline_specific_args'])
-            if not valid:
-                return jsonify({'error': err}), 400
-            row.pipeline_specific_args = data['pipeline_specific_args']
-
-        session.commit()
-        return jsonify({'success': True, 'message': f'Pipeline {name} updated'})
-    except Exception as e:
-        session.rollback()
-        current_app.logger.error(f"Failed to update pipeline {name}: {e}")
-        return jsonify({'error': 'Failed to update pipeline'}), 500
-    finally:
-        session.close()
-
-
-@api_bp.route('/pipelines/<name>', methods=['DELETE'])
-@require_auth
-@require_api_scope('sync:write')
-@rate_limit_api(max_requests=10, window_seconds=60)
-def api_delete_pipeline(name):
-    """Delete a scheduler-owned pipeline."""
-    from scheduler.models import PipelineConfig
-
-    session = get_session()
-    try:
-        row = (session.query(PipelineConfig)
-               .filter_by(pipeline_name=name, managed_by='scheduler').first())
-        if not row:
-            return jsonify({'error': 'Pipeline not found'}), 404
-
-        session.delete(row)
-        session.commit()
-        return jsonify({'success': True, 'message': f'Pipeline {name} deleted'})
-    except Exception as e:
-        session.rollback()
-        current_app.logger.error(f"Failed to delete pipeline {name}: {e}")
-        return jsonify({'error': 'Failed to delete pipeline'}), 500
-    finally:
-        session.close()
 
 
 @api_bp.route('/pipelines/ownership')
