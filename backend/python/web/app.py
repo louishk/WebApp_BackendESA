@@ -97,7 +97,7 @@ def create_app(config=None, db_url=None):
     def load_user(user_id):
         from web.models.user import User
         from sqlalchemy.orm import joinedload
-        session = get_db_session()
+        session = _get_session('backend')
         try:
             # Eagerly load the roles relationship to avoid DetachedInstanceError
             user = session.query(User).options(joinedload(User.roles)).get(int(user_id))
