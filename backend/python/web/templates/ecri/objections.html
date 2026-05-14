@@ -245,14 +245,18 @@
         const reductionPct = (CURRENT_RAISE.increase_pct || 0) - newPct;
         const reductionAbs = (CURRENT_RAISE.new_rent || 0) - newRent;
         const hint = document.getElementById('raise-approval-hint');
+        // max_abs === 0 means "no absolute cap" — only the pct ceiling applies.
+        const absLimit = USER_PERMS.max_abs;
+        const absOk = (absLimit === 0) || (reductionAbs <= absLimit);
+        const absLabel = (absLimit === 0) ? 'no $ cap' : `$${absLimit}`;
         if (reductionPct < 0 || reductionAbs < 0) {
             hint.textContent = 'Bigger increase than planned — requires manager approval.';
             hint.style.background = '#fef3c7'; hint.style.color = '#92400e';
-        } else if (reductionPct <= USER_PERMS.max_pct && reductionAbs <= USER_PERMS.max_abs) {
-            hint.textContent = `Within your limit (${USER_PERMS.max_pct}% / ${USER_PERMS.max_abs}) — will be auto-approved.`;
+        } else if (reductionPct <= USER_PERMS.max_pct && absOk) {
+            hint.textContent = `Within your limit (${USER_PERMS.max_pct}% / ${absLabel}) — will be auto-approved.`;
             hint.style.background = '#d1fae5'; hint.style.color = '#065f46';
         } else {
-            hint.textContent = `Exceeds your limit (${USER_PERMS.max_pct}% / ${USER_PERMS.max_abs}) — needs manager approval.`;
+            hint.textContent = `Exceeds your limit (${USER_PERMS.max_pct}% / ${absLabel}) — needs manager approval.`;
             hint.style.background = '#fef3c7'; hint.style.color = '#92400e';
         }
     }

@@ -2673,10 +2673,13 @@ def api_create_objection():
 
         user_max_pct, user_max_abs = current_user.ecri_limits()
 
-        # Increase-direction always requires approval
+        # Increase-direction always requires approval.
+        # user_max_abs == 0 is treated as "no absolute cap" — only the pct
+        # ceiling applies. This lets Country GMs (and any operator with a
+        # blanket waiver) pass any $ amount within their pct allowance.
         if reduction_pct < 0 or reduction_abs < 0:
             requires_approval = True
-        elif reduction_pct <= user_max_pct and reduction_abs <= user_max_abs:
+        elif reduction_pct <= user_max_pct and (user_max_abs == 0 or reduction_abs <= user_max_abs):
             requires_approval = False
         else:
             requires_approval = True
@@ -2777,7 +2780,9 @@ def api_approve_objection(obj_id):
         reduction_pct = float(obj.original_increase_pct) - float(obj.new_increase_pct or obj.original_increase_pct)
         reduction_abs = float(obj.original_new_rent) - float(obj.new_new_rent or obj.original_new_rent)
 
-        if approver_max_pct < reduction_pct or approver_max_abs < reduction_abs:
+        # approver_max_abs == 0 means "no absolute cap" — only the pct ceiling
+        # is enforced (matches the auto-approve gate semantics above).
+        if approver_max_pct < reduction_pct or (approver_max_abs != 0 and approver_max_abs < reduction_abs):
             return jsonify({
                 'error': 'Your authority is below the requested reduction. Escalate to a higher-rank approver.',
                 'required_pct': reduction_pct,

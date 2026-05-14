@@ -887,14 +887,18 @@ body .container { max-width: 1800px; }
         const reductionAbs = origRent - newRent;
         const indicator = document.getElementById('obj-approval-indicator');
         let text, color;
+        // ecri_max_abs === 0 means "no absolute cap" — only the pct ceiling applies.
+        const absLimit = USER_PERMS.ecri_max_abs;
+        const absOk = (absLimit === 0) || (reductionAbs <= absLimit);
+        const absLabel = (absLimit === 0) ? 'no $ cap' : formatCurrency(absLimit);
         if (reductionPct < 0 || reductionAbs < 0) {
             text = 'Increase beyond original — requires approver.';
             color = '#fef3c7'; indicator.style.color = '#92400e';
-        } else if (reductionPct <= USER_PERMS.ecri_max_pct && reductionAbs <= USER_PERMS.ecri_max_abs) {
+        } else if (reductionPct <= USER_PERMS.ecri_max_pct && absOk) {
             text = 'Within your limits — will be auto-approved.';
             color = '#d1fae5'; indicator.style.color = '#065f46';
         } else {
-            text = `Exceeds your limits (max: ${USER_PERMS.ecri_max_pct}% / ${formatCurrency(USER_PERMS.ecri_max_abs)}) — requires approver.`;
+            text = `Exceeds your limits (max: ${USER_PERMS.ecri_max_pct}% / ${absLabel}) — requires approver.`;
             color = '#fef3c7'; indicator.style.color = '#92400e';
         }
         indicator.style.background = color;
