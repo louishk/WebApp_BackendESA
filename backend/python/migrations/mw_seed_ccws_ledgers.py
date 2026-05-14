@@ -61,7 +61,6 @@ def main():
             'display': 'CCWS Tenant Ledgers & Charges',
             'desc': 'Sync ccws_ledgers + ccws_charges from CallCenterWs '
                     '(LedgersByTenantID_v3 + ChargesAllByLedgerID). '
-                    'Wraps datalayer.tenant_ledger_charges_to_sql via subprocess. '
                     'Required upstream feed for ECRI eligibility view and outcome tracking.',
             'cls': 'sync_service.pipelines.ccws_ledgers.CcwsLedgersPipeline',
             'sched': '{"cron": "0 7 * * *"}',

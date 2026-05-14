@@ -62,9 +62,9 @@ def main():
             'name': 'sugarcrm_leads',
             'display': 'SugarCRM Leads',
             'desc': 'Sync CRM data (Leads, Contacts, Accounts, etc.) from SugarCRM. '
-                    'Wraps datalayer.sugarcrm_to_sql via subprocess. The datalayer '
-                    'module manages its own per-module watermark, so checkpoint '
-                    'config from the legacy YAML is not forwarded.',
+                    'Incremental by date_modified watermark (auto mode) or full '
+                    'backfill. Writes to esa_pbi sugarcrm_* tables with dynamic '
+                    'schema generation from SugarCRM metadata.',
             'cls': 'sync_service.pipelines.sugarcrm_leads.SugarCrmLeadsPipeline',
             'sched': '{"cron": "0 */3 * * *"}',
             'ttl': 4 * 3600,

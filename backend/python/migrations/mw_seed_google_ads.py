@@ -60,8 +60,7 @@ def main():
             'name': 'google_ads',
             'display': 'Google Ads',
             'desc': 'Extract Google Ads data from BigQuery (esa_google_ads) '
-                    'into PostgreSQL for PBI reporting. Wraps '
-                    'datalayer.google_ads_to_sql via subprocess.',
+                    'into PostgreSQL for PBI reporting.',
             'cls': 'sync_service.pipelines.google_ads.GoogleAdsPipeline',
             'sched': '{"cron": "0 8 * * *"}',
             'ttl': 30 * 3600,

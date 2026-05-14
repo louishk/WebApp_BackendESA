@@ -61,8 +61,8 @@ def main():
             'name': 'fxrate',
             'display': 'FX Rates',
             'desc': 'Fetch foreign exchange rates from Yahoo Finance and write '
-                    'to fx_rates + fx_rates_monthly. Wraps datalayer.fxrate_to_sql '
-                    'via subprocess.',
+                    'to fx_rates + fx_rates_monthly. Logic inlined in '
+                    'sync_service.pipelines.fx_rate.',
             'cls': 'sync_service.pipelines.fx_rate.FxRatePipeline',
             'sched': '{"cron": "0 0 * * *"}',
             'ttl': 25 * 3600,

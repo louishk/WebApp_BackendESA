@@ -62,9 +62,8 @@ def main():
             'name': 'outlook_calendar',
             'display': 'Outlook Calendar',
             'desc': 'Extract calendar events from configured Outlook mailboxes '
-                    'via Microsoft Graph and write to calendar_events. Wraps '
-                    'datalayer.calendar_to_sql via subprocess. On-demand only '
-                    '(no cron) — trigger via orchestrator API/CLI.',
+                    'via Microsoft Graph and write to calendar_events. '
+                    'On-demand only (no cron) — trigger via orchestrator API/CLI.',
             'cls': 'sync_service.pipelines.outlook_calendar.OutlookCalendarPipeline',
             'ttl': 24 * 3600,
             'args': '{"mode": "auto"}',
