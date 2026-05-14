@@ -238,11 +238,9 @@ async def _record_tool_stat(tool_name: str, elapsed_ms: float, is_error: bool):
     """Record MCP tool call to mcp_tool_statistics table (fire-and-forget)."""
     try:
         ctx = request_context_var.get({})
-        from mcp_esa.config.settings import get_settings
-        settings = get_settings()
-        from sqlalchemy import create_engine, text
-        engine = create_engine(settings.get_backend_db_url(), pool_size=1, max_overflow=1)
-        with engine.connect() as conn:
+        from common.db import get_engine
+        from sqlalchemy import text
+        with get_engine('backend').connect() as conn:
             conn.execute(
                 text("""
                     INSERT INTO mcp_tool_statistics (tool_name, username, key_id, client_ip, response_time_ms, is_error)
@@ -258,7 +256,6 @@ async def _record_tool_stat(tool_name: str, elapsed_ms: float, is_error: bool):
                 }
             )
             conn.commit()
-        engine.dispose()
     except Exception as e:
         logger.debug(f"Failed to record tool stat: {e}")
 

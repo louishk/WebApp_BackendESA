@@ -269,10 +269,9 @@ class IglooClient:
         reliable path.
         """
         try:
-            from sqlalchemy import create_engine, text
-            from common.config_loader import get_database_url
-            engine = create_engine(get_database_url('middleware'))
-            with engine.connect() as conn:
+            from sqlalchemy import text
+            from common.db import get_engine
+            with get_engine('middleware').connect() as conn:
                 row = conn.execute(
                     text(
                         'SELECT "departmentId", site_id FROM igloo_devices '
@@ -281,7 +280,6 @@ class IglooClient:
                     {'did': device_id},
                 ).fetchone()
                 if row and row[0]:
-                    engine.dispose()
                     return row[0]
                 if row and row[1]:
                     site_row = conn.execute(
@@ -291,9 +289,7 @@ class IglooClient:
                         ),
                         {'sid': row[1]},
                     ).fetchone()
-                    engine.dispose()
                     return site_row[0] if site_row and site_row[0] else None
-            engine.dispose()
             return None
         except Exception:
             logger.exception("Failed to resolve departmentId for %s", device_id)
@@ -306,10 +302,9 @@ class IglooClient:
         first Bridge deviceId found, or None.
         """
         try:
-            from sqlalchemy import create_engine, text
-            from common.config_loader import get_database_url
-            engine = create_engine(get_database_url('middleware'))
-            with engine.connect() as conn:
+            from sqlalchemy import text
+            from common.db import get_engine
+            with get_engine('middleware').connect() as conn:
                 row = conn.execute(
                     text(
                         'SELECT "linkedAccessories", "linkedDevices" '
@@ -317,7 +312,6 @@ class IglooClient:
                     ),
                     {'did': device_id},
                 ).fetchone()
-            engine.dispose()
             if not row:
                 return None
             for blob in (row[0], row[1]):

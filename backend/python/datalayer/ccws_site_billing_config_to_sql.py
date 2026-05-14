@@ -105,7 +105,8 @@ def main():
         timeout=120, retries=3,
     )
 
-    pbi_engine = create_engine(get_database_url('pbi'))
+    from common.db import get_engine as _get_engine
+    pbi_engine = _get_engine('pbi')
     Base.metadata.create_all(pbi_engine, tables=[CcwsSiteBillingConfig.__table__])
     session_mgr = SessionManager(pbi_engine)
 

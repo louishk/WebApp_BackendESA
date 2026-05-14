@@ -13,19 +13,15 @@ from typing import Optional, Tuple
 
 import bcrypt
 import jwt
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from mcp_esa.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 # Lazy-initialized DB engine for api_key lookups
-_engine = None
-_SessionFactory = None
 
 # Dummy bcrypt hash for constant-time comparison when key not found
 _DUMMY_HASH = bcrypt.hashpw(b"dummy", bcrypt.gensalt()).decode("utf-8")
@@ -38,17 +34,8 @@ _RATE_LIMIT_WINDOW = 60  # seconds
 
 def _get_session():
     """Get a database session for the esa_backend DB."""
-    global _engine, _SessionFactory
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_engine(
-            settings.get_backend_db_url(),
-            pool_size=2,
-            max_overflow=3,
-            pool_pre_ping=True,
-        )
-        _SessionFactory = sessionmaker(bind=_engine)
-    return _SessionFactory()
+    from common.db import get_session
+    return get_session('backend')
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):

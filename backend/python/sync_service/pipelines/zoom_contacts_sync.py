@@ -298,17 +298,16 @@ def update_sync_state(backend_session, sync_name: str, records_processed: int):
 
 
 def run(mode: str = 'auto', limit: Optional[int] = None) -> Dict[str, int]:
-    from common.config_loader import get_database_url
+    from common.db import get_engine, get_session
     from common.models import Base, ZoomContactSync, ZoomSyncState
     from common.sugarcrm_client import SugarCRMClient
     from common.zoom_client import ZoomClient
 
-    pbi_engine = create_engine(get_database_url('pbi'))
+    pbi_engine = get_engine('pbi')
     Base.metadata.create_all(pbi_engine, tables=[
         ZoomContactSync.__table__, ZoomSyncState.__table__,
     ])
-    Session = sessionmaker(bind=pbi_engine)
-    session = Session()
+    session = get_session('pbi')
     sugar_client = None
 
     try:

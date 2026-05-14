@@ -367,11 +367,9 @@ def _compute_effective_rate(*, site_code, unit_id, concession_row) -> Decimal:
     Pulls the unit's std_rate from ccws_available_units / ccws_units
     and applies the concession's pct/fixed discount.
     """
-    from common.config_loader import get_database_url
-    from sqlalchemy import create_engine
+    from common.db import get_engine
     try:
-        engine = create_engine(get_database_url('middleware'))
-        with engine.connect() as conn:
+        with get_engine('middleware').connect() as conn:
             r = conn.execute(text("""
                 SELECT "dcStdRate" FROM ccws_units
                 WHERE "sLocationCode" = :sc AND "UnitID" = :uid

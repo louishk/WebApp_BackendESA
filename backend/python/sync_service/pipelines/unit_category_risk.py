@@ -300,9 +300,8 @@ def run(country_code: Optional[str] = None) -> dict:
     If country_code is given, only that country is recomputed; otherwise all
     countries listed in risk.yaml are processed.
     """
-    from common.config_loader import get_config, get_database_url
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
+    from common.config_loader import get_config
+    from common.db import get_session
     from web.utils.audit import audit_log, AuditEvent
 
     cfg = get_config().get_section('risk').to_dict()
@@ -310,9 +309,7 @@ def run(country_code: Optional[str] = None) -> dict:
     threshold = int(cfg['sample_size_threshold'])
     window_years = int(cfg['window_years'])
 
-    engine = create_engine(get_database_url('pbi'))
-    Session = sessionmaker(bind=engine)
-    session = Session()
+    session = get_session('pbi')
 
     targets = ({country_code: countries[country_code]}
                if country_code else countries)

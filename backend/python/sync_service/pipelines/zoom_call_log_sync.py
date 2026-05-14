@@ -655,18 +655,17 @@ def run(mode: str = 'auto', limit: Optional[int] = None, days: Optional[int] = N
         no_push: bool = False, skip_transcribe: bool = False,
         transcribe_limit: Optional[int] = None, skip_score: bool = False,
         score_limit: Optional[int] = None, rescore_all: bool = False) -> Dict[str, int]:
-    from common.config_loader import get_database_url
+    from common.db import get_engine, get_session
     from common.models import Base, ZoomCallLog, ZoomSyncState
     from common.sugarcrm_client import SugarCRMClient
     from common.zoom_agent_resolver import refresh_agent_mapping
     from common.zoom_client import ZoomClient
 
-    pbi_engine = create_engine(get_database_url('pbi'))
+    pbi_engine = get_engine('pbi')
     Base.metadata.create_all(pbi_engine, tables=[
         ZoomCallLog.__table__, ZoomSyncState.__table__,
     ])
-    Session = sessionmaker(bind=pbi_engine)
-    session = Session()
+    session = get_session('pbi')
 
     try:
         now = datetime.now(timezone.utc)

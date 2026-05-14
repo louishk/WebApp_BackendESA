@@ -38,23 +38,19 @@ def get_pipeline_config(pipeline_name: str, key: str, default: Any = None) -> An
     now = time.time()
     if now - _pipeline_args_cache_ts > _PIPELINE_ARGS_CACHE_TTL:
         try:
-            from common.config_loader import get_database_url
-            from sqlalchemy import create_engine, text
+            from common.db import get_engine
+            from sqlalchemy import text
 
-            engine = create_engine(get_database_url('backend'), pool_size=1, max_overflow=0)
-            try:
-                with engine.connect() as conn:
-                    rows = conn.execute(text(
-                        "SELECT pipeline_name, pipeline_specific_args "
-                        "FROM scheduler_pipeline_config "
-                        "WHERE pipeline_specific_args IS NOT NULL"
-                    ))
-                    _pipeline_args_cache = {
-                        r[0]: r[1] for r in rows if r[1]
-                    }
-                    _pipeline_args_cache_ts = now
-            finally:
-                engine.dispose()
+            with get_engine('backend').connect() as conn:
+                rows = conn.execute(text(
+                    "SELECT pipeline_name, pipeline_specific_args "
+                    "FROM scheduler_pipeline_config "
+                    "WHERE pipeline_specific_args IS NOT NULL"
+                ))
+                _pipeline_args_cache = {
+                    r[0]: r[1] for r in rows if r[1]
+                }
+                _pipeline_args_cache_ts = now
         except Exception:
             logger.debug("Could not refresh pipeline args cache from DB")
 

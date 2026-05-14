@@ -1,83 +1,42 @@
-"""
-sync_service configuration and DB session management.
+"""sync_service DB session management.
 
-Relies only on common/config_loader.py for DB credentials.
-Does NOT import from scheduler/, sync/, or web/routes/.
+Thin delegator over common.db so the orchestrator shares the same engine
+pool and pool config as the rest of the backend.
 """
 
-import logging
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 
-logger = logging.getLogger(__name__)
-
-# Engine cache — one engine per database, created lazily
-_engines: dict = {}
-_session_factories: dict = {}
+from common.db import (
+    dispose_all,
+    get_engine as _get_engine,
+    get_session as _get_session,
+    session_scope as _session_scope,
+)
 
 
 def get_engine(database: str = 'middleware') -> Engine:
-    """Get or create a SQLAlchemy engine for the given database.
-
-    Args:
-        database: 'middleware' (esa_middleware — sync_service state, default),
-                  'backend' (esa_backend), or 'pbi' (esa_pbi analytics)
-    """
-    global _engines
-    if database not in _engines:
-        from common.config_loader import get_database_url
-        url = get_database_url(database)
-        _engines[database] = create_engine(
-            url,
-            pool_size=5,
-            max_overflow=5,
-            pool_pre_ping=True,
-            pool_recycle=1800,
-        )
-        logger.info(f"sync_service engine created for db={database}")
-    return _engines[database]
+    """Cached engine for the given database. See common.db.get_engine."""
+    return _get_engine(database)
 
 
 def get_session_factory(database: str = 'middleware') -> sessionmaker:
-    """Get or create a sessionmaker for the given database."""
-    global _session_factories
-    if database not in _session_factories:
-        _session_factories[database] = sessionmaker(bind=get_engine(database))
-    return _session_factories[database]
+    """Return a sessionmaker bound to the cached engine.
+
+    Kept for backwards compatibility with sync_service callers; prefer
+    `session_scope()` for new code.
+    """
+    return sessionmaker(bind=get_engine(database))
 
 
 @contextmanager
 def session_scope(database: str = 'middleware') -> Iterator[Session]:
-    """Provide a transactional scope around a series of operations.
-
-    Usage:
-        with session_scope() as session:
-            session.query(...)
-    """
-    SessionLocal = get_session_factory(database)
-    session = SessionLocal()
-    try:
+    """Transactional context — commit/rollback/close handled."""
+    with _session_scope(database) as session:
         yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
 
 
-def dispose_all():
-    """Dispose all cached engines. Call during daemon shutdown."""
-    global _engines, _session_factories
-    for db, engine in _engines.items():
-        try:
-            engine.dispose()
-            logger.info(f"sync_service engine disposed for db={db}")
-        except Exception as e:
-            logger.warning(f"Error disposing engine for {db}: {e}")
-    _engines = {}
-    _session_factories = {}
+__all__ = ['get_engine', 'get_session_factory', 'session_scope', 'dispose_all']

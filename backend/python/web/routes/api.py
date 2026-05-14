@@ -493,8 +493,6 @@ def _validate_pipeline_specific_args(args):
 @cached(ttl_seconds=60)
 def api_data_freshness():
     """Get latest data dates for all pipelines."""
-    from scheduler.config import get_pbi_engine
-
     config = _get_scheduler_config()
     freshness = {}
 
@@ -552,26 +550,21 @@ def api_data_freshness():
             for name, _, _ in queries:
                 freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
 
-    # Query PBI database
+    # Both databases served through the canonical common.db engine cache —
+    # no per-request engine creation, no leaked pools.
+    from common.db import get_engine as _get_engine
+
     if pbi_queries:
         try:
-            pbi_engine = get_pbi_engine(config)
-            _run_freshness_queries(pbi_engine, pbi_queries)
+            _run_freshness_queries(_get_engine('pbi'), pbi_queries)
         except Exception as e:
             current_app.logger.error(f"Could not connect to PBI database: {e}")
             for name, _, _ in pbi_queries:
                 freshness[name] = {'latest_date': None, 'error': 'Database connection failed'}
 
-    # Query backend database (allowlisted tables only)
     if backend_queries:
         try:
-            from common.config_loader import get_database_url
-            from sqlalchemy import create_engine
-            backend_engine = create_engine(get_database_url('backend'))
-            try:
-                _run_freshness_queries(backend_engine, backend_queries)
-            finally:
-                backend_engine.dispose()
+            _run_freshness_queries(_get_engine('backend'), backend_queries)
         except Exception as e:
             current_app.logger.error(f"Could not connect to backend database: {e}")
             for name, _, _ in backend_queries:
@@ -588,8 +581,6 @@ def api_run_job_async(pipeline):
     """Trigger job execution asynchronously."""
     from scheduler.executor import PipelineExecutor
     from scheduler.models import JobHistory
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
 
     config = _get_scheduler_config()
 
@@ -607,64 +598,62 @@ def api_run_job_async(pipeline):
     final_args = dict(p.default_args)
     final_args.update(args)
 
-    db_url = current_app.db_url
-
     def run_pipeline():
         from scheduler.resource_manager import get_resource_manager
+        from common.db import get_session
 
-        engine = create_engine(db_url)
-        Session = sessionmaker(bind=engine)
-        session = Session()
-
-        job_history = JobHistory(
-            job_id=f"{pipeline}_{execution_id}",
-            pipeline_name=pipeline,
-            execution_id=execution_id,
-            status='running',
-            priority=p.priority,
-            scheduled_at=now_utc(),
-            started_at=now_utc(),
-            mode=mode,
-            parameters=final_args,
-            triggered_by='web'
-        )
-        session.add(job_history)
-        session.commit()
-
-        rm = get_resource_manager()
-        resource_group = p.resource_group
-        db_slots = p.max_db_connections
-
+        session = get_session('backend')
         try:
-            with rm.acquire(resource_group, count=1, timeout=300, job_id=str(execution_id)):
-                with rm.acquire('db_pool', count=db_slots, timeout=300, job_id=str(execution_id)):
-                    executor = PipelineExecutor()
-                    result = executor.execute_streaming(
-                        module_path=p.module_path,
-                        args=final_args,
-                        execution_id=execution_id,
-                        timeout_seconds=p.timeout_seconds
-                    )
-        except TimeoutError as e:
-            from scheduler.executor import ExecutionResult
-            result = ExecutionResult(
-                success=False,
-                exit_code=-1,
-                stdout='',
-                stderr=str(e),
-                duration_seconds=0,
-                error_message=f"Resource acquisition timeout: {e}"
+            job_history = JobHistory(
+                job_id=f"{pipeline}_{execution_id}",
+                pipeline_name=pipeline,
+                execution_id=execution_id,
+                status='running',
+                priority=p.priority,
+                scheduled_at=now_utc(),
+                started_at=now_utc(),
+                mode=mode,
+                parameters=final_args,
+                triggered_by='web'
             )
+            session.add(job_history)
+            session.commit()
 
-        job_history.completed_at = now_utc()
-        job_history.duration_seconds = result.duration_seconds
-        job_history.records_processed = result.records_processed
-        job_history.status = 'completed' if result.success else 'failed'
-        if not result.success:
-            job_history.error_message = result.error_message
-            job_history.error_traceback = result.stderr[:5000] if result.stderr else None
-        session.commit()
-        session.close()
+            rm = get_resource_manager()
+            resource_group = p.resource_group
+            db_slots = p.max_db_connections
+
+            try:
+                with rm.acquire(resource_group, count=1, timeout=300, job_id=str(execution_id)):
+                    with rm.acquire('db_pool', count=db_slots, timeout=300, job_id=str(execution_id)):
+                        executor = PipelineExecutor()
+                        result = executor.execute_streaming(
+                            module_path=p.module_path,
+                            args=final_args,
+                            execution_id=execution_id,
+                            timeout_seconds=p.timeout_seconds
+                        )
+            except TimeoutError as e:
+                from scheduler.executor import ExecutionResult
+                result = ExecutionResult(
+                    success=False,
+                    exit_code=-1,
+                    stdout='',
+                    stderr=str(e),
+                    duration_seconds=0,
+                    error_message=f"Resource acquisition timeout: {e}"
+                )
+
+            job_history.completed_at = now_utc()
+            job_history.duration_seconds = result.duration_seconds
+            job_history.records_processed = result.records_processed
+            job_history.status = 'completed' if result.success else 'failed'
+            if not result.success:
+                job_history.error_message = result.error_message
+                job_history.error_traceback = result.stderr[:5000] if result.stderr else None
+            session.commit()
+        finally:
+            session.close()
 
         # Clear cache so dashboard shows fresh data
         clear_cache('data-freshness')

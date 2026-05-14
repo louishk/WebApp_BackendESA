@@ -613,11 +613,10 @@ def load_site_billing_config(site_code: str):
     has no row yet — caller should run ccws_site_billing_config_to_sql.py
     to populate.
     """
-    from sqlalchemy import create_engine, text
-    from common.config_loader import get_database_url
+    from sqlalchemy import text
+    from common.db import get_engine
 
-    engine = create_engine(get_database_url('middleware'))
-    with engine.connect() as conn:
+    with get_engine('middleware').connect() as conn:
         row = conn.execute(text("""
             SELECT b_anniv_date_leasing,
                    i_day_strt_prorating,

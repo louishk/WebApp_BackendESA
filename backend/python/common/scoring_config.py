@@ -40,7 +40,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
@@ -54,16 +54,10 @@ _cache_lock = threading.Lock()
 _cached_config: Optional[Dict[str, Any]] = None
 _cached_at: float = 0.0
 _cached_version: int = 0
-_engine: Optional[Engine] = None
-
-
 def _get_engine() -> Engine:
-    """Lazy-init the esa_pbi engine for this module."""
-    global _engine
-    if _engine is None:
-        from common.config_loader import get_database_url
-        _engine = create_engine(get_database_url('pbi'), pool_pre_ping=True, pool_recycle=300)
-    return _engine
+    """Return the shared pbi engine from common.db."""
+    from common.db import get_engine
+    return get_engine('pbi')
 
 
 def invalidate_cache() -> None:
