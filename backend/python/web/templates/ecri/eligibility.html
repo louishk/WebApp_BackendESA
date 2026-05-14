@@ -867,6 +867,9 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             });
             const d = await res.json();
             if (d.success) {
+                if (d.skipped_in_open_batches) {
+                    alert(`Note: ${d.skipped_in_open_batches} ledger(s) were skipped because they are already in another open batch. ${d.total_ledgers} ledger(s) added to this batch.`);
+                }
                 window.location.href = `/ecri/batch/${d.batch_id}/review`;
             } else {
                 alert('Error: ' + (d.error || 'Unknown'));
@@ -970,6 +973,9 @@ tr.row-selected { background:rgba(196,18,48,0.1); }
             });
             const d = await res.json();
             if (d.success) {
+                if (d.skipped_in_open_batches) {
+                    alert(`Note: ${d.skipped_in_open_batches} ledger(s) were skipped because they are already in another open batch. ${d.total_ledgers} ledger(s) added to this batch.`);
+                }
                 window.location.href = `/ecri/batch/${d.batch_id}/review`;
             } else {
                 alert('Error: ' + (d.error || 'Unknown'));

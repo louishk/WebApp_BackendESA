@@ -314,6 +314,30 @@ def _ledger_bump_history(session, site_ids):
     return out
 
 
+OPEN_BATCH_STATUSES = ('draft', 'site_review', 'rev_review', 'rev_approved', 'executing')
+
+
+def _ledgers_in_open_batches(session, exclude_batch_id=None):
+    """Return {(site_id, ledger_id)} for every ledger currently in an OPEN
+    batch (draft/site_review/rev_review/rev_approved/executing). Pass
+    exclude_batch_id when appending to a batch — its own rows should be
+    excluded from the conflict set (the append flow already handles same-batch
+    dedup separately).
+    """
+    sql = """
+        SELECT bl.site_id, bl.ledger_id
+        FROM ecri_batch_ledgers bl
+        JOIN ecri_batches b ON b.batch_id = bl.batch_id
+        WHERE b.status = ANY(:open_statuses)
+    """
+    params = {'open_statuses': list(OPEN_BATCH_STATUSES)}
+    if exclude_batch_id is not None:
+        sql += ' AND bl.batch_id <> :excl'
+        params['excl'] = exclude_batch_id
+    rows = session.execute(text(sql), params).fetchall()
+    return {(int(sid), int(lid)) for sid, lid in rows}
+
+
 def _tenant_ledger_counts(session, site_ids):
     """Return {tenant_id: active_ledger_count} across the requested sites.
 
@@ -805,11 +829,14 @@ def api_append_to_batch(batch_id):
         notice_days = batch.notice_period_days or 14
         today = date.today()
 
-        # Skip ledgers already in this batch
+        # Skip ledgers already in this batch (in-batch dedup)
         existing = {
             (int(l.site_id), int(l.ledger_id))
             for l in session.query(ECRIBatchLedger).filter_by(batch_id=batch_id).all()
         }
+        # Also skip ledgers in OTHER open batches (cross-batch dedup) —
+        # double-ECRI guard. Same-batch is already covered by `existing`.
+        existing |= _ledgers_in_open_batches(session, exclude_batch_id=batch_id)
 
         # Pre-fetch anniv/paid_thru for new ledgers
         site_ledger_pairs = [(int(l['site_id']), int(l['ledger_id'])) for l in new_ledgers]
@@ -940,6 +967,20 @@ def api_create_batch():
         batch_id = uuid4()
         today = date.today()
 
+        # Cross-batch dedup: drop ledgers already in any OPEN batch
+        # (draft/site_review/rev_review/rev_approved/executing). Executed and
+        # cancelled batches don't conflict because SMD updates dSchedRentStrt
+        # which removes the tenant from vw_ecri_eligible_ledgers anyway.
+        open_keys = _ledgers_in_open_batches(session)
+        original_count = len(ledgers)
+        ledgers = [l for l in ledgers if (int(l['site_id']), int(l['ledger_id'])) not in open_keys]
+        skipped_open = original_count - len(ledgers)
+        if not ledgers:
+            return jsonify({
+                'error': 'All requested ledgers are already in another open batch',
+                'skipped_in_open_batches': skipped_open,
+            }), 400
+
         # Pre-fetch dPaidThru and dAnniv for all (site_id, ledger_id) pairs
         # from the view so we can compute billing-cycle-aware effective dates.
         site_ledger_pairs = [(int(l['site_id']), int(l['ledger_id'])) for l in ledgers]
@@ -1043,6 +1084,7 @@ def api_create_batch():
             'batch_id': str(batch_id),
             'total_ledgers': len(ledgers),
             'status': 'draft',
+            'skipped_in_open_batches': skipped_open,
         })
 
     except Exception as e:
@@ -1332,6 +1374,17 @@ def api_create_advance_batch():
         batch_id = uuid4()
         today = date.today()
 
+        # Cross-batch dedup: drop ledgers already in any OPEN batch
+        open_keys = _ledgers_in_open_batches(session)
+        original_count = len(ledgers)
+        ledgers = [l for l in ledgers if (int(l['site_id']), int(l['ledger_id'])) not in open_keys]
+        skipped_open = original_count - len(ledgers)
+        if not ledgers:
+            return jsonify({
+                'error': 'All requested ledgers are already in another open batch',
+                'skipped_in_open_batches': skipped_open,
+            }), 400
+
         # Fetch anniv for each ledger (projected_paid_thru already on each entry)
         site_ledger_pairs = [(int(l['site_id']), int(l['ledger_id'])) for l in ledgers]
         anniv_map: dict[tuple[int, int], date | None] = {}
@@ -1449,6 +1502,7 @@ def api_create_advance_batch():
             'total_ledgers': len(ledgers),
             'status': 'draft',
             'batch_type': 'advance',
+            'skipped_in_open_batches': skipped_open,
         })
 
     except Exception as e:
