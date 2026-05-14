@@ -78,9 +78,17 @@ def batch_create():
 
 @ecri_bp.route('/batch/<batch_id>/review')
 @login_required
-@ecri_manage_required
+@ecri_access_required
 def batch_review(batch_id):
-    """Review batch summary before execution."""
+    """Review batch summary before execution.
+
+    Open to all ECRI users so site ops can reach the page during stage 2
+    (`site_review`) and request exclusions on their own rows. Per-action
+    permissions inside the page (objection / approve / finalize / execute)
+    are still enforced individually by the underlying API endpoints AND by
+    the in-template `renderActions` / `renderModeBanner` logic, which only
+    surfaces buttons matching the current stage + user permissions.
+    """
     return render_template('ecri/batch_review.html', batch_id=batch_id)
 
 
