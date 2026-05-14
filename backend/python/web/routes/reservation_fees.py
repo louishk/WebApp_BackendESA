@@ -27,23 +27,9 @@ reservation_fees_api_bp = Blueprint('reservation_fees_api', __name__, url_prefix
 # Helpers
 # ---------------------------------------------------------------------------
 
-_pbi_engine = None
-
-
 def _get_pbi_session():
-    global _pbi_engine
-    if _pbi_engine is None:
-        from common.config_loader import get_database_url
-        from sqlalchemy import create_engine
-        _pbi_engine = create_engine(
-            get_database_url('pbi'),
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,
-            pool_recycle=300,
-        )
-    from sqlalchemy.orm import sessionmaker
-    return sessionmaker(bind=_pbi_engine)()
+    from flask import current_app
+    return current_app.get_pbi_session()
 
 
 def _lookup_site(site_id):

@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from sqlalchemy import text
 
-from common.config_loader import get_config, get_database_url
+from common.config_loader import get_config
 from common.risk_lookup import FactorRow, compute_risk, resolve_effective_factor
 from web.auth.jwt_auth import require_auth, require_api_scope
 from web.utils.rate_limit import rate_limit_api
@@ -25,10 +25,7 @@ DIMENSIONS = ("size", "range", "type", "climate", "shape", "pillar")
 
 def _pbi_session():
     """Lazy session — overridden in tests."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    engine = create_engine(get_database_url("pbi"))
-    return sessionmaker(bind=engine)()
+    return current_app.get_pbi_session()
 
 
 def _bands():

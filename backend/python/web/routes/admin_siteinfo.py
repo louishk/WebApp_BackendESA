@@ -22,7 +22,6 @@ admin_siteinfo_bp = Blueprint('admin_siteinfo', __name__, url_prefix='/admin/sit
 # PBI engine (lazy singleton) — canonical during transition to mw_siteinfo
 # ---------------------------------------------------------------------------
 
-_pbi_engine = None
 _mw_engine = None
 
 # Middleware mirror table — dual-writes run here as best-effort.
@@ -30,20 +29,9 @@ _mw_engine = None
 MW_SITEINFO_TABLE = 'mw_siteinfo'
 
 
-def _get_pbi_engine():
-    global _pbi_engine
-    if _pbi_engine is None:
-        from common.config_loader import get_database_url
-        from sqlalchemy import create_engine
-        pbi_url = get_database_url('pbi')
-        _pbi_engine = create_engine(pbi_url, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=300)
-    return _pbi_engine
-
-
 def _get_pbi_session():
-    from sqlalchemy.orm import sessionmaker
-    Session = sessionmaker(bind=_get_pbi_engine())
-    return Session()
+    from flask import current_app
+    return current_app.get_pbi_session()
 
 
 def _get_mw_engine():

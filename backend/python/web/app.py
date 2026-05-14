@@ -6,6 +6,7 @@ Provides REST API, scheduler dashboard, user/page management.
 import logging
 import os
 import sys
+import threading
 import uuid
 from pathlib import Path
 from datetime import datetime
@@ -69,18 +70,21 @@ def create_app(config=None, db_url=None):
     # Database session factory
     _db_engine = None
     _session_factory = None
+    _db_lock = threading.Lock()
 
     def get_db_session():
         nonlocal _db_engine, _session_factory
         if _db_engine is None:
-            _db_engine = create_engine(
-                app.db_url,
-                pool_size=5,
-                max_overflow=10,
-                pool_pre_ping=True,
-                pool_recycle=300,
-            )
-            _session_factory = sessionmaker(bind=_db_engine)
+            with _db_lock:
+                if _db_engine is None:
+                    _db_engine = create_engine(
+                        app.db_url,
+                        pool_size=5,
+                        max_overflow=10,
+                        pool_pre_ping=True,
+                        pool_recycle=300,
+                    )
+                    _session_factory = sessionmaker(bind=_db_engine)
         return _session_factory()
 
     app.get_db_session = get_db_session
@@ -89,21 +93,48 @@ def create_app(config=None, db_url=None):
     # reservation fees, and other middleware-tier tables)
     _mw_engine = None
     _mw_session_factory = None
+    _mw_lock = threading.Lock()
 
     def get_middleware_session():
         nonlocal _mw_engine, _mw_session_factory
         if _mw_engine is None:
-            _mw_engine = create_engine(
-                get_database_url('middleware'),
-                pool_size=5,
-                max_overflow=10,
-                pool_pre_ping=True,
-                pool_recycle=300,
-            )
-            _mw_session_factory = sessionmaker(bind=_mw_engine)
+            with _mw_lock:
+                if _mw_engine is None:
+                    _mw_engine = create_engine(
+                        get_database_url('middleware'),
+                        pool_size=5,
+                        max_overflow=10,
+                        pool_pre_ping=True,
+                        pool_recycle=300,
+                    )
+                    _mw_session_factory = sessionmaker(bind=_mw_engine)
         return _mw_session_factory()
 
     app.get_middleware_session = get_middleware_session
+
+    # PBI database session factory (esa_pbi — analytics/reporting DB,
+    # Azure-hosted with a tight 100-connection ceiling). Shared by every
+    # blueprint to avoid pool fragmentation across workers.
+    _pbi_engine = None
+    _pbi_session_factory = None
+    _pbi_lock = threading.Lock()
+
+    def get_pbi_session():
+        nonlocal _pbi_engine, _pbi_session_factory
+        if _pbi_engine is None:
+            with _pbi_lock:
+                if _pbi_engine is None:
+                    _pbi_engine = create_engine(
+                        get_database_url('pbi'),
+                        pool_size=3,
+                        max_overflow=5,
+                        pool_pre_ping=True,
+                        pool_recycle=300,
+                    )
+                    _pbi_session_factory = sessionmaker(bind=_pbi_engine)
+        return _pbi_session_factory()
+
+    app.get_pbi_session = get_pbi_session
 
     # Initialize CORS with restricted origins
     cors_origins = app.config.get('CORS_ORIGINS', [

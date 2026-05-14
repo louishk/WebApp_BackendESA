@@ -102,24 +102,10 @@ def _site_codes_from_plan(plan) -> list:
     return [code for code, flag in sites.items() if flag]
 
 
-_pbi_engine = None
-
-
-def _get_pbi_engine():
-    global _pbi_engine
-    if _pbi_engine is None:
-        from common.config_loader import get_database_url
-        from sqlalchemy import create_engine
-        pbi_url = get_database_url('pbi')
-        _pbi_engine = create_engine(pbi_url, pool_size=5, max_overflow=10, pool_pre_ping=True, pool_recycle=300)
-    return _pbi_engine
-
-
 def _get_pbi_session():
-    """Get PBI database session for Site queries."""
-    from sqlalchemy.orm import sessionmaker
-    Session = sessionmaker(bind=_get_pbi_engine())
-    return Session()
+    """Get PBI database session — delegates to the app-level shared pool."""
+    from flask import current_app
+    return current_app.get_pbi_session()
 
 
 def _get_sites_by_country():

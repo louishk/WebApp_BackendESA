@@ -1083,12 +1083,9 @@ def services_page():
 # =============================================================================
 
 def _get_pbi_session():
-    """Get PBI database session for site billing config (Azure-hosted)."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-    from common.config_loader import get_database_url
-    engine = create_engine(get_database_url('pbi'))
-    return sessionmaker(bind=engine)()
+    """Get PBI database session — shared app-level engine pool."""
+    from flask import current_app
+    return current_app.get_pbi_session()
 
 
 @admin_bp.route('/site-billing-config')

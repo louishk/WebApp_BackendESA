@@ -19,7 +19,6 @@ from common.ecri_dates import (
 from flask import Blueprint, render_template, request, jsonify, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import func, text, desc
-from sqlalchemy.orm import sessionmaker
 
 from web.auth.decorators import (
     ecri_access_required, ecri_manage_required,
@@ -35,26 +34,10 @@ ecri_bp = Blueprint('ecri', __name__, url_prefix='/ecri')
 # PBI Database Session (ECRI data lives in esa_pbi)
 # =============================================================================
 
-_pbi_engine = None
-_pbi_session_factory = None
-
-
 def get_pbi_session():
-    """Get PBI database session for ECRI queries."""
-    global _pbi_engine, _pbi_session_factory
-    if _pbi_engine is None:
-        from common.config_loader import get_database_url
-        from sqlalchemy import create_engine
-        pbi_url = get_database_url('pbi')
-        _pbi_engine = create_engine(
-            pbi_url,
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,
-            pool_recycle=300,
-        )
-        _pbi_session_factory = sessionmaker(bind=_pbi_engine)
-    return _pbi_session_factory()
+    """Get PBI database session — delegates to the app-level shared pool."""
+    from flask import current_app
+    return current_app.get_pbi_session()
 
 
 # =============================================================================

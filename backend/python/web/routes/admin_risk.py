@@ -1,5 +1,5 @@
 """Risk Factors UI — unit-category and (future) tenant risk inspection."""
-from flask import Blueprint, render_template
+from flask import Blueprint, current_app, render_template
 from flask_login import login_required
 
 from common.config_loader import get_config
@@ -33,11 +33,9 @@ def tenant_risk_page():
 @login_required
 @risk_admin_access_required
 def risk_inventory_json():
-    from sqlalchemy import create_engine, text
-    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy import text
     from flask import request, jsonify
 
-    from common.config_loader import get_database_url
     from common.risk_lookup import (
         FactorRow, compute_risk, resolve_effective_factor,
     )
@@ -49,8 +47,7 @@ def risk_inventory_json():
     if not name:
         return jsonify({"error": "country not configured"}), 404
 
-    engine = create_engine(get_database_url("pbi"))
-    session = sessionmaker(bind=engine)()
+    session = current_app.get_pbi_session()
     try:
         baseline_row = session.execute(text("""
             SELECT baseline_rate FROM unit_category_risk_baseline

@@ -14,33 +14,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Tuple
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 
 # ---------------------------------------------------------------------------
 # Database session — esa_pbi (analytics / SiteInfo lookup target)
 # ---------------------------------------------------------------------------
 
-_pbi_engine = None
-_pbi_session_factory = None
-
-
 def get_pbi_session():
-    """Return a fresh session bound to esa_pbi. Lazy engine init."""
-    global _pbi_engine, _pbi_session_factory
-    if _pbi_engine is None:
-        from common.config_loader import get_database_url
-        pbi_url = get_database_url('pbi')
-        _pbi_engine = create_engine(
-            pbi_url,
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,
-            pool_recycle=300,
-        )
-        _pbi_session_factory = sessionmaker(bind=_pbi_engine)
-    return _pbi_session_factory()
+    """Return a fresh session bound to esa_pbi — uses the app-level shared pool."""
+    from flask import current_app
+    return current_app.get_pbi_session()
 
 
 # ---------------------------------------------------------------------------
