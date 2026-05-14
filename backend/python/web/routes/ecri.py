@@ -1567,6 +1567,88 @@ def api_get_batch(batch_id):
         session.close()
 
 
+@ecri_bp.route('/api/batch/<batch_id>', methods=['PATCH'])
+@login_required
+@ecri_manage_required
+def api_patch_batch(batch_id):
+    """Edit metadata on a draft batch — name and/or notes.
+
+    Other fields (ledgers, target %, sites) are immutable; use cancel + recreate
+    if those need to change.
+    """
+    from common.models import ECRIBatch
+    data = request.get_json() or {}
+    new_name = data.get('name')
+    new_notes = data.get('notes')
+
+    if new_name is not None:
+        new_name = str(new_name).strip()
+        if not (1 <= len(new_name) <= 255):
+            return jsonify({'error': 'name length must be 1-255'}), 400
+    if new_notes is not None:
+        new_notes = str(new_notes)
+        if len(new_notes) > 4000:
+            return jsonify({'error': 'notes too long (max 4000 chars)'}), 400
+
+    if new_name is None and new_notes is None:
+        return jsonify({'error': 'No editable fields provided'}), 400
+
+    session = get_pbi_session()
+    try:
+        batch = session.query(ECRIBatch).filter_by(batch_id=batch_id).first()
+        if not batch:
+            return jsonify({'error': 'Batch not found'}), 404
+        if batch.status != 'draft':
+            return jsonify({'error': f'Can only edit draft batches (current: {batch.status})'}), 400
+
+        if new_name is not None:
+            batch.name = new_name
+        if new_notes is not None:
+            batch.notes = new_notes
+        session.commit()
+        return jsonify({'success': True, 'name': batch.name, 'notes': batch.notes})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"ECRI batch patch error: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+    finally:
+        session.close()
+
+
+@ecri_bp.route('/api/batch/<batch_id>/ledger/<int:row_id>', methods=['DELETE'])
+@login_required
+@ecri_manage_required
+def api_delete_batch_ledger(batch_id, row_id):
+    """Remove a single ledger row from a draft batch. Updates total_ledgers."""
+    from common.models import ECRIBatch, ECRIBatchLedger
+
+    session = get_pbi_session()
+    try:
+        batch = session.query(ECRIBatch).filter_by(batch_id=batch_id).first()
+        if not batch:
+            return jsonify({'error': 'Batch not found'}), 404
+        if batch.status != 'draft':
+            return jsonify({'error': f'Can only edit draft batches (current: {batch.status})'}), 400
+
+        row = (session.query(ECRIBatchLedger)
+               .filter_by(id=row_id, batch_id=batch_id).first())
+        if not row:
+            return jsonify({'error': 'Ledger row not found in this batch'}), 404
+
+        session.delete(row)
+        session.flush()
+        batch.total_ledgers = (session.query(ECRIBatchLedger)
+                               .filter_by(batch_id=batch_id).count())
+        session.commit()
+        return jsonify({'success': True, 'total_ledgers': batch.total_ledgers})
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"ECRI batch ledger delete error: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+    finally:
+        session.close()
+
+
 @ecri_bp.route('/api/batch/<batch_id>/cancel', methods=['POST'])
 @login_required
 @ecri_manage_required

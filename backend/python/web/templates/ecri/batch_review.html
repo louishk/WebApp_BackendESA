@@ -338,6 +338,41 @@ body .container { max-width: 1800px; }
             reasons.map(r => `<option value="${r.code}">${r.label}</option>`).join('');
     }
 
+    async function editBatchName() {
+        const current = (BATCH_DATA && BATCH_DATA.name) || '';
+        const next = prompt('Edit batch name:', current);
+        if (next === null) return;
+        const trimmed = next.trim();
+        if (!trimmed || trimmed === current) return;
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}`, {
+                method: 'PATCH', headers: apiHeaders(),
+                body: JSON.stringify({ name: trimmed }),
+            });
+            const d = await res.json();
+            if (d.error) { alert('Rename failed: ' + d.error); return; }
+            BATCH_DATA.name = d.name;
+            document.getElementById('batch-name-display').textContent = d.name;
+        } catch (e) { alert('Rename failed: ' + e.message); }
+    }
+
+    async function removeLedger(rowId, tenantName) {
+        if (!confirm(`Remove ${tenantName || 'this ledger'} from the batch? This cannot be undone (you can re-add via Append on /ecri/eligibility).`)) return;
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/ledger/${rowId}`, {
+                method: 'DELETE', headers: apiHeaders(),
+            });
+            const d = await res.json();
+            if (d.error) { alert('Remove failed: ' + d.error); return; }
+            // Drop from local state + redraw
+            ALL_LEDGERS = ALL_LEDGERS.filter(l => l.id !== rowId);
+            if (BATCH_DATA) BATCH_DATA.total_ledgers = d.total_ledgers;
+            renderLedgers();
+            // Refresh the impact card so the count is fresh
+            loadBatch();
+        } catch (e) { alert('Remove failed: ' + e.message); }
+    }
+
     async function loadBatch() {
         try {
             const res = await fetch(`/ecri/api/batch/${BATCH_ID}`, {headers: apiHeaders()});
@@ -348,9 +383,14 @@ body .container { max-width: 1800px; }
             }
             BATCH_DATA = data;
 
+            const canEditMeta = data.status === 'draft' && USER_PERMS.can_manage_ecri;
+            const nameHtml = canEditMeta
+                ? `<strong>Name:</strong> <span id="batch-name-display">${data.name || '-'}</span>
+                   <button class="btn btn-secondary btn-sm" style="padding:1px 6px; font-size:0.75rem; margin-left:0.3rem;" onclick="editBatchName()">edit</button>`
+                : `<strong>Name:</strong> ${data.name || '-'}`;
             document.getElementById('batch-info').innerHTML = `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; max-width: 700px;">
-                    <div><strong>Name:</strong> ${data.name || '-'}</div>
+                    <div>${nameHtml}</div>
                     <div><strong>Status:</strong> <span class="status status-pending">${data.status}</span></div>
                     <div><strong>Sites:</strong> ${data.site_ids.join(', ')}</div>
                     <div><strong>Target:</strong> ${data.control_group_enabled ? 'Control Groups' : (data.target_increase_pct + '%')}</div>
@@ -568,6 +608,10 @@ body .container { max-width: 1800px; }
             }
             if (batchStatus === 'executed' && l.api_status === 'success' && USER_PERMS.can_create_ecri_objection) {
                 actions.push(`<button class="btn btn-secondary" style="padding:2px 8px;font-size:0.78rem;" onclick="openObjectionModal(${l.id},${l.increase_pct||0},${l.new_rent||0},'${tenEsc}',${l.old_rent||0},'${l.currency||'SGD'}')">Objection</button>`);
+            }
+            // Draft-only: hard-remove a row from the batch (before submit-for-review)
+            if (batchStatus === 'draft' && USER_PERMS.can_manage_ecri) {
+                actions.push(`<button class="btn" style="padding:2px 8px;font-size:0.78rem;background:#C41230;" onclick="removeLedger(${l.id},'${tenEsc}')">Remove</button>`);
             }
             const actionHtml = actions.join(' ');
 
