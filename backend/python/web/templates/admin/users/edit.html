@@ -319,7 +319,7 @@
         feedback.style.color = '#666';
         feedback.textContent = 'Saving…';
 
-        fetch('/admin/api/users/{{ user.id }}/ecri-settings', {
+        fetch('/ecri/admin/api/users/{{ user.id }}/ecri-settings', {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
