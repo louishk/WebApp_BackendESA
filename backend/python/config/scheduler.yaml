@@ -1,76 +1,18 @@
 # =============================================================================
-# ESA Backend - Scheduler Configuration (merged)
+# Pipeline runtime overrides
 # =============================================================================
-# Daemon settings (APScheduler), app-level scheduler settings, pipelines, alerts.
+# Per-pipeline knobs read by sync_service/pipelines/* via
+# common.config.get_pipeline_config('<pipeline>', '<key>', default).
+#
+# config_loader uses the filename as the namespace, so a `pipelines:` key here
+# is reached at runtime as `config.scheduler.pipelines.<name>.<key>`.
+#
+# Filename kept as scheduler.yaml for backwards-compat with existing call
+# sites; the daemon-specific sections (daemon, engine, resources, retry,
+# health, shutdown, web, alerts) were stripped when the legacy APScheduler
+# daemon was decommissioned.
 
-scheduler:
-  enabled: true
-  timezone: "Asia/Singapore"
-  max_workers: 5
-  working_dir: "/var/www/backend/backend/python"
-
-  # Daemon process settings
-  daemon:
-    pid_file: /var/run/pbi-scheduler.pid
-    log_file: /var/log/pbi-scheduler/scheduler.log
-    working_directory: ${SCHEDULER_WORKING_DIR}
-
-  # APScheduler engine settings
-  engine:
-    timezone: Asia/Singapore
-    job_defaults:
-      coalesce: true                    # Combine missed runs into one
-      max_instances: 1                  # Only one instance per job
-      misfire_grace_time: 3600          # Allow 1 hour late execution
-
-    # Job store (uses PostgreSQL from .env)
-    jobstore:
-      tablename: apscheduler_jobs
-
-    # Thread pool executor
-    executor:
-      max_workers: 5                    # Max concurrent pipeline executions
-
-  # Resource limits to prevent contention
-  resources:
-    db_pool:
-      max_connections: 10               # Of 15 total PostgreSQL connections
-      reserve_for_scheduler: 2          # Reserved for scheduler operations
-    soap_api:
-      max_concurrent: 5                 # Max concurrent SOAP API calls
-    http_api:
-      max_concurrent: 10                # Max concurrent HTTP API calls
-
-  # Default retry settings
-  retry:
-    max_attempts: 3
-    delay_seconds: 300
-    backoff_multiplier: 2.0
-    max_delay_seconds: 3600
-
-  # Batch processing
-  batch:
-    chunk_size: 500
-    compression_threshold: 1024
-
-  # Health check settings
-  health:
-    heartbeat_interval_seconds: 30      # How often to update heartbeat
-    stale_lock_timeout_seconds: 600     # Consider lock stale after 10 min
-
-  # Graceful shutdown settings
-  shutdown:
-    timeout_seconds: 300                # Wait up to 5 min for running jobs
-    wait_for_jobs: true                 # Wait for jobs to complete before exit
-
-  # Web UI settings
-  web:
-    host: 0.0.0.0
-    port: 5000
-    debug: false
-
-# Pipeline-specific settings
-# Location codes used by: rentroll, discount, mimo, unitsinfo
+# Location codes used by: rentroll, discount, mimo, ccws_*, etc.
 location_codes: &location_codes
   - "L001"
   - "L002"
@@ -115,10 +57,6 @@ pipelines:
     location_codes: *location_codes
     days_back: 60
     days_forward: 365
-
-  unitsinfo:
-    sql_chunk_size: 500
-    location_codes: *location_codes
 
   ccws_charge_descriptions:
     sql_chunk_size: 500
@@ -166,23 +104,3 @@ pipelines:
       - "Contacts"
       - "Accounts"
       - "Opportunities"
-
-# Alerts
-alerts:
-  slack:
-    enabled: false
-    webhook_url_vault: "SLACK_WEBHOOK_URL"  # Reference to vault secret
-    channel: "#data-pipeline-alerts"
-    notify_on:
-      - "failure"
-      - "recovery"
-
-  email:
-    enabled: false
-    smtp_host: "smtp.your-provider.com"
-    smtp_port: 587
-    smtp_user: "alerts@your-domain.com"
-    smtp_password_vault: "SMTP_PASSWORD"  # Reference to vault secret
-    from_address: "pbi-scheduler@your-domain.com"
-    to_addresses:
-      - "data-team@your-domain.com"
