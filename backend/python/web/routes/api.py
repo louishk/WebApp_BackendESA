@@ -1947,6 +1947,39 @@ def api_list_sites():
         session.close()
 
 
+# Process-level cache for the all-sites list. Refreshed every 5 min.
+# Keeps the dropdown working when the PBI DB is briefly saturated on
+# connection slots (we've seen "remaining connection slots are reserved for
+# roles with the SUPERUSER attribute" on Azure under load).
+_ALL_SITES_CACHE: dict = {'fetched_at': 0.0, 'sites': None}
+_ALL_SITES_TTL = 300
+
+
+def _get_all_sites_cached():
+    import time
+    now = time.time()
+    if _ALL_SITES_CACHE['sites'] is not None and (now - _ALL_SITES_CACHE['fetched_at']) < _ALL_SITES_TTL:
+        return _ALL_SITES_CACHE['sites'], None
+    from common.models import SiteInfo
+    try:
+        session = get_pbi_session()
+        try:
+            rows = session.query(SiteInfo).order_by(SiteInfo.Country, SiteInfo.SiteCode).all()
+            sites = [
+                {'site_id': s.SiteID, 'site_code': s.SiteCode, 'name': s.Name, 'country': s.Country}
+                for s in rows
+            ]
+        finally:
+            session.close()
+        _ALL_SITES_CACHE['sites'] = sites
+        _ALL_SITES_CACHE['fetched_at'] = now
+        return sites, None
+    except Exception as e:
+        current_app.logger.warning(f"site list fetch failed: {e}")
+        # On failure, fall back to whatever's in the cache. None if cold.
+        return _ALL_SITES_CACHE.get('sites'), str(e)
+
+
 @api_bp.route('/me/sites')
 def api_me_sites():
     """Caller's effective allowed sites. Empty allowed_site_ids = all sites."""
@@ -1954,21 +1987,11 @@ def api_me_sites():
     if not current_user.is_authenticated:
         return jsonify({'error': 'Authentication required'}), 401
 
-    from common.models import SiteInfo
-    session = get_pbi_session()
-    try:
-        sites = session.query(SiteInfo).order_by(SiteInfo.Country, SiteInfo.SiteCode).all()
-        all_sites = [
-            {
-                'site_id': s.SiteID,
-                'site_code': s.SiteCode,
-                'name': s.Name,
-                'country': s.Country,
-            }
-            for s in sites
-        ]
-    finally:
-        session.close()
+    all_sites, err = _get_all_sites_cached()
+    if all_sites is None:
+        # Cold cache + DB failure — bubble a real error so the frontend can
+        # display something more useful than an empty dropdown.
+        return jsonify({'error': 'Site list temporarily unavailable', 'sites': []}), 503
 
     if not current_user.allowed_site_ids:
         return jsonify({'sites': all_sites, 'unrestricted': True})

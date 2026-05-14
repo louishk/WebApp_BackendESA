@@ -470,17 +470,16 @@
     </div>
     {% endif %}
 
-    {% if (request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint or 'api_key' in request.endpoint or 'ecri_user_limits' in request.endpoint)) or (request.endpoint and 'api_keys' in request.endpoint) %}
+    {% if (request.endpoint and 'admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint or 'api_key' in request.endpoint)) or (request.endpoint and 'api_keys' in request.endpoint) %}
     <div class="sub-navbar">
         {% if current_user.can_manage_users() %}
-        <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint == 'admin.list_users' or (request.endpoint and 'user' in request.endpoint and 'ecri' not in request.endpoint and 'api_key' not in request.endpoint) else '' }}">Users</a>
+        <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint == 'admin.list_users' or (request.endpoint and 'user' in request.endpoint and 'api_key' not in request.endpoint) else '' }}">Users</a>
         {% endif %}
         {% if current_user.can_manage_roles() %}
         <a href="{{ url_for('admin.list_roles') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and 'role' in request.endpoint else '' }}">Roles</a>
         {% endif %}
         {% if current_user.can_manage_users() %}
         <a href="{{ url_for('admin.list_api_keys') }}" class="{{ 'active' if request.endpoint and 'admin' in request.endpoint and 'api_key' in request.endpoint else '' }}">API Keys</a>
-        <a href="{{ url_for('admin.ecri_user_limits') }}" class="{{ 'active' if request.endpoint == 'admin.ecri_user_limits' else '' }}">ECRI Limits</a>
         {% endif %}
         <a href="{{ url_for('api_keys.my_key') }}" class="{{ 'active' if request.endpoint and 'api_keys' in request.endpoint else '' }}">My API Key</a>
     </div>
