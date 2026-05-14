@@ -319,9 +319,14 @@
         feedback.style.color = '#666';
         feedback.textContent = 'Saving…';
 
+        const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+        const csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : '';
         fetch('/ecri/admin/api/users/{{ user.id }}/ecri-settings', {
             method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+            },
             body: JSON.stringify({
                 allowed_site_ids: payloadSiteIds,
                 ecri_max_pct_reduction: maxPct,
