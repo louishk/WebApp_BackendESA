@@ -40,7 +40,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common import (
     DataLayerConfig,
-    create_engine_from_config,
     SessionManager,
     UpsertOperations,
     BatchOperations,
@@ -340,7 +339,8 @@ def truncate_and_load(
         return 0
 
     db_config = config.databases.get('postgresql')
-    engine = create_engine_from_config(db_config)
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
     Base.metadata.create_all(engine, tables=[model.__table__])
 
     session_manager = SessionManager(engine)
@@ -374,7 +374,8 @@ def upsert_facts(
         return 0
 
     db_config = config.databases.get('postgresql')
-    engine = create_engine_from_config(db_config)
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
     Base.metadata.create_all(engine, tables=[model.__table__])
 
     session_manager = SessionManager(engine)

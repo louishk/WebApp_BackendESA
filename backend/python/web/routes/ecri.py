@@ -262,6 +262,10 @@ def _ledger_bump_history(session, site_ids):
     earliest observed snapshot to the most recent (can be negative when rates
     decreased over time — observed for HK).
     """
+    # extract_date lower bound caps the snapshot window at ~3 years —
+    # matches the history_years clamp below and keeps the scan bounded
+    # so Azure PG isn't burning through unbounded historical snapshots
+    # on every eligibility request.
     rows = session.execute(text("""
         WITH per_ledger AS (
             SELECT "SiteID", "LedgerID", extract_date, "dcRent",
@@ -270,6 +274,7 @@ def _ledger_bump_history(session, site_ids):
                    ROW_NUMBER() OVER (PARTITION BY "SiteID", "LedgerID" ORDER BY extract_date DESC) AS rn_desc
             FROM rentroll
             WHERE "SiteID" = ANY(:site_ids)
+              AND extract_date >= CURRENT_DATE - INTERVAL '3 years'
               AND "bRented" AND "LedgerID" IS NOT NULL AND "dcRent" > 0
         )
         SELECT "SiteID", "LedgerID",

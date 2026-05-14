@@ -91,9 +91,9 @@ def transform_review(item: Dict[str, Any]) -> Dict[str, Any]:
 
 def push_reviews_to_database(data: List[Dict[str, Any]], config, chunk_size: int = 500) -> int:
     from common import (
-        create_engine_from_config, SessionManager, UpsertOperations, Base,
-        EmbedSocialReview,
+        SessionManager, UpsertOperations, Base, EmbedSocialReview,
     )
+    from common.db import get_engine
     if not data:
         return 0
 
@@ -101,7 +101,7 @@ def push_reviews_to_database(data: List[Dict[str, Any]], config, chunk_size: int
     if not db_config:
         raise ValueError("PostgreSQL configuration not found")
 
-    engine = create_engine_from_config(db_config)
+    engine = get_engine('pbi')
     Base.metadata.create_all(engine, tables=[EmbedSocialReview.__table__])
     session_manager = SessionManager(engine)
 
@@ -119,7 +119,8 @@ def push_reviews_to_database(data: List[Dict[str, Any]], config, chunk_size: int
 
 
 def get_existing_review_ids(config, review_ids: List[str]) -> set:
-    from common import create_engine_from_config, SessionManager, EmbedSocialReview
+    from common import SessionManager, EmbedSocialReview
+    from common.db import get_engine
     if not review_ids:
         return set()
 
@@ -127,7 +128,7 @@ def get_existing_review_ids(config, review_ids: List[str]) -> set:
     if not db_config:
         return set()
 
-    engine = create_engine_from_config(db_config)
+    engine = get_engine('pbi')
     session_manager = SessionManager(engine)
     try:
         with session_manager.session_scope() as session:
@@ -171,7 +172,8 @@ def run_backfill(api_key: str, config, page_size: int, chunk_size: int) -> int:
 
 
 def run_auto(api_key: str, config, page_size: int, chunk_size: int, max_pages: int) -> int:
-    from common import HTTPClient, create_engine_from_config, SessionManager, EmbedSocialReview
+    from common import HTTPClient, SessionManager, EmbedSocialReview
+    from common.db import get_engine
 
     http_client = HTTPClient()
     new_reviews: List[Dict[str, Any]] = []
@@ -214,7 +216,7 @@ def run_auto(api_key: str, config, page_size: int, chunk_size: int, max_pages: i
         try:
             db_config = config.databases.get('postgresql')
             if db_config and total_count > 0:
-                engine = create_engine_from_config(db_config)
+                engine = get_engine('pbi')
                 sm = SessionManager(engine)
                 with sm.session_scope() as session:
                     db_count = session.query(EmbedSocialReview).count()
@@ -231,7 +233,8 @@ def run_auto(api_key: str, config, page_size: int, chunk_size: int, max_pages: i
 
 
 def run_diagnose(api_key: str, config, page_size: int) -> Dict[str, Any]:
-    from common import HTTPClient, create_engine_from_config, SessionManager, EmbedSocialReview
+    from common import HTTPClient, SessionManager, EmbedSocialReview
+    from common.db import get_engine
 
     http_client = HTTPClient()
     items, total_count = get_items(http_client, api_key, page=1, page_size=page_size)
@@ -243,7 +246,7 @@ def run_diagnose(api_key: str, config, page_size: int) -> Dict[str, Any]:
 
     db_config = config.databases.get('postgresql')
     if db_config:
-        engine = create_engine_from_config(db_config)
+        engine = get_engine('pbi')
         sm = SessionManager(engine)
         try:
             with sm.session_scope() as session:

@@ -63,25 +63,27 @@ def transform_record(record: Dict[str, Any], extract_date: date) -> Dict[str, An
 def fetch_discount_data(report_client, location_codes: List[str],
                         start_date: datetime, end_date: datetime,
                         extract_date: date) -> List[Dict[str, Any]]:
+    """Parallel SOAP fan-out across sites — matches the ccws_* pipeline pattern."""
     from common import deduplicate_records
-    all_data: List[Dict[str, Any]] = []
+    from sync_service.pipelines._ccws_utils import parallel_fetch
 
-    for location_code in location_codes:
-        try:
-            results = report_client.call_report(
-                report_name='discounts',
-                parameters={
-                    'sLocationCode': location_code,
-                    'dReportDateStart': start_date.strftime('%Y-%m-%dT00:00:00'),
-                    'dReportDateEnd': end_date.strftime('%Y-%m-%dT23:59:59'),
-                },
-            )
-            for record in results:
-                all_data.append(transform_record(record, extract_date))
-            logger.info("discount fetched %s: %d records", location_code, len(results))
-        except Exception as e:
-            logger.exception("discount fetch failed for %s: %s", location_code, e)
-            continue
+    start_str = start_date.strftime('%Y-%m-%dT00:00:00')
+    end_str = end_date.strftime('%Y-%m-%dT23:59:59')
+
+    def _fetch_one(location_code: str) -> List[Dict[str, Any]]:
+        results = report_client.call_report(
+            report_name='discounts',
+            parameters={
+                'sLocationCode': location_code,
+                'dReportDateStart': start_str,
+                'dReportDateEnd': end_str,
+            },
+        )
+        return [transform_record(r, extract_date) for r in (results or [])]
+
+    all_data, per_site = parallel_fetch(_fetch_one, location_codes, max_workers=6)
+    for sc, n in per_site.items():
+        logger.info("discount fetched %s: %d records", sc, n)
 
     original_count = len(all_data)
     all_data = deduplicate_records(all_data, ['extract_date', 'SiteID', 'ChargeID'])
@@ -92,10 +94,11 @@ def fetch_discount_data(report_client, location_codes: List[str],
 
 def push_to_database(data: List[Dict[str, Any]], config, year: int, month: int, status: str) -> int:
     from common import (
-        create_engine_from_config, SessionManager, UpsertOperations, Base,
+        SessionManager, UpsertOperations, Base,
         Discount, delete_current_month_records, delete_non_eom_records,
     )
     from common.config import get_pipeline_config
+    from common.db import get_engine
 
     if not data:
         logger.warning("discount: no data to push for %d-%02d", year, month)
@@ -105,7 +108,8 @@ def push_to_database(data: List[Dict[str, Any]], config, year: int, month: int, 
     if not db_config:
         raise ValueError("PostgreSQL configuration not found")
 
-    engine = create_engine_from_config(db_config)
+    # Shared engine — no per-call pool construction.
+    engine = get_engine('pbi')
     Base.metadata.create_all(engine, tables=[Discount.__table__])
 
     session_manager = SessionManager(engine)

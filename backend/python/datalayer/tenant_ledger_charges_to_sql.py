@@ -49,7 +49,6 @@ from common import (
     DataLayerConfig,
     SOAPClient,
     REPORT_REGISTRY,
-    create_engine_from_config,
     SessionManager,
     UpsertOperations,
     Base,
@@ -949,11 +948,12 @@ def main():
     logger.info("=" * 70)
     print("[STAGE:INIT] TenantLedgerCharges")
 
-    # Create DB engine (shared across location processing, push, and Phase C)
+    # Shared engine via common.db — picks up pool_pre_ping/recycle automatically.
     db_config = config.databases.get('postgresql')
     if not db_config:
         raise ValueError("PostgreSQL configuration not found in .env")
-    engine = create_engine_from_config(db_config)
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
 
     # Build location_code → SiteID map
     site_map = {}

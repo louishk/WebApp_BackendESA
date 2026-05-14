@@ -95,12 +95,6 @@ SERVICE_RULES = [
         'full_restart': True,
     },
     {
-        'prefixes': ['backend/python/systemd/backend-scheduler.service'],
-        'services': {'backend-scheduler'},
-        'label': 'systemd:backend-scheduler',
-        'full_restart': True,
-    },
-    {
         'prefixes': ['backend/python/systemd/backend-mcp.service'],
         'services': {'backend-mcp'},
         'label': 'systemd:backend-mcp',
@@ -118,7 +112,7 @@ SERVICE_RULES = [
             'backend/python/requirements.txt',
             'mcp_esa/requirements.txt',
         ],
-        'services': {'esa-backend', 'backend-scheduler', 'backend-mcp', 'backend-orchestrator'},
+        'services': {'esa-backend', 'backend-mcp', 'backend-orchestrator'},
         'label': 'requirements',
     },
     # MCP server
@@ -130,16 +124,17 @@ SERVICE_RULES = [
         'services': {'backend-mcp'},
         'label': 'mcp',
     },
-    # Scheduler / datalayer
+    # Orchestrator pipelines + legacy scheduler/datalayer (kept on disk during decommission)
     {
         'prefixes': [
+            'backend/python/sync_service/',
             'backend/python/scheduler/',
             'backend/python/datalayer/',
             'backend/python/config/pipelines.yaml',
             'backend/python/config/scheduler.yaml',
         ],
-        'services': {'backend-scheduler'},
-        'label': 'scheduler/datalayer',
+        'services': {'backend-orchestrator'},
+        'label': 'orchestrator/pipelines',
     },
     # Web app routes, auth, utils, models
     {
@@ -152,12 +147,12 @@ SERVICE_RULES = [
         'services': {'esa-backend'},
         'label': 'web',
     },
-    # Common modules affect both web and scheduler
+    # Common modules affect web + orchestrator (shared SOAP client, models, config_loader)
     {
         'prefixes': [
             'backend/python/common/',
         ],
-        'services': {'esa-backend', 'backend-scheduler'},
+        'services': {'esa-backend', 'backend-orchestrator'},
         'label': 'common',
     },
 ]
@@ -514,11 +509,10 @@ def step_determine_restart_scope(credentials: dict, force: bool = False, verbose
     if force:
         print("    --force: restarting all services")
         return {
-            'services': {'esa-backend', 'backend-scheduler', 'backend-mcp', 'backend-orchestrator'},
-            'full_restart_services': {'esa-backend', 'backend-scheduler', 'backend-mcp', 'backend-orchestrator'},
+            'services': {'esa-backend', 'backend-mcp', 'backend-orchestrator'},
+            'full_restart_services': {'esa-backend', 'backend-mcp', 'backend-orchestrator'},
             'reasons': {
                 'esa-backend': ['--force flag'],
-                'backend-scheduler': ['--force flag'],
                 'backend-mcp': ['--force flag'],
                 'backend-orchestrator': ['--force flag'],
             },
@@ -532,9 +526,9 @@ def step_determine_restart_scope(credentials: dict, force: bool = False, verbose
     if not current_sha:
         print("    WARNING: Cannot determine local git SHA — restarting all services")
         return {
-            'services': {'esa-backend', 'backend-scheduler', 'backend-mcp', 'backend-orchestrator'},
+            'services': {'esa-backend', 'backend-mcp', 'backend-orchestrator'},
             'full_restart_services': set(),
-            'reasons': {'esa-backend': ['no git SHA'], 'backend-scheduler': ['no git SHA'], 'backend-mcp': ['no git SHA'], 'backend-orchestrator': ['no git SHA']},
+            'reasons': {'esa-backend': ['no git SHA'], 'backend-mcp': ['no git SHA'], 'backend-orchestrator': ['no git SHA']},
             'skip_pip': False,
             'unmatched_files': [],
         }
@@ -542,9 +536,9 @@ def step_determine_restart_scope(credentials: dict, force: bool = False, verbose
     if not deployed_sha:
         print("    No deploy manifest found (first deploy?) — restarting all services")
         return {
-            'services': {'esa-backend', 'backend-scheduler', 'backend-mcp', 'backend-orchestrator'},
+            'services': {'esa-backend', 'backend-mcp', 'backend-orchestrator'},
             'full_restart_services': set(),
-            'reasons': {'esa-backend': ['first deploy'], 'backend-scheduler': ['first deploy'], 'backend-mcp': ['first deploy'], 'backend-orchestrator': ['first deploy']},
+            'reasons': {'esa-backend': ['first deploy'], 'backend-mcp': ['first deploy'], 'backend-orchestrator': ['first deploy']},
             'skip_pip': False,
             'unmatched_files': [],
         }
@@ -566,9 +560,9 @@ def step_determine_restart_scope(credentials: dict, force: bool = False, verbose
     if not changed_files:
         print("    WARNING: git diff returned no files — restarting all services")
         return {
-            'services': {'esa-backend', 'backend-scheduler', 'backend-mcp', 'backend-orchestrator'},
+            'services': {'esa-backend', 'backend-mcp', 'backend-orchestrator'},
             'full_restart_services': set(),
-            'reasons': {'esa-backend': ['git diff empty'], 'backend-scheduler': ['git diff empty'], 'backend-mcp': ['git diff empty'], 'backend-orchestrator': ['git diff empty']},
+            'reasons': {'esa-backend': ['git diff empty'], 'backend-mcp': ['git diff empty'], 'backend-orchestrator': ['git diff empty']},
             'skip_pip': False,
             'unmatched_files': [],
         }
@@ -617,9 +611,6 @@ def step_restart_services(credentials: dict, scope: dict, verbose: bool = True) 
         # Copy service files if they exist
         if [ -f "{VM_PYTHON_PATH}/systemd/esa-backend.service" ]; then
             sudo cp {VM_PYTHON_PATH}/systemd/esa-backend.service /etc/systemd/system/
-        fi
-        if [ -f "{VM_PYTHON_PATH}/systemd/backend-scheduler.service" ]; then
-            sudo cp {VM_PYTHON_PATH}/systemd/backend-scheduler.service /etc/systemd/system/
         fi
         if [ -f "{VM_PYTHON_PATH}/systemd/backend-mcp.service" ]; then
             sudo cp {VM_PYTHON_PATH}/systemd/backend-mcp.service /etc/systemd/system/
@@ -679,21 +670,6 @@ def step_restart_services(credentials: dict, scope: dict, verbose: bool = True) 
                 fi
             """)
 
-    if 'backend-scheduler' in services_to_restart:
-        if 'backend-scheduler' in full_restart:
-            parts.append("""
-                echo "backend-scheduler: full restart (unit file changed)..."
-                sudo systemctl stop backend-scheduler 2>/dev/null || true
-                sleep 1
-                sudo systemctl enable backend-scheduler
-                sudo systemctl start backend-scheduler
-            """)
-        else:
-            parts.append("""
-                echo "backend-scheduler: restarting..."
-                sudo systemctl restart backend-scheduler
-            """)
-
     if 'backend-mcp' in services_to_restart:
         if 'backend-mcp' in full_restart:
             parts.append("""
@@ -746,7 +722,7 @@ def step_restart_services(credentials: dict, scope: dict, verbose: bool = True) 
         """)
 
     # Also verify services we didn't restart are still running
-    all_services = {'esa-backend', 'backend-scheduler', 'backend-mcp', 'backend-orchestrator'}
+    all_services = {'esa-backend', 'backend-mcp', 'backend-orchestrator'}
     untouched = all_services - services_to_restart
     for svc in sorted(untouched):
         parts.append(f"""
@@ -835,8 +811,6 @@ def check_status(verbose: bool = True) -> bool:
     status_cmd = f"""
         echo "=== Services ==="
         sudo systemctl status esa-backend --no-pager 2>/dev/null || echo "esa-backend: not running"
-        echo ""
-        sudo systemctl status backend-scheduler --no-pager 2>/dev/null || echo "backend-scheduler: not running"
         echo ""
         sudo systemctl status backend-mcp --no-pager 2>/dev/null || echo "backend-mcp: not running"
         echo ""

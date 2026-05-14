@@ -45,7 +45,6 @@ except ImportError:
 
 from common import (
     DataLayerConfig,
-    create_engine_from_config,
     SessionManager,
     UpsertOperations,
     Base,
@@ -292,7 +291,8 @@ def push_daily_rates_to_database(
     if not db_config:
         raise ValueError("PostgreSQL configuration not found in .env")
 
-    engine = create_engine_from_config(db_config)
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
 
     # Create table if not exists
     Base.metadata.create_all(engine, tables=[FXRate.__table__])
@@ -335,7 +335,8 @@ def push_monthly_rates_to_database(
     if not db_config:
         raise ValueError("PostgreSQL configuration not found in .env")
 
-    engine = create_engine_from_config(db_config)
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
 
     # Create table if not exists
     Base.metadata.create_all(engine, tables=[FXRateMonthly.__table__])
@@ -364,7 +365,8 @@ def get_latest_date_from_db(config: DataLayerConfig) -> Optional[date]:
     if not db_config:
         return None
 
-    engine = create_engine_from_config(db_config)
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
     session_manager = SessionManager(engine)
 
     try:
@@ -478,7 +480,8 @@ def run_refresh_monthly(
     if not db_config:
         raise ValueError("PostgreSQL configuration not found in .env")
 
-    engine = create_engine_from_config(db_config)
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
     session_manager = SessionManager(engine)
 
     print("Fetching all daily rates from database...")

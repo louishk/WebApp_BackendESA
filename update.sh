@@ -4,7 +4,7 @@
 #
 # Usage:
 #   sudo ./update.sh              # default: restart services
-#   sudo ./update.sh restart      # restart esa-backend + backend-scheduler
+#   sudo ./update.sh restart      # restart esa-backend + backend-orchestrator + backend-mcp
 #   sudo ./update.sh deps         # pip install requirements, then restart
 #   sudo ./update.sh status       # show service status + recent logs
 #   sudo ./update.sh nginx        # sync nginx config, test, reload
@@ -20,7 +20,8 @@ NGINX_SRC="$PYTHON_DIR/config/nginx-esa-backend.conf"
 NGINX_DEST="/etc/nginx/sites-available/esa-backend"
 
 WEB_SERVICE="esa-backend"
-SCHEDULER_SERVICE="backend-scheduler"
+ORCHESTRATOR_SERVICE="backend-orchestrator"
+MCP_SERVICE="backend-mcp"
 
 if [ "$EUID" -ne 0 ]; then
     echo "Please run as root: sudo $0"
@@ -32,7 +33,8 @@ CMD="${1:-restart}"
 do_restart() {
     echo "Restarting services..."
     systemctl restart "$WEB_SERVICE"
-    systemctl restart "$SCHEDULER_SERVICE"
+    systemctl restart "$ORCHESTRATOR_SERVICE"
+    systemctl restart "$MCP_SERVICE"
     echo "Done"
 }
 
@@ -46,8 +48,11 @@ do_status() {
     echo "=== $WEB_SERVICE ==="
     systemctl status "$WEB_SERVICE" --no-pager --lines=5 2>/dev/null || echo "not running"
     echo ""
-    echo "=== $SCHEDULER_SERVICE ==="
-    systemctl status "$SCHEDULER_SERVICE" --no-pager --lines=5 2>/dev/null || echo "not running"
+    echo "=== $ORCHESTRATOR_SERVICE ==="
+    systemctl status "$ORCHESTRATOR_SERVICE" --no-pager --lines=5 2>/dev/null || echo "not running"
+    echo ""
+    echo "=== $MCP_SERVICE ==="
+    systemctl status "$MCP_SERVICE" --no-pager --lines=5 2>/dev/null || echo "not running"
     echo ""
     echo "=== Recent logs ($WEB_SERVICE) ==="
     journalctl -u "$WEB_SERVICE" --no-pager -n 10 2>/dev/null || echo "no logs"
@@ -71,8 +76,9 @@ do_nginx() {
 
 do_systemd() {
     echo "Syncing systemd service files..."
-    cp "$SYSTEMD_SRC/$WEB_SERVICE.service"       /etc/systemd/system/
-    cp "$SYSTEMD_SRC/$SCHEDULER_SERVICE.service"  /etc/systemd/system/
+    cp "$SYSTEMD_SRC/$WEB_SERVICE.service"           /etc/systemd/system/
+    cp "$SYSTEMD_SRC/$ORCHESTRATOR_SERVICE.service"  /etc/systemd/system/
+    cp "$SYSTEMD_SRC/$MCP_SERVICE.service"           /etc/systemd/system/
     systemctl daemon-reload
     echo "Systemd units reloaded"
 }

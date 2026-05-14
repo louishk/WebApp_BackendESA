@@ -95,25 +95,27 @@ def transform_record(record: Dict[str, Any], extract_date: date) -> Dict[str, An
 def fetch_mimo_data(report_client, location_codes: List[str],
                     start_date: date, end_date: date,
                     extract_date: date) -> List[Dict[str, Any]]:
+    """Parallel SOAP fan-out across sites — matches the ccws_* pipeline pattern."""
     from common import deduplicate_records
-    all_data: List[Dict[str, Any]] = []
+    from sync_service.pipelines._ccws_utils import parallel_fetch
 
-    for location_code in location_codes:
-        try:
-            results = report_client.call_report(
-                report_name='move_ins_and_move_outs',
-                parameters={
-                    'sLocationCode': location_code,
-                    'dReportDateStart': start_date.strftime('%Y-%m-%dT00:00:00'),
-                    'dReportDateEnd': end_date.strftime('%Y-%m-%dT23:59:59'),
-                },
-            )
-            for record in results:
-                all_data.append(transform_record(record, extract_date))
-            logger.info("mimo fetched %s: %d records", location_code, len(results))
-        except Exception as e:
-            logger.exception("mimo fetch failed for %s: %s", location_code, e)
-            continue
+    start_str = start_date.strftime('%Y-%m-%dT00:00:00')
+    end_str = end_date.strftime('%Y-%m-%dT23:59:59')
+
+    def _fetch_one(location_code: str) -> List[Dict[str, Any]]:
+        results = report_client.call_report(
+            report_name='move_ins_and_move_outs',
+            parameters={
+                'sLocationCode': location_code,
+                'dReportDateStart': start_str,
+                'dReportDateEnd': end_str,
+            },
+        )
+        return [transform_record(r, extract_date) for r in (results or [])]
+
+    all_data, per_site = parallel_fetch(_fetch_one, location_codes, max_workers=6)
+    for sc, n in per_site.items():
+        logger.info("mimo fetched %s: %d records", sc, n)
 
     original_count = len(all_data)
     all_data = deduplicate_records(all_data, ['SiteID', 'TenantID', 'MoveDate'])
@@ -123,13 +125,11 @@ def fetch_mimo_data(report_client, location_codes: List[str],
 
 
 def delete_recent_records(config, delete_from_date: date) -> int:
-    from common import create_engine_from_config, SessionManager, MoveInsAndMoveOuts
+    from common import SessionManager, MoveInsAndMoveOuts
+    from common.db import get_engine
 
-    db_config = config.databases.get('postgresql')
-    if not db_config:
-        raise ValueError("PostgreSQL configuration not found")
-
-    engine = create_engine_from_config(db_config)
+    # Shared engine — same instance as push_to_database, no extra pool.
+    engine = get_engine('pbi')
     session_manager = SessionManager(engine)
 
     with session_manager.session_scope() as session:
@@ -142,10 +142,10 @@ def delete_recent_records(config, delete_from_date: date) -> int:
 
 def push_to_database(data: List[Dict[str, Any]], config) -> int:
     from common import (
-        create_engine_from_config, SessionManager, UpsertOperations, Base,
-        MoveInsAndMoveOuts,
+        SessionManager, UpsertOperations, Base, MoveInsAndMoveOuts,
     )
     from common.config import get_pipeline_config
+    from common.db import get_engine
 
     if not data:
         logger.warning("mimo: no data to push")
@@ -155,7 +155,8 @@ def push_to_database(data: List[Dict[str, Any]], config) -> int:
     if not db_config:
         raise ValueError("PostgreSQL configuration not found")
 
-    engine = create_engine_from_config(db_config)
+    # Shared engine — no per-call pool construction.
+    engine = get_engine('pbi')
     Base.metadata.create_all(engine, tables=[MoveInsAndMoveOuts.__table__])
 
     session_manager = SessionManager(engine)

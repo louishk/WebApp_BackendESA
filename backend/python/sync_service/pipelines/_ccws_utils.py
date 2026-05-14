@@ -121,7 +121,12 @@ def parallel_fetch(
             try:
                 rows = fut.result() or []
             except Exception as e:
-                logger.warning(f"parallel fetch {sc} raised: {e}")
+                # Avoid f-string interpolation of `e` — SOAP exception messages
+                # can echo the configured auth header (user:::APIKEY) verbatim.
+                logger.warning(
+                    "parallel fetch %s failed: %s: %s",
+                    sc, type(e).__name__, str(e)[:200],
+                )
                 rows = []
             per_site[sc] = len(rows)
             all_rows.extend(rows)

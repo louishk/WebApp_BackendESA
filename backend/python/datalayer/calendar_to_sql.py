@@ -284,9 +284,9 @@ def main():
         print("    Ensure Calendars.Read APPLICATION permission is granted + admin consent.")
         sys.exit(1)
 
-    # Connect to esa_pbi
-    db_url = get_database_url('pbi')
-    engine = create_engine(db_url)
+    # Connect to esa_pbi via the canonical engine factory.
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
 
     total_count = 0
 

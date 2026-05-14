@@ -138,22 +138,27 @@ def transform_record(record: Dict[str, Any], extract_date: date) -> Dict[str, An
 def fetch_rentroll_data(report_client, location_codes: List[str],
                         start_date: datetime, end_date: datetime,
                         extract_date: date) -> List[Dict[str, Any]]:
-    from common import deduplicate_records
-    all_data: List[Dict[str, Any]] = []
+    """Fan-out SOAP fetch across all sites in parallel.
 
-    for location_code in location_codes:
-        try:
-            results = report_client.get_rent_roll(
-                location_code=location_code,
-                start_date=start_date,
-                end_date=end_date,
-            )
-            for record in results:
-                all_data.append(transform_record(record, extract_date))
-            logger.info("rentroll fetched %s: %d records", location_code, len(results))
-        except Exception as e:
-            logger.exception("rentroll fetch failed for %s: %s", location_code, e)
-            continue
+    SOAP latency per site is the dominant cost (~1-3s × N sites sequentially).
+    The report_client is a SOAP client wrapper that creates a fresh
+    transport per call, so concurrent calls from multiple threads are
+    safe — same pattern used by ccws_units / ccws_available_units.
+    """
+    from common import deduplicate_records
+    from sync_service.pipelines._ccws_utils import parallel_fetch
+
+    def _fetch_one(location_code: str) -> List[Dict[str, Any]]:
+        results = report_client.get_rent_roll(
+            location_code=location_code,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        return [transform_record(record, extract_date) for record in (results or [])]
+
+    all_data, per_site = parallel_fetch(_fetch_one, location_codes, max_workers=6)
+    for sc, n in per_site.items():
+        logger.info("rentroll fetched %s: %d records", sc, n)
 
     original_count = len(all_data)
     all_data = deduplicate_records(all_data, ['extract_date', 'SiteID', 'UnitID'])
@@ -164,9 +169,10 @@ def fetch_rentroll_data(report_client, location_codes: List[str],
 
 def push_to_database(data: List[Dict[str, Any]], config, year: int, month: int, status: str) -> int:
     from common import (
-        create_engine_from_config, SessionManager, UpsertOperations, Base,
+        SessionManager, UpsertOperations, Base,
         RentRoll, delete_current_month_records, delete_non_eom_records,
     )
+    from common.db import get_engine
 
     if not data:
         logger.warning("rentroll: no data to push for %d-%02d", year, month)
@@ -176,7 +182,8 @@ def push_to_database(data: List[Dict[str, Any]], config, year: int, month: int, 
     if not db_config:
         raise ValueError("PostgreSQL configuration not found")
 
-    engine = create_engine_from_config(db_config)
+    # Shared engine — no per-call pool construction, no test-conn burn.
+    engine = get_engine('pbi')
     Base.metadata.create_all(engine, tables=[RentRoll.__table__])
 
     session_manager = SessionManager(engine)

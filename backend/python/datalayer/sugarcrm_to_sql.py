@@ -58,7 +58,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common import (
     DataLayerConfig,
-    create_engine_from_config,
     SessionManager,
     UpsertOperations,
     convert_to_bool,
@@ -266,7 +265,8 @@ def push_dimensions_to_database(
         raise ValueError("PostgreSQL configuration not found")
 
     if engine is None:
-        engine = create_engine_from_config(db_config)
+        from common.db import get_engine as _get_engine
+        engine = _get_engine('pbi')
     session_manager = SessionManager(engine)
     results = {}
 
@@ -598,7 +598,8 @@ def push_records_to_database(
         raise ValueError("PostgreSQL configuration not found in .env")
 
     if engine is None:
-        engine = create_engine_from_config(db_config)
+        from common.db import get_engine as _get_engine
+        engine = _get_engine('pbi')
 
     # Create table if not exists, then add any missing columns
     DynamicBase.metadata.create_all(engine, tables=[model_class.__table__])
@@ -701,11 +702,12 @@ def process_module(
     valid_columns = set(c.name for c in model_class.__table__.columns)
     logger.debug(f"Valid columns for {module}: {len(valid_columns)}")
 
-    # Create engine once for the entire module run
+    # Shared engine via common.db (singleton per process — picks up pool_pre_ping).
     db_config = config.databases.get('postgresql')
     if not db_config:
         raise ValueError("PostgreSQL configuration not found in .env")
-    engine = create_engine_from_config(db_config)
+    from common.db import get_engine as _get_engine
+    engine = _get_engine('pbi')
 
     # Fetch and process records in batches
     total_processed = 0
