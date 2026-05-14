@@ -27,7 +27,7 @@ def require_permission(permission_check):
 
     Args:
         permission_check: String name of permission method on User model
-                         (e.g., 'can_access_scheduler', 'can_manage_users')
+                         (e.g., 'can_access_sync', 'can_manage_users')
 
     Usage:
         @require_permission('can_manage_users')
@@ -88,9 +88,9 @@ def admin_required(f):
     return require_permission('can_manage_users')(f)
 
 
-def scheduler_access_required(f):
+def sync_access_required(f):
     """Decorator to require scheduler access permission."""
-    return require_permission('can_access_scheduler')(f)
+    return require_permission('can_access_sync')(f)
 
 
 def sync_access_required(f):
@@ -99,7 +99,7 @@ def sync_access_required(f):
     Currently aliased to scheduler access — change to a dedicated
     'can_access_sync' role permission once piloted in production.
     """
-    return require_permission('can_access_scheduler')(f)
+    return require_permission('can_access_sync')(f)
 
 
 def billing_tools_access_required(f):
@@ -185,6 +185,11 @@ def ecri_execute_required(f):
 def ecri_reasons_manage_required(f):
     """Decorator to require ECRI reasons admin permission."""
     return require_permission('can_manage_ecri_reasons')(f)
+
+
+def pricing_anomalies_tools_access_required(f):
+    """Decorator to require pricing anomalies tools access permission."""
+    return require_permission('can_access_pricing_anomalies_tools')(f)
 
 
 def risk_admin_access_required(f):

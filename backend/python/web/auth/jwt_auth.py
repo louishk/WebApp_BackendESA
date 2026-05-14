@@ -53,7 +53,7 @@ def _ensure_jwt_config():
         JWT_ALGORITHM = _get_jwt_algorithm()
 
 # Allowed roles for API access (scheduler and tools)
-API_ACCESS_ROLES = ['admin', 'scheduler_admin']
+API_ACCESS_ROLES = ['admin', 'sync_admin']
 
 # Known API key scopes — grant via /admin/api-keys.
 # Scope enforcement is string-based in require_api_scope(); this list is the

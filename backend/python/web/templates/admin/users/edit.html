@@ -141,7 +141,7 @@
             <tr>
                 <td>Scheduler Access</td>
                 <td>
-                    {% if user.can_access_scheduler() %}
+                    {% if user.can_access_sync() %}
                         <span class="status status-completed">Yes</span>
                     {% else %}
                         <span class="status status-pending">No</span>

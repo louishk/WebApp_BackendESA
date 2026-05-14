@@ -294,13 +294,13 @@
                 {% if has_revenue %}
                     <a href="{{ url_for('revenue.dashboard') if current_user.can_access_revenue_tools() else url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint and ('revenue' in request.endpoint or 'ecri' in request.endpoint or 'admin_risk' in request.endpoint) else '' }}">Revenue</a>
                 {% endif %}
-                {% set has_middleware = current_user.can_manage_configs() or current_user.can_access_billing_tools() or current_user.can_access_discount_tools() or current_user.can_access_scheduler() or current_user.can_access_revenue_tools() or current_user.can_access_smart_lock() %}
+                {% set has_middleware = current_user.can_manage_configs() or current_user.can_access_billing_tools() or current_user.can_access_discount_tools() or current_user.can_access_revenue_tools() or current_user.can_access_smart_lock() %}
                 {% if has_middleware %}
                     <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint and ('discount_plans' in request.endpoint or 'reservation_fees' in request.endpoint or 'orchestrator_ui' in request.endpoint or 'smart_lock' in request.endpoint or 'recommendation_engine' in request.endpoint) else '' }}">Middleware</a>
                 {% endif %}
-                {% set has_any_tool = current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_smart_lock() or current_user.can_access_scheduler() or current_user.can_manage_configs() %}
+                {% set has_any_tool = current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_smart_lock() or current_user.can_manage_configs() %}
                 {% if has_any_tool %}
-                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else (url_for('tools.inventory_checker') if current_user.can_access_inventory_tools() else url_for('scheduler.dashboard')) }}" class="{{ 'active' if (request.endpoint and ('tools' in request.endpoint or 'scheduler' in request.endpoint) and 'orchestrator_ui' not in request.endpoint and 'smart_lock' not in request.endpoint) else '' }}">Tools</a>
+                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else url_for('tools.inventory_checker') }}" class="{{ 'active' if (request.endpoint and 'tools' in request.endpoint and 'orchestrator_ui' not in request.endpoint and 'smart_lock' not in request.endpoint) else '' }}">Tools</a>
                 {% endif %}
                 {% if current_user.can_manage_users() or current_user.can_manage_roles() %}
                     <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and ('admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint or 'api_key' in request.endpoint)) or (request.endpoint and 'api_keys' in request.endpoint) else '' }}">User Management</a>
@@ -360,7 +360,7 @@
         {% if current_user.can_access_smart_lock() %}
         <a href="{{ url_for('tools.smart_lock_bridges') }}" class="{{ 'active' if request.endpoint and 'smart_lock' in request.endpoint else '' }}">Smart Lock</a>
         {% endif %}
-        {% if current_user.can_access_scheduler() and has_endpoint('orchestrator_ui.dashboard') %}
+        {% if current_user.can_access_sync() and has_endpoint('orchestrator_ui.dashboard') %}
         <a href="{{ url_for('orchestrator_ui.dashboard') }}" class="{{ 'active' if request.endpoint and 'orchestrator_ui' in request.endpoint else '' }}">Orchestrator</a>
         {% endif %}
     </div>
@@ -403,8 +403,7 @@
         <a href="{{ url_for('tools.unit_availability') }}" class="{{ 'active' if request.endpoint == 'tools.unit_availability' else '' }}">Unit Availability</a>
         <a href="{{ url_for('tools.visit_workflow') }}" class="{{ 'active' if request.endpoint == 'tools.visit_workflow' else '' }}">Visit Workflow</a>
         {% endif %}
-        {% if current_user.can_access_scheduler() %}
-        <a href="{{ url_for('scheduler.dashboard') }}" class="{{ 'active' if request.endpoint and 'scheduler' in request.endpoint else '' }}">Scheduler</a>
+        {% if current_user.can_access_sync() %}
         <a href="{{ url_for('tools.call_scoring') }}" class="{{ 'active' if request.endpoint == 'tools.call_scoring' else '' }}">Call Scoring</a>
         {% endif %}
     </div>
@@ -417,15 +416,6 @@
         <a href="{{ url_for('tools.smart_lock_padlocks') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_padlocks' else '' }}">Padlocks</a>
         <a href="{{ url_for('tools.smart_lock_assignments') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_assignments' else '' }}">Unit Assignments</a>
         <a href="{{ url_for('tools.smart_lock_config') }}" class="{{ 'active' if request.endpoint == 'tools.smart_lock_config' else '' }}">Site Config</a>
-    </div>
-    {% endif %}
-    {# --- Level 2: Scheduler --- #}
-    {% if request.endpoint and 'scheduler' in request.endpoint %}
-    <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
-        <a href="{{ url_for('scheduler.dashboard') }}" class="{{ 'active' if request.endpoint == 'scheduler.dashboard' else '' }}">Dashboard</a>
-        <a href="{{ url_for('scheduler.jobs_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.jobs_page' else '' }}">Jobs</a>
-        <a href="{{ url_for('scheduler.history_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.history_page' else '' }}">History</a>
-        <a href="{{ url_for('scheduler.settings_page') }}" class="{{ 'active' if request.endpoint == 'scheduler.settings_page' else '' }}">Settings</a>
     </div>
     {% endif %}
     {# --- Level 2: Orchestrator --- #}

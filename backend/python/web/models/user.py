@@ -51,9 +51,9 @@ class User(Base, UserMixin):
         """Backward-compatible property returning the first role (or None)."""
         return self.roles[0] if self.roles else None
 
-    def can_access_scheduler(self):
+    def can_access_sync(self):
         """Check if user can access scheduler functionality."""
-        return any(r.can_access_scheduler for r in self.roles)
+        return any(r.can_access_sync for r in self.roles)
 
     def can_access_billing_tools(self):
         """Check if user can access billing tools (Billing Date Changer, etc.)."""
@@ -102,6 +102,10 @@ class User(Base, UserMixin):
     def can_access_revenue_tools(self):
         """Check if user can access revenue management tools."""
         return any(r.can_access_revenue_tools for r in self.roles)
+
+    def can_access_pricing_anomalies_tools(self):
+        """Check if user can access pricing anomalies analysis tool."""
+        return any(r.can_access_pricing_anomalies_tools for r in self.roles)
 
     # ---- ECRI workflow permissions (migration 042) ----
 

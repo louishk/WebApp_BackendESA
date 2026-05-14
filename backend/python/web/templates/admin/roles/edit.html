@@ -44,7 +44,7 @@
             <label style="display: block; margin-bottom: 0.75rem; font-weight: 500;">Permissions</label>
             <div style="display: grid; gap: 0.75rem; max-width: 600px;">
                 <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; cursor: pointer;">
-                    <input type="checkbox" name="can_access_scheduler" {% if role and role.can_access_scheduler %}checked{% endif %}>
+                    <input type="checkbox" name="can_access_sync" {% if role and role.can_access_sync %}checked{% endif %}>
                     <div>
                         <strong>Scheduler Access</strong>
                         <p style="color: #666; font-size: 0.85rem; margin: 0;">Access scheduler dashboard, jobs, and history</p>

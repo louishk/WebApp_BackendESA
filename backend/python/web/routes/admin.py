@@ -102,7 +102,7 @@ def create_role():
             role = Role(
                 name=name,
                 description=description,
-                can_access_scheduler=request.form.get('can_access_scheduler') == 'on',
+                can_access_sync=request.form.get('can_access_sync') == 'on',
                 can_access_billing_tools=request.form.get('can_access_billing_tools') == 'on',
                 can_access_inventory_tools=request.form.get('can_access_inventory_tools') == 'on',
                 can_access_discount_tools=request.form.get('can_access_discount_tools') == 'on',
@@ -155,7 +155,7 @@ def edit_role(role_id):
 
         if request.method == 'POST':
             role.description = request.form.get('description', '').strip()
-            role.can_access_scheduler = request.form.get('can_access_scheduler') == 'on'
+            role.can_access_sync = request.form.get('can_access_sync') == 'on'
             role.can_access_billing_tools = request.form.get('can_access_billing_tools') == 'on'
             role.can_access_inventory_tools = request.form.get('can_access_inventory_tools') == 'on'
             role.can_access_discount_tools = request.form.get('can_access_discount_tools') == 'on'

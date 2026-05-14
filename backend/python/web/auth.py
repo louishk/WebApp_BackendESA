@@ -15,7 +15,7 @@ JWT_SECRET = config('JWT_SECRET', default='')
 JWT_ALGORITHM = config('JWT_ALGORITHM', default='HS256')
 
 # Allowed roles for scheduler access
-SCHEDULER_ROLES = ['admin', 'scheduler_admin']
+SCHEDULER_ROLES = ['admin', 'sync_admin']
 
 
 class AuthError(Exception):

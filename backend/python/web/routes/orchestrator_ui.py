@@ -12,7 +12,7 @@ Routes:
 
 from flask import Blueprint, render_template
 
-from web.auth.decorators import login_required, scheduler_access_required
+from web.auth.decorators import login_required, sync_access_required
 
 orchestrator_ui_bp = Blueprint(
     'orchestrator_ui',
@@ -23,7 +23,7 @@ orchestrator_ui_bp = Blueprint(
 
 @orchestrator_ui_bp.route('/')
 @login_required
-@scheduler_access_required
+@sync_access_required
 def dashboard():
     """Main orchestrator dashboard."""
     return render_template('orchestrator/dashboard.html')
@@ -31,7 +31,7 @@ def dashboard():
 
 @orchestrator_ui_bp.route('/pipelines/<name>')
 @login_required
-@scheduler_access_required
+@sync_access_required
 def pipeline_detail(name):
     """Detail view for a single orchestrator pipeline."""
     return render_template('orchestrator/pipeline_detail.html', pipeline_name=name)
@@ -39,7 +39,7 @@ def pipeline_detail(name):
 
 @orchestrator_ui_bp.route('/runs')
 @login_required
-@scheduler_access_required
+@sync_access_required
 def runs():
     """Recent runs across all pipelines."""
     return render_template('orchestrator/runs.html')

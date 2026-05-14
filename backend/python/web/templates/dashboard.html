@@ -9,18 +9,6 @@
 </div>
 
 <div class="features-grid">
-    {% if current_user.can_access_scheduler() %}
-    <a href="{{ url_for('scheduler.dashboard') }}" class="feature-card">
-        <div class="feature-icon">
-            <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
-                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm4.2 14.2L11 13V7h1.5v5.2l4.5 2.7-.8 1.3z"/>
-            </svg>
-        </div>
-        <h3>Scheduler</h3>
-        <p>Manage data pipelines, view job status, and monitor executions</p>
-    </a>
-    {% endif %}
-
     {% if current_user.can_manage_users() %}
     <a href="{{ url_for('admin.list_users') }}" class="feature-card">
         <div class="feature-icon">
@@ -120,7 +108,7 @@
     color: #fff;
 }
 
-.badge-scheduler_admin {
+.badge-sync_admin {
     background: #2563eb;
     color: #fff;
 }

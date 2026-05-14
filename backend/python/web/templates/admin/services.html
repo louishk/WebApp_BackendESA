@@ -20,19 +20,6 @@
             <div class="service-details" id="details-web_ui"></div>
         </div>
 
-        <div class="service-card" id="service-scheduler">
-            <div class="service-header">
-                <span class="service-name">Scheduler Daemon</span>
-                <span class="service-status" id="status-scheduler">checking...</span>
-            </div>
-            <div class="service-info">APScheduler Background Process</div>
-            <div class="service-details" id="details-scheduler"></div>
-            <div class="service-actions">
-                <button class="btn btn-sm btn-success" id="btn-start-scheduler" onclick="startScheduler()">Start</button>
-                <button class="btn btn-sm btn-danger" id="btn-stop-scheduler" onclick="stopScheduler()">Stop</button>
-            </div>
-        </div>
-
         <div class="service-card" id="service-mcp_server">
             <div class="service-header">
                 <span class="service-name">MCP Server</span>
@@ -161,10 +148,9 @@ function loadServiceStatus() {
                 }
 
                 // Update button states for services with start/stop
-                if (key === 'scheduler' || key === 'mcp_server') {
-                    const suffix = key === 'scheduler' ? 'scheduler' : 'mcp';
-                    const startBtn = document.getElementById('btn-start-' + suffix);
-                    const stopBtn = document.getElementById('btn-stop-' + suffix);
+                if (key === 'mcp_server') {
+                    const startBtn = document.getElementById('btn-start-mcp');
+                    const stopBtn = document.getElementById('btn-stop-mcp');
                     if (startBtn && stopBtn) {
                         if (info.status === 'running') {
                             startBtn.disabled = true;
@@ -180,64 +166,6 @@ function loadServiceStatus() {
         .catch(err => {
             console.error('Failed to load service status:', err);
         });
-}
-
-function startScheduler() {
-    const statusEl = document.getElementById('status-scheduler');
-    const startBtn = document.getElementById('btn-start-scheduler');
-
-    startBtn.disabled = true;
-    statusEl.textContent = 'starting...';
-    statusEl.className = 'service-status unknown';
-
-    fetch('/api/services/scheduler/start', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'}
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            alert(data.message || 'Scheduler started');
-        } else {
-            alert('Failed to start: ' + (data.error || 'Unknown error'));
-        }
-        setTimeout(loadServiceStatus, 2000);
-    })
-    .catch(err => {
-        alert('Error: ' + err);
-        loadServiceStatus();
-    });
-}
-
-function stopScheduler() {
-    if (!confirm('Stop the scheduler daemon? Scheduled jobs will not run until restarted.')) {
-        return;
-    }
-
-    const statusEl = document.getElementById('status-scheduler');
-    const stopBtn = document.getElementById('btn-stop-scheduler');
-
-    stopBtn.disabled = true;
-    statusEl.textContent = 'stopping...';
-    statusEl.className = 'service-status unknown';
-
-    fetch('/api/services/scheduler/stop', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'}
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            alert(data.message || 'Scheduler stopped');
-        } else {
-            alert('Failed to stop: ' + (data.error || 'Unknown error'));
-        }
-        setTimeout(loadServiceStatus, 2000);
-    })
-    .catch(err => {
-        alert('Error: ' + err);
-        loadServiceStatus();
-    });
 }
 
 function startMcp() {

@@ -19,7 +19,7 @@ class Role(Base):
     description = Column(String(255), default='')
 
     # System permissions
-    can_access_scheduler = Column(Boolean, default=False)
+    can_access_sync = Column(Boolean, default=False)
     can_access_billing_tools = Column(Boolean, default=False)
     can_manage_users = Column(Boolean, default=False)
     can_manage_pages = Column(Boolean, default=False)
@@ -32,6 +32,7 @@ class Role(Base):
     can_access_statistics = Column(Boolean, default=False)
     can_access_smart_lock = Column(Boolean, default=False)
     can_access_revenue_tools = Column(Boolean, default=False)
+    can_access_pricing_anomalies_tools = Column(Boolean, default=False)
     # ECRI workflow permissions (migration 042)
     can_request_ecri_exclusion = Column(Boolean, default=False)
     can_create_ecri_objection = Column(Boolean, default=False)
@@ -48,7 +49,7 @@ class Role(Base):
         {
             'name': 'admin',
             'description': 'Full system access',
-            'can_access_scheduler': True,
+            'can_access_sync': True,
             'can_access_billing_tools': True,
             'can_access_inventory_tools': True,
             'can_access_discount_tools': True,
@@ -61,12 +62,13 @@ class Role(Base):
             'can_access_statistics': True,
             'can_access_smart_lock': True,
             'can_access_revenue_tools': True,
+            'can_access_pricing_anomalies_tools': True,
             'is_system': True
         },
         {
-            'name': 'scheduler_admin',
+            'name': 'sync_admin',
             'description': 'Scheduler management',
-            'can_access_scheduler': True,
+            'can_access_sync': True,
             'can_access_billing_tools': True,
             'can_manage_users': False,
             'can_manage_pages': False,
@@ -77,7 +79,7 @@ class Role(Base):
         {
             'name': 'editor',
             'description': 'Page management',
-            'can_access_scheduler': False,
+            'can_access_sync': False,
             'can_access_billing_tools': False,
             'can_manage_users': False,
             'can_manage_pages': True,
@@ -88,7 +90,7 @@ class Role(Base):
         {
             'name': 'viewer',
             'description': 'Read-only access',
-            'can_access_scheduler': False,
+            'can_access_sync': False,
             'can_access_billing_tools': False,
             'can_manage_users': False,
             'can_manage_pages': False,
@@ -101,7 +103,7 @@ class Role(Base):
     def get_permissions_list(self):
         """Get list of permission names this role has."""
         permissions = []
-        if self.can_access_scheduler:
+        if self.can_access_sync:
             permissions.append('Scheduler')
         if self.can_access_billing_tools:
             permissions.append('Billing Tools')
@@ -127,6 +129,8 @@ class Role(Base):
             permissions.append('Smart Lock')
         if self.can_access_revenue_tools:
             permissions.append('Revenue Tools')
+        if self.can_access_pricing_anomalies_tools:
+            permissions.append('Pricing Anomalies')
         if self.can_request_ecri_exclusion:
             permissions.append('ECRI Exclusion Request')
         if self.can_create_ecri_objection:
@@ -147,7 +151,7 @@ class Role(Base):
             'id': self.id,
             'name': self.name,
             'description': self.description,
-            'can_access_scheduler': self.can_access_scheduler,
+            'can_access_sync': self.can_access_sync,
             'can_access_billing_tools': self.can_access_billing_tools,
             'can_access_inventory_tools': self.can_access_inventory_tools,
             'can_access_discount_tools': self.can_access_discount_tools,
@@ -160,6 +164,7 @@ class Role(Base):
             'can_access_statistics': self.can_access_statistics,
             'can_access_smart_lock': self.can_access_smart_lock,
             'can_access_revenue_tools': self.can_access_revenue_tools,
+            'can_access_pricing_anomalies_tools': self.can_access_pricing_anomalies_tools,
             'can_request_ecri_exclusion': self.can_request_ecri_exclusion,
             'can_create_ecri_objection': self.can_create_ecri_objection,
             'can_approve_ecri_objection': self.can_approve_ecri_objection,

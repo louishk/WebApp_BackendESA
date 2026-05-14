@@ -232,7 +232,6 @@ def create_app(config=None, db_url=None):
     from web.routes.main import main_bp
     from web.routes.auth import auth_bp
     from web.routes.admin import admin_bp
-    from web.routes.scheduler import scheduler_bp
     from web.routes.api import api_bp
     from web.routes.tools import tools_bp
     # ECRI blueprint depends on common.ecri_dates which was never
@@ -307,7 +306,6 @@ def create_app(config=None, db_url=None):
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
-    app.register_blueprint(scheduler_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(tools_bp)
     if ecri_bp is not None:

@@ -134,7 +134,7 @@
                         {% for role in user.roles %}
                         <span class="status
                             {% if role.name == 'admin' %}status-failed{% endif %}
-                            {% if role.name == 'scheduler_admin' %}status-running{% endif %}
+                            {% if role.name == 'sync_admin' %}status-running{% endif %}
                             {% if role.name == 'editor' %}status-completed{% endif %}
                             {% if role.name == 'viewer' %}status-pending{% endif %}
                         " style="margin-right: 0.2rem;">{{ role.name }}</span>
