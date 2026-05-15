@@ -11,13 +11,8 @@
 </div>
 
 <div class="card" style="margin-bottom: 1rem;">
-    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
-        <div>
-            <label style="display: block; font-weight: 500; margin-bottom: 0.25rem; font-size: 0.85rem;">Site</label>
-            <div id="site-filter" style="min-width: 220px;"></div>
-        </div>
-        <button class="btn" onclick="loadBridges()">Load</button>
-        <button class="btn btn-secondary" onclick="loadBridges('')" title="Show all sites">Show All</button>
+    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+        <input id="search-input" type="search" placeholder="Filter by bridge ID, site, property, country…" oninput="renderTable()" style="padding: 0.4rem 0.6rem; border: 2px solid #e5e7eb; border-radius: 6px; min-width: 320px; font-size: 0.85rem;">
         <button id="sync-igloo-btn" class="btn btn-secondary" onclick="syncIgloo()" style="margin-left: auto; font-size: 0.75rem; padding: 0.3rem 0.6rem; border-color: #6366f1; color: #4f46e5;"><i class="bi bi-arrow-repeat"></i> Sync Igloo</button>
         <span id="status-msg" style="font-size: 0.85rem; padding: 0.25rem 0.5rem; border-radius: 4px; display: none;"></span>
     </div>
@@ -90,27 +85,37 @@
         return s ? `${s.site_code} - ${s.name}` : `Site ${siteId}`;
     }
 
-    async function loadBridges(forceSiteId) {
-        const siteIds = forceSiteId !== undefined ? [forceSiteId] : SiteFilter.getSelected('site-filter');
+    async function loadSites() {
         try {
-            if (siteIds.length === 0 || (siteIds.length === 1 && siteIds[0] === '')) {
-                const res = await fetch('/api/smart-lock/bridges', { headers: apiHeaders() });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                allBridges = data.bridges || [];
-            } else {
-                allBridges = [];
-                for (const sid of siteIds) {
-                    const res = await fetch(`/api/smart-lock/bridges?site_id=${sid}`, { headers: apiHeaders() });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    allBridges.push(...(data.bridges || []));
-                }
-            }
+            const res = await fetch('/api/sites', { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            allSites = data.sites || [];
+        } catch (e) { /* site names will fall back to "Site <id>" */ }
+    }
+
+    async function loadBridges() {
+        try {
+            const res = await fetch('/api/smart-lock/bridges', { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            allBridges = data.bridges || [];
             renderTable();
         } catch (e) {
             showStatus('Failed to load bridges', false);
         }
+    }
+
+    function bridgeMatchesSearch(b, q) {
+        if (!q) return true;
+        const ig = b.igloo || {};
+        const haystack = [
+            b.bridge_id,
+            b.site_id != null ? siteName(b.site_id) : 'unassigned',
+            ig.country, ig.property,
+            ...(ig.linked_devices || []).map(d => d.deviceId),
+        ].filter(Boolean).join(' ').toLowerCase();
+        return haystack.includes(q);
     }
 
     function siteCell(b) {
@@ -122,13 +127,16 @@
 
     function renderTable() {
         const tbody = document.getElementById('bridges-tbody');
-        if (allBridges.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">No bridges found</td></tr>';
+        const q = (document.getElementById('search-input').value || '').trim().toLowerCase();
+        const filtered = allBridges.filter(b => bridgeMatchesSearch(b, q));
+        if (filtered.length === 0) {
+            const msg = allBridges.length === 0 ? 'No bridges found' : 'No bridges match search';
+            tbody.innerHTML = `<tr><td colspan="7" style="padding: 2rem; text-align: center; color: #999;">${msg}</td></tr>`;
             document.getElementById('count-info').textContent = '';
             return;
         }
         // Sort: unassigned first, then by site_id, then bridge_id.
-        const sorted = [...allBridges].sort((a, b) => {
+        const sorted = [...filtered].sort((a, b) => {
             const aOrphan = a.site_id == null ? 0 : 1;
             const bOrphan = b.site_id == null ? 0 : 1;
             if (aOrphan !== bOrphan) return aOrphan - bOrphan;
@@ -160,8 +168,9 @@
             </tr>`;
         }).join('');
         const orphanCount = allBridges.filter(b => b.site_id == null).length;
-        const orphanNote = orphanCount > 0 ? ` (${orphanCount} unassigned)` : '';
-        document.getElementById('count-info').textContent = `${allBridges.length} bridge(s)${orphanNote}`;
+        const orphanNote = orphanCount > 0 ? ` · ${orphanCount} unassigned` : '';
+        const filterNote = filtered.length !== allBridges.length ? ` of ${allBridges.length}` : '';
+        document.getElementById('count-info').textContent = `${filtered.length}${filterNote} bridge(s)${orphanNote}`;
     }
 
 
@@ -187,9 +196,6 @@
         }
     }
 
-    SiteFilter.init('site-filter', { mode: 'multi' }).then(() => {
-        allSites = SiteFilter.getSites('site-filter');
-        loadBridges('');
-    });
+    loadSites().then(loadBridges);
 </script>
 {% endblock %}

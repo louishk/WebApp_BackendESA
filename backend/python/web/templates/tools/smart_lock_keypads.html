@@ -13,14 +13,9 @@
 
 <!-- Filters -->
 <div class="card" style="margin-bottom: 1rem;">
-    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
-        <div>
-            <label style="display: block; font-weight: 500; margin-bottom: 0.25rem; font-size: 0.85rem;">Site</label>
-            <div id="site-filter" style="min-width: 220px;"></div>
-        </div>
-        <button class="btn" onclick="loadKeypads()">Load</button>
-        <button class="btn btn-secondary" onclick="loadKeypads('')" title="Show all sites">Show All</button>
-        <div style="display: flex; gap: 0.25rem; align-items: center; margin-left: 0.5rem;">
+    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+        <input id="search-input" type="search" placeholder="Filter by keypad ID, site, property, country, unit…" oninput="renderTable()" style="padding: 0.4rem 0.6rem; border: 2px solid #e5e7eb; border-radius: 6px; min-width: 320px; font-size: 0.85rem;">
+        <div style="display: flex; gap: 0.25rem; align-items: center;">
             <span style="font-size: 0.8rem; color: #6b7280; margin-right: 0.25rem;">Status:</span>
             <button class="btn btn-sm status-filter-btn active" data-filter="all" onclick="setStatusFilter('all')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">All</button>
             <button class="btn btn-sm status-filter-btn" data-filter="assigned" onclick="setStatusFilter('assigned')" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Assigned</button>
@@ -162,39 +157,51 @@
         return s ? `${s.site_code} - ${s.name}` : `Site ${siteId}`;
     }
 
-    async function loadKeypads(forceSiteId) {
-        const siteIds = forceSiteId !== undefined ? [forceSiteId] : SiteFilter.getSelected('site-filter');
+    async function loadSites() {
         try {
-            if (siteIds.length === 0 || (siteIds.length === 1 && siteIds[0] === '')) {
-                // No filter — load all
-                const res = await fetch('/api/smart-lock/keypads', { headers: apiHeaders() });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                allKeypads = data.keypads || [];
-            } else {
-                // Fetch per site and merge
-                allKeypads = [];
-                for (const sid of siteIds) {
-                    const res = await fetch(`/api/smart-lock/keypads?site_id=${sid}`, { headers: apiHeaders() });
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    const data = await res.json();
-                    allKeypads.push(...(data.keypads || []));
-                }
-            }
+            const res = await fetch('/api/sites', { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            allSites = data.sites || [];
+        } catch (e) { /* fall back to "Site <id>" labels */ }
+    }
+
+    async function loadKeypads() {
+        try {
+            const res = await fetch('/api/smart-lock/keypads', { headers: apiHeaders() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            allKeypads = data.keypads || [];
             renderTable();
         } catch (e) {
             showStatus('Failed to load keypads', false);
         }
     }
 
+    function keypadMatchesSearch(k, q) {
+        if (!q) return true;
+        const ig = k.igloo || {};
+        const haystack = [
+            k.keypad_id,
+            k.site_id != null ? siteName(k.site_id) : '',
+            ig.country, ig.property,
+            k.notes,
+            k.assigned_to ? `unit ${k.assigned_to.unit_id}` : '',
+        ].filter(Boolean).join(' ').toLowerCase();
+        return haystack.includes(q);
+    }
+
     function renderTable() {
         const tbody = document.getElementById('keypads-tbody');
+        const q = (document.getElementById('search-input').value || '').trim().toLowerCase();
         let filtered = allKeypads;
         if (statusFilter === 'assigned') filtered = filtered.filter(k => k.status === 'assigned');
         else if (statusFilter === 'not_assigned') filtered = filtered.filter(k => k.status !== 'assigned');
+        filtered = filtered.filter(k => keypadMatchesSearch(k, q));
 
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">No keypads match filter</td></tr>';
+            const msg = allKeypads.length === 0 ? 'No keypads found' : 'No keypads match filter';
+            tbody.innerHTML = `<tr><td colspan="10" style="padding: 2rem; text-align: center; color: #999;">${msg}</td></tr>`;
             document.getElementById('count-info').textContent = '';
             return;
         }
@@ -399,10 +406,7 @@
     }
 
     // Init
-    SiteFilter.init('site-filter', { mode: 'multi' }).then(() => {
-        allSites = SiteFilter.getSites('site-filter');
-        loadKeypads('');
-    });
+    loadSites().then(loadKeypads);
     SiteFilter.init('add-site-filter', { mode: 'single' });
     loadAuditLog();
 </script>
