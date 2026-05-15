@@ -1570,6 +1570,16 @@ def api_get_batch(batch_id):
 
         batch_dict = batch.to_dict()
 
+        # site_id → site_code lookup so the UI can show codes (L001, L023…)
+        # instead of the opaque numeric SiteID.
+        all_site_ids = list({int(l.site_id) for l in ledgers} | set(batch.site_ids or []))
+        site_code_map = {}
+        if all_site_ids:
+            for row in session.execute(text(
+                'SELECT "SiteID", "SiteCode" FROM siteinfo WHERE "SiteID" = ANY(:ids)'
+            ), {'ids': all_site_ids}).fetchall():
+                site_code_map[int(row[0])] = row[1]
+
         ledger_dicts = []
         total_increase_sgd = 0.0
         by_group = {}
@@ -1578,6 +1588,7 @@ def api_get_batch(batch_id):
             ld['old_rent_sgd'] = to_sgd(l.old_rent, l.currency)
             ld['new_rent_sgd'] = to_sgd(l.new_rent, l.currency)
             ld['increase_amt_sgd'] = to_sgd(l.increase_amt, l.currency)
+            ld['site_code'] = site_code_map.get(int(l.site_id))
             ledger_dicts.append(ld)
 
             inc_sgd = ld['increase_amt_sgd'] or 0.0
@@ -1599,6 +1610,9 @@ def api_get_batch(batch_id):
             del by_group[g]['pcts']
 
         batch_dict['ledgers'] = ledger_dicts
+        batch_dict['site_codes'] = [
+            site_code_map.get(int(sid)) or str(sid) for sid in (batch.site_ids or [])
+        ]
         batch_dict['fx'] = {
             'base': 'SGD',
             'rate_date': fx_date.isoformat() if fx_date else None,

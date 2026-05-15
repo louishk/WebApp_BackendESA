@@ -392,7 +392,7 @@ body .container { max-width: 1800px; }
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 2rem; max-width: 700px;">
                     <div>${nameHtml}</div>
                     <div><strong>Status:</strong> <span class="status status-pending">${data.status}</span></div>
-                    <div><strong>Sites:</strong> ${data.site_ids.join(', ')}</div>
+                    <div><strong>Sites:</strong> ${(data.site_codes && data.site_codes.length ? data.site_codes : data.site_ids).join(', ')}</div>
                     <div><strong>Target:</strong> ${data.control_group_enabled ? 'Control Groups' : (data.target_increase_pct + '%')}</div>
                     <div><strong>Created:</strong> ${formatDate(data.created_at)}</div>
                     <div><strong>Notice Period:</strong> ${data.notice_period_days} days</div>
@@ -441,7 +441,9 @@ body .container { max-width: 1800px; }
             }
             ALL_LEDGERS = visibleLedgers;
 
-            const siteSet = Array.from(new Set(ALL_LEDGERS.map(l => l.site_id))).sort((a,b)=>a-b);
+            const siteSet = Array.from(
+                new Set(ALL_LEDGERS.map(l => l.site_code || String(l.site_id)))
+            ).sort();
             const siteSel = document.getElementById('filter-site');
             siteSel.innerHTML = '<option value="">All sites</option>' +
                 siteSet.map(s => `<option value="${s}">${s}</option>`).join('');
@@ -556,7 +558,7 @@ body .container { max-width: 1800px; }
         const exclFilter = document.getElementById('filter-exclusion').value;
 
         const filtered = ALL_LEDGERS.filter(l => {
-            if (site && String(l.site_id) !== site) return false;
+            if (site && (l.site_code || String(l.site_id)) !== site) return false;
             if (status && l.api_status !== status) return false;
             if (bucket && (l.bucket || 'unknown') !== bucket) return false;
             if (exclFilter && (l.exclusion_status || 'none') !== exclFilter) return false;
@@ -617,7 +619,7 @@ body .container { max-width: 1800px; }
 
             return `<tr>
                 <td>${cb}</td>
-                <td>${l.site_id}</td>
+                <td>${l.site_code || l.site_id}</td>
                 <td>${l.ledger_id}</td>
                 <td>${l.tenant_id||'-'}</td>
                 <td>${l.unit_name||'-'}</td>
