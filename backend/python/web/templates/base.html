@@ -296,7 +296,16 @@
                 {% endif %}
                 {% set has_middleware = current_user.can_manage_configs() or current_user.can_access_billing_tools() or current_user.can_access_discount_tools() or current_user.can_access_revenue_tools() or current_user.can_access_smart_lock() %}
                 {% if has_middleware %}
-                    <a href="{{ url_for('discount_plans.list_plans') }}" class="{{ 'active' if request.endpoint and ('discount_plans' in request.endpoint or 'reservation_fees' in request.endpoint or 'orchestrator_ui' in request.endpoint or 'smart_lock' in request.endpoint or 'recommendation_engine' in request.endpoint) else '' }}">Middleware</a>
+                    {% if current_user.can_manage_configs() or current_user.can_access_billing_tools() or current_user.can_access_discount_tools() %}
+                        {% set _middleware_url = url_for('discount_plans.list_plans') %}
+                    {% elif current_user.can_access_revenue_tools() and has_endpoint('reservation_fees.page') %}
+                        {% set _middleware_url = url_for('reservation_fees.page') %}
+                    {% elif current_user.can_access_smart_lock() %}
+                        {% set _middleware_url = url_for('tools.smart_lock_bridges') if current_user.can_admin_smart_lock() else url_for('tools.smart_lock_assignments') %}
+                    {% else %}
+                        {% set _middleware_url = url_for('discount_plans.list_plans') %}
+                    {% endif %}
+                    <a href="{{ _middleware_url }}" class="{{ 'active' if request.endpoint and ('discount_plans' in request.endpoint or 'reservation_fees' in request.endpoint or 'orchestrator_ui' in request.endpoint or 'smart_lock' in request.endpoint or 'recommendation_engine' in request.endpoint) else '' }}">Middleware</a>
                 {% endif %}
                 {% set has_any_tool = current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_smart_lock() or current_user.can_manage_configs() %}
                 {% if has_any_tool %}
