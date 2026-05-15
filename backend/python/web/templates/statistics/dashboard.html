@@ -25,6 +25,15 @@
 
 <!-- ==================== INBOUND VIEW ==================== -->
 <div id="inbound-view" style="display: none;">
+    <!-- Classification sub-toggle -->
+    <div class="class-toggle-row">
+        <div class="class-toggle">
+            <button class="class-btn active" data-class="internal">Internal API</button>
+            <button class="class-btn class-btn-probe" data-class="probes">Probes &amp; Bots</button>
+        </div>
+        <div class="class-hint" id="class-hint">Real backend endpoints (non-404 responses)</div>
+    </div>
+
     <!-- Summary KPIs -->
     <div class="card">
         <h2>Overview</h2>
@@ -180,11 +189,15 @@
     <!-- Outbound Endpoint Detail -->
     <div class="card">
         <h2>Endpoint Detail</h2>
-        <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem; align-items: center;">
+        <div style="margin-bottom: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
             <label style="font-size: 0.85rem; color: #666;">Filter service:</label>
             <select id="ext-service-filter" style="padding: 0.3rem 0.6rem; border: 1px solid var(--esa-gray-dark); border-radius: 4px; font-size: 0.8rem;">
                 <option value="">All Services</option>
             </select>
+            <label style="font-size: 0.85rem; color: #666; display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+                <input type="checkbox" id="ext-group-toggle" checked style="margin: 0;">
+                Group similar URLs (collapse device/UUID segments)
+            </label>
         </div>
         <div style="overflow-x: auto;">
             <table>
@@ -293,7 +306,7 @@
     </div>
 </div>
 
-<div class="refresh-notice">Data refreshes every 60 seconds</div>
+<div class="refresh-notice">Data refreshes every 3 minutes (server-cached)</div>
 
 <style>
     .tab-selector {
@@ -531,6 +544,55 @@
         color: #6f42c1;
     }
 
+    .class-toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0.75rem;
+    }
+    .class-toggle {
+        display: flex;
+        gap: 0;
+        background: var(--esa-gray-dark);
+        padding: 3px;
+        border-radius: 6px;
+    }
+    .class-btn {
+        padding: 0.35rem 0.9rem;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 0.8rem;
+        color: #666;
+        transition: all 0.2s;
+    }
+    .class-btn.active { background: var(--esa-navy); color: #fff; }
+    .class-btn:hover:not(.active) { background: #fff; color: var(--esa-navy); }
+    .class-btn-probe.active { background: #c0392b; }
+    .class-btn-probe:hover:not(.active) { color: #c0392b; }
+    .class-hint {
+        font-size: 0.78rem;
+        color: #888;
+        font-style: italic;
+    }
+
+    .endpoint-collapsed {
+        color: var(--esa-navy);
+        font-weight: 500;
+    }
+    .endpoint-variant-count {
+        display: inline-block;
+        margin-left: 6px;
+        font-size: 0.7rem;
+        padding: 1px 6px;
+        background: var(--esa-gray);
+        color: #555;
+        border-radius: 8px;
+        font-weight: 600;
+    }
+
     .mcp-category-badge {
         display: inline-block;
         padding: 0.15rem 0.5rem;
@@ -553,6 +615,8 @@
     let currentSort = 'calls';
     let currentTab = 'outbound';
     let currentMcpSort = 'calls';
+    let currentClassification = 'internal';
+    let extGroupSimilar = true;
 
     // Tab selector
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -590,6 +654,25 @@
     // Service filter
     document.getElementById('ext-service-filter').addEventListener('change', function() {
         loadExtEndpoints();
+    });
+
+    // Outbound group-similar toggle
+    document.getElementById('ext-group-toggle').addEventListener('change', function() {
+        extGroupSimilar = this.checked;
+        loadExtEndpoints();
+    });
+
+    // Inbound classification toggle (Internal / Probes)
+    document.querySelectorAll('.class-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.class-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentClassification = this.dataset.class;
+            document.getElementById('class-hint').textContent = currentClassification === 'probes'
+                ? 'URLs that don’t exist on this server (404s) — bot scanners probing for vulns'
+                : 'Real backend endpoints (non-404 responses)';
+            if (currentTab === 'inbound') refreshAll();
+        });
     });
 
     // MCP sort buttons
@@ -636,7 +719,7 @@
     // =====================================================================
 
     function loadSummary() {
-        fetch(`/api/statistics/summary?period=${currentPeriod}`)
+        fetch(`/api/statistics/summary?period=${currentPeriod}&classification=${currentClassification}`)
             .then(r => r.json())
             .then(data => {
                 document.getElementById('total-calls').textContent = formatNumber(data.total_calls);
@@ -731,7 +814,7 @@
     }
 
     function loadEndpoints() {
-        fetch(`/api/statistics/endpoints?period=${currentPeriod}&sort=${currentSort}`)
+        fetch(`/api/statistics/endpoints?period=${currentPeriod}&sort=${currentSort}&classification=${currentClassification}`)
             .then(r => r.json())
             .then(data => {
                 const tbody = document.getElementById('endpoints-tbody');
@@ -774,7 +857,7 @@
     }
 
     function loadSlowEndpoints() {
-        fetch(`/api/statistics/slow-endpoints?period=${currentPeriod}&min_calls=3`)
+        fetch(`/api/statistics/slow-endpoints?period=${currentPeriod}&min_calls=3&classification=${currentClassification}`)
             .then(r => r.json())
             .then(data => {
                 const tbody = document.getElementById('slow-tbody');
@@ -802,7 +885,7 @@
     }
 
     function loadTopConsumers() {
-        fetch(`/api/statistics/top-consumers?period=${currentPeriod}&limit=10`)
+        fetch(`/api/statistics/top-consumers?period=${currentPeriod}&limit=10&classification=${currentClassification}`)
             .then(r => r.json())
             .then(data => {
                 const tbody = document.getElementById('consumers-tbody');
@@ -888,6 +971,78 @@
             });
     }
 
+    // Normalize an outbound endpoint string for cleaner display + grouping.
+    // - For HTTP URLs: strip protocol+host so the path is what we read.
+    // - Collapse Igloo device IDs (e.g. EK2X11000666, SP2X2991f1c0, EB1X08776b94,
+    //   SW1X11000368, EK1X17000865) and bare UUID-ish segments into placeholders.
+    // - SOAP operation names already come in clean (e.g. UnitsInformation_v3).
+    function normalizeOutboundEndpoint(service, endpoint) {
+        if (!endpoint) return endpoint;
+        let path = endpoint;
+        let host = '';
+        const m = endpoint.match(/^https?:\/\/([^/]+)(\/.*)?$/i);
+        if (m) {
+            host = m[1];
+            path = m[2] || '/';
+        }
+        // Igloo device-ID pattern: 2 letters + digit + 'X' + alphanumeric tail (>=6)
+        // e.g. EK2X11000666, SP2X2991f1c0, EB1X08776b94, SW1X11000368
+        const IGLOO_ID = /^[A-Z]{2}\d[A-Z][A-Za-z0-9]{6,}$/;
+        const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const HEX_LONG = /^[0-9a-f]{16,}$/i;
+
+        const parts = path.split('/').map(seg => {
+            if (!seg) return seg;
+            if (IGLOO_ID.test(seg))    return '{deviceId}';
+            if (UUID.test(seg))        return '{uuid}';
+            if (HEX_LONG.test(seg))    return '{hex}';
+            if (/^\d{4,}$/.test(seg))  return '{id}';
+            return seg;
+        });
+        let norm = parts.join('/');
+        // Treat bridges/<id> the second time consistently (already covered by IGLOO_ID)
+        // but if a host distinguishes services (auth.iglooworks vs api.iglooworks), keep it.
+        if (host && host !== 'api.iglooworks.co') {
+            norm = host + norm;
+        }
+        return norm;
+    }
+
+    function aggregateOutbound(endpoints) {
+        const groups = new Map();
+        for (const e of endpoints) {
+            const norm = normalizeOutboundEndpoint(e.service_name, e.endpoint);
+            const key = `${e.service_name}|${e.method}|${norm}`;
+            const g = groups.get(key) || {
+                service_name: e.service_name,
+                endpoint: norm,
+                method: e.method,
+                total_calls: 0,
+                _avg_weighted_sum: 0,
+                max_response_ms: 0,
+                error_count: 0,
+                _variants: new Set(),
+            };
+            g.total_calls += e.total_calls;
+            g._avg_weighted_sum += (e.avg_response_ms || 0) * e.total_calls;
+            g.max_response_ms = Math.max(g.max_response_ms, e.max_response_ms || 0);
+            g.error_count += e.error_count || 0;
+            g._variants.add(e.endpoint);
+            groups.set(key, g);
+        }
+        return Array.from(groups.values()).map(g => ({
+            service_name: g.service_name,
+            endpoint: g.endpoint,
+            method: g.method,
+            total_calls: g.total_calls,
+            avg_response_ms: g.total_calls > 0 ? g._avg_weighted_sum / g.total_calls : 0,
+            max_response_ms: g.max_response_ms,
+            error_count: g.error_count,
+            error_rate: g.total_calls > 0 ? +(g.error_count / g.total_calls * 100).toFixed(2) : 0,
+            variant_count: g._variants.size,
+        })).sort((a, b) => b.total_calls - a.total_calls);
+    }
+
     function loadExtEndpoints() {
         const serviceFilter = document.getElementById('ext-service-filter').value;
         let url = `/api/statistics/external/services?period=${currentPeriod}`;
@@ -897,25 +1052,37 @@
             .then(r => r.json())
             .then(data => {
                 const tbody = document.getElementById('ext-endpoints-tbody');
-                const endpoints = data.endpoints || [];
+                let endpoints = data.endpoints || [];
 
                 if (endpoints.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #666;">No data for this period</td></tr>';
                     return;
                 }
 
-                tbody.innerHTML = endpoints.map(e => `
-                    <tr>
-                        <td>${serviceBadge(e.service_name)}</td>
-                        <td><code style="font-size: 0.8rem;">${escapeHtml(e.endpoint)}</code></td>
-                        <td><span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">${escapeHtml(e.method)}</span></td>
-                        <td style="text-align: right; font-weight: 600;">${e.total_calls.toLocaleString()}</td>
-                        <td style="text-align: right;">${responseBadge(e.avg_response_ms)}</td>
-                        <td style="text-align: right;">${responseBadge(e.max_response_ms)}</td>
-                        <td style="text-align: right;">${e.error_count > 0 ? '<span style="color: var(--esa-red); font-weight: 600;">' + e.error_count + '</span>' : '0'}</td>
-                        <td style="text-align: right;">${e.error_rate > 0 ? '<span style="color: var(--esa-red);">' + e.error_rate + '%</span>' : '0%'}</td>
-                    </tr>
-                `).join('');
+                if (extGroupSimilar) {
+                    endpoints = aggregateOutbound(endpoints);
+                }
+
+                tbody.innerHTML = endpoints.map(e => {
+                    const variantBadge = (extGroupSimilar && e.variant_count > 1)
+                        ? `<span class="endpoint-variant-count" title="${e.variant_count} distinct URLs collapsed into this pattern">${e.variant_count} variants</span>`
+                        : '';
+                    const endpointDisplay = extGroupSimilar
+                        ? `<span class="endpoint-collapsed">${escapeHtml(e.endpoint)}</span>${variantBadge}`
+                        : `<code style="font-size: 0.8rem;">${escapeHtml(e.endpoint)}</code>`;
+                    return `
+                        <tr>
+                            <td>${serviceBadge(e.service_name)}</td>
+                            <td>${endpointDisplay}</td>
+                            <td><span class="status" style="background: var(--esa-navy); color: #fff; font-size: 0.75rem;">${escapeHtml(e.method)}</span></td>
+                            <td style="text-align: right; font-weight: 600;">${e.total_calls.toLocaleString()}</td>
+                            <td style="text-align: right;">${responseBadge(e.avg_response_ms)}</td>
+                            <td style="text-align: right;">${responseBadge(e.max_response_ms)}</td>
+                            <td style="text-align: right;">${e.error_count > 0 ? '<span style="color: var(--esa-red); font-weight: 600;">' + e.error_count + '</span>' : '0'}</td>
+                            <td style="text-align: right;">${e.error_rate > 0 ? '<span style="color: var(--esa-red);">' + e.error_rate + '%</span>' : '0%'}</td>
+                        </tr>
+                    `;
+                }).join('');
             })
             .catch(err => {
                 console.error('Ext endpoints error:', err);
@@ -1054,7 +1221,7 @@
     // Initial load
     refreshAll();
 
-    // Auto-refresh every 60 seconds
-    setInterval(refreshAll, 60000);
+    // Auto-refresh every 3 minutes (matches server-side @cached TTL)
+    setInterval(refreshAll, 180000);
 </script>
 {% endblock %}

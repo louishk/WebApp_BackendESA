@@ -62,11 +62,13 @@ def cached(ttl_seconds=30):
     Shared across all gunicorn workers via filesystem.
 
     Args:
-        ttl_seconds: Cache time-to-live in seconds (default 30s)
+        ttl_seconds: TTL in seconds, or a callable (request) -> int for per-request TTL.
+            Use the callable form to tier TTL by query params (e.g. period=30d → longer).
     """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            ttl = ttl_seconds(request) if callable(ttl_seconds) else ttl_seconds
             cache_key = f"{func.__name__}:{request.path}:{request.query_string.decode()}"
             path = _cache_path(cache_key)
 
@@ -74,7 +76,7 @@ def cached(ttl_seconds=30):
             try:
                 if os.path.exists(path):
                     mtime = os.path.getmtime(path)
-                    if (datetime.now().timestamp() - mtime) < ttl_seconds:
+                    if (datetime.now().timestamp() - mtime) < ttl:
                         with open(path, 'r') as f:
                             data = json.load(f)
                         return jsonify(data)
@@ -97,6 +99,22 @@ def cached(ttl_seconds=30):
             return response
         return wrapper
     return decorator
+
+
+def stats_ttl_by_period(req):
+    """TTL for stats endpoints, scaled by period.
+
+    Short window (1d/7d) needs to feel near-real-time. Long windows (30d/90d)
+    require expensive scans of hundreds of thousands of rows and the underlying
+    data shifts only by a few percent per hour — much longer TTL is fine.
+    """
+    period = req.args.get('period', '7d')
+    return {
+        '1d': 180,    # 3 min
+        '7d': 600,    # 10 min
+        '30d': 1800,  # 30 min
+        '90d': 3600,  # 1 hour
+    }.get(period, 300)
 
 
 def clear_cache(pattern=None):
@@ -1174,48 +1192,56 @@ def _build_volume_timeline(period, db_rows):
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=30)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_statistics_summary():
     """
     Overall API consumption summary.
     Query params:
         period: 1d, 7d, 30d, 90d (default 7d)
+        classification: internal | probes | all (default internal).
+            internal = status_code != 404 (real endpoints)
+            probes   = status_code == 404 (bot/scanner traffic on routes that don't exist)
     """
     from web.models.api_statistic import ApiStatistic
 
     period = request.args.get('period', '7d')
+    classification = request.args.get('classification', 'internal')
     days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
     since = datetime.utcnow() - timedelta(days=days)
 
     session = get_session()
     try:
-        base = session.query(ApiStatistic).filter(ApiStatistic.called_at >= since)
-
-        total_calls = base.count()
-
-        avg_response = session.query(
-            func.avg(ApiStatistic.response_time_ms)
-        ).filter(ApiStatistic.called_at >= since).scalar() or 0
-
-        error_count = base.filter(ApiStatistic.status_code >= 400).count()
+        # Single roundtrip: total + avg + error_count in one aggregate query.
+        agg_q = session.query(
+            func.count(ApiStatistic.id).label('total'),
+            func.avg(ApiStatistic.response_time_ms).label('avg_ms'),
+            func.sum(case((ApiStatistic.status_code >= 400, 1), else_=0)).label('errors'),
+        ).filter(ApiStatistic.called_at >= since)
+        agg = _apply_classification(agg_q, classification).one()
+        total_calls = int(agg.total or 0)
+        avg_response = float(agg.avg_ms or 0)
+        error_count = int(agg.errors or 0)
 
         # Calls per time bucket in SGT (hourly for 24h, daily otherwise)
         trunc_unit = 'hour' if period == '1d' else 'day'
         sgt_time = func.timezone('Asia/Singapore', func.timezone('UTC', ApiStatistic.called_at))
-        volume = session.query(
+        volume_q = session.query(
             func.date_trunc(trunc_unit, sgt_time).label('bucket'),
             func.count(ApiStatistic.id).label('count')
         ).filter(
             ApiStatistic.called_at >= since
-        ).group_by('bucket').order_by('bucket').all()
+        )
+        volume_q = _apply_classification(volume_q, classification)
+        volume = volume_q.group_by('bucket').order_by('bucket').all()
 
         time_unit, timeline = _build_volume_timeline(period, volume)
 
         return jsonify({
             'period': period,
+            'classification': classification,
             'since': since.isoformat(),
             'total_calls': total_calls,
-            'avg_response_time_ms': round(float(avg_response), 2),
+            'avg_response_time_ms': round(avg_response, 2),
             'error_count': error_count,
             'error_rate': round(error_count / total_calls * 100, 2) if total_calls > 0 else 0,
             'time_unit': time_unit,
@@ -1225,28 +1251,40 @@ def api_statistics_summary():
         session.close()
 
 
+def _apply_classification(query, classification):
+    """Filter ApiStatistic query by Internal (200/2xx/5xx on real routes) vs Probes (404s)."""
+    from web.models.api_statistic import ApiStatistic
+    if classification == 'probes':
+        return query.filter(ApiStatistic.status_code == 404)
+    if classification == 'internal':
+        return query.filter(ApiStatistic.status_code != 404)
+    return query
+
+
 @api_bp.route('/statistics/endpoints')
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=30)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_statistics_endpoints():
     """
     Per-endpoint breakdown of API consumption.
     Query params:
         period: 1d, 7d, 30d, 90d (default 7d)
         sort: calls, avg_time, errors (default calls)
+        classification: internal | probes | all (default internal)
     """
     from web.models.api_statistic import ApiStatistic
 
     period = request.args.get('period', '7d')
     sort_by = request.args.get('sort', 'calls')
+    classification = request.args.get('classification', 'internal')
     days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
     since = datetime.utcnow() - timedelta(days=days)
 
     session = get_session()
     try:
-        stats = session.query(
+        q = session.query(
             ApiStatistic.endpoint,
             ApiStatistic.method,
             func.count(ApiStatistic.id).label('total_calls'),
@@ -1255,7 +1293,9 @@ def api_statistics_endpoints():
             func.sum(case((ApiStatistic.status_code >= 400, 1), else_=0)).label('error_count'),
         ).filter(
             ApiStatistic.called_at >= since
-        ).group_by(
+        )
+        q = _apply_classification(q, classification)
+        stats = q.group_by(
             ApiStatistic.endpoint, ApiStatistic.method
         ).all()
 
@@ -1284,6 +1324,7 @@ def api_statistics_endpoints():
 
         return jsonify({
             'period': period,
+            'classification': classification,
             'since': since.isoformat(),
             'endpoints': endpoints,
         })
@@ -1353,17 +1394,19 @@ def api_statistics_timeline():
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=60)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_statistics_top_consumers():
     """
     Top API consumers by client IP.
     Query params:
         period: 1d, 7d, 30d (default 7d)
         limit: number of results (default 20)
+        classification: internal | probes | all (default internal)
     """
     from web.models.api_statistic import ApiStatistic
 
     period = request.args.get('period', '7d')
+    classification = request.args.get('classification', 'internal')
     try:
         limit = min(int(request.args.get('limit', 20)), 100)
     except (ValueError, TypeError):
@@ -1373,14 +1416,16 @@ def api_statistics_top_consumers():
 
     session = get_session()
     try:
-        stats = session.query(
+        q = session.query(
             ApiStatistic.client_ip,
             func.count(ApiStatistic.id).label('total_calls'),
             func.count(func.distinct(ApiStatistic.endpoint)).label('unique_endpoints'),
             func.avg(ApiStatistic.response_time_ms).label('avg_ms'),
         ).filter(
             ApiStatistic.called_at >= since
-        ).group_by(
+        )
+        q = _apply_classification(q, classification)
+        stats = q.group_by(
             ApiStatistic.client_ip
         ).order_by(
             desc(func.count(ApiStatistic.id))
@@ -1407,17 +1452,19 @@ def api_statistics_top_consumers():
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=60)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_statistics_slow_endpoints():
     """
     Endpoints ranked by response time (identifies performance bottlenecks).
     Query params:
         period: 1d, 7d, 30d (default 7d)
         min_calls: minimum call count to include (default 5)
+        classification: internal | probes | all (default internal)
     """
     from web.models.api_statistic import ApiStatistic
 
     period = request.args.get('period', '7d')
+    classification = request.args.get('classification', 'internal')
     try:
         min_calls = int(request.args.get('min_calls', 5))
     except (ValueError, TypeError):
@@ -1427,7 +1474,7 @@ def api_statistics_slow_endpoints():
 
     session = get_session()
     try:
-        stats = session.query(
+        q = session.query(
             ApiStatistic.endpoint,
             ApiStatistic.method,
             func.count(ApiStatistic.id).label('total_calls'),
@@ -1438,7 +1485,9 @@ def api_statistics_slow_endpoints():
             func.max(ApiStatistic.response_time_ms).label('max_ms'),
         ).filter(
             ApiStatistic.called_at >= since
-        ).group_by(
+        )
+        q = _apply_classification(q, classification)
+        stats = q.group_by(
             ApiStatistic.endpoint, ApiStatistic.method
         ).having(
             func.count(ApiStatistic.id) >= min_calls
@@ -1474,7 +1523,7 @@ def api_statistics_slow_endpoints():
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=30)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_ext_statistics_summary():
     """
     Outbound API call summary.
@@ -1486,65 +1535,98 @@ def api_ext_statistics_summary():
     days = {'1d': 1, '7d': 7, '30d': 30, '90d': 90}.get(period, 7)
     since = datetime.utcnow() - timedelta(days=days)
 
-    session = get_session()
-    try:
-        base = session.query(ExternalApiStatistic).filter(
-            ExternalApiStatistic.called_at >= since
-        )
-        total = base.count()
-        avg_ms = session.query(
-            func.avg(ExternalApiStatistic.response_time_ms)
-        ).filter(ExternalApiStatistic.called_at >= since).scalar() or 0
-        error_count = base.filter(ExternalApiStatistic.success == False).count()
+    # Run the 3 independent aggregates concurrently — they all scan the same
+    # rows but produce different groupings. For 30d (~400k rows) this drops
+    # wall time from the sum (~18 s) to the slowest single query (~11 s).
+    # Use common.db.get_session (thread-safe) — Flask's current_app proxy can't
+    # cross thread boundaries.
+    from concurrent.futures import ThreadPoolExecutor
+    from common.db import get_session as _get_db_session
 
-        by_service = session.query(
-            ExternalApiStatistic.service_name,
-            func.count(ExternalApiStatistic.id).label('count'),
-            func.avg(ExternalApiStatistic.response_time_ms).label('avg_ms'),
-            func.sum(case((ExternalApiStatistic.success == False, 1), else_=0)).label('errors'),
-        ).filter(
-            ExternalApiStatistic.called_at >= since
-        ).group_by(ExternalApiStatistic.service_name).all()
+    trunc_unit = 'hour' if period == '1d' else 'day'
 
-        trunc_unit = 'hour' if period == '1d' else 'day'
-        sgt_time = func.timezone('Asia/Singapore', func.timezone('UTC', ExternalApiStatistic.called_at))
-        volume = session.query(
-            func.date_trunc(trunc_unit, sgt_time).label('bucket'),
-            func.count(ExternalApiStatistic.id).label('count'),
-        ).filter(
-            ExternalApiStatistic.called_at >= since
-        ).group_by('bucket').order_by('bucket').all()
+    def _q_aggregate():
+        s = _get_db_session('backend')
+        try:
+            return s.execute(text("""
+                SELECT COUNT(*) AS total,
+                       AVG(response_time_ms) AS avg_ms,
+                       SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) AS errors
+                FROM external_api_statistics
+                WHERE called_at >= :since
+            """), {'since': since}).fetchone()
+        finally:
+            s.close()
 
-        time_unit, timeline = _build_volume_timeline(period, volume)
+    def _q_by_service():
+        s = _get_db_session('backend')
+        try:
+            return s.execute(text("""
+                SELECT service_name,
+                       COUNT(*) AS n,
+                       AVG(response_time_ms) AS avg_ms,
+                       SUM(CASE WHEN NOT success THEN 1 ELSE 0 END) AS errors
+                FROM external_api_statistics
+                WHERE called_at >= :since
+                GROUP BY service_name
+            """), {'since': since}).fetchall()
+        finally:
+            s.close()
 
-        return jsonify({
-            'period': period,
-            'since': since.isoformat(),
-            'total_calls': total,
-            'avg_response_time_ms': round(float(avg_ms), 2),
-            'error_count': error_count,
-            'error_rate': round(error_count / total * 100, 2) if total > 0 else 0,
-            'time_unit': time_unit,
-            'by_service': [
-                {
-                    'service_name': s.service_name,
-                    'total_calls': s.count,
-                    'avg_response_ms': round(float(s.avg_ms or 0), 2),
-                    'error_count': int(s.errors or 0),
-                }
-                for s in by_service
-            ],
-            'calls_per_day': timeline,
-        })
-    finally:
-        session.close()
+    def _q_volume():
+        s = _get_db_session('backend')
+        try:
+            return s.execute(text("""
+                SELECT date_trunc(:trunc, timezone('Asia/Singapore', timezone('UTC', called_at))) AS bucket,
+                       COUNT(*) AS count
+                FROM external_api_statistics
+                WHERE called_at >= :since
+                GROUP BY bucket
+                ORDER BY bucket
+            """), {'since': since, 'trunc': trunc_unit}).fetchall()
+        finally:
+            s.close()
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_agg = pool.submit(_q_aggregate)
+        f_svc = pool.submit(_q_by_service)
+        f_vol = pool.submit(_q_volume)
+        agg = f_agg.result()
+        by_service = f_svc.result()
+        volume = f_vol.result()
+
+    total = int(agg.total or 0)
+    avg_ms = float(agg.avg_ms or 0)
+    error_count = int(agg.errors or 0)
+
+    time_unit, timeline = _build_volume_timeline(period, volume)
+
+    return jsonify({
+        'period': period,
+        'since': since.isoformat(),
+        'total_calls': total,
+        'avg_response_time_ms': round(float(avg_ms), 2),
+        'error_count': error_count,
+        'error_rate': round(error_count / total * 100, 2) if total > 0 else 0,
+        'time_unit': time_unit,
+        'by_service': [
+            {
+                'service_name': s.service_name,
+                'total_calls': int(s.n or 0),
+                'avg_response_ms': round(float(s.avg_ms or 0), 2),
+                'error_count': int(s.errors or 0),
+            }
+            for s in by_service
+        ],
+        'calls_per_day': timeline,
+    })
 
 
 @api_bp.route('/statistics/external/services')
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=30)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_ext_statistics_services():
     """
     Per-service/endpoint breakdown of outbound API calls.
@@ -1613,7 +1695,7 @@ def api_ext_statistics_services():
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=30)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_mcp_statistics_summary():
     """
     MCP tool call summary.
@@ -1671,7 +1753,7 @@ def api_mcp_statistics_summary():
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=30)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_mcp_statistics_tools():
     """
     Per-tool breakdown of MCP calls.
@@ -1739,7 +1821,7 @@ def api_mcp_statistics_tools():
 @require_auth
 @require_api_scope('statistics:read')
 @rate_limit_api(max_requests=30, window_seconds=60)
-@cached(ttl_seconds=30)
+@cached(ttl_seconds=stats_ttl_by_period)
 def api_mcp_statistics_users():
     """
     Per-user breakdown of MCP calls.
