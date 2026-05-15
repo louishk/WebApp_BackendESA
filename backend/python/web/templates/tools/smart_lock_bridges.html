@@ -7,7 +7,7 @@
 </div>
 
 <div style="background: #eff6ff; border-left: 3px solid #3b82f6; padding: 0.5rem 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; color: #1e40af; border-radius: 4px;">
-    <strong>Mostly auto-managed.</strong> Bridges are populated from Igloo on every sync. When Igloo can't tell us which site a bridge belongs to (typically an offline or unpaired bridge), it appears as <em>Unassigned</em> at the top — pick a site to attribute it. Manual assignments are sticky and won't be overwritten by the next sync.
+    <strong>Read-only — Igloo is the source of truth.</strong> Bridges and their site mapping are populated from Igloo on every sync. A bridge listed as <em>Unassigned</em> means Igloo couldn't tell us which site it belongs to (typically an offline bridge or one that was never paired with a keypad). The fix is to repair the pairing in the Igloo console and re-sync — there is no manual override here on purpose.
 </div>
 
 <div class="card" style="margin-bottom: 1rem;">
@@ -115,23 +115,9 @@
 
     function siteCell(b) {
         if (b.site_id != null) {
-            const adminBadge = b.site_assigned_by === 'admin'
-                ? '<span title="Manually assigned — won\'t be overwritten by Igloo sync" style="font-size:0.65rem;color:#6366f1;margin-left:0.25rem;">[manual]</span>'
-                : '';
-            return `<span>${esc(siteName(b.site_id))}</span>${adminBadge}`;
+            return `<span>${esc(siteName(b.site_id))}</span>`;
         }
-        // Orphan: render an inline dropdown.
-        const options = allSites
-            .map(s => `<option value="${s.site_id}">${esc(s.site_code)} - ${esc(s.name)}</option>`)
-            .join('');
-        return `<div style="display:flex;gap:0.25rem;align-items:center;">
-            <span style="background:#fef3c7;color:#92400e;padding:0.1rem 0.4rem;border-radius:4px;font-size:0.7rem;font-weight:500;">Unassigned</span>
-            <select id="assign-${b.id}" style="font-size:0.75rem;padding:0.15rem;max-width:180px;">
-                <option value="">Assign to site…</option>
-                ${options}
-            </select>
-            <button class="btn btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.4rem;" onclick="assignBridge(${b.id})">Save</button>
-        </div>`;
+        return `<span title="Igloo couldn't tell us the site. Repair the pairing in the Igloo console (keypad → bridge) and re-sync." style="background:#fef3c7;color:#92400e;padding:0.1rem 0.4rem;border-radius:4px;font-size:0.7rem;font-weight:500;cursor:help;">Unassigned — fix in Igloo</span>`;
     }
 
     function renderTable() {
@@ -178,24 +164,6 @@
         document.getElementById('count-info').textContent = `${allBridges.length} bridge(s)${orphanNote}`;
     }
 
-    async function assignBridge(pk) {
-        const sel = document.getElementById(`assign-${pk}`);
-        const siteId = sel && sel.value;
-        if (!siteId) { showStatus('Pick a site first', false); return; }
-        try {
-            const res = await fetch(`/api/smart-lock/bridges/${pk}`, {
-                method: 'PUT',
-                headers: apiHeaders(),
-                body: JSON.stringify({ site_id: parseInt(siteId, 10) }),
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-            showStatus('Bridge assigned', true);
-            loadBridges('');
-        } catch (e) {
-            showStatus('Assign failed: ' + e.message, false);
-        }
-    }
 
     async function syncIgloo() {
         const btn = document.getElementById('sync-igloo-btn');

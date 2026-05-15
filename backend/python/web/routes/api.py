@@ -3094,61 +3094,7 @@ def api_sl_keypads_delete(pk):
         session.close()
 
 
-# --- Bridges (auto-populated from Igloo sync; admin can assign orphan bridges) ---
-
-@api_bp.route('/smart-lock/bridges/<int:pk>', methods=['PUT'])
-@require_auth
-@_require_sl_session_admin
-@require_api_scope('smart_lock:write')
-@rate_limit_api(max_requests=30, window_seconds=60)
-def api_sl_bridges_update(pk):
-    """Assign or change the site for a Bridge.
-
-    Used when the Igloo sync couldn't infer a site (orphan bridge) and an
-    admin needs to attribute it manually. The assignment is sticky: subsequent
-    pipeline runs won't overwrite it (site_assigned_by='admin').
-    """
-    from web.models.smart_lock import SmartLockBridge
-    data = request.get_json()
-    if not data or 'site_id' not in data:
-        return jsonify({'error': 'site_id required'}), 400
-
-    try:
-        new_site_id = int(data['site_id'])
-    except (TypeError, ValueError):
-        return jsonify({'error': 'site_id must be an integer'}), 400
-
-    session = current_app.get_middleware_session()
-    try:
-        bridge = session.query(SmartLockBridge).get(pk)
-        if not bridge:
-            return jsonify({'error': 'Bridge not found'}), 404
-
-        from flask_login import current_user
-        if current_user.is_authenticated and not current_user.can_see_site(new_site_id):
-            return jsonify({'error': 'forbidden'}), 403
-
-        old_site_id = bridge.site_id
-        if old_site_id == new_site_id and bridge.site_assigned_by == 'admin':
-            return jsonify({'success': True, 'bridge': bridge.to_dict()})
-
-        bridge.site_id = new_site_id
-        bridge.site_assigned_by = 'admin'
-        bridge.updated_at = datetime.utcnow()
-        _sl_audit(
-            session, 'bridge_site_assigned', 'bridge', bridge.bridge_id,
-            site_id=new_site_id,
-            detail=f'site {old_site_id}->{new_site_id} (manual)',
-        )
-        session.commit()
-        return jsonify({'success': True, 'bridge': bridge.to_dict()})
-    except Exception as e:
-        session.rollback()
-        current_app.logger.error(f"Smart lock bridge update error: {e}")
-        return jsonify({'error': 'Failed to update bridge'}), 500
-    finally:
-        session.close()
-
+# --- Bridges (read-only — Igloo is the source of truth for site mapping) ---
 
 @api_bp.route('/smart-lock/bridges')
 @require_auth

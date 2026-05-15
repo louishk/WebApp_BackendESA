@@ -394,30 +394,26 @@ def sync_devices_to_smart_locks(
             elif device_type == 'Bridge':
                 existing = session.query(SmartLockBridge).filter_by(bridge_id=device_id).first()
                 if existing:
-                    # Never overwrite an admin-assigned site. Otherwise update
-                    # only when we have a non-null inference and it differs.
-                    if (
-                        existing.site_assigned_by != 'admin'
-                        and site_id
-                        and existing.site_id != site_id
-                    ):
+                    # Igloo is the source of truth. Mirror whatever it tells us,
+                    # including transitioning back to NULL if a previously-paired
+                    # bridge loses its linkage.
+                    if existing.site_id != site_id:
                         logger.info(
                             "Bridge %s site changed %s->%s",
                             device_id, existing.site_id, site_id,
                         )
                         existing.site_id = site_id
-                        existing.site_assigned_by = 'igloo_pipeline'
                 else:
                     if not site_id:
                         logger.warning(
                             "Bridge %s has no inferable site (linkedDevices/"
-                            "linkedAccessories empty) — listing as unassigned",
+                            "linkedAccessories empty) — listing as unassigned. "
+                            "Fix the pairing in Igloo and re-sync.",
                             device_id,
                         )
                     session.add(SmartLockBridge(
                         bridge_id=device_id,
                         site_id=site_id,
-                        site_assigned_by='igloo_pipeline',
                         status='not_assigned',
                         created_by='igloo_pipeline',
                     ))
