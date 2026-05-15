@@ -318,6 +318,24 @@ def sync_devices_to_smart_locks(
         if r.get('deviceId') and r.get('site_id')
     }
 
+    # Reverse map: bridge_id -> site_id, derived by walking every keypad/lock's
+    # linkedAccessories for Bridge entries. Catches bridges whose own
+    # linkedDevices is empty (typically because the bridge is offline) but
+    # whose paired keypad still remembers the pairing.
+    bridge_to_site: Dict[str, int] = {}
+    for r in device_records:
+        sid = r.get('site_id')
+        if not sid:
+            continue
+        for ent in (r.get('linkedAccessories') or []):
+            if not isinstance(ent, dict):
+                continue
+            if (ent.get('type') or '').lower() != 'bridge':
+                continue
+            bid = ent.get('deviceId') or ent.get('id')
+            if bid:
+                bridge_to_site.setdefault(bid, sid)
+
     try:
         for rec in device_records:
             device_id = rec.get('deviceId', '')
@@ -325,13 +343,22 @@ def sync_devices_to_smart_locks(
             site_id = rec.get('site_id')
 
             if not site_id and device_type == 'Bridge':
+                # 1) Igloo's linkedDevices on the bridge (works only when the
+                #    bridge is online).
                 for ent in (rec.get('linkedDevices') or []):
                     linked_id = (ent or {}).get('deviceId') or (ent or {}).get('id')
                     if linked_id and device_to_site.get(linked_id):
                         site_id = device_to_site[linked_id]
                         break
+                # 2) Reverse lookup via keypad/lock linkedAccessories.
+                if not site_id:
+                    site_id = bridge_to_site.get(device_id)
 
-            if not device_id or not site_id:
+            if not device_id:
+                continue
+            if device_type != 'Bridge' and not site_id:
+                # Keypads/Locks without a site are still skipped — they have a
+                # propertyId we trust. Only Bridges get the orphan treatment.
                 continue
 
             if device_type == 'Keypad':
@@ -367,13 +394,30 @@ def sync_devices_to_smart_locks(
             elif device_type == 'Bridge':
                 existing = session.query(SmartLockBridge).filter_by(bridge_id=device_id).first()
                 if existing:
-                    if existing.site_id != site_id:
+                    # Never overwrite an admin-assigned site. Otherwise update
+                    # only when we have a non-null inference and it differs.
+                    if (
+                        existing.site_assigned_by != 'admin'
+                        and site_id
+                        and existing.site_id != site_id
+                    ):
+                        logger.info(
+                            "Bridge %s site changed %s->%s",
+                            device_id, existing.site_id, site_id,
+                        )
                         existing.site_id = site_id
-                        logger.info("Bridge %s site changed to %s", device_id, site_id)
+                        existing.site_assigned_by = 'igloo_pipeline'
                 else:
+                    if not site_id:
+                        logger.warning(
+                            "Bridge %s has no inferable site (linkedDevices/"
+                            "linkedAccessories empty) — listing as unassigned",
+                            device_id,
+                        )
                     session.add(SmartLockBridge(
                         bridge_id=device_id,
                         site_id=site_id,
+                        site_assigned_by='igloo_pipeline',
                         status='not_assigned',
                         created_by='igloo_pipeline',
                     ))

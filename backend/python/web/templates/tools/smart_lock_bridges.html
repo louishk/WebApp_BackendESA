@@ -7,7 +7,7 @@
 </div>
 
 <div style="background: #eff6ff; border-left: 3px solid #3b82f6; padding: 0.5rem 0.75rem; margin-bottom: 1rem; font-size: 0.8rem; color: #1e40af; border-radius: 4px;">
-    <strong>Read-only.</strong> Bridges are auto-populated from Igloo on every sync. Each bridge proxies BLE commands to the keypad/lock paired with it (visible in <em>Linked devices</em>).
+    <strong>Mostly auto-managed.</strong> Bridges are populated from Igloo on every sync. When Igloo can't tell us which site a bridge belongs to (typically an offline or unpaired bridge), it appears as <em>Unassigned</em> at the top — pick a site to attribute it. Manual assignments are sticky and won't be overwritten by the next sync.
 </div>
 
 <div class="card" style="margin-bottom: 1rem;">
@@ -113,6 +113,27 @@
         }
     }
 
+    function siteCell(b) {
+        if (b.site_id != null) {
+            const adminBadge = b.site_assigned_by === 'admin'
+                ? '<span title="Manually assigned — won\'t be overwritten by Igloo sync" style="font-size:0.65rem;color:#6366f1;margin-left:0.25rem;">[manual]</span>'
+                : '';
+            return `<span>${esc(siteName(b.site_id))}</span>${adminBadge}`;
+        }
+        // Orphan: render an inline dropdown.
+        const options = allSites
+            .map(s => `<option value="${s.site_id}">${esc(s.site_code)} - ${esc(s.name)}</option>`)
+            .join('');
+        return `<div style="display:flex;gap:0.25rem;align-items:center;">
+            <span style="background:#fef3c7;color:#92400e;padding:0.1rem 0.4rem;border-radius:4px;font-size:0.7rem;font-weight:500;">Unassigned</span>
+            <select id="assign-${b.id}" style="font-size:0.75rem;padding:0.15rem;max-width:180px;">
+                <option value="">Assign to site…</option>
+                ${options}
+            </select>
+            <button class="btn btn-secondary" style="font-size:0.7rem;padding:0.15rem 0.4rem;" onclick="assignBridge(${b.id})">Save</button>
+        </div>`;
+    }
+
     function renderTable() {
         const tbody = document.getElementById('bridges-tbody');
         if (allBridges.length === 0) {
@@ -120,7 +141,15 @@
             document.getElementById('count-info').textContent = '';
             return;
         }
-        tbody.innerHTML = allBridges.map(b => {
+        // Sort: unassigned first, then by site_id, then bridge_id.
+        const sorted = [...allBridges].sort((a, b) => {
+            const aOrphan = a.site_id == null ? 0 : 1;
+            const bOrphan = b.site_id == null ? 0 : 1;
+            if (aOrphan !== bOrphan) return aOrphan - bOrphan;
+            if ((a.site_id || 0) !== (b.site_id || 0)) return (a.site_id || 0) - (b.site_id || 0);
+            return String(a.bridge_id).localeCompare(String(b.bridge_id));
+        });
+        tbody.innerHTML = sorted.map(b => {
             const ig = b.igloo || {};
             const bat = ig.batteryLevel != null ? ig.batteryLevel : null;
             const batBadge = bat !== null
@@ -133,9 +162,10 @@
             const linked = (ig.linked_devices || []).map(d =>
                 `<span style="display:inline-block;background:#eef2ff;color:#4338ca;padding:0.1rem 0.4rem;border-radius:4px;font-size:0.7rem;margin-right:0.25rem;" title="${esc(d.type || '')}">${esc(d.deviceId)}<span style="opacity:0.6;font-size:0.65rem;"> ${esc(d.type || '')}</span></span>`
             ).join('') || '<span style="color:#999;">—</span>';
-            return `<tr>
+            const rowBg = b.site_id == null ? 'background:#fffbeb;' : '';
+            return `<tr style="${rowBg}">
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;font-weight:500;">${esc(b.bridge_id)}</td>
-                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(siteName(b.site_id))}</td>
+                <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${siteCell(b)}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(ig.country || '—')}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${esc(ig.property || '—')}</td>
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;text-align:center;">${batBadge}</td>
@@ -143,7 +173,28 @@
                 <td style="padding:0.5rem;border-bottom:1px solid #f1f5f9;">${linked}</td>
             </tr>`;
         }).join('');
-        document.getElementById('count-info').textContent = `${allBridges.length} bridge(s)`;
+        const orphanCount = allBridges.filter(b => b.site_id == null).length;
+        const orphanNote = orphanCount > 0 ? ` (${orphanCount} unassigned)` : '';
+        document.getElementById('count-info').textContent = `${allBridges.length} bridge(s)${orphanNote}`;
+    }
+
+    async function assignBridge(pk) {
+        const sel = document.getElementById(`assign-${pk}`);
+        const siteId = sel && sel.value;
+        if (!siteId) { showStatus('Pick a site first', false); return; }
+        try {
+            const res = await fetch(`/api/smart-lock/bridges/${pk}`, {
+                method: 'PUT',
+                headers: apiHeaders(),
+                body: JSON.stringify({ site_id: parseInt(siteId, 10) }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+            showStatus('Bridge assigned', true);
+            loadBridges('');
+        } catch (e) {
+            showStatus('Assign failed: ' + e.message, false);
+        }
     }
 
     async function syncIgloo() {

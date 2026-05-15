@@ -40,12 +40,20 @@ class SmartLockKeypad(Base):
 
 
 class SmartLockBridge(Base):
-    """An Igloo Bridge device assigned to a site (auto-populated from Igloo)."""
+    """An Igloo Bridge device, auto-populated from Igloo.
+
+    site_id is nullable: when Igloo can't tell us which site a Bridge belongs to
+    (offline bridge, never paired, fresh install) the row is still created so
+    operators can see it and assign a site manually. `site_assigned_by` records
+    whether the site was inferred by the pipeline or set by an admin — the
+    pipeline must not overwrite admin assignments.
+    """
     __tablename__ = 'mw_smart_lock_bridges'
 
     id = Column(Integer, primary_key=True)
     bridge_id = Column(String(50), unique=True, nullable=False)
-    site_id = Column(Integer, nullable=False)
+    site_id = Column(Integer, nullable=True)
+    site_assigned_by = Column(String(20), nullable=False, default='igloo_pipeline')
     status = Column(String(20), nullable=False, default='not_assigned')
     notes = Column(String(255))
     created_by = Column(String(255))
@@ -57,6 +65,7 @@ class SmartLockBridge(Base):
             'id': self.id,
             'bridge_id': self.bridge_id,
             'site_id': self.site_id,
+            'site_assigned_by': self.site_assigned_by,
             'status': self.status,
             'notes': self.notes,
             'created_by': self.created_by,
