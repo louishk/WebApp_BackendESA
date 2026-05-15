@@ -666,6 +666,7 @@ def delete_user(user_id):
 
 @admin_bp.route('/api/users/search')
 @login_required
+@admin_required
 def search_users():
     """Search users for Select2 dropdown."""
     from web.models.user import User

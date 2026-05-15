@@ -388,8 +388,10 @@
            class="{{ 'active' if request.endpoint and request.endpoint.startswith('recommendation_engine.simulator') else '' }}">Simulator</a>
         <a href="{{ url_for('recommendation_engine.unit_availability') }}"
            class="{{ 'active' if request.endpoint and 'unit_availability' in request.endpoint else '' }}">Unit Availability</a>
+        {% if current_user.can_manage_configs() %}
         <a href="{{ url_for('admin.site_distance') }}"
            class="{{ 'active' if request.endpoint and 'site_distance' in request.endpoint else '' }}">Site Distance</a>
+        {% endif %}
         <a href="{{ url_for('recommendation_engine.lease_followups') }}"
            class="{{ 'active' if request.endpoint and 'lease_followup' in request.endpoint else '' }}">Lease Follow-ups</a>
         <a href="{{ url_for('recommendation_engine.marketing_feeds_list') }}"
@@ -436,14 +438,18 @@
     <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
         <a href="{{ url_for('orchestrator_ui.dashboard') }}" class="{{ 'active' if request.endpoint == 'orchestrator_ui.dashboard' else '' }}">Dashboard</a>
         <a href="{{ url_for('orchestrator_ui.runs') }}" class="{{ 'active' if request.endpoint == 'orchestrator_ui.runs' else '' }}">Run History</a>
+        {% if current_user.can_manage_configs() %}
         <a href="/admin/services" class="">Services Admin</a>
+        {% endif %}
     </div>
     {% endif %}
     {# --- Level 2: ECRI (hidden on batch_review / analytics to maximise table space) --- #}
     {% if request.endpoint and 'ecri' in request.endpoint and not request.endpoint.startswith('admin.') and request.endpoint not in ('ecri.batch_review', 'ecri.batch_analytics') %}
     <div class="sub-navbar" style="background: #1a2744; border-bottom: 2px solid var(--esa-red);">
+        {% if current_user.can_access_ecri() %}
         <a href="{{ url_for('ecri.dashboard') }}" class="{{ 'active' if request.endpoint == 'ecri.dashboard' else '' }}">Dashboard</a>
         <a href="{{ url_for('ecri.eligibility') }}" class="{{ 'active' if request.endpoint == 'ecri.eligibility' else '' }}">Eligibility</a>
+        {% endif %}
         {% if current_user.can_access_ecri() %}
         <a href="{{ url_for('ecri.batches_list') }}" class="{{ 'active' if request.endpoint in ('ecri.batches_list','ecri.batch_review','ecri.batch_analytics','ecri.batch_create') else '' }}">Batches</a>
         <a href="{{ url_for('ecri.objections_dashboard') }}" class="{{ 'active' if request.endpoint == 'ecri.objections_dashboard' else '' }}">Objections</a>

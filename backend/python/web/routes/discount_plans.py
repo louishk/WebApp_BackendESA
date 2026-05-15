@@ -173,6 +173,22 @@ def _require_config_permission(f):
     return decorated
 
 
+def _require_discount_read_permission(f):
+    """Read-level gate matching the Middleware nav: config OR billing OR discount tools."""
+    from functools import wraps
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for('auth.login'))
+        if not (current_user.can_manage_configs()
+                or current_user.can_access_billing_tools()
+                or current_user.can_access_discount_tools()):
+            flash('Discount plan access required.', 'error')
+            return redirect(url_for('main.dashboard'))
+        return f(*args, **kwargs)
+    return decorated
+
+
 PLAN_TYPES = ['Evergreen', 'Tactical', 'Seasonal']
 DISCOUNT_TYPES = ['none', 'percentage', 'fixed_amount', 'free_period']
 ELIGIBILITY_OPTIONS = ['Not Eligible', 'Eligible']
@@ -470,6 +486,7 @@ def _edit_tpl_kwargs():
 
 @discount_plans_bp.route('/')
 @login_required
+@_require_discount_read_permission
 def list_plans():
     """List all discount plans with per-plan candidate counts + setup audit."""
     from web.models.discount_plan import DiscountPlan
@@ -800,6 +817,7 @@ _DIM_TABLE = {
 
 @discount_plans_bp.route('/api/dim-options')
 @login_required
+@_require_discount_read_permission
 def api_dim_options():
     """Return the canonical option lists for every SOP COM01 dim.
 
@@ -822,6 +840,7 @@ def api_dim_options():
 
 @discount_plans_bp.route('/api/unit-count', methods=['POST'])
 @login_required
+@_require_discount_read_permission
 @rate_limit_api(max_requests=60, window_seconds=60)
 def api_unit_count():
     """Count vacant units matching the given site + restriction combo.
@@ -1238,6 +1257,7 @@ def delete_plan(plan_id):
 
 @discount_plans_bp.route('/<int:plan_id>/brief')
 @login_required
+@_require_discount_read_permission
 def view_brief(plan_id):
     """Show the promotion brief view for a discount plan."""
     from web.models.discount_plan import DiscountPlan
@@ -1340,6 +1360,7 @@ def view_brief(plan_id):
 
 @discount_plans_bp.route('/api/list')
 @login_required
+@_require_discount_read_permission
 def api_list():
     """JSON list of all plans (for AJAX use)."""
     from web.models.discount_plan import DiscountPlan
@@ -1356,6 +1377,7 @@ def api_list():
 
 @discount_plans_bp.route('/api/<int:plan_id>')
 @login_required
+@_require_discount_read_permission
 def api_get(plan_id):
     """Get a single plan as JSON."""
     from web.models.discount_plan import DiscountPlan
@@ -1376,6 +1398,7 @@ def api_get(plan_id):
 
 @discount_plans_bp.route('/api/concessions/search')
 @login_required
+@_require_discount_read_permission
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_search_concessions():
     """
@@ -1463,6 +1486,7 @@ def api_search_concessions():
 
 @discount_plans_bp.route('/api/concessions/by-plan-name')
 @login_required
+@_require_discount_read_permission
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_concessions_by_plan_name():
     """
@@ -1532,6 +1556,7 @@ def api_concessions_by_plan_name():
 
 @discount_plans_bp.route('/api/concessions/by-ids')
 @login_required
+@_require_discount_read_permission
 @rate_limit_api(max_requests=30, window_seconds=60)
 def api_concessions_by_ids():
     """Hydrate linked_concessions entries with site_code + sPlanName.
@@ -1829,6 +1854,7 @@ def api_translate_text():
 
 @discount_plans_bp.route('/api/config-options/<field_name>')
 @login_required
+@_require_discount_read_permission
 def api_config_options(field_name):
     """JSON API: get active options for a specific field."""
     from web.models.discount_plan_config import DiscountPlanConfig

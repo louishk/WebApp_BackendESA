@@ -26,6 +26,7 @@ from web.auth.decorators import (
     ecri_objection_approve_required, ecri_finalize_required,
     ecri_execute_required, ecri_reasons_manage_required,
 )
+from web.routes.api import cached
 
 ecri_bp = Blueprint('ecri', __name__, url_prefix='/ecri')
 
@@ -128,13 +129,18 @@ def get_app_db_session():
 @ecri_bp.route('/api/data-freshness')
 @login_required
 @ecri_access_required
+@cached(ttl_seconds=60)
 def api_data_freshness():
-    """Check freshness of key tables used by ECRI."""
+    """Check freshness of source tables used by ECRI.
+
+    rentroll_enriched is deliberately excluded — it is a non-materialized VIEW
+    on top of rentroll, so its MAX(extract_date) is identical by construction
+    but ~3× more expensive to compute (the enrichment joins run on every call).
+    """
     session = get_pbi_session()
     try:
         tables = {
             'ccws_ledgers': 'extract_date',
-            'rentroll_enriched': 'extract_date',
             'rentroll': 'extract_date',
             'fx_rates': 'rate_date',
         }
@@ -3523,6 +3529,7 @@ def admin_ecri_reasons():
 
 @ecri_bp.route('/admin/ecri-user-limits')
 @login_required
+@ecri_access_required
 def admin_ecri_user_limits():
     """Legacy URL — redirects to the page under User Management."""
     from flask import redirect, url_for

@@ -49,12 +49,28 @@ def _require_config_permission(f):
     return decorated
 
 
+def _require_read_permission(f):
+    """Read-level gate matching Middleware nav: config OR billing OR discount tools."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated:
+            return redirect(url_for('auth.login'))
+        if not (current_user.can_manage_configs()
+                or current_user.can_access_billing_tools()
+                or current_user.can_access_discount_tools()):
+            flash('Recommendation engine access required.', 'error')
+            return redirect(url_for('main.dashboard'))
+        return f(*args, **kwargs)
+    return decorated
+
+
 # ---------------------------------------------------------------------------
 # Landing
 # ---------------------------------------------------------------------------
 
 @recommendation_engine_bp.route('/')
 @login_required
+@_require_read_permission
 def index():
     """Dashboard — live API health, candidate health, navigation hints.
 
@@ -133,6 +149,7 @@ def index():
 
 @recommendation_engine_bp.route('/settings', methods=['GET'])
 @login_required
+@_require_read_permission
 def settings_page():
     """Standalone settings editor.
 
@@ -172,6 +189,7 @@ def settings_page():
 
 @recommendation_engine_bp.route('/feed', methods=['GET'])
 @login_required
+@_require_read_permission
 def feed():
     """Paginated browser of the last N live /api/recommendations calls.
 
@@ -275,6 +293,7 @@ def feed():
 
 @recommendation_engine_bp.route('/feed/<int:row_id>.json', methods=['GET'])
 @login_required
+@_require_read_permission
 def feed_detail(row_id: int):
     """Return the full request_payload + full_response for one served row."""
     session = _get_session()
@@ -642,6 +661,7 @@ def save_settings():
 
 @recommendation_engine_bp.route('/unit-availability', methods=['GET'])
 @login_required
+@_require_read_permission
 def unit_availability():
     """Show every dim_unit_type with an include/exclude toggle."""
     session = _get_session()
@@ -759,6 +779,7 @@ def unit_availability_save():
 
 @recommendation_engine_bp.route('/api/exclusions', methods=['GET'])
 @login_required
+@_require_read_permission
 def api_exclusions():
     """Read-only JSON export of the current exclusion set."""
     session = _get_session()

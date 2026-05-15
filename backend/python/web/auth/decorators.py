@@ -89,16 +89,7 @@ def admin_required(f):
 
 
 def sync_access_required(f):
-    """Decorator to require scheduler access permission."""
-    return require_permission('can_access_sync')(f)
-
-
-def sync_access_required(f):
-    """Decorator to require sync orchestrator access permission.
-
-    Currently aliased to scheduler access — change to a dedicated
-    'can_access_sync' role permission once piloted in production.
-    """
+    """Decorator to require sync orchestrator access permission."""
     return require_permission('can_access_sync')(f)
 
 
