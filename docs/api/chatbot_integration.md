@@ -73,7 +73,6 @@ sync:*  scheduler:*  ecri:*  statistics:*
 | GET | `/api/reservations/insurance-coverage` | `reservations:read` | Insurance options + premiums |
 | GET | `/api/reservations/insurance-minimums` | `reservations:read` | Required minimum coverage per unit type |
 | GET | `/api/reservations/fees` | `reservations:read` | Per-site reservation fees |
-| GET | `/api/inventory/units` | `inventory:read` | Raw unit list (use recommender instead when possible) |
 | GET | `/api/smart-lock/units` | `smart_lock:read` | Keypad + padlock assignments for a site |
 
 ---
@@ -426,14 +425,9 @@ back null — the bot should then escalate to a human or offer a callback.
 
 ### "Show me what's available at Yishun" (raw inventory, no quote)
 
-Prefer `POST /api/recommendations` so concessions/restrictions/channel
-filtering apply. Only fall back to `/api/inventory/units` when the bot
-genuinely needs unstructured raw inventory (e.g. for a site map).
-
-```
-GET /api/inventory/units?site_codes=L017&available_only=true
-  scope: inventory:read
-```
+Use `POST /api/recommendations` so concessions/restrictions/channel
+filtering apply. Set wide constraints (e.g. all size_ranges) to surface
+the full set when the bot needs a broad listing.
 
 ---
 

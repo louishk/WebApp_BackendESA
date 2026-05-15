@@ -1056,18 +1056,6 @@ def delete_secret(key):
 
 
 # =============================================================================
-# Type Mappings (Config permission required)
-# =============================================================================
-
-@admin_bp.route('/type-mappings')
-@login_required
-@config_required
-def type_mappings():
-    """Manage inventory type mappings."""
-    return render_template('admin/type_mappings/manage.html')
-
-
-# =============================================================================
 # Services (Config permission required)
 # =============================================================================
 

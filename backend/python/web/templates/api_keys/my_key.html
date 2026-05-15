@@ -1100,48 +1100,6 @@ const API_ENDPOINTS = {
                     "site_codes": {"type": "string", "required": true, "description": "Comma-separated site codes (max 50)"}
                 },
                 "example_response": {"reservations": {"L001:1234": {"waiting_id": 5678, "first_name": "John", "quoted_rate": 250.0}}, "count": 3}
-            },
-            {
-                "method": "GET", "path": "/api/inventory/units", "scope": "inventory:read",
-                "description": "Get unit inventory data",
-                "params": {
-                    "site_code": {"type": "string", "required": false, "description": "Filter by site"}
-                },
-                "example_response": {"units": ["..."]}
-            },
-            {
-                "method": "GET", "path": "/api/inventory/type-mappings", "scope": "inventory:read",
-                "description": "Get inventory type mappings",
-                "params": {},
-                "example_response": {"mappings": ["..."]}
-            },
-            {
-                "method": "GET", "path": "/api/inventory/overrides", "scope": "inventory:read",
-                "description": "Get unit overrides",
-                "params": {},
-                "example_response": {"overrides": ["..."]}
-            },
-            {
-                "method": "PUT", "path": "/api/inventory/type-mappings", "scope": "inventory:write",
-                "description": "Bulk upsert type mappings",
-                "body": {
-                    "mappings": {"type": "array", "required": true, "description": "Array of mapping objects"}
-                },
-                "example_response": {"success": true, "updated": 5}
-            },
-            {
-                "method": "PUT", "path": "/api/inventory/overrides", "scope": "inventory:write",
-                "description": "Bulk upsert unit overrides",
-                "body": {
-                    "overrides": {"type": "array", "required": true, "description": "Array of override objects"}
-                },
-                "example_response": {"success": true, "updated": 3}
-            },
-            {
-                "method": "POST", "path": "/api/inventory/publish-labels", "scope": "inventory:write",
-                "description": "Publish labels to esa_pbi",
-                "body": {},
-                "example_response": {"success": true, "published": 150}
             }
         ]
     },

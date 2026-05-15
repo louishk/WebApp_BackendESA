@@ -30,14 +30,6 @@ def discount_plan_changer():
     return render_template('tools/discount_plan_changer.html')
 
 
-@tools_bp.route('/inventory-checker')
-@login_required
-@inventory_tools_access_required
-def inventory_checker():
-    """Inventory naming convention checker tool page."""
-    return render_template('tools/inventory_checker.html')
-
-
 @tools_bp.route('/unit-availability')
 @login_required
 @inventory_tools_access_required

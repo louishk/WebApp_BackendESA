@@ -309,7 +309,7 @@
                 {% endif %}
                 {% set has_any_tool = current_user.can_access_billing_tools() or current_user.can_access_inventory_tools() or current_user.can_access_smart_lock() or current_user.can_manage_configs() %}
                 {% if has_any_tool %}
-                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else url_for('tools.inventory_checker') }}" class="{{ 'active' if (request.endpoint and 'tools' in request.endpoint and 'orchestrator_ui' not in request.endpoint and 'smart_lock' not in request.endpoint) else '' }}">Tools</a>
+                    <a href="{{ url_for('tools.billing_date_changer') if current_user.can_access_billing_tools() else url_for('tools.unit_availability') }}" class="{{ 'active' if (request.endpoint and 'tools' in request.endpoint and 'orchestrator_ui' not in request.endpoint and 'smart_lock' not in request.endpoint) else '' }}">Tools</a>
                 {% endif %}
                 {% if current_user.can_manage_users() or current_user.can_manage_roles() %}
                     <a href="{{ url_for('admin.list_users') }}" class="{{ 'active' if request.endpoint and ('admin' in request.endpoint and ('user' in request.endpoint or 'role' in request.endpoint or 'api_key' in request.endpoint)) or (request.endpoint and 'api_keys' in request.endpoint) else '' }}">User Management</a>
@@ -317,7 +317,7 @@
                     <a href="{{ url_for('api_keys.my_key') }}" class="{{ 'active' if request.endpoint and 'api_keys' in request.endpoint else '' }}" style="font-size: 0.85rem;">My API Key</a>
                 {% endif %}
                 {% if current_user.can_manage_configs() %}
-                    <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint or 'admin_siteinfo' in request.endpoint or 'services_page' in request.endpoint) else '' }}">Settings</a>
+                    <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if request.endpoint and ('config' in request.endpoint or 'secret' in request.endpoint or 'admin_siteinfo' in request.endpoint or 'services_page' in request.endpoint) else '' }}">Settings</a>
                 {% endif %}
                 <a href="{{ url_for('auth.logout') }}" style="margin-left: 1rem;">Logout ({{ current_user.username }})</a>
             {% else %}
@@ -410,7 +410,6 @@
         <a href="{{ url_for('tools.discount_plan_changer') }}" class="{{ 'active' if request.endpoint == 'tools.discount_plan_changer' else '' }}">Discount Plan Changer</a>
         {% endif %}
         {% if current_user.can_access_inventory_tools() %}
-        <a href="{{ url_for('tools.inventory_checker') }}" class="{{ 'active' if request.endpoint == 'tools.inventory_checker' else '' }}">Inventory Checker</a>
         <a href="{{ url_for('tools.unit_availability') }}" class="{{ 'active' if request.endpoint == 'tools.unit_availability' else '' }}">Unit Availability</a>
         <a href="{{ url_for('tools.visit_workflow') }}" class="{{ 'active' if request.endpoint == 'tools.visit_workflow' else '' }}">Visit Workflow</a>
         {% endif %}
@@ -494,11 +493,10 @@
     </div>
     {% endif %}
 
-    {% if request.endpoint and ('list_configs' in request.endpoint or 'edit_config' in request.endpoint or 'secret' in request.endpoint or 'type_mapping' in request.endpoint or 'admin_siteinfo' in request.endpoint or 'services_page' in request.endpoint or 'site_billing_config' in request.endpoint) and 'discount_plans' not in request.endpoint %}
+    {% if request.endpoint and ('list_configs' in request.endpoint or 'edit_config' in request.endpoint or 'secret' in request.endpoint or 'admin_siteinfo' in request.endpoint or 'services_page' in request.endpoint or 'site_billing_config' in request.endpoint) and 'discount_plans' not in request.endpoint %}
     <div class="sub-navbar">
         <a href="{{ url_for('admin.list_configs') }}" class="{{ 'active' if 'list_configs' in request.endpoint or 'edit_config' in request.endpoint else '' }}">Config</a>
         <a href="{{ url_for('admin.list_secrets') }}" class="{{ 'active' if 'secret' in request.endpoint else '' }}">Secrets</a>
-        <a href="{{ url_for('admin.type_mappings') }}" class="{{ 'active' if 'type_mapping' in request.endpoint else '' }}">Type Mappings</a>
         <a href="{{ url_for('admin_siteinfo.list_sites') }}" class="{{ 'active' if 'admin_siteinfo' in request.endpoint else '' }}">Site Info</a>
         <a href="{{ url_for('admin.site_billing_config_list') }}" class="{{ 'active' if 'site_billing_config' in request.endpoint else '' }}">Billing Config</a>
         <a href="{{ url_for('admin.services_page') }}" class="{{ 'active' if 'services_page' in request.endpoint else '' }}">Services</a>
