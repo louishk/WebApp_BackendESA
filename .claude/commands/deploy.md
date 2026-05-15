@@ -57,29 +57,29 @@ Ask the user: **"Push successful. Do you want to deploy to the VM now?"**
 
 ## Step 5: Deploy to VM
 
-SSH into the production VM using key-based authentication and run the update script.
+**ALWAYS use `scripts/deploy_to_vm.py`.** The VM has no git — code is shipped via rsync from the dev machine. The VM's `/var/www/backend/update.sh` only *restarts services*; it does NOT sync code. Running `update.sh` alone will silently leave the VM on stale code.
 
-Connection details:
-- Host: `20.6.132.108`
-- Port: `22`
-- User: `esa_bk_admin`
-- SSH key: `~/.ssh/id_ed25519_vm`
-- Password (for sudo only): read `VM_SSH_PASSWORD` from `.env`
-
-Execute in a **single command**:
+Run from the project root:
 
 ```
-ssh -i ~/.ssh/id_ed25519_vm -o StrictHostKeyChecking=no esa_bk_admin@20.6.132.108 'echo <VM_SSH_PASSWORD> | sudo -S sed -i "s/\r$//" /var/www/backend/update.sh && echo <VM_SSH_PASSWORD> | sudo -S bash /var/www/backend/update.sh'
+python3 scripts/deploy_to_vm.py
 ```
 
-Key details:
-- Uses SSH key auth (no `sshpass` needed)
-- The update script is at `/var/www/backend/update.sh` (owned by root, requires sudo)
-- Fix Windows line endings with `sudo sed` before running (directory is root-owned)
-- The script requires `sudo` — read `VM_SSH_PASSWORD` from `.env` and pipe via `echo <password> | sudo -S`
-- Do this all in one SSH command to avoid multiple round trips
+What this does (6-step pipeline, defined in the script):
+1. rsync code → `/var/www/backend` on `20.6.132.108` (excludes `.env`, backups, `__pycache__`)
+2. Verifies venv at `/var/www/backend/backend/python/venv`
+3. Installs/updates Python requirements
+4. Checks `.env` exists on VM (DB_PASSWORD, VAULT_MASTER_KEY)
+5. Computes restart scope from the deploy manifest
+6. Restarts the affected services: `esa-backend`, `backend-orchestrator`, `backend-mcp` (+ reloads nginx if config changed)
 
-Report the deployment output to the user.
+Connection (handled by the script via paramiko, you don't need to ssh manually):
+- Host: `20.6.132.108`, user: `esa_bk_admin`, key: `~/.ssh/id_ed25519_vm`
+- Sudo password: `VM_SSH_PASSWORD` from `.env` (the script reads it itself)
+
+**Do NOT** ssh in and run `update.sh` as a substitute. If you only need a service restart (no code change), say so explicitly and ask the user — don't reach for `update.sh` by default.
+
+Report the deploy_to_vm.py output to the user (the final "Deployment complete!" + service status block).
 
 ---
 

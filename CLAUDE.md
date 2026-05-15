@@ -97,10 +97,13 @@ engine = get_engine('backend')          # for raw conn.execute / metadata.create
 **Regression guard.** `backend/python/tests/test_db_module_canonical.py` fails CI if anyone reintroduces `create_engine(get_database_url(...))` outside `common/db.py`. Allowlist: `migrations/`, `scripts/` (one-shot CLI probes), tests.
 
 ## Deploy
+- **ALWAYS use `python3 scripts/deploy_to_vm.py`** to deploy. It rsyncs code AND restarts services. This is the only correct way.
+- **NEVER ssh into the VM and run `/var/www/backend/update.sh` as a deploy.** `update.sh` only restarts systemd units — it does NOT pull code (there's no git on the VM). Running it after `git push` leaves the VM on the previous revision and looks like a successful deploy. This mistake has been made repeatedly; do not repeat it.
 - Script: `scripts/deploy_to_vm.py` (paramiko-based, 6-step rsync pipeline)
 - VM: `20.6.132.108`, user `esa_bk_admin`, SSH key `~/.ssh/id_ed25519_vm`
 - Services (3 systemd units): `esa-backend` (gunicorn, 4 workers), `backend-orchestrator` (sync_service daemon), `backend-mcp` (MCP HTTP server)
 - No git on VM — uses rsync
+- `update.sh` is only appropriate for: standalone service restart (no code change), nginx reload, `update.sh status`. Ask the user before using it.
 
 ## What NOT to Do
 - Don't add React, Vue, TypeScript, or a build system — the frontend is intentionally vanilla
