@@ -564,10 +564,12 @@ def run(mode: str = 'auto', property_site_map: Optional[Dict[str, int]] = None,
         enriched = len(_new_igloo_mappings)
         logger.info("igloo: persisted %d new Igloo mappings to mw_siteinfo", enriched)
 
-    # Auto-populate smart lock keypads/padlocks/bridges in esa_backend
-    backend_engine = get_engine('backend')
-    kp_added, pl_added, br_added = sync_devices_to_smart_locks(backend_engine, device_records)
-    logger.info("igloo: keypads=%d padlocks=%d bridges=%d synced to esa_backend",
+    # Auto-populate smart lock keypads/padlocks/bridges. The mw_smart_lock_*
+    # tables live in esa_middleware since mw_split_smart_lock.py — keep this
+    # engine selector aligned with the model __tablename__ targets.
+    middleware_engine = get_engine('middleware')
+    kp_added, pl_added, br_added = sync_devices_to_smart_locks(middleware_engine, device_records)
+    logger.info("igloo: keypads=%d padlocks=%d bridges=%d synced",
                 kp_added, pl_added, br_added)
 
     return {
