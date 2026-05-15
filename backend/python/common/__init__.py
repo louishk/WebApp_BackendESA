@@ -60,7 +60,7 @@ from .models import (
 )
 from .models import IglooProperty, IglooDevice  # Igloo smart lock models
 from .models import ZoomContactSync, ZoomCallLog, ZoomSyncState, CallScoringConfig  # Zoom Phone sync models
-from .models import Tenant, Ledger, Charge, CcwsDiscount  # CallCenterWs models
+from .models import CcwsDiscount  # CallCenterWs discount model
 from .models import CcwsTenant, CcwsLedger, CcwsCharge  # CallCenterWs API-only models
 from .models import UnitDiscountCandidate  # Per-unit discount candidates (phase 1)
 from .models import RecommenderExcludedUnitType  # Recommender unit-type exclusions

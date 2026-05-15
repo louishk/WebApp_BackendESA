@@ -217,7 +217,7 @@ try:
     try:
         from sqlalchemy import create_engine, text
         from common.config_loader import get_database_url
-        engine = create_engine(get_database_url('pbi'))
+        engine = create_engine(get_database_url('middleware'))
         with engine.connect() as conn:
             rows = conn.execute(text("""
                 SELECT "ConcessionID", "sConcessionName", "iDiscountType", "bEnabled"

@@ -387,7 +387,7 @@ def _call_soap(soap_client, report_name: str, parameters: Dict[str, Any]) -> Lis
 def get_site_id_for_location(engine, location_code: str) -> Optional[int]:
     with engine.connect() as conn:
         row = conn.execute(sa_text(
-            'SELECT "SiteID" FROM siteinfo WHERE "SiteCode" = :loc LIMIT 1'
+            'SELECT "SiteID" FROM mw_siteinfo WHERE "SiteCode" = :loc LIMIT 1'
         ), {'loc': location_code}).fetchone()
     return row[0] if row else None
 
@@ -452,14 +452,14 @@ def discover_and_backfill_new_tenants(
 
     with engine.connect() as conn:
         rows = conn.execute(sa_text(
-            'SELECT "SiteID", "SiteCode" FROM siteinfo WHERE "SiteCode" IS NOT NULL'
+            'SELECT "SiteID", "SiteCode" FROM mw_siteinfo WHERE "SiteCode" IS NOT NULL'
         )).fetchall()
     site_to_location = {row[0]: row[1] for row in rows}
 
     with engine.connect() as conn:
         new_pairs = conn.execute(sa_text("""
             SELECT DISTINCT r."SiteID", r."TenantID"
-            FROM rentroll r
+            FROM pbi_staging.rentroll r
             LEFT JOIN ccws_tenants ct ON r."SiteID" = ct."SiteID" AND r."TenantID" = ct."TenantID"
             WHERE ct."TenantID" IS NULL
               AND r."TenantID" IS NOT NULL
@@ -687,7 +687,7 @@ def run(
     if incremental_since:
         logger.info("ccws_ledgers incremental_since=%s", incremental_since.strftime('%Y-%m-%d %H:%M:%S'))
 
-    engine = get_engine('pbi')
+    engine = get_engine('middleware')
 
     # Build location -> SiteID map
     site_map: Dict[str, int] = {}

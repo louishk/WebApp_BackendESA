@@ -63,7 +63,7 @@ def round_half_up(amount, rate_pct):
 
 def main():
     client = get_client()
-    engine = create_engine(get_database_url('pbi'))
+    engine = create_engine(get_database_url('middleware'))
 
     print(f"\nSOAP rounding probe — {SITE}\n")
 

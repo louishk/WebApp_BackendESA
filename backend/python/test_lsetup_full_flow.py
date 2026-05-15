@@ -61,7 +61,7 @@ def section(title):
 
 def main():
     client = get_client()
-    engine = create_engine(get_database_url('pbi'))
+    engine = create_engine(get_database_url('middleware'))
     move_in_date = datetime(2026, 5, 17)
     move_in_iso = move_in_date.strftime("%Y-%m-%dT00:00:00")
     end_date = (move_in_date + timedelta(days=30)).strftime("%Y-%m-%dT00:00:00")
@@ -92,7 +92,7 @@ def main():
             plans = conn.execute(text("""
                 SELECT cd."ConcessionID", cd."sPlanName", cd."dcPCDiscount", cd."dcFixedDiscount"
                 FROM ccws_discount cd
-                JOIN siteinfo si ON cd."SiteID" = si."SiteID"
+                JOIN mw_siteinfo si ON cd."SiteID" = si."SiteID"
                 WHERE si."SiteCode" = :site AND cd."dDisabled" IS NULL
                 ORDER BY cd."dcPCDiscount" DESC
                 LIMIT 10

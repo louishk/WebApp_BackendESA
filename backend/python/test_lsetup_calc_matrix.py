@@ -119,7 +119,7 @@ def cmp_money(a, b, tol=0.01):
 
 def main():
     client = get_client()
-    engine = create_engine(get_database_url('pbi'))
+    engine = create_engine(get_database_url('middleware'))
 
     # Pull config from synced DB
     with engine.connect() as conn:
@@ -167,7 +167,7 @@ def main():
         disc_rows = conn.execute(text("""
             SELECT cd."ConcessionID", cd."sPlanName", cd."dcPCDiscount",
                    cd."dcFixedDiscount", cd."iAmtType"
-            FROM ccws_discount cd JOIN siteinfo si ON cd."SiteID" = si."SiteID"
+            FROM ccws_discount cd JOIN mw_siteinfo si ON cd."SiteID" = si."SiteID"
             WHERE si."SiteCode"='LSETUP' AND cd."dDisabled" IS NULL
         """)).fetchall()
     # Recurring Discount plans only for percentage tests

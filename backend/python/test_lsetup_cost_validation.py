@@ -241,7 +241,7 @@ def run_scenario(client, scenario, unit_info, waiting_id):
 
 def main():
     client = get_client()
-    engine = create_engine(get_database_url('pbi'))
+    engine = create_engine(get_database_url('middleware'))
 
     try:
         # Get multiple available units with different rates

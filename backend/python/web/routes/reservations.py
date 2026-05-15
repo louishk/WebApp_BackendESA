@@ -1723,7 +1723,7 @@ def discount_plans_list():
     if not _validate_site_code(site_code):
         return jsonify({'error': 'Invalid site_code'}), 400
 
-    session = get_pbi_session()
+    session = current_app.get_middleware_session()
     try:
         rows = session.execute(text("""
             SELECT cd."ConcessionID", cd."sPlanName", cd."sDescription",
@@ -1731,7 +1731,7 @@ def discount_plans_list():
                    cd."bForAllUnits", cd."dPlanStrt", cd."dPlanEnd",
                    cd."bNeverExpires", cd."iExpirMonths"
             FROM ccws_discount cd
-            JOIN siteinfo si ON cd."SiteID" = si."SiteID"
+            JOIN mw_siteinfo si ON cd."SiteID" = si."SiteID"
             WHERE si."SiteCode" = :site_code
               AND cd."dDisabled" IS NULL
               AND cd."dDeleted" IS NULL

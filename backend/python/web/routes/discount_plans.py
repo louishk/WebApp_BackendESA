@@ -1296,25 +1296,20 @@ def view_brief(plan_id):
                 })
         elif plan.linked_concessions:
             try:
-                from common.models import CcwsDiscount, Site, SiteInfo
-                pbi_session = _get_pbi_session()
+                from common.models import CcwsDiscount
+                from sqlalchemy import text as sqltext
+                mw_session = current_app.get_middleware_session()
                 try:
-                    # Collect all site IDs for batch lookup
                     link_site_ids = list({link.get('site_id') for link in plan.linked_concessions if link.get('site_id')})
-                    # Build SiteID -> SiteCode map (prefer SiteInfo for standardized L001 format)
                     sid_to_code = {}
                     if link_site_ids:
-                        info_rows = pbi_session.query(SiteInfo.SiteID, SiteInfo.SiteCode).filter(SiteInfo.SiteID.in_(link_site_ids)).all()
-                        sid_to_code = {si.SiteID: si.SiteCode for si in info_rows if si.SiteCode}
-                        missing = [sid for sid in link_site_ids if sid not in sid_to_code]
-                        if missing:
-                            site_rows = pbi_session.query(Site.SiteID, Site.sLocationCode).filter(Site.SiteID.in_(missing)).all()
-                            for s in site_rows:
-                                if s.sLocationCode:
-                                    sid_to_code[s.SiteID] = s.sLocationCode
+                        info_rows = mw_session.execute(sqltext(
+                            'SELECT "SiteID", "SiteCode" FROM mw_siteinfo WHERE "SiteID" = ANY(:sids)'
+                        ), {'sids': link_site_ids}).fetchall()
+                        sid_to_code = {r[0]: r[1] for r in info_rows if r[1]}
 
                     for link in plan.linked_concessions:
-                        cc = (pbi_session.query(CcwsDiscount)
+                        cc = (mw_session.query(CcwsDiscount)
                               .filter_by(SiteID=link.get('site_id'), ConcessionID=link.get('concession_id'))
                               .first())
                         if cc:
@@ -1330,7 +1325,7 @@ def view_brief(plan_id):
                                 'end': cc.dPlanEnd.strftime('%Y-%m-%d') if cc.dPlanEnd else None,
                             })
                 finally:
-                    pbi_session.close()
+                    mw_session.close()
             except Exception as e:
                 current_app.logger.warning(f"Could not resolve linked concessions: {e}")
 
@@ -1498,13 +1493,13 @@ def api_concessions_by_plan_name():
         return jsonify([])
 
     try:
-        from common.models import CcwsDiscount, Site
-        pbi_session = _get_pbi_session()
+        from common.models import CcwsDiscount
+        mw_session = current_app.get_middleware_session()
         try:
-            from sqlalchemy import or_
+            from sqlalchemy import or_, text as sqltext
             from datetime import datetime
             now = datetime.utcnow()
-            results = (pbi_session.query(
+            results = (mw_session.query(
                 CcwsDiscount.ConcessionID, CcwsDiscount.SiteID,
                 CcwsDiscount.sPlanName, CcwsDiscount.sDefPlanName,
                 CcwsDiscount.dcPCDiscount, CcwsDiscount.dPlanStrt, CcwsDiscount.dPlanEnd,
@@ -1521,21 +1516,14 @@ def api_concessions_by_plan_name():
             .order_by(CcwsDiscount.SiteID)
             .all())
 
-            # Get site names + site codes via SiteInfo (preferred) and Site (fallback)
             site_ids = list({r.SiteID for r in results})
             site_map = {}
             if site_ids:
-                from common.models import SiteInfo
-                # SiteInfo.SiteCode is the standardized L001 format used by form checkboxes
-                infos = pbi_session.query(SiteInfo.SiteID, SiteInfo.SiteCode, SiteInfo.Name).filter(SiteInfo.SiteID.in_(site_ids)).all()
-                for si in infos:
-                    site_map[si.SiteID] = {'name': si.Name or f'Site {si.SiteID}', 'code': si.SiteCode}
-                # Fallback to Site table for any SiteIDs not in SiteInfo
-                missing = [sid for sid in site_ids if sid not in site_map]
-                if missing:
-                    sites = pbi_session.query(Site.SiteID, Site.sSiteName, Site.sLocationCode).filter(Site.SiteID.in_(missing)).all()
-                    for s in sites:
-                        site_map[s.SiteID] = {'name': s.sSiteName or f'Site {s.SiteID}', 'code': s.sLocationCode}
+                info_rows = mw_session.execute(sqltext(
+                    'SELECT "SiteID", "SiteCode", "Name" FROM mw_siteinfo WHERE "SiteID" = ANY(:sids)'
+                ), {'sids': site_ids}).fetchall()
+                for sid, code, sname in info_rows:
+                    site_map[sid] = {'name': sname or f'Site {sid}', 'code': code}
 
             return jsonify([{
                 'concession_id': r.ConcessionID,
@@ -1548,7 +1536,7 @@ def api_concessions_by_plan_name():
                 'end': r.dPlanEnd.strftime('%Y-%m-%d') if r.dPlanEnd else None,
             } for r in results])
         finally:
-            pbi_session.close()
+            mw_session.close()
     except Exception as e:
         current_app.logger.error(f"Concessions by plan name error: {e}")
         return jsonify({'error': 'Failed to fetch concessions'}), 500
