@@ -212,6 +212,22 @@ class OnDemandExecutor:
                 )
                 self._in_flight[key] = future
 
+        # Insert a 'running' row up front so the dashboard / status filter can see
+        # the run in flight. Dedup'd callers do NOT get their own running row — the
+        # original submitter owns the row; dedup'd callers record their own
+        # was_deduplicated=True row at completion.
+        started_at = datetime.now(timezone.utc)
+        execution_id = None
+        if not was_deduplicated:
+            execution_id = self._record_run_start(
+                pipeline_name=pipeline_row.pipeline_name,
+                scope=scope,
+                scope_hash=scope_hash,
+                triggered_by=triggered_by,
+                triggered_by_detail=triggered_by_detail,
+                started_at=started_at,
+            )
+
         try:
             result = future.result(timeout=timeout)
         except FuturesTimeout:
@@ -229,16 +245,27 @@ class OnDemandExecutor:
                     del self._in_flight[key]
 
         # Record the run — every caller records their own perspective
-        self._record_run(
-            pipeline_name=pipeline_row.pipeline_name,
-            scope=scope,
-            triggered_by=triggered_by,
-            triggered_by_detail=triggered_by_detail,
-            result=result,
-            was_fresh=(result.status == 'fresh'),
-            was_deduplicated=was_deduplicated,
-            freshness_age_seconds=freshness_age_seconds,
-        )
+        if execution_id is not None:
+            self._record_run_finish(
+                execution_id=execution_id,
+                result=result,
+                was_fresh=(result.status == 'fresh'),
+                freshness_age_seconds=freshness_age_seconds,
+                started_at=started_at,
+            )
+        else:
+            # Dedup'd caller (needs its own dedup-flagged row), OR
+            # _record_run_start failed (fallback: still record the outcome).
+            self._record_run(
+                pipeline_name=pipeline_row.pipeline_name,
+                scope=scope,
+                triggered_by=triggered_by,
+                triggered_by_detail=triggered_by_detail,
+                result=result,
+                was_fresh=(result.status == 'fresh'),
+                was_deduplicated=was_deduplicated,
+                freshness_age_seconds=freshness_age_seconds,
+            )
         return result
 
     def _execute_pipeline(
@@ -272,6 +299,77 @@ class OnDemandExecutor:
         except Exception as e:
             logger.exception(f"{pipeline_row.pipeline_name} executor error")
             return RunResult(status='failed', scope=scope, error=str(e)[:500])
+
+    def _record_run_start(
+        self,
+        pipeline_name: str,
+        scope: Dict[str, Any],
+        scope_hash: str,
+        triggered_by: str,
+        triggered_by_detail: Optional[str],
+        started_at: datetime,
+    ):
+        """Insert a 'running' row at execution start. Returns execution_id (UUID)
+        on success or None on DB failure — caller falls back to one-shot record."""
+        execution_id = uuid4()
+        try:
+            with session_scope() as session:
+                session.add(SyncRun(
+                    execution_id=execution_id,
+                    pipeline_name=pipeline_name,
+                    scope=scope or {},
+                    scope_hash=scope_hash,
+                    triggered_by=triggered_by,
+                    triggered_by_detail=(triggered_by_detail or '')[:200] or None,
+                    status='running',
+                    started_at=started_at,
+                    completed_at=None,
+                    was_fresh=False,
+                    was_deduplicated=False,
+                    host_name=socket.gethostname(),
+                ))
+            return execution_id
+        except Exception:
+            logger.exception(f"Failed to record run start for {pipeline_name}")
+            return None
+
+    def _record_run_finish(
+        self,
+        execution_id,
+        result: RunResult,
+        was_fresh: bool,
+        freshness_age_seconds: Optional[int],
+        started_at: datetime,
+    ):
+        """Update the 'running' row with the final outcome."""
+        try:
+            now = datetime.now(timezone.utc)
+            status_map = {
+                'fresh': 'completed',
+                'refreshed': 'completed',
+                'skipped': 'completed',
+                'failed': 'failed',
+            }
+            # Fall back to wall-clock duration when the pipeline didn't set one
+            # (e.g. timeout or pre-execution failure).
+            duration_ms = result.duration_ms
+            if duration_ms is None and started_at is not None:
+                duration_ms = int((now - started_at).total_seconds() * 1000)
+            with session_scope() as session:
+                session.query(SyncRun).filter(
+                    SyncRun.execution_id == execution_id
+                ).update({
+                    'status': status_map.get(result.status, 'failed'),
+                    'completed_at': now,
+                    'duration_ms': duration_ms,
+                    'records_processed': result.records,
+                    'result': result.to_dict() if hasattr(result, 'to_dict') else None,
+                    'error_message': result.error,
+                    'freshness_age_seconds': freshness_age_seconds,
+                    'was_fresh': was_fresh,
+                })
+        except Exception:
+            logger.exception(f"Failed to record run finish for execution_id={execution_id}")
 
     def _record_run(
         self,
