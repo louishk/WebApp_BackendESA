@@ -34,16 +34,6 @@
     {% endif %}
 
     {% if current_user.can_manage_configs() %}
-    <a href="{{ url_for('api.api_status') }}" class="feature-card" target="_blank">
-        <div class="feature-icon">
-            <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
-                <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
-            </svg>
-        </div>
-        <h3>REST API</h3>
-        <p>Access programmatic endpoints for automation</p>
-    </a>
-
     <a href="{{ url_for('main.healthcheck') }}" class="feature-card" target="_blank">
         <div class="feature-icon">
             <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor">
