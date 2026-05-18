@@ -2580,6 +2580,168 @@ def api_reopen_review(batch_id):
         session.close()
 
 
+@ecri_bp.route('/api/batch/<batch_id>/refresh-dates', methods=['POST'])
+@login_required
+def api_refresh_batch_dates(batch_id):
+    """Recompute notice/effective dates for every still-pending ledger in the
+    batch using today's date and fresh paid_thru / anniv from
+    vw_ecri_eligible_ledgers.
+
+    Allowed in any pre-execution stage (draft / site_review / rev_review /
+    rev_approved) so ops or Revenue can re-anchor the schedule if reviewing
+    drags past the originally computed effective date.
+
+    Already-pushed ledgers (api_status='success') are skipped — SMD already
+    has the scheduled change. Cancelled/executed/executing batches are
+    rejected outright.
+
+    Permission: requires can_manage_ecri or can_finalize_ecri_batch (either
+    role may want to refresh — manage owns draft, finalize owns the review
+    stages).
+    """
+    from common.models import ECRIBatch, ECRIBatchLedger
+    from web.utils.audit import audit_log, AuditEvent
+
+    # Permission gate: either ECRI manager or Revenue finalizer can refresh.
+    if not (current_user.can_manage_ecri() or current_user.can_finalize_ecri_batch()):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    ALLOWED = ('draft', 'site_review', 'rev_review', 'rev_approved')
+    session = get_pbi_session()
+    try:
+        batch = session.query(ECRIBatch).filter_by(batch_id=batch_id).first()
+        if not batch:
+            return jsonify({'error': 'Batch not found'}), 404
+        if batch.status not in ALLOWED:
+            return jsonify({
+                'error': f'Cannot refresh dates for {batch.status} batch '
+                         f'(allowed: {", ".join(ALLOWED)})'
+            }), 400
+
+        today = date.today()
+        notice_days = batch.notice_period_days or 14
+        is_advance = (batch.batch_type or 'standard') == 'advance'
+
+        ledgers = session.query(ECRIBatchLedger).filter_by(batch_id=batch_id).all()
+        if not ledgers:
+            return jsonify({'success': True, 'examined': 0, 'updated': 0,
+                            'unchanged': 0, 'skipped_pushed': 0, 'missing_data': 0})
+
+        # Pre-fetch fresh anniv (and paid_thru, for standard) per ledger.
+        all_site_ids = list({int(l.site_id) for l in ledgers})
+        wanted = {(int(l.site_id), int(l.ledger_id)) for l in ledgers}
+        fresh_map: dict[tuple[int, int], tuple[date | None, date | None]] = {}
+        rows = session.execute(text(
+            'SELECT "SiteID", "LedgerID", "dPaidThru", "dAnniv" '
+            'FROM vw_ecri_eligible_ledgers '
+            'WHERE "SiteID" = ANY(:site_ids)'
+        ), {'site_ids': all_site_ids}).fetchall()
+        for r in rows:
+            key = (int(r[0]), int(r[1]))
+            if key in wanted:
+                pt = r[2].date() if r[2] is not None else None
+                an = r[3].date() if r[3] is not None else None
+                fresh_map[key] = (pt, an)
+
+        updated = 0
+        unchanged = 0
+        skipped_pushed = 0
+        missing_data = 0
+
+        for led in ledgers:
+            if led.api_status == 'success':
+                skipped_pushed += 1
+                continue
+
+            key = (int(led.site_id), int(led.ledger_id))
+            fresh = fresh_map.get(key)
+            if fresh is None:
+                # Tenant no longer eligible (closed/moved out) — keep existing
+                # dates, surface count to user.
+                missing_data += 1
+                continue
+
+            fresh_pt, fresh_anniv = fresh
+            # Use existing stored anniv only as a fallback when the view drops it.
+            anniv = fresh_anniv
+
+            if is_advance:
+                # Advance batches anchor on projected_paid_thru (a user input
+                # captured at creation), not on live dPaidThru.
+                ppt = led.projected_paid_thru
+                eff, notice, bucket = compute_advance_effective_date(
+                    anniv, ppt, today, notice_days=notice_days,
+                )
+                new_paid_thru = ppt
+            else:
+                eff, notice, bucket = compute_effective_date(
+                    anniv, fresh_pt, today, notice_days=notice_days,
+                )
+                new_paid_thru = fresh_pt
+
+            new_lad = next_lease_anniversary(anniv, today) if anniv else None
+
+            changed = (
+                led.effective_date != eff
+                or led.notice_date != notice
+                or led.bucket != bucket
+                or led.paid_thru_date != new_paid_thru
+                or led.next_lad != new_lad
+            )
+            if not changed:
+                unchanged += 1
+                continue
+
+            led.effective_date = eff
+            led.notice_date = notice
+            led.bucket = bucket
+            led.paid_thru_date = new_paid_thru
+            led.next_lad = new_lad
+            updated += 1
+
+        # If the batch is in site_review, the deadline (MIN(notice_date) - 3d)
+        # may have shifted along with the recomputed notice dates. Restamp it.
+        if batch.status == 'site_review':
+            min_notice = session.execute(
+                text("SELECT MIN(notice_date) FROM ecri_batch_ledgers "
+                     "WHERE batch_id = :bid"),
+                {'bid': str(batch_id)}
+            ).scalar()
+            batch.site_review_deadline = (
+                min_notice - timedelta(days=3) if min_notice else None
+            )
+
+        session.commit()
+
+        audit_log(
+            AuditEvent.ECRI_BATCH_DATES_REFRESHED,
+            f"Batch {batch_id} dates refreshed at status={batch.status}: "
+            f"updated={updated}, unchanged={unchanged}, "
+            f"skipped_pushed={skipped_pushed}, missing_data={missing_data}",
+        )
+
+        return jsonify({
+            'success': True,
+            'status': batch.status,
+            'examined': len(ledgers),
+            'updated': updated,
+            'unchanged': unchanged,
+            'skipped_pushed': skipped_pushed,
+            'missing_data': missing_data,
+            'site_review_deadline': (
+                batch.site_review_deadline.isoformat()
+                if batch.site_review_deadline else None
+            ),
+        })
+
+    except Exception as e:
+        session.rollback()
+        current_app.logger.error(f"ECRI refresh-dates error: {e}")
+        return jsonify({'error': 'An internal error occurred'}), 500
+    finally:
+        session.close()
+
+
 # =============================================================================
 # API: Exclusion requests (Stage 2–3)
 # =============================================================================

@@ -125,6 +125,7 @@ body .container { max-width: 1800px; }
         <button type="button" class="btn" id="execute-btn" onclick="confirmExecute()" style="display:none;">Execute - Push to SiteLink</button>
         <button type="button" class="btn btn-secondary" id="reopen-btn" onclick="reopenReview()" style="display:none;">Reopen Revenue Review</button>
         <!-- common -->
+        <button type="button" class="btn btn-secondary" id="refresh-dates-btn" onclick="refreshDates()" style="display:none;" title="Recompute notice / effective dates against today so a delayed review still lands on the next billing cycle.">Refresh Effective Dates</button>
         <button type="button" class="btn btn-secondary" id="cancel-btn" onclick="confirmCancel()">Cancel Batch</button>
         <a href="{{ url_for('ecri.dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
     </div>
@@ -513,11 +514,23 @@ body .container { max-width: 1800px; }
         section.style.display = 'block';
 
         // Reset all buttons before enabling the right ones for the current stage.
+        // refresh-dates-btn keeps its static title; others clear theirs.
         ['submit-review-btn','close-review-btn','finalize-btn','execute-btn','reopen-btn'].forEach(id => {
             const el = document.getElementById(id);
             if (el) { el.style.display = 'none'; el.disabled = false; el.title = ''; }
         });
+        const refreshBtn = document.getElementById('refresh-dates-btn');
+        if (refreshBtn) { refreshBtn.style.display = 'none'; refreshBtn.disabled = false; }
         document.getElementById('actions-help').textContent = '';
+
+        // "Refresh Effective Dates" is available in any pre-execution stage so
+        // reviewers can re-anchor the schedule when review drags past the
+        // originally computed dates.
+        const REFRESH_STAGES = ['draft','site_review','rev_review','rev_approved'];
+        if (REFRESH_STAGES.includes(status)
+                && (USER_PERMS.can_manage_ecri || USER_PERMS.can_finalize_ecri_batch)) {
+            document.getElementById('refresh-dates-btn').style.display = 'inline-block';
+        }
 
         if (status === 'draft' && USER_PERMS.can_manage_ecri) {
             document.getElementById('submit-review-btn').style.display = 'inline-block';
@@ -784,6 +797,45 @@ body .container { max-width: 1800px; }
             if (d.success) { alert('Batch finalized.' + (d.force_finalized ? ' (Force-finalized past deadline)' : '')); loadBatch(); }
             else alert('Error: ' + (d.error || 'Unknown'));
         } catch(e) { alert('Error: ' + e.message); }
+    }
+
+    // Recompute notice / effective dates against today. Skips already-pushed
+    // ledgers. Restamps the site_review deadline when applicable.
+    async function refreshDates() {
+        const msg = 'Recompute notice & effective dates for every pending ledger ' +
+                    'using today as the reference?\n\nAlready-pushed rows are left ' +
+                    'untouched. If the batch is in Site Review, the deadline is ' +
+                    'restamped from the new earliest notice date.';
+        if (!confirm(msg)) return;
+        const btn = document.getElementById('refresh-dates-btn');
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = 'Refreshing…';
+        try {
+            const res = await fetch(`/ecri/api/batch/${BATCH_ID}/refresh-dates`, {
+                method: 'POST', headers: apiHeaders(),
+            });
+            const d = await res.json();
+            if (!d.success) {
+                alert('Error: ' + (d.error || 'Unknown'));
+                return;
+            }
+            let summary = `Examined ${d.examined} ledger(s):\n` +
+                          `  updated:        ${d.updated}\n` +
+                          `  unchanged:      ${d.unchanged}\n` +
+                          `  skipped pushed: ${d.skipped_pushed}\n` +
+                          `  missing data:   ${d.missing_data}`;
+            if (d.site_review_deadline) {
+                summary += `\n\nNew Site Review deadline: ${d.site_review_deadline}`;
+            }
+            alert(summary);
+            loadBatch();
+        } catch (e) {
+            alert('Error: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = orig;
+        }
     }
 
     async function reopenReview() {
