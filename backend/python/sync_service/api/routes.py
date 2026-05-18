@@ -222,8 +222,9 @@ def run_endpoint(name):
 @require_auth
 @require_api_scope('sync:read')
 def list_runs_endpoint():
-    """Recent sync_runs. Query params: pipeline, limit, since_hours."""
+    """Recent sync_runs. Query params: pipeline, status, limit, since_hours."""
     pipeline_name = request.args.get('pipeline')
+    status = (request.args.get('status') or '').strip().lower() or None
     try:
         limit = min(500, max(1, int(request.args.get('limit', 50))))
     except (TypeError, ValueError):
@@ -239,6 +240,8 @@ def list_runs_endpoint():
         q = session.query(SyncRun).filter(SyncRun.queued_at >= since)
         if pipeline_name:
             q = q.filter(SyncRun.pipeline_name == pipeline_name)
+        if status:
+            q = q.filter(SyncRun.status == status)
         rows = q.order_by(SyncRun.queued_at.desc()).limit(limit).all()
         return jsonify({
             'runs': [r.to_dict() for r in rows],

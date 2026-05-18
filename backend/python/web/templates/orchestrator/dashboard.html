@@ -113,6 +113,27 @@
     </div>
 </div>
 
+<div class="card" id="failures-card">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <h2 style="margin:0;">Recent Failed Executions <span style="font-size:0.85rem;color:#666;font-weight:normal;">(last 7 days)</span></h2>
+        <a href="/orchestrator/runs?status=failed" style="font-size:0.85rem;color:#1A2E5A;">View all →</a>
+    </div>
+    <table style="margin-top:1rem;">
+        <thead>
+            <tr>
+                <th>Pipeline</th>
+                <th>When (SGT)</th>
+                <th>Duration</th>
+                <th>Trigger</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody id="failed-executions">
+            <tr><td colspan="5" style="text-align:center;color:#666;">Loading...</td></tr>
+        </tbody>
+    </table>
+</div>
+
 <div class="refresh-notice" id="refresh-notice">Auto-refresh every 45 seconds</div>
 
 <style>
@@ -156,6 +177,7 @@
 .status-completed { background: #28A745; color: #fff; }
 .status-failed { background: var(--esa-red,#C41230); color: #fff; }
 .status-queued, .status-pending { background: #6C757D; color: #fff; }
+#failures-card .err-cell { font-family: monospace; font-size: 0.78rem; color: #721c24; max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 table { width: 100%; border-collapse: collapse; }
 th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #E0E0E0; }
 th { color: var(--esa-navy,#1A2E5A); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; background: #F5F5F5; }
@@ -468,14 +490,46 @@ function updateCountdowns() {
     });
 }
 
+async function updateFailures() {
+    try {
+        const r = await fetch('/api/orchestrator/runs?status=failed&since_hours=168&limit=20');
+        const data = await r.json();
+        const tbody = document.getElementById('failed-executions');
+        const runs = data.runs || [];
+        if (runs.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#666;">No failures in the last 7 days 🎉</td></tr>';
+            return;
+        }
+        tbody.innerHTML = runs.map(j => {
+            const when = formatSGT(j.started_at || j.queued_at);
+            const dur = formatDurationMs(j.duration_ms);
+            const err = j.error_message ? escHtml(j.error_message) : '';
+            return `
+                <tr>
+                    <td><a href="/orchestrator/pipelines/${encodeURIComponent(j.pipeline_name)}" style="color:#1A2E5A;"><code>${escHtml(j.pipeline_name)}</code></a></td>
+                    <td>${when}</td>
+                    <td>${dur}</td>
+                    <td>${escHtml(j.triggered_by)}</td>
+                    <td class="err-cell" title="${err}">${err}</td>
+                </tr>
+            `;
+        }).join('');
+    } catch (err) {
+        document.getElementById('failed-executions').innerHTML =
+            `<tr><td colspan="5" style="text-align:center;color:#dc3545;">${escHtml(err.message)}</td></tr>`;
+    }
+}
+
 updateStatusAndRuns();
 updatePipelines();
 updateFreshness();
 updateUpcoming();
+updateFailures();
 intervals.push(setInterval(updateStatusAndRuns, 45000));
 intervals.push(setInterval(updatePipelines, 60000));
 intervals.push(setInterval(updateFreshness, 45000));
 intervals.push(setInterval(updateUpcoming, 60000));
+intervals.push(setInterval(updateFailures, 60000));
 setInterval(updateCountdowns, 1000);
 </script>
 {% endblock %}

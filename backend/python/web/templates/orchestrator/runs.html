@@ -14,6 +14,15 @@
             <select id="filter-pipeline" onchange="loadRuns()">
                 <option value="">All pipelines</option>
             </select>
+            <select id="filter-status" onchange="loadRuns()">
+                <option value="">All statuses</option>
+                <option value="failed">Failed</option>
+                <option value="completed">Completed</option>
+                <option value="running">Running</option>
+                <option value="queued">Queued</option>
+                <option value="fresh">Fresh</option>
+                <option value="skipped">Skipped</option>
+            </select>
             <select id="filter-hours" onchange="loadRuns()">
                 <option value="1">Last 1h</option>
                 <option value="24" selected>Last 24h</option>
@@ -29,10 +38,11 @@
             <tr>
                 <th>Time</th><th>Pipeline</th><th>Scope</th><th>Status</th>
                 <th>Records</th><th>Duration</th><th>Age</th><th>Fresh</th><th>Dedup</th><th>Trigger</th>
+                <th>Error</th>
             </tr>
         </thead>
         <tbody id="runs-tbody">
-            <tr><td colspan="10" style="text-align:center;color:#999;">Loading...</td></tr>
+            <tr><td colspan="11" style="text-align:center;color:#999;">Loading...</td></tr>
         </tbody>
     </table>
     <p style="margin-top:1rem;color:#666;font-size:0.85rem;">
@@ -53,6 +63,7 @@
 .data-table th, .data-table td { padding:0.5rem 0.75rem; border-bottom:1px solid #e0e0e0; text-align:left; font-size:0.85rem; }
 .data-table th { background:#f8f9fa; font-weight:600; }
 .scope-cell { font-family:monospace; font-size:0.75rem; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.error-cell { font-family:monospace; font-size:0.75rem; color:#721c24; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 </style>
 
 <script>
@@ -79,11 +90,17 @@ async function loadPipelineOptions() {
     } catch (err) { /* ignore */ }
 }
 
+function escAttr(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 async function loadRuns() {
     const pipeline = document.getElementById('filter-pipeline').value;
+    const status = document.getElementById('filter-status').value;
     const hours = document.getElementById('filter-hours').value;
     const params = new URLSearchParams({limit: '200', since_hours: hours});
     if (pipeline) params.set('pipeline', pipeline);
+    if (status) params.set('status', status);
 
     try {
         const r = await fetch('/api/orchestrator/runs?' + params);
@@ -92,7 +109,7 @@ async function loadRuns() {
 
         const tbody = document.getElementById('runs-tbody');
         if (!data.runs || data.runs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#999;">No runs in selected window</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#999;">No runs in selected window</td></tr>';
             return;
         }
         tbody.innerHTML = data.runs.map(r => {
@@ -103,11 +120,12 @@ async function loadRuns() {
                 : badge(r.status, 'info');
             const age = r.freshness_age_seconds !== null && r.freshness_age_seconds !== undefined
                 ? r.freshness_age_seconds + 's' : '—';
+            const err = r.error_message ? escAttr(r.error_message) : '';
             return `
                 <tr>
                     <td>${when}</td>
                     <td><code>${r.pipeline_name}</code></td>
-                    <td class="scope-cell" title="${JSON.stringify(r.scope)}">${JSON.stringify(r.scope)}</td>
+                    <td class="scope-cell" title="${escAttr(JSON.stringify(r.scope))}">${escAttr(JSON.stringify(r.scope))}</td>
                     <td>${statusBadge}</td>
                     <td>${r.records_processed ?? 0}</td>
                     <td>${fmtDuration(r.duration_ms)}</td>
@@ -115,12 +133,13 @@ async function loadRuns() {
                     <td>${r.was_fresh ? badge('yes', 'info') : badge('ran', 'ok')}</td>
                     <td>${r.was_deduplicated ? badge('dedup', 'warn') : ''}</td>
                     <td>${r.triggered_by}</td>
+                    <td class="error-cell" title="${err}">${err}</td>
                 </tr>
             `;
         }).join('');
     } catch (err) {
         document.getElementById('runs-tbody').innerHTML =
-            `<tr><td colspan="10" style="color:#c41230;text-align:center;">${err.message}</td></tr>`;
+            `<tr><td colspan="11" style="color:#c41230;text-align:center;">${err.message}</td></tr>`;
     }
 }
 
