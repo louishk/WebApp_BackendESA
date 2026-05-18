@@ -109,11 +109,19 @@ class OrchestratorDaemon:
         """Execute a single pipeline run via the shared executor."""
         logger.info(f"Firing scheduled run: {pipeline_name}")
         try:
+            # Honor per-pipeline timeout_seconds (mw_sync_pipelines); fall back to 30 min.
+            with session_scope() as s:
+                row = (
+                    s.query(SyncPipeline.timeout_seconds)
+                    .filter(SyncPipeline.pipeline_name == pipeline_name)
+                    .first()
+                )
+            timeout = float(row[0]) if row and row[0] else 1800.0
             result = self.executor.run(
                 pipeline_name=pipeline_name,
                 triggered_by='schedule',
                 triggered_by_detail=f'daemon@{self._hostname}',
-                timeout=1800.0,
+                timeout=timeout,
             )
             logger.info(
                 f"{pipeline_name} → status={result.status} records={result.records} "
