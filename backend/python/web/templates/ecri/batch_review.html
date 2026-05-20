@@ -74,6 +74,9 @@ body .container { max-width: 1800px; }
             <option value="approved">approved</option>
             <option value="rejected">rejected</option>
         </select>
+        <select id="filter-excl-reason" style="padding:0.5rem 0.75rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;">
+            <option value="">All excl. reasons</option>
+        </select>
         <select id="filter-bucket" style="padding:0.5rem 0.75rem; border:1px solid var(--esa-gray-dark); border-radius:4px; font-size:0.9rem;">
             <option value="">All buckets</option>
             <option value="green">green</option>
@@ -101,12 +104,13 @@ body .container { max-width: 1800px; }
                     <th>Effective Date</th>
                     <th>API Status</th>
                     <th>Excl.</th>
+                    <th>Excl. Reason</th>
                     <th>Bucket</th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody id="ledgers-tbody">
-                <tr><td colspan="16" style="text-align: center; color: #666;">Loading...</td></tr>
+                <tr><td colspan="17" style="text-align: center; color: #666;">Loading...</td></tr>
             </tbody>
         </table>
     </div>
@@ -265,6 +269,7 @@ body .container { max-width: 1800px; }
 .excl-badge-approved { background:#d1fae5; color:#065f46; }
 .excl-badge-rejected { background:#fee2e2; color:#991b1b; }
 .excl-badge { padding:2px 6px; border-radius:4px; font-size:0.75rem; font-weight:600; }
+.excl-reason-chip { background:#eef2ff; color:#3730a3; padding:2px 6px; border-radius:4px; font-size:0.72rem; font-weight:600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; cursor:help; }
 </style>
 {% endblock %}
 
@@ -314,6 +319,7 @@ body .container { max-width: 1800px; }
     let ALL_LEDGERS = [];
     let BATCH_DATA = null;
     let EXCL_REASONS = [];
+    let EXCL_REASON_LABELS = {}; // code → label
     let OBJ_REASONS = [];
 
     async function loadReasons() {
@@ -324,13 +330,26 @@ body .container { max-width: 1800px; }
             ]);
             if (er.ok) {
                 const d = await er.json();
+                // Keep all reasons (incl. inactive) in the label map so historical
+                // codes still resolve to a human-readable label.
+                (d.reasons || []).forEach(r => { EXCL_REASON_LABELS[r.code] = r.label; });
                 EXCL_REASONS = (d.reasons || []).filter(r => r.active);
             }
             if (or_.ok) {
                 const d = await or_.json();
                 OBJ_REASONS = (d.reasons || []).filter(r => r.active);
             }
+            populateReasonFilter();
         } catch (e) { /* non-fatal */ }
+    }
+
+    function populateReasonFilter() {
+        const sel = document.getElementById('filter-excl-reason');
+        if (!sel) return;
+        const current = sel.value;
+        sel.innerHTML = '<option value="">All excl. reasons</option>' +
+            EXCL_REASONS.map(r => `<option value="${r.code}">${r.code} — ${r.label}</option>`).join('');
+        sel.value = current;
     }
 
     function populateReasonSelect(selectId, reasons) {
@@ -569,12 +588,14 @@ body .container { max-width: 1800px; }
         const status = document.getElementById('filter-status').value;
         const bucket = document.getElementById('filter-bucket').value;
         const exclFilter = document.getElementById('filter-exclusion').value;
+        const exclReasonFilter = document.getElementById('filter-excl-reason').value;
 
         const filtered = ALL_LEDGERS.filter(l => {
             if (site && (l.site_code || String(l.site_id)) !== site) return false;
             if (status && l.api_status !== status) return false;
             if (bucket && (l.bucket || 'unknown') !== bucket) return false;
             if (exclFilter && (l.exclusion_status || 'none') !== exclFilter) return false;
+            if (exclReasonFilter && (l.exclusion_reason_code || '') !== exclReasonFilter) return false;
             if (search) {
                 const hay = [l.ledger_id, l.tenant_id, l.tenant_name, l.unit_name]
                     .map(v => String(v || '').toLowerCase()).join(' ');
@@ -588,7 +609,7 @@ body .container { max-width: 1800px; }
 
         const tbody = document.getElementById('ledgers-tbody');
         if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="16" style="text-align:center; color:#666;">No rows match.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="17" style="text-align:center; color:#666;">No rows match.</td></tr>';
             updateSelectionBar();
             return;
         }
@@ -602,6 +623,15 @@ body .container { max-width: 1800px; }
                 ? `<div style="font-size:0.72rem;color:#888;">${l.paid_thru_date?'Paid:'+formatDate(l.paid_thru_date):''}${l.paid_thru_date&&l.next_lad?' · ':''}${l.next_lad?'LAD:'+formatDate(l.next_lad):''}</div>` : '';
             const excStatus = l.exclusion_status || 'none';
             const exclBadgeHtml = exclusionBadge(excStatus);
+            const excCode = l.exclusion_reason_code || '';
+            const excLabel = excCode ? (EXCL_REASON_LABELS[excCode] || excCode) : '';
+            const excNotesEsc = (l.exclusion_notes || '').replace(/"/g, '&quot;');
+            const excReasonCellTitle = excCode
+                ? `${excLabel}${l.exclusion_notes ? ' — ' + excNotesEsc : ''}`
+                : '';
+            const exclReasonHtml = excCode
+                ? `<span class="excl-reason-chip" title="${excReasonCellTitle}">${excCode}</span>`
+                : '<span style="color:#9ca3af;">—</span>';
 
             // Checkbox: only on pending rows for execute flow
             const cb = (l.api_status === 'pending' && batchStatus === 'rev_approved' && USER_PERMS.can_execute_ecri_batch)
@@ -645,6 +675,7 @@ body .container { max-width: 1800px; }
                 <td>${formatDate(l.effective_date)}${effectiveSub}</td>
                 <td><span class="status ${statusClass}">${l.api_status}</span></td>
                 <td>${exclBadgeHtml}</td>
+                <td>${exclReasonHtml}</td>
                 <td><span class="status ${bucketClass}">${l.bucket||'unknown'}</span></td>
                 <td style="white-space:nowrap;">${actionHtml}</td>
             </tr>`;
@@ -653,7 +684,7 @@ body .container { max-width: 1800px; }
         wireSelection();
     }
 
-    ['filter-search','filter-site','filter-status','filter-bucket','filter-exclusion'].forEach(id => {
+    ['filter-search','filter-site','filter-status','filter-bucket','filter-exclusion','filter-excl-reason'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('input', renderLedgers);
